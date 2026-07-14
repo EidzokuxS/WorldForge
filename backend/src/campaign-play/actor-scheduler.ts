@@ -51,7 +51,7 @@ export type CampaignPlayActorSkipReason =
   | "already_considered_this_turn"
   | "pending_job"
   | "actor_ineligible";
-export type CampaignPlayActorDeferReason = "incapacitated";
+export type CampaignPlayActorDeferReason = "incapacitated" | "actor_capacity" | "replan_capacity";
 
 interface CampaignPlayActorDueDecisionBase {
   dueOrder: number;
@@ -194,6 +194,7 @@ interface JobRow {
   campaignId: string;
   turnId: string;
   actorId: string;
+  admittedPlanId: string;
   planId: string;
   dueReason: CampaignPlayActorDueReason;
   frozenBaseWorldVersion: number;
@@ -201,6 +202,7 @@ interface JobRow {
   claimTurnWorkerEpoch: number | null;
   stage: CampaignPlayActorJob["stage"];
   proposalId: string | null;
+  deferReason: CampaignPlayActorJob["deferReason"];
   createdAt: number;
   completedAt: number | null;
 }
@@ -309,7 +311,8 @@ function dueRows(
     JOIN campaign_play_actor_plans p ON p.plan_id = s.plan_id
     JOIN actors a ON a.id = s.actor_id
     WHERE s.campaign_id = ? AND s.next_act_at_world_time_minutes <= ?
-    ORDER BY s.next_act_at_world_time_minutes ASC, s.priority DESC, s.actor_id ASC
+    ORDER BY s.next_act_at_world_time_minutes ASC, s.agency_debt DESC,
+      s.priority DESC, s.actor_id ASC
   `).all(turnId, handle.campaignId, settledWorldTimeMinutes) as DueRow[];
 }
 
@@ -319,6 +322,7 @@ function makeDecision(
   settledWorldTimeMinutes: number,
   row: DueRow,
   dueOrder: number,
+  actorOpportunityAvailable: boolean,
 ): CampaignPlayActorDueDecision {
   const base: CampaignPlayActorDueDecisionBase = {
     dueOrder,
@@ -362,6 +366,24 @@ function makeDecision(
       disposition: "defer",
       dueReason: row.agencyDebt > 0 ? "agency_debt" : "scheduled",
       reason: "incapacitated",
+      jobId,
+      nextDueAtWorldTimeMinutes: transition.nextActAtWorldTimeMinutes,
+      resultAgencyDebt: transition.agencyDebt,
+    };
+  }
+  if (!actorOpportunityAvailable) {
+    const transition = calculateCampaignPlayActorNextDueTime({
+      settledWorldTimeMinutes,
+      cadenceMinutes: row.cadenceMinutes,
+      lastActAtWorldTimeMinutes: null,
+      agencyDebt: row.agencyDebt,
+      outcome: "deferred",
+    });
+    return {
+      ...base,
+      disposition: "defer",
+      dueReason,
+      reason: "actor_capacity",
       jobId,
       nextDueAtWorldTimeMinutes: transition.nextActAtWorldTimeMinutes,
       resultAgencyDebt: transition.agencyDebt,
@@ -695,17 +717,23 @@ export function createCampaignPlayActorScheduler(
       if (turn?.stage !== "primary_settled") {
         throw new CampaignPlayActorSchedulerError("scheduler_turn_invalid");
       }
+      let actorOpportunities = 0;
       const decisions = dueRows(
         handle,
         input.turnId,
         state.authority.worldTimeMinutes,
-      ).map((row, dueOrder) => makeDecision(
-        handle.campaignId,
-        input.turnId,
-        state.authority.worldTimeMinutes!,
-        row,
-        dueOrder,
-      ));
+      ).map((row, dueOrder) => {
+        const decision = makeDecision(
+          handle.campaignId,
+          input.turnId,
+          state.authority.worldTimeMinutes!,
+          row,
+          dueOrder,
+          actorOpportunities < CAMPAIGN_PLAY_LIMITS.actorOpportunitiesPerTurn,
+        );
+        if (decision.disposition === "wake") actorOpportunities += 1;
+        return decision;
+      });
       const dueSet = campaignPlayActorDueSetSchema.parse({
         campaignId: handle.campaignId,
         turnId: input.turnId,
@@ -767,16 +795,17 @@ export function createCampaignPlayActorScheduler(
         if (decision.disposition === "skip") continue;
         handle.sqlite.prepare(`
           INSERT INTO campaign_play_actor_jobs (
-            job_id, campaign_id, turn_id, actor_id, plan_id, due_reason,
+            job_id, campaign_id, turn_id, actor_id, admitted_plan_id, plan_id, due_reason,
             frozen_base_world_version, worker_epoch, claim_turn_worker_epoch,
             stage, proposal_id,
-            created_at, completed_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, NULL, ?, ?)
+            defer_reason, created_at, completed_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, NULL, NULL, ?, ?)
         `).run(
           decision.jobId,
           handle.campaignId,
           input.dueSet.turnId,
           decision.actorId,
+          decision.planId,
           decision.planId,
           decision.dueReason,
           input.dueSet.baseWorldVersion,
@@ -786,9 +815,10 @@ export function createCampaignPlayActorScheduler(
         );
         if (decision.disposition === "defer") {
           handle.sqlite.prepare(`UPDATE campaign_play_actor_jobs
-            SET stage = 'deferred', completed_at = ?
+            SET stage = 'deferred', defer_reason = ?, completed_at = ?
             WHERE job_id = ? AND campaign_id = ? AND stage = 'queued'`).run(
-            input.createdAt,
+              decision.reason,
+              input.createdAt,
             decision.jobId,
             handle.campaignId,
           );
@@ -840,11 +870,13 @@ export function createCampaignPlayActorScheduler(
     listTurnJobs(turnId) {
       const rows = handle.sqlite.prepare(`
         SELECT j.job_id AS jobId, j.campaign_id AS campaignId, j.turn_id AS turnId,
-          j.actor_id AS actorId, j.plan_id AS planId, j.due_reason AS dueReason,
+          j.actor_id AS actorId, j.admitted_plan_id AS admittedPlanId,
+          j.plan_id AS planId, j.due_reason AS dueReason,
           j.frozen_base_world_version AS frozenBaseWorldVersion,
           j.worker_epoch AS workerEpoch,
           j.claim_turn_worker_epoch AS claimTurnWorkerEpoch,
           j.stage, j.proposal_id AS proposalId,
+          j.defer_reason AS deferReason,
           j.created_at AS createdAt, j.completed_at AS completedAt
         FROM campaign_play_actor_jobs j
         JOIN campaign_play_actor_schedules s ON s.actor_id = j.actor_id
@@ -882,7 +914,7 @@ export function createCampaignPlayActorScheduler(
         if (decision.disposition === "skip") continue;
         const job = jobsById.get(decision.jobId)!;
         if (
-          job.actorId !== decision.actorId || job.planId !== decision.planId ||
+          job.actorId !== decision.actorId || job.admittedPlanId !== decision.planId ||
           job.dueReason !== decision.dueReason ||
           job.frozenBaseWorldVersion !== dueSet.baseWorldVersion ||
           !["settled", "rejected", "deferred"].includes(job.stage)
@@ -901,26 +933,33 @@ export function createCampaignPlayActorScheduler(
         if (!schedulePair || schedulePair.planActorId !== job.actorId) {
           throw new CampaignPlayActorSchedulerError("scheduler_job_invalid");
         }
-        if (job.stage === "deferred" && decision.disposition === "wake") {
-          const acceptedReplan = handle.sqlite.prepare(`SELECT artifact_json AS artifactJson
-            FROM campaign_play_model_stages
-            WHERE campaign_id = ? AND turn_id = ? AND stage_id = ?
-              AND kind = 'actor_replanner' AND status = 'accepted'`).get(
-              handle.campaignId,
-              turnId,
-              deriveCampaignPlayActorReplanStageId(job.jobId),
-            ) as { artifactJson: string } | undefined;
-          let replanned: CampaignPlayActorPlan;
+        const acceptedReplan = handle.sqlite.prepare(`SELECT artifact_json AS artifactJson
+          FROM campaign_play_model_stages
+          WHERE campaign_id = ? AND turn_id = ? AND stage_id = ?
+            AND kind = 'actor_replanner' AND status = 'accepted'`).get(
+            handle.campaignId,
+            turnId,
+            deriveCampaignPlayActorReplanStageId(job.jobId),
+          ) as { artifactJson: string } | undefined;
+        let replanned: CampaignPlayActorPlan | null = null;
+        if (acceptedReplan) {
           try {
             replanned = campaignPlayActorPlanSchema.parse(
-              JSON.parse(acceptedReplan?.artifactJson ?? ""),
+              JSON.parse(acceptedReplan.artifactJson),
             );
           } catch (cause) {
             throw new CampaignPlayActorSchedulerError("scheduler_job_invalid", { cause });
           }
-          if (replanned.actorId !== job.actorId || schedulePair.planId !== replanned.planId) {
+        }
+        if (job.planId !== decision.planId) {
+          if (
+            !replanned || replanned.actorId !== job.actorId ||
+            replanned.planId !== job.planId || schedulePair.planId !== replanned.planId
+          ) {
             throw new CampaignPlayActorSchedulerError("scheduler_job_invalid");
           }
+        } else if (replanned !== null) {
+          throw new CampaignPlayActorSchedulerError("scheduler_job_invalid");
         }
         const proposalRows = handle.sqlite.prepare(`SELECT proposal_id AS proposalId, status,
             result_json AS resultJson, result_hash AS resultHash,
@@ -941,10 +980,20 @@ export function createCampaignPlayActorScheduler(
             baseWorldVersion: number;
           }>;
         if (job.stage === "deferred") {
-          if (proposalRows.length !== 0 || job.proposalId !== null) {
+          const expectedDeferReason = decision.disposition === "defer"
+            ? decision.reason
+            : "replan_capacity";
+          if (
+            proposalRows.length !== 0 || job.proposalId !== null ||
+            job.deferReason !== expectedDeferReason || replanned !== null ||
+            job.planId !== decision.planId
+          ) {
             throw new CampaignPlayActorSchedulerError("scheduler_job_invalid");
           }
           continue;
+        }
+        if (job.deferReason !== null || decision.disposition !== "wake") {
+          throw new CampaignPlayActorSchedulerError("scheduler_job_invalid");
         }
         const proposal = proposalRows[0];
         if (
@@ -1047,7 +1096,17 @@ export function createCampaignPlayActorScheduler(
           handle.campaignId,
           turnId,
         ) as { count: number };
-      if (unsettledModels.count !== 0 || pendingProposals.count !== 0) {
+      const acceptedReplans = handle.sqlite.prepare(`SELECT count(*) AS count
+        FROM campaign_play_model_stages
+        WHERE campaign_id = ? AND turn_id = ?
+          AND kind = 'actor_replanner' AND status = 'accepted'`).get(
+            handle.campaignId,
+            turnId,
+          ) as { count: number };
+      if (
+        unsettledModels.count !== 0 || pendingProposals.count !== 0 ||
+        acceptedReplans.count > 1
+      ) {
         throw new CampaignPlayActorSchedulerError("scheduler_job_invalid");
       }
       return jobs;
@@ -1061,11 +1120,13 @@ export function createCampaignPlayActorScheduler(
       }
       const job = handle.sqlite.prepare(`
         SELECT job_id AS jobId, campaign_id AS campaignId, turn_id AS turnId,
-          actor_id AS actorId, plan_id AS planId, due_reason AS dueReason,
+          actor_id AS actorId, admitted_plan_id AS admittedPlanId,
+          plan_id AS planId, due_reason AS dueReason,
           frozen_base_world_version AS frozenBaseWorldVersion,
           worker_epoch AS workerEpoch,
           claim_turn_worker_epoch AS claimTurnWorkerEpoch,
           stage, proposal_id AS proposalId,
+          defer_reason AS deferReason,
           created_at AS createdAt, completed_at AS completedAt
         FROM campaign_play_actor_jobs WHERE job_id = ? AND campaign_id = ?
       `).get(jobId, handle.campaignId) as JobRow | undefined;

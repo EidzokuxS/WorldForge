@@ -1361,6 +1361,11 @@ describe("Campaign Play player-action turn runtime", () => {
     const dueSet = scheduler.loadDueSet(admission.turnId);
     expect(dueSet).not.toBeNull();
     const expectedJobs = dueSet!.decisions.filter((decision) => decision.disposition !== "skip");
+    expect(dueSet!.decisions.filter((decision) => decision.disposition === "wake"))
+      .toHaveLength(CAMPAIGN_PLAY_LIMITS.actorOpportunitiesPerTurn);
+    expect(dueSet!.decisions.filter((decision) =>
+      decision.disposition === "defer" && decision.reason === "actor_capacity"))
+      .toHaveLength(3);
     expect(scheduler.listTurnJobs(admission.turnId)).toHaveLength(expectedJobs.length);
     expect(() => scheduler.validateTurnSettlement(admission.turnId))
       .toThrow("scheduler_job_invalid");
@@ -1383,7 +1388,20 @@ describe("Campaign Play player-action turn runtime", () => {
     }
 
     expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "actors_settled" });
-    expect(scheduler.validateTurnSettlement(admission.turnId)).toHaveLength(expectedJobs.length);
+    const settledJobs = scheduler.validateTurnSettlement(admission.turnId);
+    expect(settledJobs).toHaveLength(expectedJobs.length);
+    const capacityDeferred = settledJobs.filter((job) => job.deferReason === "actor_capacity");
+    expect(capacityDeferred).toHaveLength(3);
+    for (const job of capacityDeferred) {
+      const schedule = handle.sqlite.prepare(`SELECT next_act_at_world_time_minutes AS nextDue,
+          agency_debt AS agencyDebt FROM campaign_play_actor_schedules
+        WHERE campaign_id = ? AND actor_id = ?`).get(CAMPAIGN_ID, job.actorId) as {
+          nextDue: number;
+          agencyDebt: number;
+        };
+      expect(schedule.agencyDebt).toBe(1);
+      expect(schedule.nextDue).toBeGreaterThan(dueSet!.settledWorldTimeMinutes);
+    }
     expect(actorBoundaries).toBe(expectedJobs.filter((decision) => decision.disposition === "wake").length + 1);
     expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_proposals proposal
       JOIN campaign_play_actor_jobs job ON job.job_id = proposal.job_id
@@ -1408,11 +1426,6 @@ describe("Campaign Play player-action turn runtime", () => {
             validUntilWorldTimeMinutes: null,
           },
           {
-            channel: "direct_perception",
-            locationId: "location-c",
-            validUntilWorldTimeMinutes: null,
-          },
-          {
             channel: "local_aftermath",
             locationId: "location-a",
             validUntilWorldTimeMinutes: 4,
@@ -1420,16 +1433,6 @@ describe("Campaign Play player-action turn runtime", () => {
           {
             channel: "local_aftermath",
             locationId: "location-a",
-            validUntilWorldTimeMinutes: 1_441,
-          },
-          {
-            channel: "local_aftermath",
-            locationId: "location-a",
-            validUntilWorldTimeMinutes: 1_441,
-          },
-          {
-            channel: "local_aftermath",
-            locationId: "location-b",
             validUntilWorldTimeMinutes: 1_441,
           },
         ]);
@@ -1921,7 +1924,7 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(providerCalls).toBe(2);
     expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
       .find((job) => job.jobId === jobId)).toMatchObject({
-        stage: "deferred",
+        stage: "claimed",
         workerEpoch: 2,
       });
     expect(handle.sqlite.prepare(`SELECT status, worker_epoch AS workerEpoch
@@ -2034,7 +2037,7 @@ describe("Campaign Play player-action turn runtime", () => {
       expect(providerCalls).toBe(2);
       expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
         .find((job) => job.jobId === jobId)).toMatchObject({
-          stage: "deferred",
+          stage: "claimed",
           workerEpoch: 2,
         });
       expect(handle.sqlite.prepare(`SELECT status, worker_epoch AS workerEpoch
@@ -2140,7 +2143,7 @@ describe("Campaign Play player-action turn runtime", () => {
     });
     expect(providerCalls).toBe(2);
     expect(createCampaignPlayActorScheduler(reopened).listTurnJobs(admission.turnId)
-      .find((job) => job.jobId === jobId)).toMatchObject({ stage: "deferred", workerEpoch: 2 });
+      .find((job) => job.jobId === jobId)).toMatchObject({ stage: "claimed", workerEpoch: 2 });
   });
 
   it("rejects actor replanner acceptance when compilation crosses the main lease deadline", async () => {
@@ -2220,7 +2223,7 @@ describe("Campaign Play player-action turn runtime", () => {
     });
     expect(providerCalls).toBe(2);
     expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
-      .find((job) => job.jobId === jobId)).toMatchObject({ stage: "deferred", workerEpoch: 2 });
+      .find((job) => job.jobId === jobId)).toMatchObject({ stage: "claimed", workerEpoch: 2 });
   });
 
   it("keeps a queued actor replan outside startup recovery until explicit runtime work", async () => {
@@ -2263,7 +2266,7 @@ describe("Campaign Play player-action turn runtime", () => {
     await runtime.runNextStage(admission.turnId);
     expect(providerCalls).toBe(1);
     expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
-      .find((job) => job.jobId === jobId)).toMatchObject({ stage: "deferred", workerEpoch: 1 });
+      .find((job) => job.jobId === jobId)).toMatchObject({ stage: "claimed", workerEpoch: 1 });
   });
 
   it("interrupts an expired claimed replanner before recovery and rejects its late result", async () => {
@@ -2341,7 +2344,7 @@ describe("Campaign Play player-action turn runtime", () => {
     });
     const resumedJob = createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
       .find((job) => job.jobId === jobId);
-    expect(resumedJob).toMatchObject({ stage: "deferred", workerEpoch: 2 });
+    expect(resumedJob).toMatchObject({ stage: "claimed", workerEpoch: 2 });
 
     if (!resolveOld || !oldObject) throw new Error("Expired actor replanner never reached its provider call.");
     resolveOld({ object: oldObject, trace: actorReplanTrace() });
@@ -2416,22 +2419,29 @@ describe("Campaign Play player-action turn runtime", () => {
       )).toEqual({ count: 1 });
   });
 
-  it("reloads multiple accepted actor-owned replanner artifacts without turn-stage collisions", async () => {
-    const { handle, state } = await createReadyCampaignWithOpening();
+  it("reopens one accepted actor replan, executes it once, and defers a second boundary", async () => {
+    const fixture = await createReadyCampaignWithOpening();
+    let handle = fixture.handle;
+    const { state } = fixture;
     const time = fixedClock(5_500);
-    const actorReplanner = createCampaignPlayActorReplanner(handle, {
-      now: time.clock.now,
-      generateObject: (async (request: { prompt: string }) => ({
+    let providerCalls = 0;
+    const createReplanner = (currentHandle: CampaignPlayDatabaseHandle) =>
+      createCampaignPlayActorReplanner(currentHandle, {
+        now: time.clock.now,
+        generateObject: (async (request: { prompt: string }) => {
+          providerCalls += 1;
+          return {
         object: actorReplanProposalFromPrompt(request.prompt),
         trace: actorReplanTrace(),
-      })) as unknown as typeof safeGenerateObject,
-    });
+          };
+        }) as unknown as typeof safeGenerateObject,
+      });
     const runtime = turnRuntime(
       handle,
       time,
       judgeFixture("deterministic"),
       gameMasterFixture(),
-      { actorReplanner },
+      { actorReplanner: createReplanner(handle) },
     );
     const admission = runtime.admitAction({
       request: admissionRequest(state, "multiple-actor-replanners"),
@@ -2444,11 +2454,24 @@ describe("Campaign Play player-action turn runtime", () => {
     const firstJobId = forceFirstActorReplan(handle, time, admission.turnId);
     time.advance();
     await runtime.runNextStage(admission.turnId);
+
+    closeTracked(handle);
+    handle = track(openCampaignPlayDatabase(CAMPAIGN_ID));
+    const reopenedRuntime = turnRuntime(
+      handle,
+      time,
+      judgeFixture("deterministic"),
+      gameMasterFixture(),
+      { actorReplanner: createReplanner(handle), owner: "reopened-replan-worker" },
+    );
+    time.advance();
+    await reopenedRuntime.runNextStage(admission.turnId);
     const secondJobId = forceFirstActorReplan(handle, time, admission.turnId);
     time.advance();
-    await runtime.runNextStage(admission.turnId);
+    await reopenedRuntime.runNextStage(admission.turnId);
 
     expect(secondJobId).not.toBe(firstJobId);
+    expect(providerCalls).toBe(1);
     const rows = handle.sqlite.prepare(`SELECT stage_id AS stageId, status, worker_epoch AS workerEpoch
       FROM campaign_play_model_stages
       WHERE campaign_id = ? AND turn_id = ? AND kind = 'actor_replanner'
@@ -2457,14 +2480,24 @@ describe("Campaign Play player-action turn runtime", () => {
         status: string;
         workerEpoch: number;
       }>;
-    expect(rows).toHaveLength(2);
-    expect(new Set(rows.map((row) => row.stageId)).size).toBe(2);
+    expect(rows).toHaveLength(1);
+    expect(new Set(rows.map((row) => row.stageId)).size).toBe(1);
     expect(rows.every((row) => row.status === "accepted" && row.workerEpoch === 1)).toBe(true);
-    const actorTelemetry = runtime.loadTelemetry(admission.turnId).modelAttempts
+    const actorTelemetry = reopenedRuntime.loadTelemetry(admission.turnId).modelAttempts
       .filter((attempt) => attempt.kind === "actor_replanner");
-    expect(actorTelemetry).toHaveLength(2);
-    expect(new Set(actorTelemetry.map((attempt) => attempt.stageId)).size).toBe(2);
+    expect(actorTelemetry).toHaveLength(1);
+    expect(new Set(actorTelemetry.map((attempt) => attempt.stageId)).size).toBe(1);
     expect(actorTelemetry.every((attempt) => attempt.costComplete)).toBe(true);
+    const jobs = createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId);
+    expect(jobs.find((job) => job.jobId === firstJobId)).toMatchObject({
+      stage: "settled",
+      admittedPlanId: expect.not.stringMatching(/^actor-plan:/),
+      planId: expect.stringMatching(/^actor-plan:/),
+    });
+    expect(jobs.find((job) => job.jobId === secondJobId)).toMatchObject({
+      stage: "deferred",
+      deferReason: "replan_capacity",
+    });
     const repository = createCampaignPlayTurnRepository(handle);
     expect(repository.loadTurn(admission.turnId)).toMatchObject({ stage: "primary_settled" });
     expect(() => repository.loadAcceptedModelArtifact(admission.turnId, "actor_replanner"))
@@ -2482,6 +2515,7 @@ describe("Campaign Play player-action turn runtime", () => {
       const base = createCampaignPlayActorProposalService(handle, { now: time.clock.now });
       let inject = true;
       const actorProposalService: CampaignPlayActorProposalService = {
+        deferReplan: (request) => base.deferReplan(request),
         processNext(request) {
           return base.processNext({
             ...request,
@@ -2555,6 +2589,7 @@ describe("Campaign Play player-action turn runtime", () => {
     const base = createCampaignPlayActorProposalService(handle, { now: time.clock.now });
     let faultPending = true;
     const actorProposalService: CampaignPlayActorProposalService = {
+      deferReplan: (request) => base.deferReplan(request),
       processNext(request) {
         return base.processNext({
           ...request,

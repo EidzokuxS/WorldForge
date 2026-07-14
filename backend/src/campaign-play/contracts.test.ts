@@ -2235,6 +2235,7 @@ describe("Campaign Play events, actors, visibility, and recovery contracts", () 
         campaignId: "campaign_1",
         turnId: "turn_1",
         actorId: "actor_guard",
+        admittedPlanId: "plan_guard",
         planId: "plan_guard",
         dueReason: "scheduled",
         frozenBaseWorldVersion: 11,
@@ -2242,6 +2243,7 @@ describe("Campaign Play events, actors, visibility, and recovery contracts", () 
         claimTurnWorkerEpoch: active ? 1 : null,
         stage,
         proposalId: proposalRequired ? "proposal_guard" : null,
+        deferReason: stage === "deferred" ? "incapacitated" : null,
         createdAt: 1_000,
         completedAt: terminal ? 1_010 : null,
       }).success).toBe(true);

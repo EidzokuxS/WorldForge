@@ -136,10 +136,6 @@ function stableId(prefix: string, value: unknown): string {
   return `${prefix}:${hashCampaignPlayProjection(value).slice(0, 32)}`;
 }
 
-function boundedTime(base: number, delta: number): number {
-  return Math.min(2_147_483_647, base + Math.max(1, delta));
-}
-
 function estimatedCostMicros(
   inputTokens: number,
   outputTokens: number,
@@ -700,10 +696,9 @@ export function createCampaignPlayActorReplanner(
               acceptedAt, acceptedAt,
             );
             const scheduleUpdate = context.sqlite.prepare(`UPDATE campaign_play_actor_schedules SET plan_id = ?,
-              next_act_at_world_time_minutes = ?, priority = ?, updated_at = ?
+              priority = ?, updated_at = ?
               WHERE schedule_id = ? AND campaign_id = ? AND actor_id = ?`).run(
               plan.planId,
-              boundedTime(latestFrame.worldTimeMinutes, plan.cadenceMinutes),
               plan.priority,
               acceptedAt,
               schedule.scheduleId,
@@ -719,10 +714,10 @@ export function createCampaignPlayActorReplanner(
               evidence.outputTokens, durationMs, evidence.finishReason,
               artifactJson, artifactHash, acceptedAt, stageId, workerEpoch,
             );
-            const jobUpdate = context.sqlite.prepare(`UPDATE campaign_play_actor_jobs SET stage = 'deferred', completed_at = ?
+            const jobUpdate = context.sqlite.prepare(`UPDATE campaign_play_actor_jobs SET plan_id = ?
               WHERE job_id = ? AND campaign_id = ? AND stage = 'claimed'
                 AND worker_epoch = ? AND claim_turn_worker_epoch = ?`).run(
-              acceptedAt, request.jobId, context.campaignId,
+              plan.planId, request.jobId, context.campaignId,
               workerEpoch, request.token.epoch,
             );
             if (scheduleUpdate.changes !== 1 || modelUpdate.changes !== 1 || jobUpdate.changes !== 1) {

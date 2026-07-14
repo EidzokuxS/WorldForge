@@ -45,6 +45,7 @@ export const CAMPAIGN_PLAY_LIMITS = {
   pressureProgress: 100,
   pressureAdvance: 25,
   agencyDebt: 100,
+  actorOpportunitiesPerTurn: 3,
 } as const;
 
 export const CAMPAIGN_PLAY_SETUP_PHASE_VALUES = [

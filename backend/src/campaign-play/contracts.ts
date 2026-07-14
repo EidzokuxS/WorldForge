@@ -2603,8 +2603,8 @@ export const campaignPlayActorDueDecisionSchema = z.discriminatedUnion(
     z.object({
       ...campaignPlayActorDueDecisionBaseShape,
       disposition: z.literal("defer"),
-      dueReason: z.enum(["scheduled", "agency_debt"]),
-      reason: z.literal("incapacitated"),
+      dueReason: z.enum(["scheduled", "agency_debt", "plan_retry"]),
+      reason: z.enum(["incapacitated", "actor_capacity"]),
       jobId: idSchema,
       nextDueAtWorldTimeMinutes: worldTimeSchema,
       resultAgencyDebt: nonnegativeIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.agencyDebt),
@@ -2629,6 +2629,14 @@ export const campaignPlayActorDueSetSchema = z.object({
   baseRuntimeRevision: positiveIntegerSchema,
   decisions: z.array(campaignPlayActorDueDecisionSchema),
 }).strict().superRefine((dueSet, context) => {
+  const wakeCount = dueSet.decisions.filter((decision) => decision.disposition === "wake").length;
+  if (wakeCount > CAMPAIGN_PLAY_LIMITS.actorOpportunitiesPerTurn) {
+    context.addIssue({
+      code: "custom",
+      path: ["decisions"],
+      message: "Due set exceeds the per-turn actor opportunity limit.",
+    });
+  }
   addDuplicateIssue(
     dueSet.decisions.map((decision) => decision.actorId),
     context,
@@ -2657,6 +2665,7 @@ export const campaignPlayActorJobSchema = z.object({
   campaignId: idSchema,
   turnId: idSchema,
   actorId: idSchema,
+  admittedPlanId: idSchema,
   planId: idSchema,
   dueReason: z.enum(["scheduled", "agency_debt", "plan_retry"]),
   frozenBaseWorldVersion: positiveIntegerSchema,
@@ -2664,6 +2673,7 @@ export const campaignPlayActorJobSchema = z.object({
   claimTurnWorkerEpoch: positiveIntegerSchema.nullable(),
   stage: campaignPlayActorJobStageSchema,
   proposalId: idSchema.nullable(),
+  deferReason: z.enum(["incapacitated", "actor_capacity", "replan_capacity"]).nullable(),
   createdAt: timestampSchema,
   completedAt: timestampSchema.nullable(),
 }).strict().superRefine((job, context) => {
@@ -2683,6 +2693,13 @@ export const campaignPlayActorJobSchema = z.object({
       code: "custom",
       path: ["proposalId"],
       message: "Proposed or settled actor job requires a proposal.",
+    });
+  }
+  if ((job.stage === "deferred") !== (job.deferReason !== null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["deferReason"],
+      message: "Only a deferred actor job has a defer reason.",
     });
   }
   if (

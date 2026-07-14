@@ -1276,6 +1276,15 @@ export function createCampaignPlayTurnRuntime(
   const visibility = input.visibility ?? createCampaignPlayVisibilityService(input.handle);
   const frozenSelection = selection(input);
 
+  const acceptedActorReplanCount = (turnId: string): number =>
+    (input.handle.sqlite.prepare(`SELECT count(*) AS count
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ?
+        AND kind = 'actor_replanner' AND status = 'accepted'`).get(
+          input.handle.campaignId,
+          turnId,
+        ) as { count: number }).count;
+
   const releaseActorBoundary = (
     token: CampaignPlayWorkerLeaseToken,
     jobId: string,
@@ -1779,6 +1788,15 @@ export function createCampaignPlayTurnRuntime(
               );
             }
             if (outcome.kind === "replan_required") {
+              if (acceptedActorReplanCount(context.turn.turnId) >= 1) {
+                const deferred = actorProposalService.deferReplan({
+                  jobId: outcome.jobId,
+                  token: context.token,
+                  createdAt: now(),
+                });
+                releaseActorBoundary(context.token, outcome.jobId, deferred.kind);
+                return;
+              }
               const replanned = await actorReplanner.replan({
                 jobId: outcome.jobId,
                 token: context.token,
@@ -1972,7 +1990,8 @@ export function createCampaignPlayTurnRuntime(
           ["queued", "claimed", "proposed"].includes(job.stage));
         if (
           next?.stage === "queued" &&
-          actorScheduler.buildActorFrame(next.jobId).selection.kind === "replan_required"
+          actorScheduler.buildActorFrame(next.jobId).selection.kind === "replan_required" &&
+          acceptedActorReplanCount(active.turnId) === 0
         ) {
           return {
             turn: active,

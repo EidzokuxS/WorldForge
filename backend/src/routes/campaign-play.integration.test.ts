@@ -169,7 +169,7 @@ function playerDraft(): CampaignPlayCharacterDraft {
 }
 
 function openingProposal(): CampaignPlayOpeningProposal {
-  const actorPlans = ["a", "b", "c"].map((suffix) => {
+  const actorPlans = ["a", "b", "c", "d", "e", "f"].map((suffix) => {
     const actorId = `actor-${suffix}`;
     const goalId = `goal-${suffix}`;
     const targets = suffix === "b"

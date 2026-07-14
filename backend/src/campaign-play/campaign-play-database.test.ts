@@ -462,6 +462,7 @@ describe("Campaign Play core and Rulebook storage", () => {
           OR name LIKE 'campaign_play_turn_terminal_result%'
         ) ORDER BY name`).all();
       expect(runtimeTriggers).toEqual([
+        { name: "campaign_play_actor_due_sets_capacity_guard" },
         { name: "campaign_play_actor_due_sets_delete_immutable" },
         { name: "campaign_play_actor_due_sets_insert_guard" },
         { name: "campaign_play_actor_due_sets_update_immutable" },
@@ -1764,11 +1765,11 @@ describe("Campaign Play core and Rulebook storage", () => {
     );
     handle.sqlite.prepare(`
       INSERT INTO campaign_play_actor_jobs (
-        job_id, campaign_id, turn_id, actor_id, plan_id, due_reason,
+        job_id, campaign_id, turn_id, actor_id, admitted_plan_id, plan_id, due_reason,
         frozen_base_world_version, worker_epoch, stage, proposal_id,
-        created_at, completed_at
-      ) VALUES ('job-agent-one', ?, 'turn-one', ?, 'plan-agent-one',
-        'scheduled', ?, 0, 'queued', NULL, 1910, NULL)
+        defer_reason, created_at, completed_at
+      ) VALUES ('job-agent-one', ?, 'turn-one', ?, 'plan-agent-one', 'plan-agent-one',
+        'scheduled', ?, 0, 'queued', NULL, NULL, 1910, NULL)
     `).run(
       CAMPAIGN_A,
       actorGoal.actorId,
@@ -1776,11 +1777,11 @@ describe("Campaign Play core and Rulebook storage", () => {
     );
     expect(() => handle.sqlite.prepare(`
       INSERT INTO campaign_play_actor_jobs (
-        job_id, campaign_id, turn_id, actor_id, plan_id, due_reason,
+        job_id, campaign_id, turn_id, actor_id, admitted_plan_id, plan_id, due_reason,
         frozen_base_world_version, worker_epoch, stage, proposal_id,
-        created_at, completed_at
-      ) VALUES ('job-agent-duplicate', ?, 'turn-one', ?, 'plan-agent-one',
-        'scheduled', ?, 0, 'queued', NULL, 1911, NULL)
+        defer_reason, created_at, completed_at
+      ) VALUES ('job-agent-duplicate', ?, 'turn-one', ?, 'plan-agent-one', 'plan-agent-one',
+        'scheduled', ?, 0, 'queued', NULL, NULL, 1911, NULL)
     `).run(
       CAMPAIGN_A,
       actorGoal.actorId,

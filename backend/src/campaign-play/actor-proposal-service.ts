@@ -50,6 +50,7 @@ const ACTOR_AFTERMATH_VISIBILITY_MINUTES = 1_440;
 export type CampaignPlayActorProposalOutcome =
   | { kind: "settled"; jobId: string; proposalId: string; receiptIds: string[]; resultWorldVersion: number }
   | { kind: "rejected"; jobId: string; proposalId: string; reason: CampaignPlayActorProposalRejectionReason }
+  | { kind: "deferred"; jobId: string; reason: "replan_capacity" }
   | { kind: "replan_required"; jobId: string; reason: "plan_inactive" | "plan_exhausted" | "precondition_failed"; failedPreconditionIndexes: number[] };
 
 type CampaignPlayActorProposalRejectionReason =
@@ -76,6 +77,11 @@ export interface CampaignPlayActorProposalService {
   processNext(
     input: ProcessCampaignPlayActorProposalsInput,
   ): CampaignPlayActorProposalOutcome | null;
+  deferReplan(input: {
+    jobId: string;
+    token: CampaignPlayWorkerLeaseToken;
+    createdAt: number;
+  }): Extract<CampaignPlayActorProposalOutcome, { kind: "deferred" }>;
 }
 
 export class CampaignPlayActorProposalServiceError extends Error {
@@ -795,5 +801,60 @@ export function createCampaignPlayActorProposalService(
 
   return {
     processNext,
+    deferReplan(input) {
+      if (!input.jobId.trim() || !Number.isSafeInteger(input.createdAt) || input.createdAt < 0) {
+        throw new CampaignPlayActorProposalServiceError("proposal_input_invalid");
+      }
+      requireTurnLease(handle, input.token, input.createdAt);
+      const job = scheduler.listTurnJobs(input.token.turnId).find((candidate) =>
+        candidate.jobId === input.jobId);
+      if (!job || job.stage !== "queued" ||
+        scheduler.buildActorFrame(job.jobId).selection.kind !== "replan_required") {
+        throw new CampaignPlayActorProposalServiceError("proposal_state_invalid");
+      }
+      const state = stateRepository.loadState();
+      if (!state || state.authority.worldTimeMinutes === null) {
+        throw new CampaignPlayActorProposalServiceError("proposal_state_invalid");
+      }
+      const schedule = scheduleRow(handle, job.actorId);
+      turnRepository.commitActorTransition({
+        token: input.token,
+        leaseMode: "live",
+        worldVersionAdvance: 0,
+        mutationId: stableId("actor-job-event", {
+          jobId: job.jobId,
+          stage: "deferred",
+          reason: "replan_capacity",
+        }),
+        protectedPayloadHash: hashCampaignPlayProjection({
+          jobId: job.jobId,
+          reason: "replan_capacity",
+        }),
+        committedAt: input.createdAt,
+        mutate(context) {
+          requireTurnLeaseInContext(context, input.token, input.createdAt);
+          const updated = context.sqlite.prepare(`UPDATE campaign_play_actor_jobs
+            SET stage = 'deferred', defer_reason = 'replan_capacity', completed_at = ?
+            WHERE job_id = ? AND campaign_id = ? AND stage = 'queued'
+              AND worker_epoch = 0 AND claim_turn_worker_epoch IS NULL`).run(
+                input.createdAt,
+                job.jobId,
+                context.campaignId,
+              );
+          if (updated.changes !== 1) {
+            throw new CampaignPlayActorProposalServiceError("proposal_state_invalid");
+          }
+          transitionSchedule(
+            context,
+            schedule,
+            job.actorId,
+            state.authority.worldTimeMinutes!,
+            "deferred",
+            input.createdAt,
+          );
+        },
+      });
+      return { kind: "deferred", jobId: job.jobId, reason: "replan_capacity" };
+    },
   };
 }

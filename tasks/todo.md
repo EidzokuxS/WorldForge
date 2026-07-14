@@ -1479,7 +1479,7 @@ Root-fix progress:
 - [x] Retrieve input-relevant, player-authored history from the current location into the frozen Judge authority without exceeding the existing observation budget.
 - [x] Settle compound freeform movement before resolving the co-located action.
 - [x] Replace inert collective actor shells with person/job/world-state behavior.
-- [ ] Remove serial actor-replan work from the player's critical-path cadence without hiding world mutation.
+- [x] Bound serial actor work to three admitted opportunities and one accepted replan per player turn without hiding world mutation.
 - [ ] Prove all four roots through a fresh manual UI campaign before promotion.
 
 Person/job/world-state cutover:
@@ -1489,3 +1489,12 @@ Person/job/world-state cutover:
 - Accepted snapshots, shared types, Review UI, Rulebook frames, opening plans, replanning, scheduling, visibility, and evidence v3 use the same person-only contract. Every accepted person must have a persisted plan and schedule in playtest eligibility evidence, including background people.
 - Migration `0032_campaign_world_people.sql` rejects new collective actors and base/influence placements. Old collective snapshots are intentionally rejected by the current parser; there is no conversion, compatibility adapter, fallback, or hidden retry.
 - Verification passes the broad Campaign World + Campaign Play backend selection, backend/frontend typechecks, 33 Campaign Play E2E tests, 14 World Review tests, scoped Review lint, and diff check. The fresh GLM 5.2 world and manual UI proof remain deferred until the scheduler root is fixed.
+
+Scheduler cadence cutover:
+
+- Each player turn admits at most three autonomous people. Other due people receive a durable `actor_capacity` defer, one agency-debt increment, and a future due time.
+- At most one actor job may accept a new plan during the turn. Explicit Resume may continue that same interrupted attempt. A second job that needs replanning receives a durable `replan_capacity` defer and no provider call.
+- An accepted replan replaces the admitted job's execution plan and runs its first step during the same player turn. The job retains `admittedPlanId` as due-set provenance while `planId` names the plan that actually executes.
+- Proposals still settle serially against the latest committed world version. The runtime does not mutate the world in the background and adds no retry, repair, provider switch, parser fallback, or backend-authored narrative prose.
+- Focused Campaign Play verification passes 101/101. The broad Campaign Play and mounted-route selection passes after updating the person-only opening fixture, and all 33 Campaign Play E2E tests plus backend, frontend, and E2E typechecks pass. Standalone smoke additions: `0`.
+- The next formative manual run tests whether the cap improves waiting time while keeping autonomous consequences legible. One fresh UI campaign can expose mechanisms and prose defects; it cannot establish prevalence.

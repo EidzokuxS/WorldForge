@@ -322,6 +322,12 @@ export const campaignPlayActorJobDueReasonValues = [
   "plan_retry",
 ] as const;
 
+export const campaignPlayActorJobDeferReasonValues = [
+  "incapacitated",
+  "actor_capacity",
+  "replan_capacity",
+] as const;
+
 export const campaignPlayProposalStatusValues = [
   "pending",
   "accepted",
@@ -3251,6 +3257,8 @@ export const campaignPlayActorJobs = sqliteTable(
       .references(() => campaignPlayTurns.id, { onDelete: "cascade" }),
     actorId: text("actor_id").notNull()
       .references(() => actors.id, { onDelete: "cascade" }),
+    admittedPlanId: text("admitted_plan_id").notNull()
+      .references(() => campaignPlayActorPlans.planId, { onDelete: "restrict" }),
     planId: text("plan_id").notNull()
       .references(() => campaignPlayActorPlans.planId, { onDelete: "restrict" }),
     dueReason: text("due_reason", { enum: campaignPlayActorJobDueReasonValues }).notNull(),
@@ -3259,6 +3267,7 @@ export const campaignPlayActorJobs = sqliteTable(
     claimTurnWorkerEpoch: integer("claim_turn_worker_epoch"),
     stage: text("stage", { enum: campaignPlayActorJobStageValues }).notNull(),
     proposalId: text("proposal_id"),
+    deferReason: text("defer_reason", { enum: campaignPlayActorJobDeferReasonValues }),
     createdAt: integer("created_at", { mode: "number" }).notNull(),
     completedAt: integer("completed_at", { mode: "number" }),
   },
@@ -3278,6 +3287,8 @@ export const campaignPlayActorJobs = sqliteTable(
       AND (${table.stage} <> 'queued' OR (${table.workerEpoch} = 0 AND ${table.claimTurnWorkerEpoch} IS NULL))
       AND ((${table.stage} IN ('settled', 'rejected', 'deferred') AND ${table.completedAt} IS NOT NULL)
         OR (${table.stage} NOT IN ('settled', 'rejected', 'deferred') AND ${table.completedAt} IS NULL))
+      AND ((${table.stage} = 'deferred' AND ${table.deferReason} IN ('incapacitated', 'actor_capacity', 'replan_capacity'))
+        OR (${table.stage} <> 'deferred' AND ${table.deferReason} IS NULL))
       AND (${table.stage} NOT IN ('proposed', 'settled') OR ${table.proposalId} IS NOT NULL)`),
   ],
 );

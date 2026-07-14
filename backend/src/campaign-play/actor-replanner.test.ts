@@ -425,7 +425,14 @@ describe("Campaign Play actor replanner", () => {
     expect("timeout" in generateObject.mock.calls[0]![0]).toBe(false);
     expect(generateObject.mock.calls[0]![0].abortSignal).toBe(controller.signal);
     expect(createCampaignPlayActorScheduler(handle).listTurnJobs("turn-player")[0])
-      .toMatchObject({ stage: "deferred", workerEpoch: 1 });
+      .toMatchObject({
+        stage: "claimed",
+        workerEpoch: 1,
+        admittedPlanId: "actor-replanner-plan",
+        planId: outcome.kind === "replanned" ? outcome.plan.planId : "unreachable",
+      });
+    expect(createCampaignPlayActorScheduler(handle).buildActorFrame(jobId).selection.kind)
+      .toBe("step");
     expect(handle.sqlite.prepare(`SELECT status, worker_epoch AS workerEpoch,
         requested_provider_id AS requestedProviderId, requested_model AS requestedModel,
         actual_provider_id AS actualProviderId, actual_model AS actualModel,

@@ -232,6 +232,13 @@
       "when": 1784002437142,
       "tag": "0032_campaign_world_people",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1784006037142,
+      "tag": "0033_campaign_play_actor_opportunities",
+      "breakpoints": true
     }
   ]
 }
