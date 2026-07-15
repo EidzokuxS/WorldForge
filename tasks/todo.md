@@ -58,6 +58,7 @@ Execution board:
 - [x] Task 16A: deterministic integration and promotion gate.
 - [x] Task 16B: first playable slice gate.
 - [x] Task 17: real opening, custom action, 20-turn proof, and 30-turn diagnosis.
+- [x] Task 17B: concrete scene topology and exact visibility cutover.
 - [ ] Task 18: one reusable-template, one new-template, and one clone/provenance pristine 60-turn campaign.
 - [ ] Task 19: 300-turn long-horizon soak.
 - [ ] Task 20: documentation, independent audit, and handoff.
