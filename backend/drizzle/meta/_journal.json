@@ -253,6 +253,13 @@
       "when": 1784016300001,
       "tag": "0035_campaign_play_actor_possessions",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1784092000000,
+      "tag": "0036_campaign_play_character_inventory",
+      "breakpoints": true
     }
   ]
 }

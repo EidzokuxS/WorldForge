@@ -743,6 +743,7 @@ describe("Campaign Play shared public contracts", () => {
       visibleActors: [],
       visibleRoutes: [],
       visiblePressures: [],
+      possessions: [],
       narration: null,
       consequences: [],
       activeTurn: null,
@@ -759,11 +760,13 @@ describe("Campaign Play shared public contracts", () => {
         ...emptyScene,
         phase: "opening_required",
         openingOptions: [openingOptionFixture()],
+        possessions: [{ handle: "possession_tools", name: "Mending tools", quantity: 1 }],
       },
       {
         ...active,
         ...emptyScene,
         phase: "opening_active",
+        possessions: [{ handle: "possession_tools", name: "Mending tools", quantity: 1 }],
         activeTurn: {
           ...active.activeTurn!,
           turnKind: "opening",
@@ -773,6 +776,7 @@ describe("Campaign Play shared public contracts", () => {
         ...active,
         ...emptyScene,
         phase: "opening_active",
+        possessions: [{ handle: "possession_tools", name: "Mending tools", quantity: 1 }],
         activeTurn: {
           ...active.activeTurn!,
           turnKind: "opening",
@@ -1173,7 +1177,7 @@ describe("Campaign Play shared public contracts", () => {
       [campaignPlayPutPlayerResponseSchema, {
         actorHandle: "actor_player",
         acceptedWorldVersion: 7,
-        worldVersion: 8,
+        worldVersion: 11,
         runtimeRevision: 2,
       }],
     ];
@@ -1208,7 +1212,13 @@ describe("Campaign Play shared public contracts", () => {
     expect(campaignPlayPutPlayerResponseSchema.safeParse({
       actorHandle: "actor_player",
       acceptedWorldVersion: 7,
-      worldVersion: 9,
+      worldVersion: 7,
+      runtimeRevision: 2,
+    }).success).toBe(false);
+    expect(campaignPlayPutPlayerResponseSchema.safeParse({
+      actorHandle: "actor_player",
+      acceptedWorldVersion: 7,
+      worldVersion: 29,
       runtimeRevision: 2,
     }).success).toBe(false);
   });
@@ -2020,11 +2030,33 @@ describe("Campaign Play Judge and Rulebook contracts", () => {
       }),
     );
     expect(campaignPlayGameMasterPlanSchema.safeParse({ commands }).success).toBe(true);
+    const internalCommands = Array.from(
+      { length: CAMPAIGN_PLAY_LIMITS.characterList + 1 },
+      (_, index) => ({
+        ...advance,
+        commandId: `internal_command_${index}`,
+        order: index,
+        expectedWorldVersion: 11 + index,
+      }),
+    );
     expect(rulebookCommandBatchSchema.safeParse({
       batchId: "batch_1",
       baseWorldVersion: 11,
-      commands,
+      commands: internalCommands,
     }).success).toBe(true);
+    expect(rulebookCommandBatchSchema.safeParse({
+      batchId: "batch_1",
+      baseWorldVersion: 11,
+      commands: [
+        ...internalCommands,
+        {
+          ...advance,
+          commandId: "internal_command_extra",
+          order: CAMPAIGN_PLAY_LIMITS.characterList + 1,
+          expectedWorldVersion: 11 + CAMPAIGN_PLAY_LIMITS.characterList + 1,
+        },
+      ],
+    }).success).toBe(false);
     expect(campaignPlayGameMasterPlanSchema.safeParse({
       commands: [...commands, { ...commands[0], commandId: "command_extra" }],
     }).success).toBe(false);

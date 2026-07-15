@@ -793,9 +793,15 @@ function validateAvailability(
   command: RulebookBatchCommand,
   index: number,
 ): void {
-  const bootstrap = !CAMPAIGN_PLAY_COMMAND_METADATA[command.kind].modelVisible;
+  const modelVisible = CAMPAIGN_PLAY_COMMAND_METADATA[command.kind].modelVisible;
+  const available = authority.purpose === "character_bootstrap"
+    ? command.kind === "create_player_actor"
+      || (command.kind === "adjust_actor_possession" && command.quantityDelta > 0)
+    : authority.purpose === "opening"
+      ? !modelVisible
+      : modelVisible;
   if (
-    (authority.purpose === "character_bootstrap" || authority.purpose === "opening") !== bootstrap
+    !available
     || !actorJobOwns(frame, state, authority, command)
   ) {
     deny("command_unavailable", "Command kind is unavailable to this authority.", command, index);
@@ -1019,8 +1025,22 @@ function validateBootstrapCoverage(
   commands: readonly RulebookBatchCommand[],
 ): void {
   if (authority.purpose === "character_bootstrap") {
-    if (commands.length !== 1 || commands[0]?.kind !== "create_player_actor") {
-      deny("invalid_bootstrap_coverage", "Character bootstrap requires exactly one player command.");
+    const player = commands[0];
+    const possessions = commands.slice(1);
+    if (
+      player?.kind !== "create_player_actor"
+      || possessions.some((command) =>
+        command.kind !== "adjust_actor_possession"
+        || command.actorId !== player.actorId
+        || command.quantityDelta <= 0)
+      || new Set(possessions.map((command) =>
+        command.kind === "adjust_actor_possession" ? command.possessionId : "")).size
+        !== possessions.length
+    ) {
+      deny(
+        "invalid_bootstrap_coverage",
+        "Character bootstrap requires one player command followed by unique positive starting possessions for that actor.",
+      );
     }
     return;
   }
@@ -1077,6 +1097,12 @@ export function preflightCampaignPlayRulebook(
     const parsed = rulebookCommandBatchSchema.safeParse(input.batch);
     if (!parsed.success) deny("invalid_batch", "Command batch violates the strict contract.");
     const batch = parsed.data;
+    if (
+      input.authority.purpose !== "character_bootstrap"
+      && batch.commands.length > CAMPAIGN_PLAY_LIMITS.commandsPerBatch
+    ) {
+      deny("invalid_batch", "Command batch exceeds the authority-specific command limit.");
+    }
     if (batch.baseWorldVersion !== input.frame.worldVersion) {
       deny("stale_world_version", "Command batch base version is stale.");
     }

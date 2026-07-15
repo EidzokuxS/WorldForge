@@ -22,6 +22,7 @@ import {
   type CampaignPlayDatabaseHandle,
 } from "./campaign-play-database.js";
 import { createCampaignPlayStateRepository } from "./campaign-play-state-repository.js";
+import { createCampaignPlayReadModel } from "./campaign-play-read-model.js";
 import { createCampaignPlayCharacterService } from "./character-service.js";
 import {
   bootstrapCampaignPlayPlayer,
@@ -101,7 +102,7 @@ function createState() {
   return { handle, state };
 }
 
-function donorDraft(): CharacterDraft {
+function donorDraft(inventorySeed: string[] = ["Repair roll"]): CharacterDraft {
   return {
     identity: {
       role: "player",
@@ -149,7 +150,7 @@ function donorDraft(): CharacterDraft {
     },
     state: { hp: 5, conditions: [], statusFlags: [], activityState: "idle" },
     loadout: {
-      inventorySeed: ["Repair roll"], equippedItemRefs: [], currencyNotes: "",
+      inventorySeed, equippedItemRefs: [], currencyNotes: "",
       signatureItems: ["Brass tuning fork"],
     },
     startConditions: {},
@@ -171,9 +172,9 @@ const generator = {
 
 const settings = { research: { enabled: false } } as unknown as Settings;
 
-function characterService() {
+function characterService(inventorySeed?: string[]) {
   return createCampaignPlayCharacterService({
-    ingestCharacterDraft: vi.fn(async () => donorDraft()),
+    ingestCharacterDraft: vi.fn(async () => donorDraft(inventorySeed)),
   });
 }
 
@@ -209,10 +210,11 @@ function bootstrapSnapshot(handle: CampaignPlayDatabaseHandle) {
     (SELECT count(*) FROM campaign_play_commands WHERE campaign_id = ?) AS commands,
     (SELECT count(*) FROM campaign_play_receipts WHERE campaign_id = ?) AS receipts,
     (SELECT count(*) FROM campaign_play_events WHERE campaign_id = ?) AS events,
+    (SELECT count(*) FROM campaign_play_actor_possessions WHERE campaign_id = ?) AS possessions,
     (SELECT count(*) FROM campaign_play_runtime_events WHERE campaign_id = ?) AS runtimeEvents`
   ).get(
     CAMPAIGN_ID, CAMPAIGN_ID, CAMPAIGN_ID,
-    CAMPAIGN_ID, CAMPAIGN_ID, CAMPAIGN_ID,
+    CAMPAIGN_ID, CAMPAIGN_ID, CAMPAIGN_ID, CAMPAIGN_ID,
   );
   return { authority, counts };
 }
@@ -220,8 +222,9 @@ function bootstrapSnapshot(handle: CampaignPlayDatabaseHandle) {
 async function prepareCharacter(
   sourceKind: "character_card" | "generated",
   acceptedWorld: ReturnType<typeof createState>["state"]["acceptedReview"],
+  inventorySeed?: string[],
 ) {
-  const service = characterService();
+  const service = characterService(inventorySeed);
   const context = { acceptedWorld, generator, settings };
   const intake = sourceKind === "character_card"
     ? await service.parsePlayerCard(
@@ -247,6 +250,8 @@ describe("Campaign Play player bootstrap", () => {
     async (sourceKind) => {
       const { handle, state } = createState();
       const character = await prepareCharacter(sourceKind, state.acceptedReview);
+      const possessionCount = new Set(character.record.loadout.inventorySeed.map((name) =>
+        name.normalize("NFKC").trim().toLowerCase().replace(/\s+/gu, " "))).size;
       const result = bootstrapCampaignPlayPlayer(handle, {
         character,
         expectedAcceptedWorldVersion: state.authority.acceptedWorldVersion,
@@ -258,22 +263,32 @@ describe("Campaign Play player bootstrap", () => {
 
       expect(result.state.authority).toMatchObject({
         setupPhase: "opening_required",
-        worldVersion: state.authority.worldVersion + 1,
+        worldVersion: state.authority.worldVersion + 1 + possessionCount,
         runtimeRevision: state.authority.runtimeRevision + 1,
       });
-      expect(result.execution.receiptIds).toHaveLength(1);
+      expect(result.execution.receiptIds).toHaveLength(1 + possessionCount);
+      const publicState = createCampaignPlayReadModel(handle).loadState();
+      expect(publicState.phase).toBe("opening_required");
+      expect(publicState.possessions).toHaveLength(possessionCount);
       expect(handle.sqlite.prepare(`SELECT
         (SELECT count(*) FROM actors WHERE campaign_id = ? AND kind = 'person' AND controller = 'human' AND role = 'player') AS humans,
         (SELECT count(*) FROM campaign_play_characters WHERE campaign_id = ? AND record_hash = ?) AS profiles,
         (SELECT count(*) FROM campaign_play_commands WHERE campaign_id = ?) AS commands,
         (SELECT count(*) FROM campaign_play_receipts WHERE campaign_id = ?) AS receipts,
         (SELECT count(*) FROM campaign_play_events WHERE campaign_id = ?) AS events,
+        (SELECT count(*) FROM campaign_play_actor_possessions WHERE campaign_id = ?) AS possessions,
         (SELECT count(*) FROM campaign_play_runtime_events WHERE campaign_id = ?) AS runtimeEvents`
       ).get(
         CAMPAIGN_ID, CAMPAIGN_ID, character.profileDigest, CAMPAIGN_ID,
-        CAMPAIGN_ID, CAMPAIGN_ID, CAMPAIGN_ID,
+        CAMPAIGN_ID, CAMPAIGN_ID, CAMPAIGN_ID, CAMPAIGN_ID,
       )).toEqual({
-        humans: 1, profiles: 1, commands: 1, receipts: 1, events: 1, runtimeEvents: 2,
+        humans: 1,
+        profiles: 1,
+        commands: 1 + possessionCount,
+        receipts: 1 + possessionCount,
+        events: 1 + possessionCount,
+        possessions: possessionCount,
+        runtimeEvents: 2,
       });
 
       const expectedAuthority = result.state.authority;
@@ -285,6 +300,50 @@ describe("Campaign Play player bootstrap", () => {
       expect(reloaded?.mechanical.hash).toBe(result.state.mechanical.hash);
     },
   );
+
+  it.each([
+    { label: "empty inventory", inventory: [] as string[], expectedRows: 0, expectedQuantity: null },
+    {
+      label: "normalized duplicates",
+      inventory: ["Copper chit", "Copper   chit"],
+      expectedRows: 1,
+      expectedQuantity: 2,
+    },
+    {
+      label: "twenty distinct entries",
+      inventory: Array.from({ length: 20 }, (_, index) => `Tool ${index + 1}`),
+      expectedRows: 20,
+      expectedQuantity: 1,
+    },
+  ])("persists $label atomically as current possessions", async ({
+    inventory, expectedRows, expectedQuantity,
+  }) => {
+    const { handle, state } = createState();
+    const character = await prepareCharacter("generated", state.acceptedReview, inventory);
+    const result = bootstrapCampaignPlayPlayer(handle, {
+      character,
+      expectedAcceptedWorldVersion: state.authority.acceptedWorldVersion,
+      expectedAcceptedContentHash: state.authority.acceptedContentHash,
+      expectedWorldVersion: state.authority.worldVersion,
+      expectedRuntimeRevision: state.authority.runtimeRevision,
+      createdAt: 1_400,
+    });
+
+    expect(result.state.authority.worldVersion)
+      .toBe(state.authority.worldVersion + 1 + expectedRows);
+    expect(result.execution.receiptIds).toHaveLength(1 + expectedRows);
+    const possessions = handle.sqlite.prepare(`SELECT name, quantity
+      FROM campaign_play_actor_possessions
+      WHERE campaign_id = ? AND actor_id = ?
+      ORDER BY possession_key`).all(CAMPAIGN_ID, ACTOR_ID) as Array<{
+        name: string;
+        quantity: number;
+      }>;
+    expect(possessions).toHaveLength(expectedRows);
+    if (expectedQuantity !== null) {
+      expect(possessions[0]?.quantity).toBe(expectedQuantity);
+    }
+  });
 
   it("rejects stale, forged, and duplicate bootstrap attempts without partial rows", async () => {
     const { handle, state } = createState();
@@ -367,7 +426,7 @@ describe("Campaign Play player bootstrap", () => {
       (SELECT count(*) FROM campaign_play_commands WHERE campaign_id = ?) AS commands,
       (SELECT count(*) FROM campaign_play_runtime_events WHERE campaign_id = ?) AS runtimeEvents`
     ).get(CAMPAIGN_ID, CAMPAIGN_ID, CAMPAIGN_ID)).toEqual({
-      humans: 1, commands: 1, runtimeEvents: 2,
+      humans: 1, commands: 2, runtimeEvents: 2,
     });
     expect(bootstrapSnapshot(handle)).toEqual(committedSnapshot);
     expect(committedSnapshot.authority).toEqual(committed.state.authority);

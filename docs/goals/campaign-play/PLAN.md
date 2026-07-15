@@ -192,7 +192,7 @@ type CampaignPlayBootstrapCommand =
 type RulebookBatchCommand = CampaignPlayBootstrapCommand | CampaignPlayCommand;
 ```
 
-Bootstrap commands are internal harness commands. Models receive no schema or handle that can emit them. `CreatePlayerActorCommand` is valid only in `character_required` with no human actor. Opening-kind turns may initialize exactly one player placement, the absent world clock, and one state row for each accepted pressure. Each bootstrap command has strict phase/absence guards, receipt/event output, mechanical hash effects, and exhaustive preflight/executor coverage.
+Bootstrap commands are internal harness commands. Models receive no schema or handle that can emit them. `CreatePlayerActorCommand` is valid only in `character_required` with no human actor. The same character-bootstrap batch may then issue one protected positive `AdjustActorPossessionCommand` per normalized `CharacterRecord.loadout.inventorySeed` entry; repeated names become quantity, and signature-item prose is not materialized again. Opening-kind turns may initialize exactly one player placement, the absent world clock, and one state row for each accepted pressure. Each bootstrap command has strict phase/absence guards, receipt/event output, mechanical hash effects, and exhaustive preflight/executor coverage.
 
 Each command carries command ID, causal parent, actor/system source, expected mechanical world version, read scope, write scope, typed arguments, and an exposure policy. The first character-bootstrap command is rooted in the immutable accepted-world campaign/version/hash provenance; later commands use turn, command, world-event, or actor-job parents. Player observations are derived by visibility predicates; GM and narrator stages receive no direct observation writer.
 
@@ -210,6 +210,7 @@ Each command carries command ID, causal parent, actor/system source, expected me
 - Validation failure produces zero domain writes and a typed denial record.
 - The player and agent actors use the same command schemas and executor.
 - Actor possessions are current Rulebook state. Acquisition and spending use one typed quantity adjustment; prose-only possession claims carry no mechanical authority.
+- Character bootstrap is the one-way boundary from immutable `inventorySeed` provenance to current possession quantities. Opening setup and recovery expose those quantities before the first player action; CharacterRecord never becomes a second live inventory owner.
 - Narrator, frontend, and SSE delivery possess zero mutation authority.
 
 ### Model boundary
@@ -232,7 +233,7 @@ Every stage stores requested/actual model, strategy, token counts, duration, fin
 
 Campaign World acceptance stores the exact accepted review projection in `accepted_snapshot_json` together with `accepted_world_version` and `accepted_content_hash`. Accepted Review reads this immutable projection. Live play mutates current entity rows while accepted provenance stays stable.
 
-Campaign Play DTOs keep `acceptedWorldVersion`, mechanical `worldVersion`, and `runtimeRevision` as separate fields. Before character bootstrap, mechanical version/hash equal the accepted base. The receipt-bearing character bootstrap then adds the human actor and profile digest to mechanical truth and advances the mechanical version.
+Campaign Play DTOs keep `acceptedWorldVersion`, mechanical `worldVersion`, and `runtimeRevision` as separate fields. Before character bootstrap, mechanical version/hash equal the accepted base. The receipt-bearing character bootstrap adds the human actor and profile digest, then zero to twenty normalized starting-possession quantities, to mechanical truth. Every command advances the mechanical version, so the public bootstrap response admits a bounded advance of one to twenty-one.
 
 ### Campaign Play schema
 
@@ -242,7 +243,7 @@ The foundational Campaign Play migrations follow the two Campaign World handoff 
 - `0028_campaign_play_rulebook.sql`: command, receipt, causal event, exposure, route state, actor condition, and pressure state;
 - `0029_campaign_play_actors_visibility.sql`: plan, schedule, job, proposal, actor knowledge, and player observation.
 
-Later current-contract migrations extend these same owners. `0035_campaign_play_actor_possessions.sql` adds actor-owned fungible quantities; it does not reuse the immutable CharacterRecord inventory or the displaced gameplay item/resource stores.
+Later current-contract migrations extend these same owners. `0035_campaign_play_actor_possessions.sql` adds actor-owned fungible quantities; it does not reuse the immutable CharacterRecord inventory or the displaced gameplay item/resource stores. `0036_campaign_play_character_inventory.sql` permits the protected character-bootstrap possession commands without a fictitious turn and widens only the internal bootstrap order bound; ordinary model, opening, player, and actor batches remain capped at sixteen commands.
 
 | Table | Required contract |
 |---|---|

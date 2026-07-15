@@ -663,19 +663,19 @@ function parseState(value: unknown): CampaignPlayState | null {
   ) {
     return null;
   }
-  const emptyScene = currentLocation === null && narration === null &&
+  const noLiveScene = currentLocation === null && narration === null &&
     visibleActors.length === 0 && visibleRoutes.length === 0 &&
-    visiblePressures.length === 0 && possessions.length === 0 && consequences.length === 0;
+    visiblePressures.length === 0 && consequences.length === 0;
   if ((value.phase === "opening_required") !== (openingOptions.length > 0)) return null;
   if (value.phase === "character_required") {
-    if (character !== null || activeTurn !== null || !emptyScene) return null;
+    if (character !== null || activeTurn !== null || !noLiveScene || possessions.length > 0) return null;
   } else if (value.phase === "opening_required") {
-    if (character === null || activeTurn !== null || openingOptions.length === 0 || !emptyScene) return null;
+    if (character === null || activeTurn !== null || openingOptions.length === 0 || !noLiveScene) return null;
   } else if (value.phase === "opening_active") {
     if (
       character === null || activeTurn === null || activeTurn.turnKind !== "opening" ||
       (activeTurn.status !== "processing" && activeTurn.status !== "interrupted") ||
-      activeTurn.progress === "narrating" || !emptyScene
+      activeTurn.progress === "narrating" || !noLiveScene
     ) {
       return null;
     }
@@ -886,12 +886,18 @@ function parseCharacterResearchResponse(value: unknown): CampaignPlayCharacterRe
 }
 
 function parsePutPlayerResponse(value: unknown): CampaignPlayPutPlayerResponse | null {
+  const worldVersionAdvance = isObject(value)
+    && isPositiveInteger(value.worldVersion)
+    && isPositiveInteger(value.acceptedWorldVersion)
+    ? value.worldVersion - value.acceptedWorldVersion
+    : 0;
   if (
     !isObject(value) ||
     !hasExactKeys(value, ["acceptedWorldVersion", "worldVersion", "runtimeRevision", "actorHandle"]) ||
     !hasPublicVersions(value) ||
     !isHandle(value.actorHandle) ||
-    value.worldVersion !== value.acceptedWorldVersion + 1
+    worldVersionAdvance < 1 ||
+    worldVersionAdvance > CAMPAIGN_PLAY_LIMITS.characterList + 1
   ) {
     return null;
   }

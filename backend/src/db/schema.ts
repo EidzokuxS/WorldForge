@@ -2709,7 +2709,7 @@ export const campaignPlayCommands = sqliteTable(
     check(
       "campaign_play_commands_identity_valid",
       sql`length(${table.batchId}) > 0
-        AND ${table.order} BETWEEN 0 AND 15
+        AND ${table.order} BETWEEN 0 AND 20
         AND ${table.expectedWorldVersion} >= 1`,
     ),
     check(

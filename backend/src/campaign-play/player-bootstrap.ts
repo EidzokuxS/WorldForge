@@ -1,5 +1,7 @@
 import {
   canonicalizeCampaignPlayProjection,
+  deriveCampaignPlayPossessionId,
+  deriveCampaignPlayPossessionKey,
   hashCampaignPlayProjection,
 } from "./campaign-play-projection.js";
 import type { CampaignPlayDatabaseHandle } from "./campaign-play-database.js";
@@ -164,7 +166,7 @@ export function bootstrapCampaignPlayPlayer(
     actorId: input.character.actorId,
     profileDigest: input.character.profileDigest,
   }).slice(0, 32)}`;
-  const command = {
+  const playerCommand = {
     commandId: deriveCampaignPlayCommandId(frame.campaignId, null, batchId, 0),
     batchId,
     order: 0,
@@ -182,6 +184,50 @@ export function bootstrapCampaignPlayPlayer(
     traits: input.character.record.capabilities.traits ?? [],
     tags: [input.character.sourceKind],
   };
+  const startingPossessions = [...input.character.record.loadout.inventorySeed]
+    .reduce<Map<string, { name: string; quantity: number }>>((grouped, name) => {
+      const possessionKey = deriveCampaignPlayPossessionKey(name);
+      const existing = grouped.get(possessionKey);
+      if (existing) existing.quantity += 1;
+      else grouped.set(possessionKey, { name, quantity: 1 });
+      return grouped;
+    }, new Map());
+  const possessionCommands = [...startingPossessions.entries()]
+    .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+    .map(([possessionKey, possession], index) => {
+      const order = index + 1;
+      const possessionId = deriveCampaignPlayPossessionId(
+        frame.campaignId,
+        input.character.actorId,
+        possessionKey,
+      );
+      return {
+        commandId: deriveCampaignPlayCommandId(frame.campaignId, null, batchId, order),
+        batchId,
+        order,
+        kind: "adjust_actor_possession" as const,
+        causalParent: {
+          kind: "command" as const,
+          commandId: deriveCampaignPlayCommandId(frame.campaignId, null, batchId, order - 1),
+        },
+        source: { kind: "system" as const, system: "character_bootstrap" as const },
+        expectedWorldVersion: frame.worldVersion + order,
+        readScope: [
+          { kind: "actor" as const, id: input.character.actorId },
+          { kind: "possession" as const, id: possessionId },
+        ],
+        writeScope: [{ kind: "possession" as const, id: possessionId }],
+        exposure: { mode: "protected" as const },
+        actorId: input.character.actorId,
+        possessionId,
+        possessionKey,
+        name: possession.name,
+        quantityDelta: possession.quantity,
+        summary: `${possession.name} is part of the player's starting inventory.`,
+        affectedRefs: [{ kind: "actor" as const, id: input.character.actorId }],
+      };
+    });
+  const commands = [playerCommand, ...possessionCommands];
   const accepted = preflightCampaignPlayRulebook({
     frame,
     authority: {
@@ -193,7 +239,7 @@ export function bootstrapCampaignPlayPlayer(
       witnessActorIds: [],
       knownWorldEventIds: [],
     },
-    batch: { batchId, baseWorldVersion: frame.worldVersion, commands: [command] },
+    batch: { batchId, baseWorldVersion: frame.worldVersion, commands },
   });
   if (!accepted.accepted) {
     throw new CampaignPlayPlayerBootstrapError(
@@ -204,7 +250,7 @@ export function bootstrapCampaignPlayPlayer(
 
   let execution: ExecutedCampaignPlayRulebookBatch | null = null;
   const state = repository.commitMechanicalAndRuntime({
-    worldVersionAdvance: 1,
+    worldVersionAdvance: commands.length,
     event: {
       eventId: `runtime:${hashCampaignPlayProjection({ batchId, kind: "character_created" }).slice(0, 32)}`,
       turnId: null,

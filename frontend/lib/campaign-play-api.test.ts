@@ -143,6 +143,38 @@ afterEach(() => {
 });
 
 describe("Campaign Play API", () => {
+  it("loads starting possessions while opening is still required", async () => {
+    const openingState = {
+      ...state,
+      worldVersion: 5,
+      runtimeRevision: 2,
+      phase: "opening_required",
+      character: {
+        name: "Lenna Vey",
+        monogram: "LV",
+        descriptor: "An itinerant lamp-glass mender.",
+        accent: "amber-7",
+      },
+      openingOptions: [{
+        locationHandle: "location-terrace",
+        name: "Glasswater Terrace",
+        description: "A salt-streaked working terrace.",
+        roles: [{ handle: "role-outsider", label: "Outsider" }],
+        arrivalModes: [{ handle: "arrival-foot", label: "On foot" }],
+        immediateSituations: [{ handle: "situation-work", label: "Looking for work" }],
+      }],
+      possessions: [
+        { handle: "possession-crate", name: "Padded chimney crate", quantity: 1 },
+        { handle: "possession-tools", name: "Lamp-glass mending tools", quantity: 1 },
+      ],
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse(openingState)));
+    await expect(loadCampaignPlayState("campaign-one")).resolves.toMatchObject({
+      phase: "opening_required",
+      possessions: openingState.possessions,
+    });
+  });
+
   it("uses exact campaign-scoped endpoints, JSON bodies, and admission status contracts", async () => {
     const turnAdmission = { turnId: "turn-one", sequence: 1 };
     const addressedCampaignId = "campaign:one";
@@ -151,7 +183,7 @@ describe("Campaign Play API", () => {
       .mockResolvedValueOnce(jsonResponse({ draft }))
       .mockResolvedValueOnce(jsonResponse({ draft: { ...draft, source: { ...draft.source, kind: "generated", label: "Generated character" } } }))
       .mockResolvedValueOnce(jsonResponse({ research: { summary: "Found one source.", sources: [{ label: "Archive", excerpt: "The station closed at dusk." }] } }))
-      .mockResolvedValueOnce(jsonResponse({ ...versions, worldVersion: 2, actorHandle: "actor-mara" }))
+      .mockResolvedValueOnce(jsonResponse({ ...versions, worldVersion: 5, actorHandle: "actor-mara" }))
       .mockResolvedValueOnce(jsonResponse(turnAdmission, 202))
       .mockResolvedValueOnce(jsonResponse(turnAdmission, 202))
       .mockResolvedValueOnce(jsonResponse({
@@ -271,6 +303,21 @@ describe("Campaign Play API", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({ draft: malformedDraft })));
     await expect(parseCampaignPlayPlayerCard("campaign-1", { cardJson: "{}", importMode: "native" }))
       .rejects.toMatchObject({ code: "service_unavailable", invalidResponse: true });
+
+    for (const worldVersion of [1, CAMPAIGN_PLAY_LIMITS.characterList + 3]) {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+        ...versions,
+        worldVersion,
+        actorHandle: "actor-mara",
+      })));
+      await expect(putCampaignPlayPlayer("campaign-1", {
+        acceptedWorldVersion: 1,
+        expectedWorldVersion: 1,
+        expectedRuntimeRevision: 1,
+        source: "created",
+        character: draft,
+      })).rejects.toMatchObject({ code: "service_unavailable", invalidResponse: true });
+    }
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({ ...state, projectionHash: "not-a-hash" })));
     await expect(loadCampaignPlayState("campaign-1"))

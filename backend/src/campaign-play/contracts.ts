@@ -51,6 +51,7 @@ const HANDLE_CHARACTERS =
 const ID_CHARACTERS = `${HANDLE_CHARACTERS}:`;
 const ACCENT_CHARACTERS = "abcdefghijklmnopqrstuvwxyz0123456789-";
 const REQUIREMENT_CODE_CHARACTERS = "abcdefghijklmnopqrstuvwxyz0123456789_";
+const CHARACTER_BOOTSTRAP_COMMAND_LIMIT = CAMPAIGN_PLAY_LIMITS.characterList + 1;
 
 export const CAMPAIGN_PLAY_JUDGMENT_DISPOSITION_VALUES = [
   "deterministic",
@@ -944,14 +945,13 @@ export const campaignPlayStateSchema: z.ZodType<CampaignPlayState> =
         message: "Opening options belong exactly to opening setup.",
       });
     }
-    const requireEmptyScene = (): void => {
+    const requireNoLiveScene = (): void => {
       if (
         state.currentLocation !== null ||
         state.narration !== null ||
         state.visibleActors.length > 0 ||
         state.visibleRoutes.length > 0 ||
         state.visiblePressures.length > 0 ||
-        state.possessions.length > 0 ||
         state.consequences.length > 0
       ) {
         context.addIssue({
@@ -969,7 +969,14 @@ export const campaignPlayStateSchema: z.ZodType<CampaignPlayState> =
           message: "Character setup begins without a character or turn.",
         });
       }
-      requireEmptyScene();
+      requireNoLiveScene();
+      if (state.possessions.length > 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["possessions"],
+          message: "Character setup begins before current possessions exist.",
+        });
+      }
     } else if (state.phase === "opening_required") {
       if (
         state.character === null ||
@@ -982,7 +989,7 @@ export const campaignPlayStateSchema: z.ZodType<CampaignPlayState> =
           message: "Opening setup requires a character and bounded starting options.",
         });
       }
-      requireEmptyScene();
+      requireNoLiveScene();
     } else if (state.phase === "opening_active") {
       if (
         state.character === null ||
@@ -998,7 +1005,7 @@ export const campaignPlayStateSchema: z.ZodType<CampaignPlayState> =
           message: "Opening phase requires an admitted or resumable opening turn.",
         });
       }
-      requireEmptyScene();
+      requireNoLiveScene();
     } else if (state.phase === "ready") {
       if (
         state.character === null ||
@@ -1347,11 +1354,12 @@ export const campaignPlayPutPlayerResponseSchema:
   campaignPlayPublicVersionsBaseSchema.extend({
     actorHandle: handleSchema,
   }).strict().superRefine((response, context) => {
-    if (response.worldVersion !== response.acceptedWorldVersion + 1) {
+    const worldVersionAdvance = response.worldVersion - response.acceptedWorldVersion;
+    if (worldVersionAdvance < 1 || worldVersionAdvance > CHARACTER_BOOTSTRAP_COMMAND_LIMIT) {
       context.addIssue({
         code: "custom",
         path: ["worldVersion"],
-        message: "Character bootstrap advances one mechanical world version.",
+        message: "Character bootstrap advances one actor command plus its bounded starting possessions.",
       });
     }
   });
@@ -1976,7 +1984,7 @@ export const campaignPlayExposurePolicySchema = z.discriminatedUnion("mode", [
 const campaignPlayCommandBaseShape = {
   commandId: idSchema,
   batchId: idSchema,
-  order: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.commandsPerBatch - 1),
+  order: z.number().int().min(0).max(CHARACTER_BOOTSTRAP_COMMAND_LIMIT - 1),
   causalParent: campaignPlayCausalParentSchema,
   source: campaignPlayCommandSourceSchema,
   expectedWorldVersion: positiveIntegerSchema,
@@ -2156,7 +2164,7 @@ export const rulebookCommandBatchSchema = z.object({
   baseWorldVersion: positiveIntegerSchema,
   commands: z.array(rulebookBatchCommandSchema)
     .min(1)
-    .max(CAMPAIGN_PLAY_LIMITS.commandsPerBatch),
+    .max(CHARACTER_BOOTSTRAP_COMMAND_LIMIT),
 }).strict().superRefine((batch, context) => {
   addDuplicateIssue(
     batch.commands.map((command) => command.commandId),
