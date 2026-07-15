@@ -228,6 +228,8 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("Do not expose protected truth by guessing");
     expect(String(options.prompt)).toContain("Unknowns are constraints, not a checklist for the public summary");
     expect(String(options.prompt)).toContain("do not enumerate every interpretation the evidence fails to prove");
+    expect(String(options.prompt)).toContain("materialize each usable player-visible value in the committed summary");
+    expect(String(options.prompt)).toContain("Never say that a value was read, written down, repeated, counted, or confirmed while omitting the value itself");
     expect(String(options.prompt)).toContain(
       'ALLOWED_HANDLES=["you","guard","here","south","passage","delay","trust","guard-goal"]',
     );

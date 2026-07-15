@@ -4825,10 +4825,13 @@
 
 .campaign-play-narration {
   display: grid;
-  align-self: end;
+  /* Keep the latest prose readable above the fixed action dock on desktop-height viewports. */
+  align-self: start;
   gap: 14px;
   min-width: 0;
   max-width: 78ch;
+  max-height: max(180px, calc(100dvh - clamp(300px, 38vh, 390px) - 96px));
+  overflow-y: auto;
   padding: clamp(22px, 3vw, 34px);
   border: 1px solid var(--line-1);
   border-radius: var(--r-l);
@@ -5407,6 +5410,11 @@
   .campaign-play-scene,
   .campaign-play-narration {
     width: 100%;
+  }
+
+  .campaign-play-narration {
+    max-height: none;
+    overflow-y: visible;
   }
 
   .campaign-play-scene {
