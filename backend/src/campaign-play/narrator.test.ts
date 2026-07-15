@@ -176,10 +176,7 @@ describe("Campaign Play narrator", () => {
     const narrator = createCampaignPlayNarrator();
     const proposal: CampaignPlayNarratorProposal = {
       actionDetails: proposalFixture().actionDetails,
-      beats: [
-        proposalFixture().beats[0]!,
-        proposalFixture().beats[2]!,
-      ],
+      beats: [proposalFixture().beats[0]!],
     };
 
     const result = narrator.compile({
@@ -195,7 +192,7 @@ describe("Campaign Play narrator", () => {
     }]);
   });
 
-  it("rejects missing orientation, missing handoff, model-owned choices, and leaked handles", () => {
+  it("rejects missing orientation, model-owned choices, and leaked handles", () => {
     const narrator = createCampaignPlayNarrator();
     const base = {
       narrationId: "narration-opening",
@@ -204,7 +201,6 @@ describe("Campaign Play narrator", () => {
     };
     const invalid = [
       { ...proposalFixture(), beats: proposalFixture().beats.slice(1) },
-      { ...proposalFixture(), beats: proposalFixture().beats.slice(0, 2) },
       { ...proposalFixture(), actionDetails: [] },
       { ...proposalFixture(), suggestedActionHandles: ["choice_unknown"] },
       {
@@ -249,6 +245,41 @@ describe("Campaign Play narrator", () => {
       proposal,
       createdAt: 1_000,
     })).not.toThrow();
+  });
+
+  it("accepts a player-action consequence without a synthetic handoff", () => {
+    const narrator = createCampaignPlayNarrator();
+    const packet: CampaignPlayNarratorPacket = {
+      ...packetFixture(),
+      turnKind: "player_action",
+      openingContext: null,
+      sourceMoment: "A swollen tenement door stands closed in front of you.",
+      actionContext: {
+        submittedText: "Knock on the door.",
+        intentKind: "attempt",
+        disposition: "deterministic",
+        result: "limited",
+        clarificationQuestion: null,
+      },
+    };
+    const result = narrator.compile({
+      narrationId: "narration-player-consequence",
+      packet,
+      proposal: {
+        actionDetails: ["the next door down"],
+        beats: [{
+          purpose: "consequence",
+          text: "You knock once. No voice answers and the latch does not move.",
+        }],
+      },
+      createdAt: 1_000,
+    });
+
+    expect(result.narration.beats).toHaveLength(1);
+    expect(result.narration.effects).toEqual([{
+      kind: "flash",
+      beatId: result.narration.beats[0]!.beatId,
+    }]);
   });
 
   it("requires opening context exactly for opening packets", () => {
@@ -310,6 +341,9 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Return exactly one actionDetails entry");
     expect(prompt).toContain("grounded fragment of three to eight words");
     expect(prompt).toContain("never a sentence or explanation");
+    expect(prompt).toContain("actionContext and continuity as a record of what the player has already tried and learned");
+    expect(prompt).toContain("Do not point an intent back at an observation, question, or attempt that already resolved");
+    expect(prompt).toContain("Do not disguise the old action with synonyms");
     expect(prompt).toContain("Purposes label a beat's work. Do not emit one beat for every purpose");
     expect(prompt).toContain("Default to one or two beats");
     expect(prompt).toContain("Never add a moment beat to repeat sourceMoment");
@@ -322,8 +356,8 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("sourceMoment is the exact previous accepted player-visible scene");
     expect(prompt).toContain("Every concrete claim in a beat must be supported");
     expect(prompt).toContain("you may not decide that the ring is hollow or solid");
-    expect(prompt).toContain("An action_handoff is the unresolved edge of the immediate scene");
-    expect(prompt).toContain("must not recap the scene or inventory visible actors, routes, objects, or available choices");
+    expect(prompt).toContain("An action_handoff is optional except when the player must clarify an action");
+    expect(prompt).toContain("must not recap the result, restate a stalled goal");
     expect(prompt).toContain("Support is location-scoped");
     expect(prompt).toContain("remains history at that place");
     expect(prompt).toContain("never transplant its dust, residue, objects, actors, sound, weather, temperature, or lighting");
@@ -341,8 +375,8 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Do not label the first beat consequence");
     expect(prompt).toContain("On non-opening turns, use consequence");
     expect(prompt).toContain("On openings, the orientation beat may carry that visible result");
-    expect(prompt).toContain("When availableIntents is not empty, append a separate final beat");
-    expect(prompt).toContain("orientation first and action_handoff last");
+    expect(prompt).toContain("availableIntents never requires another beat");
+    expect(prompt).toContain("action_handoff must be the final beat");
     expect(prompt).toContain("Apply this silently");
     expect(prompt).toContain("Do not summarize the world");
     expect(prompt).toContain('"name":"Mara Venn"');
