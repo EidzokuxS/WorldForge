@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { CampaignWorldReview } from "@worldforge/shared";
 import {
-  isActorPresentInOpeningArea,
-  isLocationWithinOpeningArea,
+  isActorPresentAtScene,
+  isSceneInMacroRegion,
 } from "./opening-location.js";
 
 function locationWorld(): CampaignWorldReview {
@@ -41,6 +41,15 @@ function locationWorld(): CampaignWorldReview {
         tags: [],
         isStarting: false,
       },
+      {
+        id: "warehouse",
+        name: "Warehouse",
+        description: "A separate establishment inside the harbor.",
+        kind: "persistent_sublocation",
+        parentLocationId: "harbor",
+        tags: [],
+        isStarting: false,
+      },
     ],
     routes: [],
     actors: [],
@@ -72,13 +81,15 @@ function locationWorld(): CampaignWorldReview {
   };
 }
 
-describe("Campaign Play opening area", () => {
-  it("treats a nested place as part of its macro opening area", () => {
+describe("Campaign Play scene location", () => {
+  it("keeps sibling establishments in one region mechanically separate", () => {
     const world = locationWorld();
 
-    expect(isLocationWithinOpeningArea(world, "tower", "harbor")).toBe(true);
-    expect(isLocationWithinOpeningArea(world, "island", "harbor")).toBe(false);
-    expect(isActorPresentInOpeningArea(world, "keeper", "harbor")).toBe(true);
-    expect(isActorPresentInOpeningArea(world, "resident", "harbor")).toBe(false);
+    expect(isSceneInMacroRegion(world, "tower", "harbor")).toBe(true);
+    expect(isSceneInMacroRegion(world, "island", "harbor")).toBe(false);
+    expect(isActorPresentAtScene(world, "keeper", "tower")).toBe(true);
+    expect(isActorPresentAtScene(world, "keeper", "warehouse")).toBe(false);
+    expect(isActorPresentAtScene(world, "keeper", "harbor")).toBe(false);
+    expect(isActorPresentAtScene(world, "resident", "tower")).toBe(false);
   });
 });

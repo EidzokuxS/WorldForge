@@ -393,7 +393,7 @@ describe("Campaign Play routes", () => {
       throw new CampaignPlayApplicationError(
         "world_not_playable",
         "private topology detail",
-        ["opening_location_invalid"],
+        ["opening_scene_unavailable"],
       );
     });
     const ineligibleResponse = await app.request(
@@ -410,7 +410,7 @@ describe("Campaign Play routes", () => {
       .toMatchObject({
         code: "world_not_playable",
         status: 422,
-        unmetRequirements: ["opening_location_invalid"],
+        unmetRequirements: ["opening_scene_unavailable"],
       });
 
     vi.mocked(fixture.application.loadTurn).mockImplementation(() => {

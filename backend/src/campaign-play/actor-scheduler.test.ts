@@ -498,7 +498,12 @@ describe("Campaign Play actor scheduler", () => {
     expect(after.goals.map((goal) => goal.actorId)).toEqual(["actor-a"]);
     expect(after.relations.every((relation) =>
       relation.sourceActorId === "actor-a" || relation.targetActorId === "actor-a")).toBe(true);
-    expect(after.localRoutes.map((route) => route.id)).toEqual(["route-b", "route-c"]);
+    expect(after.localRoutes.map((route) => route.id)).toEqual([
+      "route-archive-c",
+      "route-b",
+      "route-c",
+      "route-c-archive",
+    ]);
     expect(after.knownPressures.map((pressure) => pressure.id)).toEqual(["pressure-a", "pressure-b"]);
     expect(after.knownEvents).toEqual([]);
     expect(after.authorizedRefs.some((reference) => reference.kind === "actor" && reference.id === "actor-c"))

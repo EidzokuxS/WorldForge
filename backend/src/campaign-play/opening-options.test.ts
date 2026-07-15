@@ -39,18 +39,21 @@ function openingWorld(): CampaignWorldReview {
         tags: [],
         isStarting: false,
       },
+      {
+        id: "terrace-office",
+        name: "Terrace Office",
+        description: "A public office above the valley.",
+        kind: "persistent_sublocation",
+        parentLocationId: "terrace",
+        tags: [],
+        isStarting: false,
+      },
     ],
     routes: [
       {
         id: "route-to-lift",
-        fromLocationId: "valley",
-        toLocationId: "lift-station",
-        travelCost: 1,
-      },
-      {
-        id: "route-to-terrace",
         fromLocationId: "lift-station",
-        toLocationId: "terrace",
+        toLocationId: "terrace-office",
         travelCost: 2,
       },
     ],
@@ -84,7 +87,7 @@ function openingWorld(): CampaignWorldReview {
         trajectory: "Transit will stop without repairs.",
         urgency: 4,
         actorIds: ["mechanic"],
-        locationIds: ["valley"],
+        locationIds: ["lift-station"],
       },
     ],
     builtAt: 1,
@@ -99,7 +102,7 @@ function openingWorld(): CampaignWorldReview {
 }
 
 describe("Campaign Play opening options", () => {
-  it("keeps a macro opening viable when its outgoing route enters a reachable sublocation", () => {
+  it("offers a macro region when one exact child scene has support, pressure, and a route", () => {
     const world = openingWorld();
     const state = {
       authority: {
@@ -110,10 +113,10 @@ describe("Campaign Play opening options", () => {
       eligibility: {
         projection: {
           eligible: true,
-          reachableMacroLocationIds: ["valley", "terrace"],
+          reachableSceneLocationIds: ["lift-station", "terrace-office"],
         },
       },
-    } as LoadedCampaignPlayState;
+    } as unknown as LoadedCampaignPlayState;
 
     expect(buildCampaignPlayOpeningOptions(state)).toEqual([
       expect.objectContaining({ name: "Valley" }),

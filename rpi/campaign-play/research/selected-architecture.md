@@ -35,6 +35,12 @@ Campaign `state.db` remains the only runtime truth store.
 
 The accepted build hash remains immutable provenance. Before live mutation exists, Campaign World acceptance freezes `accepted_snapshot_json`, accepted version, and accepted hash in `campaign_worlds`. World Review reads that immutable snapshot after acceptance. Campaign Play records that base, then maintains mechanical `worldVersion/worldHash` separately from operational `runtimeRevision/runtimeHash`. Only receipt-bearing bootstrap/Rulebook batches advance mechanical truth. Fenced admission, artifacts, plans, schedules, knowledge, observations, and terminalization advance runtime truth. The accepted snapshot is audit evidence rather than a second writable world.
 
+### Spatial truth
+
+Campaign World locations and directed routes are the only spatial authority. Each accepted world contains exactly three macro regions and six or seven persistent sublocations. Macro regions group scenes and remain available as player-facing opening choices, but they are never route endpoints, actor placements, pressure anchors, or direct-perception locations.
+
+Persistent sublocations are the canonical playable scenes. Player and agent presence, opening bootstrap, `currentLocation`, local aftermath, direct perception, and every `move_actor` endpoint use their IDs. Directed routes connect concrete scenes directly and form one strongly connected graph, including cross-region travel. Opening records the chosen macro region separately, resolves one exact child scene, and then persists only that concrete scene as the player's mechanical location. A sibling establishment inside the same macro remains off-screen until movement, a valid witness report, or another executable exposure channel reveals it.
+
 ## Product path
 
 ```text
@@ -140,7 +146,7 @@ Every agent-controlled actor has a next-action time, last-action time, agency de
 
 After primary settlement, the scheduler freezes due actor IDs and order by next-action time, descending priority, and actor ID. It builds each actor frame from the latest committed version, immediately settles that proposal, and then advances to the next actor. It allows one job per actor in one player turn and one pending job per actor. Current-scene and detached consequences settle before the final visibility projection. The scheduler records why an actor slept or woke and increases agency debt when a due actor is deferred. Each settled job calculates its next due time from the settled clock, preventing catch-up storms after long travel or waiting.
 
-Actor frames include only the actor's own profile, goals, placement, relations, observations, local route state, and known pressure or event facts. They exclude global hidden state and the player's private information. People and collectives share the same scheduling, intent, command, receipt, and event contracts. Collective frames expose base and influence placements instead of person-only presence assumptions.
+Actor frames include only the actor's own profile, goals, exact scene placement, relations, observations, local route state, and known pressure or event facts. They exclude global hidden state and the player's private information. Only people enter the actor scheduler. Institutions, crews, movements, and other collective forces remain world context expressed through people, relations, and pressures rather than group actors.
 
 ## Visibility and knowledge
 

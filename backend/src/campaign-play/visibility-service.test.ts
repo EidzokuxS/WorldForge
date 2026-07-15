@@ -172,7 +172,7 @@ function openingProposal(): CampaignPlayOpeningProposal {
     },
     scene: {
       candidateId: deriveCampaignPlayOpeningSceneCandidateId({
-        locationId: "location-c",
+        sceneLocationId: "location-c",
         openingActorId: "actor-c",
         supportActorId: "actor-c",
         pressureId: "pressure-b",
@@ -413,6 +413,7 @@ function createVisibilityFixture(
   const sixthId = deriveCampaignPlayCommandId(CAMPAIGN_ID, "turn-opening", batchId, 5);
   const seventhId = deriveCampaignPlayCommandId(CAMPAIGN_ID, "turn-opening", batchId, 6);
   const eighthId = deriveCampaignPlayCommandId(CAMPAIGN_ID, "turn-opening", batchId, 7);
+  const ninthId = deriveCampaignPlayCommandId(CAMPAIGN_ID, "turn-opening", batchId, 8);
   const evidenceAccepted = preflightCampaignPlayRulebook({
     frame,
     authority: {
@@ -427,6 +428,7 @@ function createVisibilityFixture(
         { kind: "location", id: "location-a" },
         { kind: "location", id: "location-b" },
         { kind: "location", id: "location-c" },
+        { kind: "location", id: "location-a-office" },
         { kind: "route", id: "route-a" },
         { kind: "route", id: "route-c" },
       ],
@@ -656,6 +658,32 @@ function createVisibilityFixture(
           fromLocationId: "location-a",
           toLocationId: "location-b",
         },
+        {
+          commandId: ninthId,
+          batchId,
+          order: 8,
+          kind: "record_world_event",
+          causalParent: { kind: "command", commandId: eighthId },
+          source: { kind: "system", system: "game_master" },
+          expectedWorldVersion: frame.worldVersion + 3,
+          readScope: [{ kind: "location", id: "location-a-office" }],
+          writeScope: [],
+          exposure: {
+            mode: "projectable",
+            predicates: [
+              { channel: "direct_perception", locationId: "location-a-office" },
+              {
+                channel: "local_aftermath",
+                locationId: "location-a-office",
+                validUntilWorldTimeMinutes: 20,
+              },
+            ],
+          },
+          eventClass: "scene",
+          summary: "Sealed writs were handled at the sibling office counter.",
+          observableTrace: "Wet seals and a fresh thumbprint mark the office counter.",
+          affectedRefs: [{ kind: "location", id: "location-a-office" }],
+        },
       ],
     },
   });
@@ -780,7 +808,7 @@ describe("Campaign Play visibility service", () => {
       .toThrow("A directly perceived autonomous actor event requires its persisted observable trace.");
   });
 
-  it("earns all four channels, freezes a strict packet atomically, and excludes protected truth", () => {
+  it("earns valid channels while keeping sibling-scene perception and aftermath hidden", () => {
     const fixture = createVisibilityFixture();
     const before = fixture.states.loadState()!;
     const result = createCampaignPlayVisibilityService(fixture.handle).projectTurn({
@@ -809,14 +837,17 @@ describe("Campaign Play visibility service", () => {
       "A harbor worker tells the player that the signal lantern has failed.",
     );
     expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
-      "Mara Venn left for Glass Reef.",
+      "Mara Venn left for Glass Reef Quay.",
     );
     expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
       "Fresh scuff marks and a snapped seal remain beside the route board.",
     );
     expect(result.packet.newObservations.map((entry) => entry.text))
       .not.toContain("Something changed here before you arrived.");
-    expect(result.packet.currentLocation.name).toBe("North Harbor");
+    expect(JSON.stringify(result.packet)).not.toContain(
+      "Wet seals and a fresh thumbprint mark the office counter.",
+    );
+    expect(result.packet.currentLocation.name).toBe("North Harbor Docks");
     expect(result.packet.visibleActors.map((actor) => actor.name)).not.toContain("Sel Bell");
     expect(result.packet.visiblePressures).toEqual([]);
     expect(result.packet.availableIntents.some((intent) => intent.kind === "attempt"))
@@ -1015,7 +1046,7 @@ describe("Campaign Play visibility service", () => {
     const move = intents.find((intent) => intent.kind === "move");
     const destination = scene.visibleRoutes.find((route) =>
       route.handle === move?.targets[0]?.handle)?.destinationName;
-    expect(destination).toBe("North Harbor");
+    expect(destination).toBe("North Harbor Docks");
     expect(destination).not.toBe("Aardvark Detour");
 
     const actionContext = {

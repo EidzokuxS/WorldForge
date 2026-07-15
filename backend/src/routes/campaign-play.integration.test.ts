@@ -211,7 +211,7 @@ function openingProposal(): CampaignPlayOpeningProposal {
     },
     scene: {
       candidateId: deriveCampaignPlayOpeningSceneCandidateId({
-        locationId: "location-c",
+        sceneLocationId: "location-c",
         openingActorId: "actor-c",
         supportActorId: "actor-c",
         pressureId: "pressure-b",
@@ -706,7 +706,7 @@ describe("Campaign Play mounted route", () => {
       expect.objectContaining({
         title: "Your action",
         text: "Mara tests the signal keepers' account against the ringing tower.",
-        whereOrRoute: "Bell Island",
+        whereOrRoute: "Bell Island Tower",
       }),
     ]));
 

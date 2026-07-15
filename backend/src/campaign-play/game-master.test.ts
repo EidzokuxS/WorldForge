@@ -30,10 +30,14 @@ function world(): CampaignWorldReview {
     sourceDigest: "b".repeat(64),
     worldSummary: "Two harbors share a guarded passage.",
     locations: [
-      { id: "location-a", name: "North Harbor", description: "A guarded harbor.", kind: "macro",
+      { id: "region-a", name: "North Harbor", description: "A guarded harbor region.", kind: "macro",
         parentLocationId: null, tags: ["harbor"], isStarting: true },
-      { id: "location-b", name: "South Harbor", description: "A market beyond the passage.", kind: "macro",
+      { id: "region-b", name: "South Harbor", description: "A market region beyond the passage.", kind: "macro",
         parentLocationId: null, tags: ["market"], isStarting: false },
+      { id: "location-a", name: "North Harbor Gate", description: "A guarded passage gate.", kind: "persistent_sublocation",
+        parentLocationId: "region-a", tags: ["harbor", "gate"], isStarting: false },
+      { id: "location-b", name: "South Harbor Market", description: "A market beyond the passage.", kind: "persistent_sublocation",
+        parentLocationId: "region-b", tags: ["market"], isStarting: false },
     ],
     routes: [{ id: "route-a-b", fromLocationId: "location-a", toLocationId: "location-b", travelCost: 5 }],
     actors: [

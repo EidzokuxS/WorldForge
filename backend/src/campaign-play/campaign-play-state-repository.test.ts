@@ -253,7 +253,9 @@ function openingBootstrapFrame(state: LoadedCampaignPlayState): CampaignPlayRule
 }
 
 function readyFrame(state: LoadedCampaignPlayState): CampaignPlayRulebookFrame {
-  const startLocationId = state.acceptedReview.locations.find((row) => row.isStarting)!.id;
+  const startingMacroId = state.acceptedReview.locations.find((row) => row.isStarting)!.id;
+  const startLocationId = state.acceptedReview.locations.find((row) =>
+    row.kind === "persistent_sublocation" && row.parentLocationId === startingMacroId)!.id;
   return {
     ...openingBootstrapFrame(state),
     setupPhase: "ready",
@@ -316,7 +318,7 @@ describe("Campaign Play state repository bootstrap", () => {
     const state = repository.createState({ eventId: "state-ineligible", createdAt: 1_300 });
 
     expect(state.eligibility.projection.eligible).toBe(false);
-    expect(state.eligibility.projection.unmetRequirements).toContain("opening_location_invalid");
+    expect(state.eligibility.projection.unmetRequirements).toContain("opening_scene_unavailable");
     expect(state.authority.setupPhase).toBe("character_required");
   });
 
@@ -602,7 +604,9 @@ describe("Campaign Play atomic Rulebook execution", () => {
     const frame = openingBootstrapFrame(characterState);
     const batchId = "batch-opening-bootstrap";
     const rootParent = { kind: "turn" as const, turnId: "turn-opening" };
-    const startLocationId = frame.acceptedWorld.locations.find((row) => row.isStarting)!.id;
+    const startingMacroId = frame.acceptedWorld.locations.find((row) => row.isStarting)!.id;
+    const startLocationId = frame.acceptedWorld.locations.find((row) =>
+      row.kind === "persistent_sublocation" && row.parentLocationId === startingMacroId)!.id;
     const commandInputs = [
       {
         kind: "initialize_player_placement" as const,

@@ -207,7 +207,7 @@ function openingProposal(): CampaignPlayOpeningProposal {
     },
     scene: {
       candidateId: deriveCampaignPlayOpeningSceneCandidateId({
-        locationId: "location-c",
+        sceneLocationId: "location-c",
         openingActorId: "actor-c",
         supportActorId: "actor-c",
         pressureId: "pressure-b",
@@ -306,10 +306,10 @@ function plannerFixture() {
           arrivalMode: request.startingConditions.arrivalMode,
           immediateSituation: request.startingConditions.immediateSituation,
         };
-        if (request.startingConditions.locationId === "location-a") {
+        if (request.startingConditions.macroLocationId === "region-a") {
           proposal.scene = {
             candidateId: deriveCampaignPlayOpeningSceneCandidateId({
-              locationId: "location-a",
+              sceneLocationId: "location-a",
               openingActorId: "actor-b",
               supportActorId: "actor-b",
               pressureId: "pressure-a",
@@ -405,7 +405,7 @@ describe("Campaign Play opening runtime", () => {
       const canonicalLocationHandle = deriveCampaignPlayPublicHandle(
         "location",
         CAMPAIGN_ID,
-        state.eligibility.projection.openingLocationId!,
+        state.eligibility.projection.startingMacroLocationId!,
       );
       const openingOption = mode === "chosen"
         ? buildCampaignPlayOpeningOptions(state).find((option) =>

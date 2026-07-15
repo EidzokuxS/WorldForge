@@ -9,8 +9,7 @@ import {
 import { deriveCampaignPlayPublicHandle } from "./campaign-play-projection.js";
 import type { LoadedCampaignPlayState } from "./campaign-play-state-repository.js";
 import {
-  isActorPresentInOpeningArea,
-  isLocationWithinOpeningArea,
+  isActorPresentAtScene,
 } from "./opening-location.js";
 
 const ROLE_OPTIONS = [
@@ -33,7 +32,7 @@ const IMMEDIATE_SITUATION_OPTIONS = [
 
 export interface CampaignPlayResolvedPublicStartingConditions {
   mode: "delegate" | "chosen";
-  locationId?: string;
+  macroLocationId?: string;
   role?: string;
   arrivalMode?: string;
   immediateSituation?: string;
@@ -55,31 +54,37 @@ function detailOptions(
   }));
 }
 
-function isViableOpeningLocation(
+function isViableOpeningMacroRegion(
   state: LoadedCampaignPlayState,
-  locationId: string,
+  macroLocationId: string,
 ): boolean {
   const review = state.acceptedReview;
+  const reachableSceneLocationIds = new Set(
+    state.eligibility.projection.reachableSceneLocationIds,
+  );
+  const scenes = review.locations.filter((location) =>
+    location.kind === "persistent_sublocation"
+    && location.parentLocationId === macroLocationId
+    && reachableSceneLocationIds.has(location.id)
+  );
   const supportActorIds = new Set(
     review.actors
       .filter((actor) => actor.kind === "person" && actor.role === "support")
       .map((actor) => actor.id),
   );
-  const hasSupport = [...supportActorIds].some((actorId) =>
-    isActorPresentInOpeningArea(review, actorId, locationId)
-  );
-  const hasPressure = review.pressures.some((pressure) =>
-    pressure.locationIds.includes(locationId)
-  );
-  const reachable = new Set(state.eligibility.projection.reachableMacroLocationIds);
-  const hasRoute = review.routes.some((route) =>
-    route.fromLocationId === locationId &&
-    route.toLocationId !== locationId &&
-    [...reachable].some((macroLocationId) =>
-      isLocationWithinOpeningArea(review, route.toLocationId, macroLocationId)
+  return scenes.some((scene) =>
+    [...supportActorIds].some((actorId) =>
+      isActorPresentAtScene(review, actorId, scene.id)
+    )
+    && review.pressures.some((pressure) =>
+      pressure.locationIds.includes(scene.id)
+    )
+    && review.routes.some((route) =>
+      route.fromLocationId === scene.id
+      && route.toLocationId !== scene.id
+      && reachableSceneLocationIds.has(route.toLocationId)
     )
   );
-  return hasSupport && hasPressure && hasRoute;
 }
 
 export function buildCampaignPlayOpeningOptions(
@@ -91,12 +96,10 @@ export function buildCampaignPlayOpeningOptions(
   ) {
     return [];
   }
-  const reachable = new Set(state.eligibility.projection.reachableMacroLocationIds);
   return state.acceptedReview.locations
     .filter((location) =>
       location.kind === "macro" &&
-      reachable.has(location.id) &&
-      isViableOpeningLocation(state, location.id)
+      isViableOpeningMacroRegion(state, location.id)
     )
     .sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
     .slice(0, 12)
@@ -148,7 +151,7 @@ export function resolveCampaignPlayStartingConditions(
   )!;
   return {
     mode: "chosen",
-    locationId: acceptedLocation.id,
+    macroLocationId: acceptedLocation.id,
     role: location.roles.find((option) =>
       option.handle === startingConditions.roleHandle
     )!.label,

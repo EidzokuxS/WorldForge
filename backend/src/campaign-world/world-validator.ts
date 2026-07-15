@@ -30,6 +30,9 @@ export class CampaignWorldValidationError extends Error {
 }
 
 const locationKinds = new Set(["macro", "persistent_sublocation"]);
+const MACRO_LOCATION_COUNT = 3;
+const PERSISTENT_SUBLOCATION_MIN = 6;
+const PERSISTENT_SUBLOCATION_MAX = 7;
 const actorKinds = new Set(["person"]);
 const actorRoles = new Set(["key", "support", "background"]);
 const goalHorizons = new Set(["immediate", "ongoing"]);
@@ -133,30 +136,37 @@ function validateUniqueIds(
   return ids;
 }
 
-function reachableLocations(draft: CampaignWorldDraft): Set<string> {
-  const starting = draft.locations.find((location) => location.isStarting);
-  const reachable = new Set(starting ? [starting.id] : []);
+function reachesEveryConcreteLocation(
+  startLocationId: string,
+  concreteLocationIds: ReadonlySet<string>,
+  routes: readonly CampaignWorldRoute[],
+): boolean {
+  const reachable = new Set([startLocationId]);
   let changed = true;
   while (changed) {
     changed = false;
-    for (const route of draft.routes) {
-      if (reachable.has(route.fromLocationId) && !reachable.has(route.toLocationId)) {
+    for (const route of routes) {
+      if (
+        concreteLocationIds.has(route.fromLocationId) &&
+        concreteLocationIds.has(route.toLocationId) &&
+        reachable.has(route.fromLocationId) &&
+        !reachable.has(route.toLocationId)
+      ) {
         reachable.add(route.toLocationId);
         changed = true;
       }
     }
-    for (const location of draft.locations) {
-      if (
-        location.parentLocationId &&
-        reachable.has(location.parentLocationId) &&
-        !reachable.has(location.id)
-      ) {
-        reachable.add(location.id);
-        changed = true;
-      }
-    }
   }
-  return reachable;
+  return reachable.size === concreteLocationIds.size;
+}
+
+function hasStronglyConnectedConcreteRoutes(
+  concreteLocationIds: ReadonlySet<string>,
+  routes: readonly CampaignWorldRoute[],
+): boolean {
+  return [...concreteLocationIds].every((locationId) =>
+    reachesEveryConcreteLocation(locationId, concreteLocationIds, routes)
+  );
 }
 
 export function validateCampaignWorldDraft(
@@ -164,7 +174,7 @@ export function validateCampaignWorldDraft(
 ): CampaignWorldDraft {
   const issues: string[] = [];
   validateText(draft.worldSummary, 1_200, "worldSummary", issues);
-  validateBounds(draft.locations, 3, 10, "locations", issues);
+  validateBounds(draft.locations, 9, 10, "locations", issues);
   validateBounds(draft.routes, 2, 30, "routes", issues);
   validateBounds(draft.actors, 6, 16, "actors", issues);
   validateBounds(draft.goals, 6, 48, "goals", issues);
@@ -187,6 +197,24 @@ export function validateCampaignWorldDraft(
   );
   if (startingLocations.length !== 1) {
     issues.push("world requires exactly one starting macro location");
+  }
+  const macroLocations = draft.locations.filter((location) =>
+    location.kind === "macro"
+  );
+  const concreteLocations = draft.locations.filter((location) =>
+    location.kind === "persistent_sublocation"
+  );
+  const concreteLocationIds = new Set(
+    concreteLocations.map((location) => location.id),
+  );
+  if (macroLocations.length !== MACRO_LOCATION_COUNT) {
+    issues.push("world requires exactly three macro regions");
+  }
+  if (
+    concreteLocations.length < PERSISTENT_SUBLOCATION_MIN ||
+    concreteLocations.length > PERSISTENT_SUBLOCATION_MAX
+  ) {
+    issues.push("world requires six or seven persistent sublocations");
   }
   for (const location of draft.locations) {
     validateText(location.name, 120, `location ${location.id} name`, issues);
@@ -215,11 +243,31 @@ export function validateCampaignWorldDraft(
       }
     }
   }
+  for (const macro of macroLocations) {
+    const childCount = concreteLocations.filter((location) =>
+      location.parentLocationId === macro.id
+    ).length;
+    if (childCount < 2) {
+      issues.push(`macro region ${macro.id} requires at least two direct persistent sublocations`);
+    }
+  }
 
   const routeKeys = new Set<string>();
   for (const route of draft.routes) {
     if (!locationIds.has(route.fromLocationId) || !locationIds.has(route.toLocationId)) {
       issues.push(`route ${route.id} references an unknown location`);
+    }
+    if (
+      locationIds.has(route.fromLocationId) &&
+      !concreteLocationIds.has(route.fromLocationId)
+    ) {
+      issues.push(`route ${route.id} origin must be a persistent sublocation`);
+    }
+    if (
+      locationIds.has(route.toLocationId) &&
+      !concreteLocationIds.has(route.toLocationId)
+    ) {
+      issues.push(`route ${route.id} destination must be a persistent sublocation`);
     }
     if (route.fromLocationId === route.toLocationId) {
       issues.push(`route ${route.id} has identical endpoints`);
@@ -234,11 +282,11 @@ export function validateCampaignWorldDraft(
     routeKeys.add(key);
   }
 
-  const reachable = reachableLocations(draft);
-  for (const location of draft.locations) {
-    if (location.kind === "macro" && !reachable.has(location.id)) {
-      issues.push(`macro location ${location.id} is unreachable from the start`);
-    }
+  if (
+    concreteLocationIds.size > 0 &&
+    !hasStronglyConnectedConcreteRoutes(concreteLocationIds, draft.routes)
+  ) {
+    issues.push("persistent sublocations must form a strongly connected directed route graph");
   }
 
   let keyPeople = 0;
@@ -289,6 +337,12 @@ export function validateCampaignWorldDraft(
     if (!placementKinds.has(placement.placementKind)) {
       issues.push(`placement ${placement.id} has an invalid kind`);
     }
+    if (
+      locationIds.has(placement.locationId) &&
+      !concreteLocationIds.has(placement.locationId)
+    ) {
+      issues.push(`placement ${placement.id} must use a persistent sublocation`);
+    }
     const key = `${placement.actorId}\u0000${placement.locationId}\u0000${placement.placementKind}`;
     if (placementKeys.has(key)) issues.push(`placement ${placement.id} is duplicated`);
     placementKeys.add(key);
@@ -324,10 +378,11 @@ export function validateCampaignWorldDraft(
   if (activeLocations.size < 2) {
     issues.push("cast requires present placements across at least two locations");
   }
-  for (const locationId of activeLocations) {
-    if (!reachable.has(locationId)) {
-      issues.push(`active cast location ${locationId} is unreachable`);
-    }
+  if (
+    activeLocations.size > 0 &&
+    !hasStronglyConnectedConcreteRoutes(concreteLocationIds, draft.routes)
+  ) {
+    issues.push("active cast placements require a strongly connected concrete route graph");
   }
 
   const relationKeys = new Set<string>();
@@ -385,6 +440,11 @@ export function validateCampaignWorldDraft(
     }
     if (pressure.locationIds.some((locationId) => !locationIds.has(locationId))) {
       issues.push(`pressure ${pressure.id} references an unknown location`);
+    }
+    if (pressure.locationIds.some((locationId) =>
+      locationIds.has(locationId) && !concreteLocationIds.has(locationId)
+    )) {
+      issues.push(`pressure ${pressure.id} must use persistent sublocation anchors`);
     }
     pressureAnchorSets.add(JSON.stringify({
       actorIds: [...pressure.actorIds].sort(compareText),

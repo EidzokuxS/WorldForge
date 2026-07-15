@@ -49,20 +49,30 @@ function acceptedReviewFixture(): CampaignWorldReview {
         tags: ["flood"],
         isStarting: false,
       },
+      { id: "scene:harbor-docks", name: "Harbor Docks", description: "A working ferry landing.", kind: "persistent_sublocation" as const, parentLocationId: "location:harbor", tags: ["trade"], isStarting: false },
+      { id: "scene:harbor-office", name: "Harbor Office", description: "A public records counter.", kind: "persistent_sublocation" as const, parentLocationId: "location:harbor", tags: ["civic"], isStarting: false },
+      { id: "scene:ridge-road", name: "Ridge Road", description: "A guarded road above the coast.", kind: "persistent_sublocation" as const, parentLocationId: "location:ridge", tags: ["road"], isStarting: false },
+      { id: "scene:ridge-gate", name: "Ridge Gate", description: "A toll gate at the marsh descent.", kind: "persistent_sublocation" as const, parentLocationId: "location:ridge", tags: ["road"], isStarting: false },
+      { id: "scene:marsh-crossing", name: "Marsh Crossing", description: "A raised crossing above floodwater.", kind: "persistent_sublocation" as const, parentLocationId: "location:marsh", tags: ["flood"], isStarting: false },
+      { id: "scene:marsh-watch", name: "Marsh Watch", description: "A lookout over the outer channels.", kind: "persistent_sublocation" as const, parentLocationId: "location:marsh", tags: ["flood"], isStarting: false },
     ],
     routes: [
       {
         id: "route:harbor-ridge",
-        fromLocationId: "location:harbor",
-        toLocationId: "location:ridge",
+        fromLocationId: "scene:harbor-docks",
+        toLocationId: "scene:ridge-road",
         travelCost: 2 as const,
       },
       {
         id: "route:ridge-marsh",
-        fromLocationId: "location:ridge",
-        toLocationId: "location:marsh",
+        fromLocationId: "scene:ridge-gate",
+        toLocationId: "scene:marsh-crossing",
         travelCost: 3 as const,
       },
+      { id: "route:ridge-road-gate", fromLocationId: "scene:ridge-road", toLocationId: "scene:ridge-gate", travelCost: 1 as const },
+      { id: "route:marsh-crossing-watch", fromLocationId: "scene:marsh-crossing", toLocationId: "scene:marsh-watch", travelCost: 1 as const },
+      { id: "route:marsh-harbor", fromLocationId: "scene:marsh-watch", toLocationId: "scene:harbor-office", travelCost: 2 as const },
+      { id: "route:harbor-office-docks", fromLocationId: "scene:harbor-office", toLocationId: "scene:harbor-docks", travelCost: 1 as const },
     ],
     actors: [
       {
@@ -142,16 +152,16 @@ function acceptedReviewFixture(): CampaignWorldReview {
       { id: "relation:five", sourceActorId: "actor:background", targetActorId: "actor:scout", relationType: "dependency" as const, summary: "Toma needs Rhea to keep the road open.", intensity: 4 as const },
     ],
     placements: [
-      { id: "placement:key", actorId: "actor:key", locationId: "location:ridge", placementKind: "present" as const },
-      { id: "placement:support-a", actorId: "actor:support-a", locationId: "location:harbor", placementKind: "present" as const },
-      { id: "placement:support-b", actorId: "actor:support-b", locationId: "location:marsh", placementKind: "present" as const },
-      { id: "placement:ilya", actorId: "actor:ilya", locationId: "location:ridge", placementKind: "present" as const },
-      { id: "placement:background", actorId: "actor:background", locationId: "location:harbor", placementKind: "present" as const },
-      { id: "placement:scout", actorId: "actor:scout", locationId: "location:marsh", placementKind: "present" as const },
+      { id: "placement:key", actorId: "actor:key", locationId: "scene:ridge-road", placementKind: "present" as const },
+      { id: "placement:support-a", actorId: "actor:support-a", locationId: "scene:harbor-docks", placementKind: "present" as const },
+      { id: "placement:support-b", actorId: "actor:support-b", locationId: "scene:marsh-crossing", placementKind: "present" as const },
+      { id: "placement:ilya", actorId: "actor:ilya", locationId: "scene:ridge-gate", placementKind: "present" as const },
+      { id: "placement:background", actorId: "actor:background", locationId: "scene:harbor-office", placementKind: "present" as const },
+      { id: "placement:scout", actorId: "actor:scout", locationId: "scene:marsh-watch", placementKind: "present" as const },
     ],
     pressures: [
-      { id: "pressure:harbor", name: "Dock strike", description: "Crews refuse unsafe work.", trajectory: "Traffic stops.", urgency: 4 as const, actorIds: ["actor:support-a"], locationIds: ["location:harbor"] },
-      { id: "pressure:marsh", name: "Flood surge", description: "Water rises in the marsh.", trajectory: "The ridge road floods.", urgency: 5 as const, actorIds: ["actor:support-b"], locationIds: ["location:marsh"] },
+      { id: "pressure:harbor", name: "Dock strike", description: "Crews refuse unsafe work.", trajectory: "Traffic stops.", urgency: 4 as const, actorIds: ["actor:support-a"], locationIds: ["scene:harbor-docks"] },
+      { id: "pressure:marsh", name: "Flood surge", description: "Water rises in the marsh.", trajectory: "The ridge road floods.", urgency: 5 as const, actorIds: ["actor:support-b"], locationIds: ["scene:marsh-crossing"] },
     ],
   };
   const contentHash = calculateCampaignWorldContentHash(SOURCE_DIGEST, draft);
@@ -236,14 +246,14 @@ describe("accepted topology eligibility", () => {
     expect(result.projection).toMatchObject({
       eligible: true,
       unmetRequirements: [],
-      openingLocationId: "location:harbor",
-      reachableMacroLocationIds: ["location:harbor", "location:marsh", "location:ridge"],
+      startingMacroLocationId: "location:harbor",
+      reachableSceneLocationIds: ["scene:harbor-docks", "scene:harbor-office", "scene:marsh-crossing", "scene:marsh-watch", "scene:ridge-gate", "scene:ridge-road"],
       activeActorIds: ["actor:background", "actor:ilya", "actor:key", "actor:scout", "actor:support-a", "actor:support-b"],
       exposurePath: {
-        fromLocationId: "location:harbor",
-        toLocationId: "location:ridge",
+        fromLocationId: "scene:harbor-docks",
+        toLocationId: "scene:ridge-road",
         routeIds: ["route:harbor-ridge"],
-        locationIds: ["location:harbor", "location:ridge"],
+        locationIds: ["scene:harbor-docks", "scene:ridge-road"],
       },
     });
     expect(reordered.canonicalBytes).toBe(result.canonicalBytes);
@@ -251,50 +261,41 @@ describe("accepted topology eligibility", () => {
     expect(review).toEqual(before);
   });
 
-  it("allows the player to enter a pressured starting location without a support actor beside them", () => {
+  it("does not count a support person in a sibling establishment for opening", () => {
     const review = acceptedReviewFixture();
     const result = projectAcceptedTopologyEligibility({
       ...review,
       placements: review.placements.map((placement) =>
         placement.actorId === "actor:support-a"
-          ? { ...placement, locationId: "location:ridge" }
+          ? { ...placement, locationId: "scene:harbor-office" }
           : placement
       ),
     });
 
     expect(result.projection).toMatchObject({
-      eligible: true,
-      unmetRequirements: [],
-      openingLocationId: "location:harbor",
+      eligible: false,
+      unmetRequirements: expect.arrayContaining(["opening_scene_unavailable"]),
+      startingMacroLocationId: "location:harbor",
     });
   });
 
-  it("accepts an active actor placed in a persistent sublocation of a reachable macro", () => {
+  it("rejects a macro region as an active actor placement", () => {
     const review = acceptedReviewFixture();
     const result = projectAcceptedTopologyEligibility({
       ...review,
-      locations: [
-        ...review.locations,
-        {
-          id: "location:signal-tower",
-          name: "Signal Tower",
-          description: "A staffed tower above the harbor.",
-          kind: "persistent_sublocation",
-          parentLocationId: "location:harbor",
-          tags: ["signals"],
-          isStarting: false,
-        },
-      ],
       placements: review.placements.map((placement) =>
         placement.actorId === "actor:support-a"
-          ? { ...placement, locationId: "location:signal-tower" }
+          ? { ...placement, locationId: "location:harbor" }
           : placement
       ),
     });
 
     expect(result.projection).toMatchObject({
-      eligible: true,
-      unmetRequirements: [],
+      eligible: false,
+      unmetRequirements: expect.arrayContaining([
+        "active_actor_placement_invalid",
+        "opening_scene_unavailable",
+      ]),
     });
   });
 
@@ -314,12 +315,12 @@ describe("accepted topology eligibility", () => {
 
     expect(result.projection.eligible).toBe(false);
     expect(result.projection.unmetRequirements).toEqual([
-      "directed_routes_missing",
+      "concrete_routes_invalid",
+      "concrete_scene_topology_invalid",
+      "concrete_scene_unreachable",
       "key_person_missing",
-      "macro_location_unreachable",
-      "macro_locations_below_minimum",
       "non_local_exposure_path_missing",
-      "opening_location_invalid",
+      "opening_scene_unavailable",
       "pressure_anchors_not_distinct",
       "pressures_below_minimum",
       "support_people_below_minimum",

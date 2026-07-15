@@ -59,26 +59,35 @@ function worldFixture(): CampaignWorldReview {
         tags: ["weather"],
         isStarting: false,
       },
+      { id: "scene-harbor-docks", name: "North Harbor Docks", description: "A rain-slick ferry landing.", kind: "persistent_sublocation", parentLocationId: "location-harbor", tags: ["harbor"], isStarting: false },
+      { id: "scene-harbor-tower", name: "North Signal Tower", description: "A staffed signal tower above the harbor.", kind: "persistent_sublocation", parentLocationId: "location-harbor", tags: ["signals"], isStarting: false },
+      { id: "scene-reef-quay", name: "Glass Reef Quay", description: "A quay beside luminous shoals.", kind: "persistent_sublocation", parentLocationId: "location-reef", tags: ["trade"], isStarting: false },
+      { id: "scene-reef-market", name: "Glass Reef Market", description: "A covered exchange behind the quay.", kind: "persistent_sublocation", parentLocationId: "location-reef", tags: ["trade"], isStarting: false },
+      { id: "scene-bells-tower", name: "Bell Tower", description: "A bronze bell chamber open to the weather.", kind: "persistent_sublocation", parentLocationId: "location-bells", tags: ["weather"], isStarting: false },
+      { id: "scene-bells-archive", name: "Bell Archive", description: "A dry room of storm records.", kind: "persistent_sublocation", parentLocationId: "location-bells", tags: ["archive"], isStarting: false },
     ],
     routes: [
       {
         id: "route-harbor-reef",
-        fromLocationId: "location-harbor",
-        toLocationId: "location-reef",
+        fromLocationId: "scene-harbor-docks",
+        toLocationId: "scene-reef-quay",
         travelCost: 2,
       },
+      { id: "route-reef-market", fromLocationId: "scene-reef-quay", toLocationId: "scene-reef-market", travelCost: 1 },
       {
         id: "route-reef-bells",
-        fromLocationId: "location-reef",
-        toLocationId: "location-bells",
+        fromLocationId: "scene-reef-market",
+        toLocationId: "scene-bells-tower",
         travelCost: 3,
       },
+      { id: "route-bells-archive", fromLocationId: "scene-bells-tower", toLocationId: "scene-bells-archive", travelCost: 1 },
       {
         id: "route-bells-harbor",
-        fromLocationId: "location-bells",
-        toLocationId: "location-harbor",
+        fromLocationId: "scene-bells-archive",
+        toLocationId: "scene-harbor-tower",
         travelCost: 4,
       },
+      { id: "route-harbor-docks", fromLocationId: "scene-harbor-tower", toLocationId: "scene-harbor-docks", travelCost: 1 },
     ],
     actors: [
       {
@@ -225,34 +234,34 @@ function worldFixture(): CampaignWorldReview {
       {
         id: "placement-keeper",
         actorId: "actor-keeper",
-        locationId: "location-reef",
+        locationId: "scene-reef-quay",
         placementKind: "present",
       },
       {
         id: "placement-courier",
         actorId: "actor-courier",
-        locationId: "location-harbor",
+        locationId: "scene-harbor-docks",
         placementKind: "present",
       },
       {
         id: "placement-bells",
         actorId: "actor-bell-tender",
-        locationId: "location-bells",
+        locationId: "scene-bells-tower",
         placementKind: "present",
       },
       {
         id: "placement-council",
         actorId: "actor-council",
-        locationId: "location-reef",
+        locationId: "scene-reef-market",
         placementKind: "present",
       },
       {
         id: "placement-background",
         actorId: "actor-background",
-        locationId: "location-harbor",
+        locationId: "scene-harbor-tower",
         placementKind: "present",
       },
-      { id: "placement-scout", actorId: "actor-scout", locationId: "location-bells", placementKind: "present" },
+      { id: "placement-scout", actorId: "actor-scout", locationId: "scene-bells-archive", placementKind: "present" },
     ],
     pressures: [
       {
@@ -262,7 +271,7 @@ function worldFixture(): CampaignWorldReview {
         trajectory: "Food and medicine queues grow by the hour.",
         urgency: 5,
         actorIds: ["actor-courier"],
-        locationIds: ["location-harbor"],
+        locationIds: ["scene-harbor-docks"],
       },
       {
         id: "pressure-false-bells",
@@ -271,7 +280,7 @@ function worldFixture(): CampaignWorldReview {
         trajectory: "Couriers stop trusting weather warnings.",
         urgency: 3,
         actorIds: ["actor-bell-tender"],
-        locationIds: ["location-bells"],
+        locationIds: ["scene-bells-tower"],
       },
     ],
     builtAt: 1_000,
@@ -345,7 +354,7 @@ function proposalFixture(): CampaignPlayOpeningProposal {
     },
     scene: {
       candidateId: deriveCampaignPlayOpeningSceneCandidateId({
-        locationId: "location-harbor",
+        sceneLocationId: "scene-harbor-docks",
         openingActorId: "actor-courier",
         supportActorId: "actor-courier",
         pressureId: "pressure-harbor-lock",
@@ -362,13 +371,13 @@ function proposalFixture(): CampaignPlayOpeningProposal {
         "actor-courier",
         "goal-courier-deliver",
         ["goal-courier-deliver"],
-        [{ kind: "location", id: "location-harbor" }],
+        [{ kind: "location", id: "scene-harbor-docks" }],
       ),
       actorPlan(
         "actor-bell-tender",
         "goal-bells-explain",
         ["goal-bells-explain"],
-        [{ kind: "location", id: "location-bells" }],
+        [{ kind: "location", id: "scene-bells-tower" }],
         "The storm bell's fresh strike pattern conflicts with the clear horizon.",
       ),
       actorPlan("actor-background", "goal-background-clear", ["goal-background-clear"]),
@@ -388,7 +397,7 @@ function proposalFixture(): CampaignPlayOpeningProposal {
 
 const chosenConditions = {
   mode: "chosen" as const,
-  locationId: "location-harbor",
+  macroLocationId: "location-harbor",
   role: "A repairer waiting for passage",
   arrivalMode: "On the last permitted ferry",
   immediateSituation: "The harbor gates close as an impossible bell pattern crosses the water.",
@@ -454,7 +463,7 @@ describe("Campaign Play opening planner", () => {
       schedule.actorId === "actor-bell-tender")?.nextActAtWorldTimeMinutes).toBe(0);
     expect(first.artifact.actorSchedules.find((schedule) =>
       schedule.actorId === "actor-courier")?.nextActAtWorldTimeMinutes).toBe(0);
-    expect(first.artifact.exposureSeed.discoverableWithinPlayerActions).toBe(3);
+    expect(first.artifact.exposureSeed.discoverableWithinPlayerActions).toBe(4);
     expect(first.artifact.exposureSeed.sourceGoalId).toBe("goal-bells-explain");
     expect(first.artifact.exposureSeed.observableTrace).toBe(
       "The storm bell's fresh strike pattern conflicts with the clear horizon.",
@@ -491,51 +500,21 @@ describe("Campaign Play opening planner", () => {
     expect(narratorJson).not.toContain("Lantern Council");
   });
 
-  it("routes an actor intent from a persistent sublocation through its parent macro", () => {
-    const world = worldFixture();
-    world.locations.push({
-      id: "location-signal-tower",
-      name: "Signal Tower",
-      description: "A staffed tower above North Harbor.",
-      kind: "persistent_sublocation",
-      parentLocationId: "location-harbor",
-      tags: ["signals"],
-      isStarting: false,
-    });
-    world.placements = world.placements.map((placement) =>
-      placement.actorId === "actor-courier"
-        ? { ...placement, locationId: "location-signal-tower" }
-        : placement
-    );
+  it("rejects a macro region as an actor's mechanical location target", () => {
     const proposal = proposalFixture();
-    proposal.scene.candidateId = deriveCampaignPlayOpeningSceneCandidateId({
-      locationId: "location-harbor",
-      openingActorId: "actor-background",
-      supportActorId: "actor-courier",
-      pressureId: "pressure-harbor-lock",
-      routeId: "route-harbor-reef",
-    });
     const openingPlan = proposal.actorPlans.find((plan) =>
-      plan.actorId === "actor-background"
+      plan.actorId === "actor-courier"
     )!;
-    openingPlan.steps[0]!.intent.targets.push({
+    openingPlan.steps[0]!.intent.targets = [{
       kind: "location",
       id: "location-harbor",
-    });
-    const courierPlan = proposal.actorPlans.find((plan) => plan.actorId === "actor-courier")!;
-    courierPlan.steps[0]!.intent.targets.push({ kind: "route", id: "route-harbor-reef" });
+    }];
 
-    const result = createCampaignPlayOpeningPlanner().compile(
-      frameFixture(world),
+    expect(() => createCampaignPlayOpeningPlanner().compile(
+      frameFixture(),
       chosenConditions,
       proposal,
-    );
-
-    expect(result.artifact.actorPlans.find((plan) =>
-      plan.actorId === "actor-courier")?.intent.targets).toContainEqual({
-      kind: "route",
-      id: "route-harbor-reef",
-    });
+    )).toThrowError(expect.objectContaining({ code: "opening_proposal_invalid" }));
   });
 
   it("freezes copied artifact data without mutating the proposal fixture", () => {
@@ -556,7 +535,7 @@ describe("Campaign Play opening planner", () => {
       { mode: "delegate" },
       proposalFixture(),
     );
-    expect(result.artifact.start.locationId).toBe("location-harbor");
+    expect(result.artifact.start.sceneLocationId).toBe("scene-harbor-docks");
   });
 
   it("requires a chosen start to be copied exactly", () => {
@@ -611,7 +590,7 @@ describe("Campaign Play opening planner", () => {
   it("uses the concrete opening step as the active plan intent", () => {
     const proposal = proposalFixture();
     proposal.actorPlans[0]!.steps[0]!.intent = intent([
-      { kind: "location", id: "location-reef" },
+      { kind: "location", id: "scene-reef-quay" },
     ]);
 
     const artifact = createCampaignPlayOpeningPlanner().compile(
@@ -673,47 +652,22 @@ describe("Campaign Play opening planner", () => {
     expect(chosen).toEqual([]);
     expect(delegated.length).toBeGreaterThan(0);
     expect(delegated.every((candidate) =>
-      candidate.locationId === "location-bells"
+      candidate.sceneLocationId === "scene-bells-tower"
       && candidate.supportActorId === "actor-bell-tender"
     )).toBe(true);
   });
 
-  it("accepts a support person present inside a nested place in the opening area", () => {
+  it("does not treat a support person in a sibling establishment as present", () => {
     const world = worldFixture();
-    world.locations.push({
-      id: "location-harbor-tower",
-      name: "Harbor Signal Tower",
-      description: "A signal room overlooking North Harbor.",
-      kind: "persistent_sublocation",
-      parentLocationId: "location-harbor",
-      tags: ["signal"],
-      isStarting: false,
-    });
     const courierPlacement = world.placements.find((placement) =>
       placement.actorId === "actor-courier"
     )!;
-    courierPlacement.locationId = "location-harbor-tower";
-    const proposal = proposalFixture();
-    proposal.scene.candidateId = deriveCampaignPlayOpeningSceneCandidateId({
-      locationId: "location-harbor",
-      openingActorId: "actor-background",
-      supportActorId: "actor-courier",
-      pressureId: "pressure-harbor-lock",
-      routeId: "route-harbor-reef",
-    });
-    const openingPlan = proposal.actorPlans.find((plan) =>
-      plan.actorId === "actor-background"
-    )!;
-    openingPlan.steps[0]!.intent.targets.push({
-      kind: "location",
-      id: "location-harbor",
-    });
+    courierPlacement.locationId = "scene-harbor-tower";
 
-    expect(createCampaignPlayOpeningPlanner().compile(
+    expect(buildCampaignPlayOpeningSceneCandidates(
       frameFixture(world),
       chosenConditions,
-      proposal,
-    ).artifact.narratorFacts.supportActor.id).toBe("actor-courier");
+    )).toEqual([]);
   });
 
   it("excludes direct perception from the hidden opening consequence schema", () => {
@@ -791,7 +745,7 @@ describe("Campaign Play opening planner", () => {
       "actor-bell-tender",
       "goal-bells-maintain",
       ["goal-bells-maintain"],
-      [{ kind: "location", id: "location-bells" }],
+      [{ kind: "location", id: "scene-bells-tower" }],
     );
 
     const result = createCampaignPlayOpeningPlanner().compile(
@@ -805,7 +759,7 @@ describe("Campaign Play opening planner", () => {
     world.placements.push({
       id: "placement-council-influence",
       actorId: "actor-council",
-      locationId: "location-bells",
+      locationId: "scene-bells-archive",
       placementKind: "home",
     });
     world.routes = world.routes.filter((route) => route.id !== "route-bells-harbor");
@@ -937,7 +891,7 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain('"openingConstraints"');
     expect(prompt).toContain('"actorId":"actor-bell-tender"');
     expect(prompt).toContain('"activeGoalIds":["goal-bells-explain"]');
-    expect(prompt).toContain('"actorLocationIds":["location-bells"]');
+    expect(prompt).toContain('"actorLocationIds":["scene-bells-tower"]');
     expect(prompt).toContain("exactly openingConstraints.plannedActors.length items");
     expect(prompt).toContain("Every listed person receives a plan regardless of role");
     expect(prompt).toContain("exactly one concrete next step");
@@ -951,9 +905,9 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain('"openingActorName":');
     expect(prompt).toContain("copy only its candidateId into scene.candidateId");
     expect(prompt).toContain("openingActorId is the person whose first step creates the immediate local situation");
-    expect(prompt).toContain('{"kind":"location","id":selectedScene.locationId}');
-    expect(prompt).toContain("Do not turn this into a tour of the location");
-    expect(prompt).toContain("single actorLocationId differs from selectedScene.locationId");
+    expect(prompt).toContain('{"kind":"location","id":selectedScene.sceneLocationId}');
+    expect(prompt).toContain("Do not turn this into a tour of the place");
+    expect(prompt).toContain("single actorLocationId differs from selectedScene.sceneLocationId");
     expect(prompt).toContain("The compiler uses selectedScene.routeId");
     expect(prompt).toContain("The compiler uses selectedScene.supportActorId");
     expect(prompt).toContain("The compiler takes the hidden location, goal, and observable trace");

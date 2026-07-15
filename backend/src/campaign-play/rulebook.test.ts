@@ -28,21 +28,24 @@ function worldFixture(): CampaignWorldReview {
     sourceDigest: "b".repeat(64),
     worldSummary: "Two harbors negotiate a failing passage while a council watches both shores.",
     locations: [
+      { id: "region-a", name: "North Harbor Region", description: "The northern harbor district.", kind: "macro", parentLocationId: null, tags: ["harbor"], isStarting: true },
+      { id: "region-b", name: "South Harbor Region", description: "The southern market district.", kind: "macro", parentLocationId: null, tags: ["market"], isStarting: false },
+      { id: "region-c", name: "Bell Island Region", description: "The outer island district.", kind: "macro", parentLocationId: null, tags: ["island"], isStarting: false },
       {
         id: "location-a",
         name: "North Harbor",
         description: "A guarded northern harbor.",
-        kind: "macro",
-        parentLocationId: null,
+        kind: "persistent_sublocation",
+        parentLocationId: "region-a",
         tags: ["harbor"],
-        isStarting: true,
+        isStarting: false,
       },
       {
         id: "location-b",
         name: "South Harbor",
         description: "A market harbor beyond the passage.",
-        kind: "macro",
-        parentLocationId: null,
+        kind: "persistent_sublocation",
+        parentLocationId: "region-b",
         tags: ["market"],
         isStarting: false,
       },
@@ -50,8 +53,8 @@ function worldFixture(): CampaignWorldReview {
         id: "location-c",
         name: "Bell Island",
         description: "A distant island outside the harbor passage.",
-        kind: "macro",
-        parentLocationId: null,
+        kind: "persistent_sublocation",
+        parentLocationId: "region-c",
         tags: ["island"],
         isStarting: false,
       },
@@ -564,6 +567,72 @@ describe("Campaign Play Rulebook preflight", () => {
       status: "active",
       lastAdvancedWorldTimeMinutes: 0,
     }]);
+  });
+
+  it("rejects opening bootstrap into a macro region", () => {
+    const frame = frameFixture("opening_required");
+    const batch = structuredClone(openingBatch());
+    const placement = batch.commands[0]!;
+    if (placement.kind !== "initialize_player_placement" || !("locationId" in placement)) {
+      throw new Error("fixture requires player placement first");
+    }
+    placement.locationId = "region-a";
+    placement.readScope = [
+      { kind: "actor", id: PLAYER_ID },
+      { kind: "location", id: "region-a" },
+    ];
+    placement.writeScope = structuredClone(placement.readScope);
+    const authority: CampaignPlayRulebookAuthority = {
+      purpose: "opening",
+      turnId: TURN_ID,
+      actorId: PLAYER_ID,
+      rootParent: { kind: "turn", turnId: TURN_ID },
+      authorizedRefs: [...allRefs(), { kind: "location", id: "region-a" }],
+      witnessActorIds: [],
+      knownWorldEventIds: [],
+    };
+
+    expect(preflightCampaignPlayRulebook({ frame, authority, batch })).toMatchObject({
+      accepted: false,
+      denial: { code: "precondition_failed" },
+    });
+  });
+
+  it("rejects movement whose route ends at a macro region", () => {
+    const frame = frameFixture();
+    frame.acceptedWorld.routes[0] = {
+      ...frame.acceptedWorld.routes[0]!,
+      toLocationId: "region-b",
+    };
+    const command = {
+      ...commandBase(0, READY_VERSION),
+      kind: "move_actor" as const,
+      readScope: [
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "route" as const, id: "route-a-b" },
+        { kind: "location" as const, id: "location-a" },
+        { kind: "location" as const, id: "region-b" },
+      ],
+      writeScope: [
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "location" as const, id: "location-a" },
+        { kind: "location" as const, id: "region-b" },
+      ],
+      actorId: PLAYER_ID,
+      routeId: "route-a-b",
+      fromLocationId: "location-a",
+      toLocationId: "region-b",
+    };
+    const authority = {
+      ...playerAuthority(),
+      authorizedRefs: [...allRefs(), { kind: "location" as const, id: "region-b" }],
+    };
+
+    expect(preflightCampaignPlayRulebook({
+      frame,
+      authority,
+      batch: { batchId: BATCH_ID, baseWorldVersion: READY_VERSION, commands: [command] },
+    })).toMatchObject({ accepted: false, denial: { code: "precondition_failed" } });
   });
 
   it("accepts the single receipt-bearing character bootstrap command", () => {

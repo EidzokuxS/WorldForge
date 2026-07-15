@@ -16,12 +16,12 @@ import {
 export type CampaignPlayEligibilityRequirementCode =
   | "active_actor_goal_missing"
   | "active_actor_placement_invalid"
-  | "directed_routes_missing"
+  | "concrete_routes_invalid"
+  | "concrete_scene_topology_invalid"
+  | "concrete_scene_unreachable"
   | "key_person_missing"
-  | "macro_location_unreachable"
-  | "macro_locations_below_minimum"
   | "non_local_exposure_path_missing"
-  | "opening_location_invalid"
+  | "opening_scene_unavailable"
   | "pressure_anchors_not_distinct"
   | "pressures_below_minimum"
   | "support_people_below_minimum";
@@ -53,8 +53,8 @@ export interface CampaignPlayEligibilitySemanticProjection {
   acceptedContentHash: string;
   eligible: boolean;
   unmetRequirements: CampaignPlayEligibilityRequirementCode[];
-  openingLocationId: string | null;
-  reachableMacroLocationIds: string[];
+  startingMacroLocationId: string | null;
+  reachableSceneLocationIds: string[];
   activeActorIds: string[];
   pressureAnchorKeys: string[];
   exposurePath: CampaignPlayExposurePath | null;
@@ -396,20 +396,20 @@ function reachableLocationIds(
 
 function findExposurePath(
   review: CampaignWorldReview,
-  openingLocationId: string,
+  openingSceneLocationId: string,
   reachable: ReadonlySet<string>,
 ): CampaignPlayExposurePath | null {
-  const macroIds = new Set(
+  const sceneIds = new Set(
     review.locations
-      .filter((location) => location.kind === "macro")
+      .filter((location) => location.kind === "persistent_sublocation")
       .map((location) => location.id),
   );
   const nonLocalAnchors = new Set<string>();
   for (const pressure of review.pressures) {
     for (const locationId of pressure.locationIds) {
       if (
-        locationId !== openingLocationId &&
-        macroIds.has(locationId) &&
+        locationId !== openingSceneLocationId &&
+        sceneIds.has(locationId) &&
         reachable.has(locationId)
       ) {
         nonLocalAnchors.add(locationId);
@@ -420,8 +420,8 @@ function findExposurePath(
     for (const placement of review.placements) {
       if (
         placement.actorId === actor.id &&
-        placement.locationId !== openingLocationId &&
-        macroIds.has(placement.locationId) &&
+        placement.locationId !== openingSceneLocationId &&
+        sceneIds.has(placement.locationId) &&
         reachable.has(placement.locationId)
       ) {
         nonLocalAnchors.add(placement.locationId);
@@ -444,15 +444,15 @@ function findExposurePath(
   }
 
   const queue: Array<{ locationId: string; routeIds: string[]; locationIds: string[] }> = [
-    { locationId: openingLocationId, routeIds: [], locationIds: [openingLocationId] },
+    { locationId: openingSceneLocationId, routeIds: [], locationIds: [openingSceneLocationId] },
   ];
-  const visited = new Set([openingLocationId]);
+  const visited = new Set([openingSceneLocationId]);
   while (queue.length > 0) {
     const current = queue.shift();
     if (!current) break;
     if (nonLocalAnchors.has(current.locationId)) {
       return {
-        fromLocationId: openingLocationId,
+        fromLocationId: openingSceneLocationId,
         toLocationId: current.locationId,
         routeIds: current.routeIds,
         locationIds: current.locationIds,
@@ -477,20 +477,49 @@ export function projectAcceptedTopologyEligibility(
 ): CampaignPlayProjection<CampaignPlayEligibilitySemanticProjection> {
   const unmet = new Set<CampaignPlayEligibilityRequirementCode>();
   const macroLocations = review.locations.filter((location) => location.kind === "macro");
+  const sceneLocations = review.locations.filter((location) =>
+    location.kind === "persistent_sublocation"
+  );
   const startingMacros = macroLocations.filter((location) => location.isStarting);
-  const openingLocationId = startingMacros.length === 1 ? startingMacros[0].id : null;
-  const reachable = openingLocationId
-    ? reachableLocationIds(review, openingLocationId)
+  const startingMacroLocationId = startingMacros.length === 1 ? startingMacros[0].id : null;
+  const startingSceneLocationIds = startingMacroLocationId
+    ? sceneLocations
+      .filter((location) => location.parentLocationId === startingMacroLocationId)
+      .map((location) => location.id)
+      .sort(compareText)
+    : [];
+  const reachabilityStartId = startingSceneLocationIds[0] ?? null;
+  const reachable = reachabilityStartId
+    ? reachableLocationIds(review, reachabilityStartId)
     : new Set<string>();
-  const reachableMacroLocationIds = uniqueSorted(
-    macroLocations.filter((location) => reachable.has(location.id)).map((location) => location.id),
+  const reachableSceneLocationIds = uniqueSorted(
+    sceneLocations.filter((location) => reachable.has(location.id)).map((location) => location.id),
   );
 
-  if (macroLocations.length < 3) unmet.add("macro_locations_below_minimum");
-  if (reachableMacroLocationIds.length !== macroLocations.length) {
-    unmet.add("macro_location_unreachable");
+  const childCounts = new Map(macroLocations.map((location) => [location.id, 0]));
+  let topologyValid = macroLocations.length === 3
+    && (sceneLocations.length === 6 || sceneLocations.length === 7)
+    && startingMacros.length === 1;
+  for (const scene of sceneLocations) {
+    if (scene.isStarting || !scene.parentLocationId || !childCounts.has(scene.parentLocationId)) {
+      topologyValid = false;
+      continue;
+    }
+    childCounts.set(scene.parentLocationId, childCounts.get(scene.parentLocationId)! + 1);
   }
-  if (review.routes.length === 0) unmet.add("directed_routes_missing");
+  if ([...childCounts.values()].some((count) => count < 2)) topologyValid = false;
+  if (!topologyValid) unmet.add("concrete_scene_topology_invalid");
+  if (!reachabilityStartId || reachableSceneLocationIds.length !== sceneLocations.length) {
+    unmet.add("concrete_scene_unreachable");
+  }
+  const sceneIds = new Set(sceneLocations.map((location) => location.id));
+  if (
+    review.routes.length === 0
+    || review.routes.some((route) =>
+      !sceneIds.has(route.fromLocationId) || !sceneIds.has(route.toLocationId))
+  ) {
+    unmet.add("concrete_routes_invalid");
+  }
 
   const keyPeople = review.actors.filter((actor) => actor.role === "key");
   const supportPeople = review.actors.filter((actor) => actor.role === "support");
@@ -504,15 +533,6 @@ export function projectAcceptedTopologyEligibility(
   if (pressureAnchorKeys.length < 2) unmet.add("pressure_anchors_not_distinct");
 
   const activeActors = activeAcceptedActors(review);
-  const locationIds = new Set(review.locations.map((location) => location.id));
-  const playablePlacementLocationIds = new Set(
-    review.locations
-      .filter((location) =>
-        reachable.has(location.id)
-        || location.parentLocationId !== null && reachable.has(location.parentLocationId)
-      )
-      .map((location) => location.id),
-  );
   for (const actor of activeActors) {
     if (!review.goals.some((goal) => goal.actorId === actor.id && goal.status === "active")) {
       unmet.add("active_actor_goal_missing");
@@ -520,28 +540,31 @@ export function projectAcceptedTopologyEligibility(
     const placements = review.placements.filter((placement) => placement.actorId === actor.id);
     const valid = placements.filter((placement) =>
       placement.placementKind === "present" &&
-      locationIds.has(placement.locationId) &&
-      playablePlacementLocationIds.has(placement.locationId)
+      sceneIds.has(placement.locationId) &&
+      reachable.has(placement.locationId)
     ).length === 1;
     if (!valid) unmet.add("active_actor_placement_invalid");
   }
 
-  let openingValid = openingLocationId !== null;
-  if (openingLocationId) {
-    const pressurePresent = review.pressures.some((pressure) =>
-      pressure.locationIds.includes(openingLocationId)
-    );
-    const routeAffordance = review.routes.some((route) =>
-      route.fromLocationId === openingLocationId &&
-      route.toLocationId !== openingLocationId &&
-      reachable.has(route.toLocationId)
-    );
-    openingValid = pressurePresent && routeAffordance;
-  }
-  if (!openingValid) unmet.add("opening_location_invalid");
+  const supportActorIds = new Set(supportPeople.map((actor) => actor.id));
+  const viableStartingScenes = startingSceneLocationIds.filter((sceneLocationId) =>
+    review.placements.some((placement) =>
+      supportActorIds.has(placement.actorId)
+      && placement.placementKind === "present"
+      && placement.locationId === sceneLocationId
+    )
+    && review.pressures.some((pressure) => pressure.locationIds.includes(sceneLocationId))
+    && review.routes.some((route) =>
+      route.fromLocationId === sceneLocationId
+      && route.toLocationId !== sceneLocationId
+      && reachable.has(route.toLocationId)
+    )
+  );
+  if (viableStartingScenes.length === 0) unmet.add("opening_scene_unavailable");
 
-  const exposurePath = openingLocationId
-    ? findExposurePath(review, openingLocationId, reachable)
+  const openingSceneLocationId = viableStartingScenes[0] ?? reachabilityStartId;
+  const exposurePath = openingSceneLocationId
+    ? findExposurePath(review, openingSceneLocationId, reachable)
     : null;
   if (!exposurePath) unmet.add("non_local_exposure_path_missing");
 
@@ -550,8 +573,8 @@ export function projectAcceptedTopologyEligibility(
     acceptedContentHash: review.contentHash,
     eligible: unmetRequirements.length === 0,
     unmetRequirements,
-    openingLocationId,
-    reachableMacroLocationIds,
+    startingMacroLocationId,
+    reachableSceneLocationIds,
     activeActorIds: uniqueSorted(activeActors.map((actor) => actor.id)),
     pressureAnchorKeys,
     exposurePath,

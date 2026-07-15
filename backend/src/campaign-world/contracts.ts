@@ -6,6 +6,9 @@ const NAME_MAX = 120;
 const TEXT_MAX = 1_200;
 const TAG_MAX = 80;
 const TAG_COUNT_MAX = 20;
+const MACRO_LOCATION_COUNT = 3;
+const PERSISTENT_SUBLOCATION_MIN = 6;
+const PERSISTENT_SUBLOCATION_MAX = 7;
 
 const actorRoleValues = ["key", "support", "background"] as const;
 const goalHorizonValues = ["immediate", "ongoing"] as const;
@@ -92,7 +95,7 @@ const worldFrameRouteSchema = z.object({
 
 const worldFramePacketBaseSchema = z.object({
   worldSummary: textSchema,
-  locations: z.array(worldFrameLocationSchema).min(3).max(10),
+  locations: z.array(worldFrameLocationSchema).min(9).max(10),
   routes: z.array(worldFrameRouteSchema).min(2).max(30),
 }).strict();
 
@@ -119,10 +122,52 @@ function addDuplicateIssues(
   }
 }
 
+function reachesEveryLocation(
+  startRef: string,
+  locationRefs: ReadonlySet<string>,
+  routes: readonly z.infer<typeof worldFrameRouteSchema>[],
+): boolean {
+  const reachable = new Set([startRef]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const route of routes) {
+      if (
+        locationRefs.has(route.fromLocationRef) &&
+        locationRefs.has(route.toLocationRef) &&
+        reachable.has(route.fromLocationRef) &&
+        !reachable.has(route.toLocationRef)
+      ) {
+        reachable.add(route.toLocationRef);
+        changed = true;
+      }
+    }
+  }
+  return reachable.size === locationRefs.size;
+}
+
+function hasStronglyConnectedConcreteRoutes(
+  concreteLocationRefs: ReadonlySet<string>,
+  routes: readonly z.infer<typeof worldFrameRouteSchema>[],
+): boolean {
+  return [...concreteLocationRefs].every((locationRef) =>
+    reachesEveryLocation(locationRef, concreteLocationRefs, routes)
+  );
+}
+
 export const worldFramePacketSchema = worldFramePacketBaseSchema.superRefine(
   (packet, context) => {
     const locationRefs = new Set(
       packet.locations.map((location) => location.locationRef),
+    );
+    const macroLocations = packet.locations.filter((location) =>
+      location.kind === "macro"
+    );
+    const concreteLocations = packet.locations.filter((location) =>
+      location.kind === "persistent_sublocation"
+    );
+    const concreteLocationRefs = new Set(
+      concreteLocations.map((location) => location.locationRef),
     );
     addDuplicateIssues(
       packet.locations.map((location) => location.locationRef),
@@ -131,7 +176,25 @@ export const worldFramePacketSchema = worldFramePacketBaseSchema.superRefine(
       "Location references",
     );
 
-    const startingLocations = packet.locations.filter((location) =>
+    if (macroLocations.length !== MACRO_LOCATION_COUNT) {
+      context.addIssue({
+        code: "custom",
+        path: ["locations"],
+        message: "The world frame requires exactly three macro regions.",
+      });
+    }
+    if (
+      concreteLocations.length < PERSISTENT_SUBLOCATION_MIN ||
+      concreteLocations.length > PERSISTENT_SUBLOCATION_MAX
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["locations"],
+        message: "The world frame requires six or seven persistent sublocations.",
+      });
+    }
+
+    const startingLocations = macroLocations.filter((location) =>
       location.isStarting && location.kind === "macro"
     );
     if (startingLocations.length !== 1) {
@@ -170,6 +233,18 @@ export const worldFramePacketSchema = worldFramePacketBaseSchema.superRefine(
         }
       }
     });
+    macroLocations.forEach((macro) => {
+      const childCount = concreteLocations.filter((location) =>
+        location.parentLocationRef === macro.locationRef
+      ).length;
+      if (childCount < 2) {
+        context.addIssue({
+          code: "custom",
+          path: ["locations"],
+          message: `Macro region ${macro.locationRef} requires at least two direct persistent sublocations.`,
+        });
+      }
+    });
 
     const routeKeys: string[] = [];
     packet.routes.forEach((route, index) => {
@@ -180,11 +255,31 @@ export const worldFramePacketSchema = worldFramePacketBaseSchema.superRefine(
           message: "Route origin must match a location reference exactly.",
         });
       }
+      if (
+        locationRefs.has(route.fromLocationRef) &&
+        !concreteLocationRefs.has(route.fromLocationRef)
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["routes", index, "fromLocationRef"],
+          message: "Route origin must be a persistent sublocation.",
+        });
+      }
       if (!locationRefs.has(route.toLocationRef)) {
         context.addIssue({
           code: "custom",
           path: ["routes", index, "toLocationRef"],
           message: "Route destination must match a location reference exactly.",
+        });
+      }
+      if (
+        locationRefs.has(route.toLocationRef) &&
+        !concreteLocationRefs.has(route.toLocationRef)
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["routes", index, "toLocationRef"],
+          message: "Route destination must be a persistent sublocation.",
         });
       }
       if (route.fromLocationRef === route.toLocationRef) {
@@ -198,32 +293,15 @@ export const worldFramePacketSchema = worldFramePacketBaseSchema.superRefine(
     });
     addDuplicateIssues(routeKeys, context, ["routes"], "Directed routes");
 
-    const startRef = startingLocations[0]?.locationRef;
-    if (startRef) {
-      const reachable = new Set([startRef]);
-      let changed = true;
-      while (changed) {
-        changed = false;
-        for (const route of packet.routes) {
-          if (
-            reachable.has(route.fromLocationRef) &&
-            !reachable.has(route.toLocationRef)
-          ) {
-            reachable.add(route.toLocationRef);
-            changed = true;
-          }
-        }
-      }
-      const unreachableMacro = packet.locations.find((location) =>
-        location.kind === "macro" && !reachable.has(location.locationRef)
-      );
-      if (unreachableMacro) {
-        context.addIssue({
-          code: "custom",
-          path: ["routes"],
-          message: `Macro location ${unreachableMacro.locationRef} is unreachable from the start.`,
-        });
-      }
+    if (
+      concreteLocationRefs.size > 0 &&
+      !hasStronglyConnectedConcreteRoutes(concreteLocationRefs, packet.routes)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["routes"],
+        message: "Persistent sublocations must form a strongly connected directed route graph.",
+      });
     }
   },
 );
@@ -269,33 +347,11 @@ export function createWorldCastPacketSchema(
   const locationRefs = new Set(
     frame.locations.map((location) => location.locationRef),
   );
-  const startRef = frame.locations.find((location) =>
-    location.isStarting
-  )?.locationRef;
-  const reachableLocationRefs = new Set(startRef ? [startRef] : []);
-  let reachabilityChanged = true;
-  while (reachabilityChanged) {
-    reachabilityChanged = false;
-    for (const route of frame.routes) {
-      if (
-        reachableLocationRefs.has(route.fromLocationRef) &&
-        !reachableLocationRefs.has(route.toLocationRef)
-      ) {
-        reachableLocationRefs.add(route.toLocationRef);
-        reachabilityChanged = true;
-      }
-    }
-    for (const location of frame.locations) {
-      if (
-        location.parentLocationRef &&
-        reachableLocationRefs.has(location.parentLocationRef) &&
-        !reachableLocationRefs.has(location.locationRef)
-      ) {
-        reachableLocationRefs.add(location.locationRef);
-        reachabilityChanged = true;
-      }
-    }
-  }
+  const concreteLocationRefs = new Set(
+    frame.locations
+      .filter((location) => location.kind === "persistent_sublocation")
+      .map((location) => location.locationRef),
+  );
 
   return worldCastPacketBaseSchema.superRefine((packet, context) => {
     const actorRefs = new Set(packet.actors.map((actor) => actor.actorRef));
@@ -357,6 +413,16 @@ export function createWorldCastPacketSchema(
           message: "Placement locationRef must match a frame reference exactly.",
         });
       }
+      if (
+        locationRefs.has(placement.locationRef) &&
+        !concreteLocationRefs.has(placement.locationRef)
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["placements", index, "locationRef"],
+          message: "Placement locationRef must be a persistent sublocation.",
+        });
+      }
       placementKeys.push(
         `${placement.actorRef}\u0000${placement.locationRef}\u0000${placement.placementKind}`,
       );
@@ -408,16 +474,14 @@ export function createWorldCastPacketSchema(
         )
         .map((placement) => placement.locationRef),
     );
-    const unreachableActivePlacement = packet.placements.find((placement) =>
-      activePersonRefs.has(placement.actorRef) &&
-      placement.placementKind === "present" &&
-      !reachableLocationRefs.has(placement.locationRef)
-    );
-    if (unreachableActivePlacement) {
+    if (
+      activeLocations.size > 0 &&
+      !hasStronglyConnectedConcreteRoutes(concreteLocationRefs, frame.routes)
+    ) {
       context.addIssue({
         code: "custom",
         path: ["placements"],
-        message: "Every person requires a reachable present placement.",
+        message: "Every person requires a present placement reachable through concrete routes.",
       });
     }
     if (activeLocations.size < 2) {
@@ -462,6 +526,11 @@ export function createWorldConnectionsPacketSchema(
 ): z.ZodType<WorldConnectionsPacket> {
   const locationRefs = new Set(
     frame.locations.map((location) => location.locationRef),
+  );
+  const concreteLocationRefs = new Set(
+    frame.locations
+      .filter((location) => location.kind === "persistent_sublocation")
+      .map((location) => location.locationRef),
   );
   const actorRefs = new Set(cast.actors.map((actor) => actor.actorRef));
 
@@ -542,6 +611,16 @@ export function createWorldConnectionsPacketSchema(
             code: "custom",
             path: ["pressures", index, "locationRefs", locationIndex],
             message: "Pressure locationRef must match a frame reference exactly.",
+          });
+        }
+        if (
+          locationRefs.has(locationRef) &&
+          !concreteLocationRefs.has(locationRef)
+        ) {
+          context.addIssue({
+            code: "custom",
+            path: ["pressures", index, "locationRefs", locationIndex],
+            message: "Pressure locationRef must be a persistent sublocation.",
           });
         }
       });

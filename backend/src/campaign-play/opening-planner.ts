@@ -35,7 +35,10 @@ import {
   hashCampaignPlayProjection,
 } from "./campaign-play-projection.js";
 import { buildCampaignPlayOpeningPrompt } from "./opening-prompts.js";
-import { isActorPresentInOpeningArea } from "./opening-location.js";
+import {
+  isActorPresentAtScene,
+  isSceneInMacroRegion,
+} from "./opening-location.js";
 import { deriveCampaignPlayCommandId } from "./rulebook.js";
 
 const OPENING_MAX_ELIGIBLE_ACTORS = 20;
@@ -103,7 +106,7 @@ export type CampaignPlayOpeningProposal =
   z.infer<typeof campaignPlayOpeningProposalSchema>;
 
 const campaignPlayOpeningStartSchema = z.object({
-  locationId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
+  sceneLocationId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
   role: boundedLine(CAMPAIGN_PLAY_LIMITS.shortText),
   arrivalMode: boundedLine(CAMPAIGN_PLAY_LIMITS.shortText),
   immediateSituation: boundedText(CAMPAIGN_PLAY_LIMITS.text),
@@ -113,7 +116,7 @@ export type CampaignPlayOpeningStart = z.infer<typeof campaignPlayOpeningStartSc
 
 export interface CampaignPlayOpeningSceneCandidate {
   candidateId: string;
-  locationId: string;
+  sceneLocationId: string;
   openingActorId: string;
   supportActorId: string;
   pressureId: string;
@@ -124,7 +127,7 @@ export type CampaignPlayResolvedStartingConditions =
   | { mode: "delegate" }
   | {
       mode: "chosen";
-      locationId: string;
+      macroLocationId: string;
       role: string;
       arrivalMode: string;
       immediateSituation: string;
@@ -135,7 +138,7 @@ export const campaignPlayResolvedStartingConditionsSchema:
     z.object({ mode: z.literal("delegate") }).strict(),
     z.object({
       mode: z.literal("chosen"),
-      locationId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
+      macroLocationId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
       role: boundedLine(CAMPAIGN_PLAY_LIMITS.shortText),
       arrivalMode: boundedLine(CAMPAIGN_PLAY_LIMITS.shortText),
       immediateSituation: boundedText(CAMPAIGN_PLAY_LIMITS.text),
@@ -527,8 +530,6 @@ function shortestDirectedDistance(
   fromLocationId: string,
   toLocationId: string,
 ): number | null {
-  fromLocationId = routingLocationId(world, fromLocationId);
-  toLocationId = routingLocationId(world, toLocationId);
   if (fromLocationId === toLocationId) return 0;
   const queue: Array<{ locationId: string; distance: number }> = [
     { locationId: fromLocationId, distance: 0 },
@@ -556,17 +557,12 @@ export function buildCampaignPlayOpeningSceneCandidates(
   startingConditions: CampaignPlayResolvedStartingConditions,
 ): CampaignPlayOpeningSceneCandidate[] {
   const world = frame.acceptedWorld;
-  const canonicalStart = world.locations.find((location) =>
-    location.kind === "macro" && location.isStarting);
-  if (!canonicalStart) return [];
-
   const locations = world.locations
     .filter((location) =>
-      location.kind === "macro"
-      && shortestDirectedDistance(world, canonicalStart.id, location.id) !== null
+      location.kind === "persistent_sublocation"
       && (
         startingConditions.mode === "delegate"
-        || location.id === startingConditions.locationId
+        || location.parentLocationId === startingConditions.macroLocationId
       ))
     .sort((left, right) => compareText(left.id, right.id));
   const candidatesByLocation = locations.map((location) => {
@@ -580,7 +576,7 @@ export function buildCampaignPlayOpeningSceneCandidates(
       .filter((actor) =>
         actor.kind === "person"
         && actor.role === "support"
-        && isActorPresentInOpeningArea(world, actor.id, location.id))
+        && isActorPresentAtScene(world, actor.id, location.id))
       .sort((left, right) => compareText(left.id, right.id));
     const pressures = world.pressures
       .filter((pressure) => pressure.locationIds.includes(location.id))
@@ -597,7 +593,7 @@ export function buildCampaignPlayOpeningSceneCandidates(
         for (const pressure of pressures) {
           for (const route of routes) {
             const identity = {
-              locationId: location.id,
+              sceneLocationId: location.id,
               openingActorId: openingActor.id,
               supportActorId: support.id,
               pressureId: pressure.id,
@@ -629,28 +625,17 @@ export function buildCampaignPlayOpeningSceneCandidates(
   return selected;
 }
 
-function routingLocationId(world: CampaignWorldReview, locationId: string): string {
-  const locations = new Map(world.locations.map((location) => [location.id, location]));
-  const visited = new Set<string>();
-  let currentId = locationId;
-  while (!visited.has(currentId)) {
-    visited.add(currentId);
-    const current = locations.get(currentId);
-    if (!current?.parentLocationId) return currentId;
-    currentId = current.parentLocationId;
-  }
-  return locationId;
-}
-
 function shortestDirectedTravelMinutes(
   world: CampaignWorldReview,
   fromLocationId: string,
   toLocationId: string,
 ): number | null {
-  fromLocationId = routingLocationId(world, fromLocationId);
-  toLocationId = routingLocationId(world, toLocationId);
   if (fromLocationId === toLocationId) return 0;
-  const remaining = new Set(world.locations.map((location) => location.id));
+  const remaining = new Set(
+    world.locations
+      .filter((location) => location.kind === "persistent_sublocation")
+      .map((location) => location.id),
+  );
   const distances = new Map<string, number>([[fromLocationId, 0]]);
   while (remaining.size > 0) {
     const current = [...remaining]
@@ -854,13 +839,17 @@ function compileScene(
     candidate.candidateId === proposal.scene.candidateId);
   if (!scene) fail("opening_proposal_invalid");
   const start = {
-    locationId: scene.locationId,
+    sceneLocationId: scene.sceneLocationId,
     ...proposal.start,
   };
   if (
     startingConditions.mode === "chosen"
     && (
-      start.locationId !== startingConditions.locationId
+      !isSceneInMacroRegion(
+        world,
+        start.sceneLocationId,
+        startingConditions.macroLocationId,
+      )
       || start.role !== startingConditions.role
       || start.arrivalMode !== startingConditions.arrivalMode
       || start.immediateSituation !== startingConditions.immediateSituation
@@ -869,7 +858,7 @@ function compileScene(
     fail("opening_proposal_invalid");
   }
   const location = world.locations.find((value) =>
-    value.id === start.locationId && value.kind === "macro");
+    value.id === start.sceneLocationId && value.kind === "persistent_sublocation");
   const support = world.actors.find((value) =>
     value.id === scene.supportActorId
     && value.kind === "person"
@@ -880,20 +869,20 @@ function compileScene(
     && value.controller === "agent");
   const pressure = world.pressures.find((value) =>
     value.id === scene.pressureId
-    && value.locationIds.includes(start.locationId));
+    && value.locationIds.includes(start.sceneLocationId));
   const route = world.routes.find((value) =>
     value.id === scene.routeId
-    && value.fromLocationId === start.locationId
-    && value.toLocationId !== start.locationId);
+    && value.fromLocationId === start.sceneLocationId
+    && value.toLocationId !== start.sceneLocationId);
   const destination = route
     ? world.locations.find((value) => value.id === route.toLocationId)
     : undefined;
   const supportPresent = support
-    && isActorPresentInOpeningArea(world, support.id, start.locationId);
+    && isActorPresentAtScene(world, support.id, start.sceneLocationId);
   if (
     !location
     || !openingActor
-    || !actorLocations(world, openingActor.id).includes(start.locationId)
+    || !actorLocations(world, openingActor.id).includes(start.sceneLocationId)
     || !support
     || !supportPresent
     || !pressure
@@ -1114,7 +1103,7 @@ export function createCampaignPlayOpeningPlanner(
       frame,
       proposal,
       openingActorId,
-      start.locationId,
+      start.sceneLocationId,
     );
     const exposureSeed = compileExposureSeed(frame, proposal, narratorFacts, plans);
     const frameHash = hashCampaignPlayProjection({
@@ -1136,7 +1125,7 @@ export function createCampaignPlayOpeningPlanner(
       frameHash,
       proposalHash,
       start: structuredClone(start),
-      bootstrapCommands: compileBootstrapCommands(frame, start.locationId),
+      bootstrapCommands: compileBootstrapCommands(frame, start.sceneLocationId),
       actorPlans: plans,
       actorSchedules: schedules,
       exposureSeed,

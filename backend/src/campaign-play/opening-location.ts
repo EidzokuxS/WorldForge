@@ -1,31 +1,26 @@
 import type { CampaignWorldReview } from "@worldforge/shared";
 
-export function isLocationWithinOpeningArea(
+export function isSceneInMacroRegion(
   world: CampaignWorldReview,
-  locationId: string,
-  openingLocationId: string,
+  sceneLocationId: string,
+  macroLocationId: string,
 ): boolean {
-  const locations = new Map(world.locations.map((location) => [location.id, location]));
-  const visited = new Set<string>();
-  let currentId: string | null = locationId;
-
-  while (currentId !== null && !visited.has(currentId)) {
-    if (currentId === openingLocationId) return true;
-    visited.add(currentId);
-    currentId = locations.get(currentId)?.parentLocationId ?? null;
-  }
-
-  return false;
+  const scene = world.locations.find((location) => location.id === sceneLocationId);
+  const macro = world.locations.find((location) => location.id === macroLocationId);
+  return scene?.kind === "persistent_sublocation"
+    && macro?.kind === "macro"
+    && scene.parentLocationId === macro.id;
 }
 
-export function isActorPresentInOpeningArea(
+export function isActorPresentAtScene(
   world: CampaignWorldReview,
   actorId: string,
-  openingLocationId: string,
+  sceneLocationId: string,
 ): boolean {
-  return world.placements.some((placement) =>
+  const scene = world.locations.find((location) => location.id === sceneLocationId);
+  return scene?.kind === "persistent_sublocation" && world.placements.some((placement) =>
     placement.actorId === actorId
     && placement.placementKind === "present"
-    && isLocationWithinOpeningArea(world, placement.locationId, openingLocationId)
+    && placement.locationId === sceneLocationId
   );
 }

@@ -223,7 +223,7 @@ function openingProposal(actorCadenceMinutes = 1): CampaignPlayOpeningProposal {
     },
     scene: {
       candidateId: deriveCampaignPlayOpeningSceneCandidateId({
-        locationId: "location-c",
+        sceneLocationId: "location-c",
         openingActorId: "actor-c",
         supportActorId: "actor-c",
         pressureId: "pressure-b",
@@ -477,7 +477,7 @@ async function createReadyCampaignWithOpening(actorCadenceMinutes = 1) {
 
 type Disposition = "deterministic" | "uncertain" | "impossible" | "clarification_required";
 
-function judgeFixture(disposition: Disposition, compoundMovement = false) {
+function judgeFixture(disposition: Disposition, compoundDestinationName: string | null = null) {
   const compiler = createCampaignPlayJudge();
   let selectedChoice: {
     kind: "observe" | "move" | "contact" | "wait" | "attempt";
@@ -493,11 +493,16 @@ function judgeFixture(disposition: Disposition, compoundMovement = false) {
         : request.frame.visibleFacts.find((fact) => fact.handle === request.input.choiceHandle);
       const target = request.frame.visibleFacts.find((fact) =>
         fact.kind === "actor" && fact.handle !== request.frame.playerActorHandle);
-      const route = request.frame.visibleFacts.find((fact) => fact.kind === "route");
+      const route = request.frame.visibleFacts.find((fact) =>
+        fact.kind === "route" && (
+          compoundDestinationName === null || fact.summary.startsWith(`${compoundDestinationName};`)
+        ));
       const destination = request.frame.visibleFacts.find((fact) =>
-        fact.kind === "location" && fact.handle !== request.frame.locationHandle);
+        fact.kind === "location" && fact.handle !== request.frame.locationHandle && (
+          compoundDestinationName === null || fact.summary === compoundDestinationName
+        ));
       const useChoice = choice !== null && choice !== undefined;
-      const useCompoundMovement = !useChoice && compoundMovement
+      const useCompoundMovement = !useChoice && compoundDestinationName !== null
         && route !== undefined && destination !== undefined;
       const noEffect = disposition === "impossible" || disposition === "clarification_required";
       const movementRouteHandle = useChoice && selectedChoice!.kind === "move"
@@ -971,7 +976,7 @@ describe("Campaign Play player-action turn runtime", () => {
     const runtime = turnRuntime(
       handle,
       time,
-      judgeFixture("deterministic", true),
+      judgeFixture("deterministic", "North Harbor Docks"),
       gameMasterFixture(),
       { narrator },
     );
@@ -1023,7 +1028,7 @@ describe("Campaign Play player-action turn runtime", () => {
       newObservations: Array<{ title: string; text: string }>;
     };
     expect(packet.currentLocation).toMatchObject({
-      name: "North Harbor",
+      name: "North Harbor Docks",
     });
     expect(packet.newObservations.map((entry) => entry.title)).not.toContain("Player moved");
     expect(packet.newObservations.map((entry) => entry.text))

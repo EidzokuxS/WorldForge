@@ -820,11 +820,17 @@ function applyCommand(
     case "move_actor": {
       const movingActor = actor(frame, state, command.actorId);
       const route = frame.acceptedWorld.routes.find((row) => row.id === command.routeId);
+      const fromLocation = frame.acceptedWorld.locations.find((row) =>
+        row.id === command.fromLocationId);
+      const toLocation = frame.acceptedWorld.locations.find((row) =>
+        row.id === command.toLocationId);
       const placement = state.placements.find((row) =>
         row.actorId === command.actorId && row.placementKind === "present");
       if (
         movingActor?.kind !== "person"
         || !route
+        || fromLocation?.kind !== "persistent_sublocation"
+        || toLocation?.kind !== "persistent_sublocation"
         || route.fromLocationId !== command.fromLocationId
         || route.toLocationId !== command.toLocationId
         || routeState(state, route.id) === "blocked"
@@ -966,7 +972,7 @@ function applyCommand(
         frame.setupPhase !== "opening_required"
         || player?.controller !== "human"
         || player.role !== "player"
-        || location?.kind !== "macro"
+        || location?.kind !== "persistent_sublocation"
         || state.placements.some((row) => row.actorId === command.actorId)
         || state.placements.some((row) => row.placementId === placementId)
       ) deny("precondition_failed", "Player placement initialization is invalid.", command, index);
