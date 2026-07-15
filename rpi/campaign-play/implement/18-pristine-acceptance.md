@@ -1,6 +1,6 @@
 # Task 18: human playtest contract
 
-Status: three current-contract lane bases are eligible and frozen before character bootstrap; the fresh manual sixty-action sessions have not started.
+Status: all three current-contract lane bases remain frozen and eligible. Lane A completed one signed ten-action sitting and is frozen as rejected evidence at its first audit checkpoint; Lane B and Lane C have not started.
 
 ## Decision
 
@@ -99,6 +99,24 @@ Disposition: `CLEAR_WITH_CONDITIONS` for this expert formative pass. Before acti
 The pristine lanes report the natural action mix. They do not force fixed counts of freeform, impossible, adversarial, or secrecy-probe actions. Missing boundary evidence is collected afterward on a disposable clone with a separate diagnostic label, so stress behavior cannot masquerade as ordinary play or contaminate the sixty-action history.
 
 Humanizer and deslop review: the contract uses direct player language, separates observation from inference, and avoids treating completion counts as evidence of engagement.
+
+## Task 18 Lane A action-10 checkpoint · 2026-07-15
+
+Lane A materialized `lowwater-ledger-pristine-fb2c7074` as campaign `62335123-90b0-433e-ae25-b17f562730d5`. Lenna Vey entered as an itinerant lamp-glass mender trying to collect payment for repaired chimneys and buy passage home. Her ordinary capability was lamp-glass and fitting repair; her bad knee made climbs slow; her need for money conflicted with her refusal to take a household's last light.
+
+Opening plus ten signed player actions completed through the rendered Play UI. Lenna asked Dessek about the debtor, followed the lead to Debt-Ward Tenements, questioned Thessha, copied the requisition number, returned through Winch-Shaft Station, reached Warden Tollhouse, learned its collection schedule from Ostane, waited three hours for the booth to open, and presented the number at the ledger. At the checkpoint she understood that Warden's Bureau authorized the supply route, a senior alderman's desk counter-sealed it, and the tollhouse held a payment voucher. She still did not know the named recipient or who made the ordering decision.
+
+The player's next voluntary action would be to try to draw the voucher, then decide whether to deliver, retain, or bargain with the chimneys. The causal model was understandable, and freeform actions kept the bad knee, closed crate, and refusal to hand it over. The player also saw two independent changes: Dessek moved to the tenements without being summoned, and Ostane scraped salt from damaged bridge fibers while Lenna waited. Protected audit found further correctly hidden work by Thessha, Vassara, Noro, Niruko, Remane, Marenthos, and Dessek. No distant scene leaked into Lenna's narration.
+
+The checkpoint scores are comprehension `4`, prose readability `3`, agency `4`, world aliveness `3`, and desire to continue `3`. The prose was generally clear and NPC knowledge stayed bounded, but consecutive beats often restated the same result. Suggested actions repeatedly favored inspection or another question over the active payment goal. The ten completed actions required `2,746,300 ms` of turn wall time: median `235,947 ms`, maximum `516,696 ms`. Curiosity remained, but another turn depended on protocol patience rather than an unqualified desire to play.
+
+Mechanical execution was clean. The database contains one completed opening and ten completed player actions, no turn error, no foreign-key violation, no provider/model/strategy substitution, and no model attempt above one. Every stage used Z.AI `glm-5.2`. Twenty-three mutating receipts produced causal events with no receipt gap. Checkpoint state is world version `24`, runtime revision `534`, and world time minute `260`; reload restored the same rendered consequence and choices.
+
+Two authority failures make later play untrustworthy. First, the character record named a padded chimney crate, mending tools, and knee brace in `inventorySeed`, while current Rulebook truth contained zero actor possessions and the displaced `items` table was empty. The narration treated the crate as continuously carried and the copied number as actionable, but no possession command could transfer, lose, consume, or contest the crate. Second, action 9 deferred the actual Warden Marenthos actor because of actor capacity, then narration opened the booth with an unnamed Warden who had no actor placement and never appeared in `Present here`. Action 10 let that prose-only authority inspect the ledger and answer Lenna.
+
+Disposition: `REJECT_CURRENT_LANE_AT_ACTION_10`. The campaign stays frozen and receives no repair, resume, rewind, or sixty-action claim. The next implementation slice must make starting loadout current Rulebook possession truth and prevent a consequential speaking character from bypassing actor identity and placement. Route-panel versus prose disagreement, repeated beats, goal-blind suggestions, and latency remain design findings but do not replace those hard authority failures.
+
+Humanizer/deslop review: the checkpoint records what the player did and wanted before scoring it, separates visible experience from protected audit, and states the two authority failures without turning successful transactions into a game-quality claim. Verdict: retain as direct rejection evidence.
 
 ## Frozen Lane A diagnosis: actor commitment continuity
 
