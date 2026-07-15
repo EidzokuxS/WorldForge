@@ -1663,3 +1663,11 @@ Lane A r02 60-action manual playtest, sitting 1:
 - All 34 model stages used Z.AI Coding Plan `glm-5.2`, attempt 1, with zero errors: 1 Opening planner, 11 Narrator, 10 Judge, 10 Game Master, and 2 actor replans. No retry, repair, fallback, provider switch, or model timeout ran.
 - A full backend restart after action 10 restored the exact public projection hash `73782db5f2415e3021f596ff3f93334f1f0c881db13f79ccc9e813aabd26be21`. The lane remains open for actions 11-60; no finalization or promotion claim has been made. Standalone smoke additions remain `0`.
 - Humanizer/deslop review kept the note factual and separated player-visible evidence, protected audit, advisories, and the unfinished-lane status.
+
+Lane A r02 hard stop at action 13:
+
+- The second sitting completed three more signed manual UI actions. Ostane's bounded refusals on actions 11-12 were coherent; action 13 crossed the open route to Compact Hall and exposed a hard spatial contradiction.
+- The UI simultaneously placed Lenna in `Compact Hall`, showed Marenthos and open ledgers there, and narrated that the Hall door remained shut with nobody answering. No action 14 was submitted. Campaign `62335123-90b0-433e-ae25-b17f562730d5` is frozen and cannot resume or count as a completed 60-action lane.
+- Protected evidence proves Judge accepted deterministic travel/contact with no visible barrier. Game Master then committed the player move into the atomic destination and a scene record that left her outside a shut door. Marenthos's co-located actor event supplied the ledger trace; visibility behaved correctly and Narrator surfaced the incompatible records.
+- Repair the compound `move + contact` execution contract at its owner: successful travel over an open route enters the destination's shared scene and cannot invent an unrepresented access boundary. Do not add prose parsing, backend-authored replacement narration, compatibility behavior, retry, repair, provider switching, or fallback.
+- After focused contract validation, prove the repair on a fresh clone of the reusable accepted world before replacing Lane A. Standalone smoke additions remain `0`.
