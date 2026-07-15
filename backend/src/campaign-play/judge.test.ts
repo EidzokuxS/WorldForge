@@ -361,6 +361,51 @@ describe("Campaign Play Judge", () => {
     }))).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
   });
 
+  it("binds a suggested wait to its frozen kind and empty target list before compilation", async () => {
+    const suggestedWaitFrame = frame();
+    suggestedWaitFrame.visibleFacts.push({
+      handle: "choice-wait", kind: "choice", summary: "Wait and watch the patrol rounds.",
+    });
+    const validProposal = proposal({
+      kind: "wait",
+      targets: [],
+      method: "Watch the patrol rounds",
+      stakes: "Learn their route",
+      citedVisibleFactHandles: ["location-harbor"],
+    });
+    const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
+      object: validProposal,
+      trace: trace(),
+    }));
+    const judge = createCampaignPlayJudge({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    await judge.judge({
+      frame: suggestedWaitFrame,
+      input: {
+        originalText: "Wait and watch the patrol rounds.",
+        source: "suggested",
+        choiceHandle: "choice-wait",
+        frozenChoice: { kind: "wait", targets: [] },
+      },
+      model: model(),
+      temperature: 0.2,
+      budget,
+    });
+
+    const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    expect(options.schema.safeParse(validProposal).success).toBe(true);
+    expect(options.schema.safeParse(proposal()).success).toBe(false);
+    expect(options.schema.safeParse({
+      ...validProposal,
+      targets: [{ handle: "actor-guard", kind: "actor" }],
+    }).success).toBe(false);
+    expect(options.schema.safeParse({
+      ...validProposal,
+      movementRouteHandle: "route-reef",
+    }).success).toBe(false);
+  });
+
   it.each([
     ["impossible", { minimum: "no_effect", maximum: "no_effect" }, { kind: "none" }, null],
     ["clarification_required", { minimum: "no_effect", maximum: "no_effect" }, { kind: "none" }, "Which gate do you mean?"],

@@ -105,7 +105,10 @@ function visibleHandleSchema(handles: readonly string[]) {
   return z.enum([first, ...rest]);
 }
 
-function judgeProposalSchemaForFrame(frame: CampaignPlayJudgeFrame) {
+function judgeProposalSchemaForFrame(
+  frame: CampaignPlayJudgeFrame,
+  input?: CampaignPlayJudgeInput,
+) {
   const visibleHandles = frame.visibleFacts.map((fact) => fact.handle);
   const targetHandles = frame.visibleFacts
     .filter((fact) => fact.kind !== "observation" && fact.kind !== "choice")
@@ -113,7 +116,7 @@ function judgeProposalSchemaForFrame(frame: CampaignPlayJudgeFrame) {
   const routeHandles = frame.visibleFacts
     .filter((fact) => fact.kind === "route")
     .map((fact) => fact.handle);
-  return judgeProposalSchema.extend({
+  const frameSchema = judgeProposalSchema.extend({
     targets: z.array(campaignPlayVisibleTargetSchema.extend({
       handle: visibleHandleSchema(targetHandles),
     })).max(CAMPAIGN_PLAY_LIMITS.targets),
@@ -122,6 +125,31 @@ function judgeProposalSchemaForFrame(frame: CampaignPlayJudgeFrame) {
       : z.null(),
     citedVisibleFactHandles: z.array(visibleHandleSchema(visibleHandles))
       .max(CAMPAIGN_PLAY_LIMITS.citedFacts),
+  });
+  if (input?.source !== "suggested" || !input.frozenChoice) return frameSchema;
+
+  const frozenTargetSchemas = input.frozenChoice.targets.map((target) =>
+    campaignPlayVisibleTargetSchema.extend({
+      handle: z.literal(target.handle),
+      kind: z.literal(target.kind),
+    }));
+  const frozenTargetsSchema = frozenTargetSchemas.length === 0
+    ? z.tuple([])
+    : z.tuple(frozenTargetSchemas as [
+      (typeof frozenTargetSchemas)[number],
+      ...(typeof frozenTargetSchemas)[number][],
+    ]);
+  const frozenRouteHandle = input.frozenChoice.kind === "move"
+    && input.frozenChoice.targets.length === 1
+    && input.frozenChoice.targets[0]?.kind === "route"
+    ? input.frozenChoice.targets[0].handle
+    : null;
+  return frameSchema.extend({
+    kind: z.literal(input.frozenChoice.kind),
+    targets: frozenTargetsSchema,
+    movementRouteHandle: frozenRouteHandle === null
+      ? z.null()
+      : z.literal(frozenRouteHandle),
   });
 }
 
@@ -425,7 +453,7 @@ export function createCampaignPlayJudge(
       try {
         generated = await dependencies.generateObject({
           model: request.model,
-          schema: judgeProposalSchemaForFrame(parsedFrame.data),
+          schema: judgeProposalSchemaForFrame(parsedFrame.data, request.input),
           prompt: prompt(parsedFrame.data, request.input),
           temperature: request.temperature,
           maxOutputTokens: request.budget.maximumOutputTokens,
