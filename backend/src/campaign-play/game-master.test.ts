@@ -258,7 +258,7 @@ describe("Campaign Play Game Master", () => {
       'ACTOR_DIRECTIVES=[{"handle":"guard","name":"Oren Tide","summary":"A guard at the northern gate.","traits":["observant"],"tags":["guard"],"conditions":[],"goals":[{"status":"active","priority":4,"objective":"Keep the route orderly.","motivation":"Protect the harbor."}],"relations":[{"direction":"from","counterpartName":"Unknown person","relationType":"association","intensity":1,"summary":"They have just met."}]}]',
     );
     expect(String(options.prompt)).toContain("PLAYER_MOVEMENT is code-authoritative");
-    expect(String(options.prompt)).toContain("origin interaction before move_actor");
+    expect(String(options.prompt)).toContain("Order movement effects as origin interaction");
     expect(String(options.prompt)).toContain("current location at that effect's chronological position");
     expect(String(options.prompt)).toContain("PLAYER_MOVEMENT=null");
     expect(String(options.prompt)).toContain("Never return an empty effects array");
@@ -472,7 +472,7 @@ describe("Campaign Play Game Master", () => {
   });
 
   it.each([
-    { kind: "move_actor" },
+    { kind: "move_actor", actorHandle: null },
     { kind: "set_route_state", routeHandle: "passage", state: "restricted", reason: "The guard delays passage.",
       exposure: { mode: "projectable", predicates: [{ channel: "route_state", anchorHandle: "passage", triggers: ["inspect"] }] } },
     { kind: "set_actor_condition", actorHandle: "guard", condition: "occupied", operation: "set", summary: "The guard checks papers.",
@@ -510,7 +510,7 @@ describe("Campaign Play Game Master", () => {
     });
     const moveProposal = {
       elapsedMinutes: 1,
-      effects: [{ kind: "move_actor" as const }],
+      effects: [{ kind: "move_actor" as const, actorHandle: null }],
     };
     const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) =>
       ({ object: moveProposal, trace: trace() }));
@@ -530,7 +530,7 @@ describe("Campaign Play Game Master", () => {
         predicates: [{ channel: "direct_perception", locationId: "location-b" }],
       },
     });
-    expect(moveProposal.effects[0]).toEqual({ kind: "move_actor" });
+    expect(moveProposal.effects[0]).toEqual({ kind: "move_actor", actorHandle: null });
     expect(() => createCampaignPlayGameMaster().compile(
       frame(),
       moveRuling,
@@ -538,23 +538,29 @@ describe("Campaign Play Game Master", () => {
       null,
       {
         elapsedMinutes: 1,
-        effects: [{ kind: "move_actor", exposure: { mode: "protected" } }],
+        effects: [{ kind: "move_actor", actorHandle: null, exposure: { mode: "protected" } }],
       },
     )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
       'PLAYER_MOVEMENT={"actorHandle":"you","routeHandle":"passage","fromLocationHandle":"here","toLocationHandle":"south"}',
     );
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
-      "return exactly one move_actor effect containing only kind",
+      'return exactly one {"kind":"move_actor","actorHandle":null} effect for the player',
     );
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
-      "Do not copy PLAYER_MOVEMENT fields or exposure into the effect",
+      "Do not copy PLAYER_MOVEMENT fields or exposure into an effect",
     );
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
-      "use eventClass scene for that arrival",
+      "use eventClass scene for an actorless arrival",
     );
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
       "places the player inside the destination's shared location scene",
+    );
+    expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
+      "A targeted visible agent may voluntarily travel with the player",
+    );
+    expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
+      "do not describe that person at the destination",
     );
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
       "do not claim that the destination is empty or inaccessible",
@@ -591,7 +597,7 @@ describe("Campaign Play Game Master", () => {
     const result = createCampaignPlayGameMaster().compile(frame(), moveRuling, resolution, null, {
       elapsedMinutes: 1,
       effects: [
-        { kind: "move_actor" },
+        { kind: "move_actor", actorHandle: null },
         {
           kind: "record_world_event",
           eventClass: "scene",
@@ -638,7 +644,7 @@ describe("Campaign Play Game Master", () => {
           summary: "The guard points the player toward South Harbor.",
           affectedHandles: ["you", "guard", "here"],
         },
-        { kind: "move_actor" },
+        { kind: "move_actor", actorHandle: null },
         {
           kind: "record_world_event",
           eventClass: "scene",
@@ -671,6 +677,134 @@ describe("Campaign Play Game Master", () => {
     });
   });
 
+  it("moves one willing targeted companion through Rulebook after the player", () => {
+    const companionRuling = ruling({
+      movementRouteHandle: "passage",
+      normalizedIntent: {
+        originalText: "I ask Oren to walk with me to South Harbor and we set out together.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "move",
+        targets: [
+          { handle: "south", kind: "location" },
+          { handle: "guard", kind: "actor" },
+        ],
+        method: "Travel the open passage beside Oren",
+        stakes: "Reach South Harbor together",
+      },
+    });
+    const result = createCampaignPlayGameMaster().compile(frame(), companionRuling, resolution, null, {
+      elapsedMinutes: 1,
+      effects: [
+        {
+          kind: "record_world_event",
+          eventClass: "dialogue",
+          performingActorHandle: "guard",
+          summary: "Oren agrees to walk beside the player and steps toward the passage.",
+          affectedHandles: ["you", "guard", "here"],
+        },
+        { kind: "move_actor", actorHandle: null },
+        { kind: "move_actor", actorHandle: "guard" },
+        {
+          kind: "record_world_event",
+          eventClass: "scene",
+          performingActorHandle: null,
+          summary: "The player and Oren enter South Harbor together.",
+          affectedHandles: ["you", "guard", "south"],
+        },
+      ],
+    });
+
+    expect(result.batch.commands.map((command) => command.kind)).toEqual([
+      "advance_world_time",
+      "record_world_event",
+      "move_actor",
+      "move_actor",
+      "record_world_event",
+    ]);
+    expect(result.batch.commands[2]).toMatchObject({
+      kind: "move_actor",
+      actorId: PLAYER_ID,
+      routeId: "route-a-b",
+      fromLocationId: "location-a",
+      toLocationId: "location-b",
+    });
+    expect(result.batch.commands[3]).toMatchObject({
+      kind: "move_actor",
+      actorId: "actor-guard",
+      routeId: "route-a-b",
+      fromLocationId: "location-a",
+      toLocationId: "location-b",
+    });
+    expect(result.preflight.simulation.placements.filter((placement) =>
+      placement.placementKind === "present"
+      && (placement.actorId === PLAYER_ID || placement.actorId === "actor-guard")))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ actorId: PLAYER_ID, locationId: "location-b" }),
+        expect.objectContaining({ actorId: "actor-guard", locationId: "location-b" }),
+      ]));
+    expect(result.batch.commands[4]).toMatchObject({
+      kind: "record_world_event",
+      affectedRefs: expect.arrayContaining([
+        { kind: "actor", id: PLAYER_ID },
+        { kind: "actor", id: "actor-guard" },
+        { kind: "location", id: "location-b" },
+      ]),
+      exposure: {
+        mode: "projectable",
+        predicates: [{ channel: "direct_perception", locationId: "location-b" }],
+      },
+    });
+  });
+
+  it("rejects companion movement without prior consent or after invalid ordering", () => {
+    const companionRuling = ruling({
+      movementRouteHandle: "passage",
+      normalizedIntent: {
+        originalText: "I tell Oren to walk with me to South Harbor.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "move",
+        targets: [
+          { handle: "south", kind: "location" },
+          { handle: "guard", kind: "actor" },
+        ],
+        method: "Travel the open passage beside Oren",
+        stakes: "Reach South Harbor together",
+      },
+    });
+    const scene = {
+      kind: "record_world_event" as const,
+      eventClass: "scene" as const,
+      performingActorHandle: null,
+      summary: "The player and Oren enter South Harbor together.",
+      affectedHandles: ["you", "guard", "south"],
+    };
+    expect(() => createCampaignPlayGameMaster().compile(frame(), companionRuling, resolution, null, {
+      elapsedMinutes: 1,
+      effects: [
+        { kind: "move_actor", actorHandle: null },
+        { kind: "move_actor", actorHandle: "guard" },
+        scene,
+      ],
+    })).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+    expect(() => createCampaignPlayGameMaster().compile(frame(), companionRuling, resolution, null, {
+      elapsedMinutes: 1,
+      effects: [
+        {
+          kind: "record_world_event",
+          eventClass: "dialogue",
+          performingActorHandle: "guard",
+          summary: "Oren agrees to walk beside the player.",
+          affectedHandles: ["you", "guard", "here"],
+        },
+        { kind: "move_actor", actorHandle: "guard" },
+        { kind: "move_actor", actorHandle: null },
+        scene,
+      ],
+    })).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+  });
+
   it("rejects an origin performer placed after movement", () => {
     const compoundRuling = ruling({
       movementRouteHandle: "passage",
@@ -691,7 +825,7 @@ describe("Campaign Play Game Master", () => {
     expect(() => createCampaignPlayGameMaster().compile(frame(), compoundRuling, resolution, null, {
       elapsedMinutes: 1,
       effects: [
-        { kind: "move_actor" },
+        { kind: "move_actor", actorHandle: null },
         {
           kind: "record_world_event",
           eventClass: "dialogue",

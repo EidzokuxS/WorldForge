@@ -80,7 +80,7 @@ const exposureProposalSchema = z.discriminatedUnion("mode", [
 
 const effectBase = { exposure: exposureProposalSchema };
 const effectProposalSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("move_actor") }).strict(),
+  z.object({ kind: z.literal("move_actor"), actorHandle: handle.nullable() }).strict(),
   z.object({ ...effectBase, kind: z.literal("set_route_state"), routeHandle: handle,
     state: z.enum(CAMPAIGN_PLAY_ROUTE_STATE_VALUES), reason: line(CAMPAIGN_PLAY_LIMITS.shortText) }).strict(),
   z.object({ ...effectBase, kind: z.literal("set_actor_condition"), actorHandle: handle,
@@ -488,7 +488,28 @@ function compileEffect(
   switch (effect.kind) {
     case "move_actor": {
       if (!movement) throw new CampaignPlayGameMasterError("model_contract_failed", null);
-      const { actor, route, from, to } = movement;
+      const actor = effect.actorHandle === null
+        ? movement.actor
+        : requireRef(map, effect.actorHandle, "actor");
+      if (effect.actorHandle !== null) {
+        const targetActorHandles = new Set(ruling.normalizedIntent.targets
+          .filter((target) => target.kind === "actor")
+          .map((target) => target.handle));
+        const actorRecord = frame.rulebookFrame.acceptedWorld.actors.find((candidate) =>
+          candidate.id === actor.id);
+        const placement = frame.rulebookFrame.placements.find((candidate) =>
+          candidate.actorId === actor.id && candidate.placementKind === "present");
+        if (
+          actor.id === movement.actor.id
+          || !targetActorHandles.has(effect.actorHandle)
+          || actorRecord?.kind !== "person"
+          || actorRecord.controller !== "agent"
+          || placement?.locationId !== movement.from.id
+        ) {
+          throw new CampaignPlayGameMasterError("model_contract_failed", null);
+        }
+      }
+      const { route, from, to } = movement;
       return { kind: effect.kind, actorId: actor.id, routeId: route.id, fromLocationId: from.id,
         toLocationId: to.id, readScope: [actor, route, from, to], writeScope: [actor, from, to],
         exposure: {
@@ -657,9 +678,32 @@ function compile(
     throw new CampaignPlayGameMasterError("model_contract_failed", null);
   }
   const movement = canonicalMovement(frame, ruling, map);
-  const movementEffectCount = proposal.effects.filter((effect) => effect.kind === "move_actor").length;
-  if ((movement === null && movementEffectCount !== 0) || (movement !== null && movementEffectCount !== 1)) {
+  const movementEffects = proposal.effects.flatMap((effect, index) =>
+    effect.kind === "move_actor" ? [{ effect, index }] : []);
+  const playerMovementEffects = movementEffects.filter(({ effect }) => effect.actorHandle === null);
+  const companionMovementEffects = movementEffects.filter(({ effect }) => effect.actorHandle !== null);
+  if (
+    (movement === null && movementEffects.length !== 0)
+    || (movement !== null && playerMovementEffects.length !== 1)
+    || companionMovementEffects.length > 1
+  ) {
     throw new CampaignPlayGameMasterError("model_contract_failed", null);
+  }
+  if (companionMovementEffects.length === 1) {
+    const companionMovement = companionMovementEffects[0]!;
+    const playerMovement = playerMovementEffects[0]!;
+    const companionHandle = companionMovement.effect.actorHandle!;
+    const consentIndex = proposal.effects.findIndex((effect) =>
+      effect.kind === "record_world_event"
+      && (effect.eventClass === "dialogue" || effect.eventClass === "interaction")
+      && effect.performingActorHandle === companionHandle);
+    if (
+      companionMovement.index <= playerMovement.index
+      || consentIndex < 0
+      || consentIndex >= playerMovement.index
+    ) {
+      throw new CampaignPlayGameMasterError("model_contract_failed", null);
+    }
   }
   const batchId = `batch:${hashCampaignPlayProjection({
     domain: "campaign_play_game_master_batch",
@@ -690,7 +734,7 @@ function compile(
       ruling,
       perceptionLocationId,
     ));
-    if (effect.kind === "move_actor") {
+    if (effect.kind === "move_actor" && effect.actorHandle === null) {
       if (!movement) {
         throw new CampaignPlayGameMasterError("model_contract_failed", null);
       }
@@ -747,7 +791,9 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     "ACTOR_CONTINUITY is protected causal truth about visible actors' own completed actions and outranks conflicting earlier dialogue in VISIBLE_FACTS. Maintain identity and causality: an actor must not deny, misattribute, or forget an action listed under its handle. Reconcile a prior denial instead of repeating it. Use this truth only when the exact PLAYER_INTENT and RULING make it relevant; do not volunteer unrelated protected history. An absent action means unknown, not that the actor did nothing.",
     "ACTOR_DIRECTIVES is protected roleplay authority for each agent actor targeted by PLAYER_INTENT. Use the person's profile, present conditions, active goals, and relations to choose what they actually say or do. These directives establish characterization and decision pressure, not player knowledge or permission to disclose protected facts. Never quote a hidden goal or motive merely because it appears there.",
     "For contact, write the targeted person's actual spoken reply, silence, gesture, or action in the record_world_event summary and copy that person's handle into performingActorHandle. The performer must be one of PLAYER_INTENT's actor targets. Do not replace the exchange with audit labels such as common knowledge, offers no interpretation, nothing further, or has nothing to share. If the person withholds something, show the words or action used to withhold it. A concrete deflection, counterquestion, or condition is useful when ACTOR_DIRECTIVES support one.",
-    "PLAYER_MOVEMENT is code-authoritative. When it is non-null, return exactly one move_actor effect containing only kind at the chronological point where travel occurs. Order every effect as the action happens: origin interaction before move_actor, then arrival or destination interaction after it. Code binds the player actor, route, endpoints, and direct perception from this order. Put any record_world_event describing the arrival after move_actor and use eventClass scene for that arrival. When PLAYER_MOVEMENT is null, never return move_actor. Do not copy PLAYER_MOVEMENT fields or exposure into the effect.",
+    "PLAYER_MOVEMENT is code-authoritative. When it is non-null, return exactly one {\"kind\":\"move_actor\",\"actorHandle\":null} effect for the player at the chronological point where travel occurs. Code binds the player actor, route, endpoints, and direct perception from this order. When PLAYER_MOVEMENT is null, never return move_actor. Do not copy PLAYER_MOVEMENT fields or exposure into an effect.",
+    "A targeted visible agent may voluntarily travel with the player over PLAYER_MOVEMENT. First record that person's explicit agreement or willing action as an origin dialogue/interaction. After the player's move_actor effect, return at most one second move_actor effect with that targeted person's exact actorHandle. Code binds the same route and endpoints. Never move an untargeted, remote, incapacitated, non-agent, or unwilling person. If the person does not travel, omit the second effect and do not describe that person at the destination.",
+    "Order movement effects as origin interaction, player move_actor with null actorHandle, optional companion move_actor with the targeted actorHandle, then arrival or destination interaction. Put any record_world_event describing the arrival after the movement effects and use eventClass scene for an actorless arrival. Every person described as present in a destination summary must already be there or have a preceding accepted move_actor effect, and their handle must appear in affectedHandles.",
     "A committed PLAYER_MOVEMENT places the player inside the destination's shared location scene. An arrival summary must not leave the player outside a door, gate, or other access boundary unless supplied route or location authority already represents that boundary. If an unnamed recipient does not answer, report only the lack of a reply; do not claim that the destination is empty or inaccessible.",
     "record_world_event accepts exactly four eventClass values: dialogue, interaction, discovery, or scene. These are eventClass values only and must never appear in kind. Dialogue and interaction mean that a targeted nonplayer actor performs the event: set performingActorHandle to that actor and include the same handle in affectedHandles. Discovery and scene are actorless: set performingActorHandle to null, and do not use their summary to make a person speak, decide, transact, disclose information, or become a contact. A player's physical attempt that has no nonplayer performer must use its typed effect or an actorless discovery/scene result. For an observe result that changes no durable entity, return exactly one effect shaped as {\"kind\":\"record_world_event\",\"eventClass\":\"discovery\",\"performingActorHandle\":null,\"summary\":\"grounded observation\",\"affectedHandles\":[\"copied handle\"]}; do not add a second inspect, observe, discover, reveal, or describe effect. Use scene for an arrival or other directly perceived situation that is neither observation nor contact. Return a grounded summary and grounded affectedHandles. Omit exposure from record_world_event; code attaches direct perception at the player's current location at that effect's chronological position.",
     "Use adjust_actor_possession whenever the resolved action gives the player a countable possession or consumes one. For a new possession, return operation acquire, the player actor handle, null possessionHandle, its concrete name, positive quantity, a player-visible summary, and grounded affectedHandles. For more of an existing possession, use its visible possessionHandle and null name. To consume one, return operation spend, its visible possessionHandle, null name, and a positive quantity. Do not add record_world_event for the same gain or spend: this typed effect is the public consequence and Rulebook truth.",
