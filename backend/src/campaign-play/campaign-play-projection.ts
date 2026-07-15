@@ -343,6 +343,8 @@ function uniqueSorted(values: Iterable<string>): string[] {
 function publicConsequence(entry: CampaignPlayConsequence): CampaignPlayConsequence {
   return {
     observationHandle: entry.observationHandle,
+    performingActorHandle: entry.performingActorHandle,
+    performingActorName: entry.performingActorName,
     whatChanged: entry.whatChanged,
     whereOrRoute: entry.whereOrRoute,
     worldTimeLabel: entry.worldTimeLabel,

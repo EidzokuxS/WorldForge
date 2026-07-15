@@ -51,6 +51,7 @@ function actorEvent(input: {
     exposure: { mode: "protected" as const },
     kind: "record_world_event" as const,
     eventClass: "interaction" as const,
+    performingActorId: input.actorId,
     summary: input.summary,
     observableTrace: "Fresh work remains at the site.",
     affectedRefs: [{ kind: "actor" as const, id: input.actorId }],

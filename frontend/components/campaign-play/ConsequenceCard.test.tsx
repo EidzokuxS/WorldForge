@@ -16,6 +16,8 @@ describe("ConsequenceCard", () => {
   it.each(labels)("renders the public %s cue as %s", (causalCue, label) => {
     const { container } = render(<ConsequenceCard consequence={{
       observationHandle: "private-opaque-handle",
+      performingActorHandle: null,
+      performingActorName: null,
       whatChanged: "The eastern gate is sealed.",
       whereOrRoute: "Eastern gate",
       worldTimeLabel: "Before dawn",

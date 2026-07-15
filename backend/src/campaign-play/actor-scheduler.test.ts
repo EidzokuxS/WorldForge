@@ -270,6 +270,7 @@ function createReadyFixture(completedActions: 30 | 60 = 30) {
       source: { kind: "system" as const, system: "game_master" as const },
       expectedWorldVersion: ready.authority.worldVersion,
       eventClass: "scene" as const,
+      performingActorId: null,
       summary: "The player watches the harbor.",
       observableTrace: null,
       affectedRefs: [{ kind: "actor" as const, id: "actor-player" }],

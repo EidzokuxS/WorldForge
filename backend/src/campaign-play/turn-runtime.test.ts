@@ -558,6 +558,8 @@ function gameMasterFixture(worldEventCount = 1, includeSubmittedText = false) {
       const movementEffects = request.ruling.movementRouteHandle === null
         ? []
         : [{ kind: "move_actor" as const }];
+      const performingActorHandle = request.ruling.normalizedIntent.targets.find((target) =>
+        target.kind === "actor")?.handle ?? null;
       return {
         ...compiler.compile(
           request.frame,
@@ -570,7 +572,8 @@ function gameMasterFixture(worldEventCount = 1, includeSubmittedText = false) {
               ...movementEffects,
               ...Array.from({ length: worldEventCount }, (_, index) => ({
                 kind: "record_world_event" as const,
-                eventClass: "dialogue" as const,
+                eventClass: performingActorHandle === null ? "scene" as const : "dialogue" as const,
+                performingActorHandle,
                 summary: includeSubmittedText
                   ? `${request.ruling.normalizedIntent.originalText} (trace ${index + 1}).`
                   : worldEventCount === 1
@@ -969,16 +972,14 @@ describe("Campaign Play player-action turn runtime", () => {
     },
   );
 
-  it("settles compound travel before contact and narrates from the destination", async () => {
+  it("interrupts compound contact when no canonical destination actor is targeted", async () => {
     const { handle, state } = await createReadyCampaignWithOpening();
     const time = fixedClock(2_250);
-    const narrator = playerNarratorFixture();
     const runtime = turnRuntime(
       handle,
       time,
       judgeFixture("deterministic", "North Harbor Docks"),
       gameMasterFixture(),
-      { narrator },
     );
     const admission = runtime.admitAction({
       request: {
@@ -988,51 +989,14 @@ describe("Campaign Play player-action turn runtime", () => {
       submittedAt: 2_250,
     });
 
-    await advanceUntilStage(runtime, time, admission.turnId, "completed");
-
-    const acceptedJudge = handle.sqlite.prepare(`SELECT artifact_json AS artifactJson
-      FROM campaign_play_model_stages
-      WHERE campaign_id = ? AND turn_id = ? AND kind = 'judge' AND status = 'accepted'`)
-      .get(CAMPAIGN_ID, admission.turnId) as { artifactJson: string };
-    expect(JSON.parse(acceptedJudge.artifactJson).ruling).toMatchObject({
-      movementRouteHandle: expect.any(String),
-      normalizedIntent: { kind: "contact" },
+    time.advance();
+    const stopped = await runtime.runNextStage(admission.turnId);
+    expect(stopped.turn).toMatchObject({
+      stage: "interrupted",
+      interruptedStage: "admitted",
+      errorCode: "model_contract_failed",
     });
-    expect(handle.sqlite.prepare(`SELECT command_kind AS commandKind
-      FROM campaign_play_commands WHERE campaign_id = ? AND turn_id = ?
-        AND json_extract(source_json, '$.system') = 'game_master'
-      ORDER BY command_order`).all(CAMPAIGN_ID, admission.turnId)).toEqual([
-      { commandKind: "advance_world_time" },
-      { commandKind: "move_actor" },
-      { commandKind: "record_world_event" },
-    ]);
-    expect(handle.sqlite.prepare(`SELECT location_id AS locationId
-      FROM actor_placements
-      WHERE campaign_id = ? AND actor_id = ? AND placement_kind = 'present'`)
-      .get(CAMPAIGN_ID, PLAYER_ID)).toEqual({ locationId: "location-a" });
-    expect(handle.sqlite.prepare(`SELECT exposure.location_id AS locationId
-      FROM campaign_play_event_exposures exposure
-      JOIN campaign_play_events event ON event.event_id = exposure.event_id
-      JOIN campaign_play_commands command ON command.command_id = event.command_id
-      WHERE exposure.campaign_id = ? AND event.turn_id = ?
-        AND exposure.channel = 'direct_perception'
-        AND json_extract(command.source_json, '$.system') = 'game_master'
-      ORDER BY event.created_at DESC LIMIT 1`)
-      .get(CAMPAIGN_ID, admission.turnId)).toEqual({ locationId: "location-a" });
-    const narration = handle.sqlite.prepare(`SELECT packet_json AS packetJson
-      FROM campaign_play_narrations
-      WHERE campaign_id = ? AND turn_id = ? AND status = 'complete'`)
-      .get(CAMPAIGN_ID, admission.turnId) as { packetJson: string };
-    const packet = JSON.parse(narration.packetJson) as {
-      currentLocation: { name: string };
-      newObservations: Array<{ title: string; text: string }>;
-    };
-    expect(packet.currentLocation).toMatchObject({
-      name: "North Harbor Docks",
-    });
-    expect(packet.newObservations.map((entry) => entry.title)).not.toContain("Player moved");
-    expect(packet.newObservations.map((entry) => entry.text))
-      .not.toContain("Player left for North Harbor.");
+    expect(countForTurn(handle, "campaign_play_commands", admission.turnId)).toBe(0);
   });
 
   it("settles the exact current suggested action without Judge reinterpretation", async () => {

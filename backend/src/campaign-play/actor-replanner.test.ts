@@ -402,7 +402,7 @@ function persistKnownScene(
     { kind: "actor", id: "actor-b" },
     { kind: "location", id: "location-a" },
   ];
-  const payload = { eventClass: "scene", summary };
+  const payload = { eventClass: "scene", performingActorId: null, summary };
   const sourceJson = canonicalizeCampaignPlayProjection(source);
   const affectedRefsJson = canonicalizeCampaignPlayProjection(affectedRefs);
   const payloadJson = canonicalizeCampaignPlayProjection(payload);

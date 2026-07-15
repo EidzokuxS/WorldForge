@@ -358,8 +358,10 @@ function parseVisiblePossession(value: unknown): CampaignPlayVisiblePossession |
 function parseConsequence(value: unknown): CampaignPlayConsequence | null {
   if (
     !isObject(value) ||
-    !hasExactKeys(value, ["observationHandle", "whatChanged", "whereOrRoute", "worldTimeLabel", "causalCue"]) ||
+    !hasExactKeys(value, ["observationHandle", "performingActorHandle", "performingActorName", "whatChanged", "whereOrRoute", "worldTimeLabel", "causalCue"]) ||
     !isHandle(value.observationHandle) ||
+    !((value.performingActorHandle === null && value.performingActorName === null)
+      || (isHandle(value.performingActorHandle) && isLabel(value.performingActorName))) ||
     !isText(value.whatChanged) ||
     !isLabel(value.whereOrRoute) ||
     !isLabel(value.worldTimeLabel) ||

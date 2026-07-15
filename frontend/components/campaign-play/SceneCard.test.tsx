@@ -34,6 +34,8 @@ describe("SceneCard", () => {
         }]}
         consequences={[{
           observationHandle: "observation-secret",
+          performingActorHandle: null,
+          performingActorName: null,
           whatChanged: "The North Cut is now restricted.",
           whereOrRoute: "North Cut",
           worldTimeLabel: "Before dawn",

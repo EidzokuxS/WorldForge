@@ -472,6 +472,7 @@ function createVisibilityFixture(
             ],
           },
           eventClass: "discovery",
+          performingActorId: null,
           summary: "Protected summary with hidden-cause-token.",
           observableTrace: "Fresh scuff marks and a snapped seal remain beside the route board.",
           affectedRefs: [
@@ -496,6 +497,7 @@ function createVisibilityFixture(
           writeScope: [],
           exposure: { mode: "protected" },
           eventClass: "dialogue",
+          performingActorId: "actor-c",
           summary: "The player asks the nearby witness about hidden-cause-token and hidden-goal-token.",
           observableTrace: null,
           affectedRefs: [
@@ -548,8 +550,9 @@ function createVisibilityFixture(
               { channel: "direct_perception", locationId: "location-a" },
             ],
           },
-          eventClass: "scene",
-          summary: "A harbor worker tells the player that the signal lantern has failed.",
+          eventClass: "dialogue",
+          performingActorId: "actor-a",
+          summary: "Mara Venn says the signal lantern has failed.",
           observableTrace: null,
           affectedRefs: [
             { kind: "actor", id: "actor-player" },
@@ -580,6 +583,7 @@ function createVisibilityFixture(
             ],
           },
           eventClass: "scene",
+          performingActorId: null,
           summary: "Protected distant activity with hidden-distant-token.",
           observableTrace: null,
           affectedRefs: [
@@ -610,6 +614,7 @@ function createVisibilityFixture(
             }],
           },
           eventClass: "scene",
+          performingActorId: null,
           summary: "Protected expired trace with hidden-expired-token.",
           observableTrace: null,
           affectedRefs: [
@@ -680,6 +685,7 @@ function createVisibilityFixture(
             ],
           },
           eventClass: "scene",
+          performingActorId: null,
           summary: "Sealed writs were handled at the sibling office counter.",
           observableTrace: "Wet seals and a fresh thumbprint mark the office counter.",
           affectedRefs: [{ kind: "location", id: "location-a-office" }],
@@ -834,7 +840,7 @@ describe("Campaign Play visibility service", () => {
     expect(result.packet.newObservations).toHaveLength(6);
     expect(result.packet.consequences).toHaveLength(6);
     expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
-      "A harbor worker tells the player that the signal lantern has failed.",
+      "Mara Venn says the signal lantern has failed.",
     );
     expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
       "Mara Venn left for Glass Reef Quay.",
@@ -856,6 +862,14 @@ describe("Campaign Play visibility service", () => {
       .toHaveLength(5);
     expect(result.packet.consequences.filter((entry) => entry.causalCue === "direct_perception"))
       .toHaveLength(1);
+    const performed = result.packet.consequences.find((entry) =>
+      entry.whatChanged === "Mara Venn says the signal lantern has failed.");
+    expect(performed).toMatchObject({
+      performingActorHandle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-a"),
+      performingActorName: "Mara Venn",
+    });
+    expect(result.packet.consequences.filter((entry) => entry !== performed).every((entry) =>
+      entry.performingActorHandle === null && entry.performingActorName === null)).toBe(true);
     expect(result.knowledgeInserted).toBeGreaterThanOrEqual(6);
     expect(result.observationsInserted).toBe(6);
 

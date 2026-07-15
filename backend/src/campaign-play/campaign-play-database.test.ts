@@ -578,6 +578,7 @@ describe("Campaign Play core and Rulebook storage", () => {
         eventKind: "scene_recorded",
         payload: {
           eventClass: "discovery",
+          performingActorId: null,
           summary: "Rain beads on the harbor rail.",
           affectedRefs: [{ kind: "location", id: locationId }],
         },
@@ -1457,6 +1458,7 @@ describe("Campaign Play core and Rulebook storage", () => {
       eventKind: "scene_recorded",
       payload: {
         eventClass: "discovery",
+        performingActorId: null,
         summary: "Fresh marks cross the paving stones.",
       },
       affectedRef: { kind: "location", id: location.id },
@@ -1499,6 +1501,7 @@ describe("Campaign Play core and Rulebook storage", () => {
       eventKind: "scene_recorded",
       payload: {
         eventClass: "scene",
+        performingActorId: null,
         summary: "A distant private decision is made.",
       },
       affectedRef: { kind: "location", id: location.id },
@@ -2004,6 +2007,7 @@ describe("Campaign Play core and Rulebook storage", () => {
       exposure: { mode: "protected" },
       kind: "record_world_event",
       eventClass: "scene",
+      performingActorId: null,
       summary: "The actor waits and watches.",
       affectedRefs: [{ kind: "location", id: location.id }],
     };

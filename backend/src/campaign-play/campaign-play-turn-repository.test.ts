@@ -2003,6 +2003,7 @@ describe("Campaign Play deterministic and terminal turn boundaries", () => {
         source: { kind: "system" as const, system: "game_master" as const },
         expectedWorldVersion: ready.authority.worldVersion,
         eventClass: "scene" as const,
+        performingActorId: null,
         summary: "The player watches the gate.",
         observableTrace: null,
         affectedRefs: [{ kind: "actor" as const, id: "actor-player" }],

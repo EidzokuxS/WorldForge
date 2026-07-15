@@ -303,19 +303,13 @@ function contactedWitnesses(
   for (const row of rows) {
     const payload = parseRecord(row.payloadJson, "Contact command payload");
     if (payload.eventClass !== "dialogue" && payload.eventClass !== "interaction") continue;
-    if (!Array.isArray(payload.affectedRefs)) continue;
-    for (const reference of payload.affectedRefs) {
-      if (!reference || typeof reference !== "object" || Array.isArray(reference)) continue;
-      const candidate = reference as Record<string, unknown>;
-      if (candidate.kind === "actor" && typeof candidate.id === "string" && candidate.id !== humanActorId) {
-        const humanLocation = actorLocationFromSnapshot(row.eventAfterPayloadJson, humanActorId);
-        const witnessLocation = actorLocationFromSnapshot(row.eventAfterPayloadJson, candidate.id);
-        if (humanLocation && witnessLocation === humanLocation) {
-          const points = contacts.get(candidate.id) ?? [];
-          points.push({ eventOrder: row.eventOrder, createdAt: row.createdAt });
-          contacts.set(candidate.id, points);
-        }
-      }
+    if (typeof payload.performingActorId !== "string" || payload.performingActorId === humanActorId) continue;
+    const humanLocation = actorLocationFromSnapshot(row.eventAfterPayloadJson, humanActorId);
+    const witnessLocation = actorLocationFromSnapshot(row.eventAfterPayloadJson, payload.performingActorId);
+    if (humanLocation && witnessLocation === humanLocation) {
+      const points = contacts.get(payload.performingActorId) ?? [];
+      points.push({ eventOrder: row.eventOrder, createdAt: row.createdAt });
+      contacts.set(payload.performingActorId, points);
     }
   }
   return contacts;
@@ -597,6 +591,13 @@ function publicEntry(
   );
   const eventSource = parseRecord(exposure.eventSourceJson, "Event source");
   const commandPayload = parseRecord(exposure.commandPayloadJson, "Command payload");
+  const performingActor = exposure.channel === "direct_perception"
+    && exposure.commandKind === "record_world_event"
+    && typeof commandPayload.performingActorId === "string"
+    ? handle.sqlite.prepare(`SELECT id, name FROM actors
+        WHERE id = ? AND campaign_id = ? AND kind = 'person'`)
+      .get(commandPayload.performingActorId, handle.campaignId) as { id: string; name: string } | undefined
+    : undefined;
   const openingTrace = resolveCampaignPlayOpeningObservableTrace(openingExposureSeed, {
     sourceActorId: eventSourceActorId(exposure),
     channel: exposure.channel,
@@ -675,6 +676,10 @@ function publicEntry(
   }
   const consequence: CampaignPlayConsequence = {
     observationHandle,
+    performingActorHandle: performingActor
+      ? publicHandle("actor", handle.campaignId, performingActor.id)
+      : null,
+    performingActorName: performingActor?.name ?? null,
     whatChanged: text,
     whereOrRoute: label,
     worldTimeLabel: timeLabel(exposure.eventWorldTimeMinutes),

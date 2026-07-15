@@ -447,11 +447,21 @@ export const campaignPlayVisiblePossessionSchema = z.object({
 
 export const campaignPlayConsequenceSchema = z.object({
   observationHandle: handleSchema,
+  performingActorHandle: handleSchema.nullable(),
+  performingActorName: nameSchema.nullable(),
   whatChanged: textSchema,
   whereOrRoute: labelSchema,
   worldTimeLabel: labelSchema,
   causalCue: z.enum(CAMPAIGN_PLAY_CONSEQUENCE_CUE_VALUES),
-}).strict();
+}).strict().superRefine((consequence, context) => {
+  if ((consequence.performingActorHandle === null) !== (consequence.performingActorName === null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["performingActorHandle"],
+      message: "Performing actor handle and name must be exposed together.",
+    });
+  }
+});
 
 export const campaignPlayJournalEntrySchema = z.object({
   observationHandle: handleSchema,
@@ -2074,12 +2084,33 @@ export const recordWorldEventCommandSchema = z.object({
   ...campaignPlayCommandBaseShape,
   kind: z.literal("record_world_event"),
   eventClass: z.enum(["dialogue", "interaction", "discovery", "scene"]),
+  performingActorId: idSchema.nullable(),
   summary: textSchema,
   observableTrace: textSchema.nullable(),
   affectedRefs: z.array(campaignPlayEntityRefSchema)
     .min(1)
     .max(CAMPAIGN_PLAY_LIMITS.affectedRefs),
-}).strict();
+}).strict().superRefine((command, context) => {
+  const requiresPerformer = command.eventClass === "dialogue" || command.eventClass === "interaction";
+  if (requiresPerformer !== (command.performingActorId !== null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["performingActorId"],
+      message: "Dialogue and interaction require one performing actor; discovery and scene forbid one.",
+    });
+  }
+  if (
+    command.performingActorId !== null
+    && !command.affectedRefs.some((reference) =>
+      reference.kind === "actor" && reference.id === command.performingActorId)
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["affectedRefs"],
+      message: "The performing actor must be an affected actor reference.",
+    });
+  }
+});
 
 export const createPlayerActorCommandSchema = z.object({
   ...campaignPlayCommandBaseShape,
@@ -2436,8 +2467,29 @@ export const sceneRecordedEventSchema = z.object({
   ...campaignPlayWorldEventBaseShape,
   kind: z.literal("scene_recorded"),
   eventClass: z.enum(["dialogue", "interaction", "discovery", "scene"]),
+  performingActorId: idSchema.nullable(),
   summary: textSchema,
-}).strict();
+}).strict().superRefine((event, context) => {
+  const requiresPerformer = event.eventClass === "dialogue" || event.eventClass === "interaction";
+  if (requiresPerformer !== (event.performingActorId !== null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["performingActorId"],
+      message: "Dialogue and interaction require one performing actor; discovery and scene forbid one.",
+    });
+  }
+  if (
+    event.performingActorId !== null
+    && !event.affectedRefs.some((reference) =>
+      reference.kind === "actor" && reference.id === event.performingActorId)
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["affectedRefs"],
+      message: "The performing actor must be an affected actor reference.",
+    });
+  }
+});
 
 const campaignPlayWorldEventUnionSchema = z.union([
   playerActorCreatedEventSchema,

@@ -248,6 +248,8 @@ export interface CampaignPlayVisiblePossession {
 
 export interface CampaignPlayConsequence {
   observationHandle: string;
+  performingActorHandle: string | null;
+  performingActorName: string | null;
   whatChanged: string;
   whereOrRoute: string;
   worldTimeLabel: string;

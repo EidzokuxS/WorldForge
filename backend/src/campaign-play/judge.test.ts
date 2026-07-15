@@ -173,6 +173,24 @@ describe("Campaign Play Judge", () => {
     expect(ruling.movementRouteHandle).toBe("route-reef");
   });
 
+  it("requires an actionable contact to target a visible nonplayer actor", () => {
+    const judge = createCampaignPlayJudge();
+    const input = {
+      originalText: "I call out to whoever is there.",
+      source: "freeform" as const,
+      choiceHandle: null,
+    };
+    expect(() => judge.compile(frame(), input, proposal({ targets: [] })))
+      .toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+    expect(judge.compile(frame(), input, proposal({
+      targets: [],
+      disposition: "clarification_required",
+      resultBounds: { minimum: "no_effect", maximum: "no_effect" },
+      reason: "No visible person is identified as the intended contact.",
+      clarificationQuestion: "Whom are you trying to address?",
+    })).disposition).toBe("clarification_required");
+  });
+
   it("accepts a substantive rationale without retry, repair, or fallback", async () => {
     const reason = Array.from(
       { length: 12 },

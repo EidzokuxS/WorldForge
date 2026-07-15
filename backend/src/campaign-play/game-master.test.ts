@@ -150,6 +150,7 @@ const proposal = {
   effects: [{
     kind: "record_world_event" as const,
     eventClass: "dialogue" as const,
+    performingActorHandle: "guard",
     summary: "The player asks the guard about the passage.",
     affectedHandles: ["you", "guard"],
   }],
@@ -233,7 +234,7 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain(
       'HANDLES_BY_KIND={"actor":["you","guard"],"location":["here","south"],"route":["passage"],"pressure":["delay"],"relation":["trust"],"goal":["guard-goal"]}',
     );
-    expect(String(options.prompt)).toContain("This includes affectedHandles");
+    expect(String(options.prompt)).toContain("This includes performingActorHandle, affectedHandles");
     expect(String(options.prompt)).toContain("affectedHandles must not repeat a handle");
     expect(String(options.prompt)).toContain("every model-authored exposure predicate anchorHandle");
     expect(String(options.prompt)).toContain("route_state anchorHandle requires route");
@@ -251,7 +252,7 @@ describe("Campaign Play Game Master", () => {
       'ACTOR_CONTINUITY=[{"actorHandle":"guard","recentOwnActions":[{"summary":"Oren Tide inspected the passage latch before the traveler arrived.","observableTrace":"Fresh oil marks the passage latch."}]}]',
     );
     expect(String(options.prompt)).toContain("ACTOR_DIRECTIVES is protected roleplay authority");
-    expect(String(options.prompt)).toContain("write the person's actual spoken reply, silence, gesture, or action");
+    expect(String(options.prompt)).toContain("write the targeted person's actual spoken reply, silence, gesture, or action");
     expect(String(options.prompt)).toContain("Do not replace the exchange with audit labels");
     expect(String(options.prompt)).toContain(
       'ACTOR_DIRECTIVES=[{"handle":"guard","name":"Oren Tide","summary":"A guard at the northern gate.","traits":["observant"],"tags":["guard"],"conditions":[],"goals":[{"status":"active","priority":4,"objective":"Keep the route orderly.","motivation":"Protect the harbor."}],"relations":[{"direction":"from","counterpartName":"Unknown person","relationType":"association","intensity":1,"summary":"They have just met."}]}]',
@@ -270,7 +271,7 @@ describe("Campaign Play Game Master", () => {
     );
     expect(String(options.prompt)).toContain("These are eventClass values only and must never appear in kind");
     expect(String(options.prompt)).toContain(
-      'return exactly one effect shaped as {"kind":"record_world_event","eventClass":"discovery","summary":"grounded observation","affectedHandles":["copied handle"]}',
+      'return exactly one effect shaped as {"kind":"record_world_event","eventClass":"discovery","performingActorHandle":null,"summary":"grounded observation","affectedHandles":["copied handle"]}',
     );
     expect(String(options.prompt)).toContain("cannot establish an absolute chronology");
     expect(String(options.prompt)).toContain("without supplied expertise and reference evidence");
@@ -307,6 +308,17 @@ describe("Campaign Play Game Master", () => {
         { kind: "actor", id: PLAYER_ID },
       ],
     });
+  });
+
+  it("requires a recorded performer to be one of the ruling's actor targets", () => {
+    expect(() => createCampaignPlayGameMaster().compile(frame(), ruling(), resolution, null, {
+      ...proposal,
+      effects: [{ ...proposal.effects[0], performingActorHandle: null }],
+    })).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+    expect(() => createCampaignPlayGameMaster().compile(frame(), ruling(), resolution, null, {
+      ...proposal,
+      effects: [{ ...proposal.effects[0], performingActorHandle: "you" }],
+    })).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
   });
 
   it("compiles acquisition and spending into the typed Rulebook possession effect", () => {
@@ -577,6 +589,7 @@ describe("Campaign Play Game Master", () => {
         {
           kind: "record_world_event",
           eventClass: "scene",
+          performingActorHandle: null,
           summary: "The player reaches South Harbor.",
           affectedHandles: ["you", "south"],
         },
@@ -596,6 +609,7 @@ describe("Campaign Play Game Master", () => {
         {
           kind: "record_world_event",
           eventClass: "scene",
+          performingActorHandle: null,
           summary: "The player reaches South Harbor.",
           affectedHandles: ["you", "south"],
         },
@@ -604,7 +618,7 @@ describe("Campaign Play Game Master", () => {
     })).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
   });
 
-  it("settles compound travel before the local contact event", () => {
+  it("rejects compound contact with an actor left at the origin", () => {
     const compoundRuling = ruling({
       movementRouteHandle: "passage",
       normalizedIntent: {
@@ -621,32 +635,19 @@ describe("Campaign Play Game Master", () => {
         stakes: "Learn why crossings are delayed",
       },
     });
-    const result = createCampaignPlayGameMaster().compile(frame(), compoundRuling, resolution, null, {
+    expect(() => createCampaignPlayGameMaster().compile(frame(), compoundRuling, resolution, null, {
       elapsedMinutes: 1,
       effects: [
         { kind: "move_actor" },
         {
           kind: "record_world_event",
           eventClass: "dialogue",
+          performingActorHandle: "guard",
           summary: "At South Harbor, the player asks the guard about passage delays.",
           affectedHandles: ["you", "guard", "south"],
         },
       ],
-    });
-
-    expect(result.batch.commands[1]).toMatchObject({
-      kind: "move_actor",
-      actorId: PLAYER_ID,
-      fromLocationId: "location-a",
-      toLocationId: "location-b",
-    });
-    expect(result.batch.commands[2]).toMatchObject({
-      kind: "record_world_event",
-      exposure: {
-        mode: "projectable",
-        predicates: [{ channel: "direct_perception", locationId: "location-b" }],
-      },
-    });
+    })).toThrow(expect.objectContaining({ code: "rulebook_denied" }));
   });
 
   it.each(["repair", "full_retry", "text_fallback"] as const)("rejects %s output strategy", async (strategy) => {

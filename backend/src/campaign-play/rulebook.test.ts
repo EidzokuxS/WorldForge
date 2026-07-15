@@ -9,6 +9,7 @@ import {
   deriveCampaignPlayPossessionId,
   deriveCampaignPlayPossessionKey,
 } from "./campaign-play-projection.js";
+import type { RulebookCommandBatch } from "./contracts.js";
 
 const CAMPAIGN_ID = "campaign-rulebook";
 const PLAYER_ID = "actor-player";
@@ -283,7 +284,7 @@ function ordinaryBatch() {
     PLAYER_ID,
     possessionKey,
   );
-  const commands = [
+  const commands: RulebookCommandBatch["commands"] = [
     {
       ...commandBase(0, READY_VERSION),
       kind: "advance_world_time",
@@ -392,6 +393,7 @@ function ordinaryBatch() {
       ],
       writeScope: [],
       eventClass: "scene",
+      performingActorId: null,
       summary: "The traveler reaches South Harbor with the repaired signal case.",
       observableTrace: null,
       affectedRefs: [
@@ -484,6 +486,32 @@ describe("Campaign Play Rulebook preflight", () => {
       quantity: 2,
     }]);
     expect(frame).toEqual(before);
+  });
+
+  it("rejects non-agent and spatially absent performers before any write", () => {
+    const nonAgentBatch = ordinaryBatch();
+    const nonAgentEvent = nonAgentBatch.commands.at(-1)!;
+    if (nonAgentEvent.kind !== "record_world_event") throw new Error("Expected scene fixture.");
+    nonAgentEvent.eventClass = "dialogue";
+    nonAgentEvent.performingActorId = PLAYER_ID;
+    expect(preflightCampaignPlayRulebook({
+      frame: frameFixture(), authority: playerAuthority(), batch: nonAgentBatch,
+    })).toMatchObject({ accepted: false, denial: { code: "precondition_failed" } });
+
+    const absentBatch = ordinaryBatch();
+    const absentEvent = absentBatch.commands.at(-1)!;
+    if (absentEvent.kind !== "record_world_event") throw new Error("Expected scene fixture.");
+    absentEvent.eventClass = "dialogue";
+    absentEvent.performingActorId = "actor-key";
+    absentEvent.affectedRefs.push({ kind: "actor", id: "actor-key" });
+    absentEvent.readScope.push({ kind: "actor", id: "actor-key" });
+    absentEvent.exposure = {
+      mode: "projectable",
+      predicates: [{ channel: "direct_perception", locationId: "location-b" }],
+    };
+    expect(preflightCampaignPlayRulebook({
+      frame: frameFixture(), authority: playerAuthority(), batch: absentBatch,
+    })).toMatchObject({ accepted: false, denial: { code: "precondition_failed" } });
   });
 
   it("spends only an authorized holding with sufficient quantity", () => {

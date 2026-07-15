@@ -174,6 +174,8 @@ function intentFixture(
 function consequenceFixture() {
   return {
     observationHandle: "observation_1",
+    performingActorHandle: null,
+    performingActorName: null,
     whatChanged: "The east bridge is now guarded.",
     whereOrRoute: "East bridge",
     worldTimeLabel: "Late afternoon",
@@ -450,6 +452,7 @@ function commandFixtures(): RulebookBatchCommand[] {
       ...commandBase(),
       kind: "record_world_event",
       eventClass: "discovery",
+      performingActorId: null,
       summary: "A fresh barricade appears at the bridge.",
       observableTrace: null,
       affectedRefs: [{ kind: "route", id: "route_market" }],
@@ -602,6 +605,7 @@ function worldEventFixtures() {
       ...base,
       kind: "scene_recorded",
       eventClass: "discovery",
+      performingActorId: null,
       summary: "A fresh barricade appears at the bridge.",
     },
   ];
@@ -1455,6 +1459,8 @@ describe("Campaign Play shared public contracts", () => {
       worldTimeLabel: "l".repeat(CAMPAIGN_PLAY_LIMITS.label),
       consequence: {
         observationHandle: "observation_large",
+        performingActorHandle: null,
+        performingActorName: null,
         whatChanged: "界".repeat(CAMPAIGN_PLAY_LIMITS.text),
         whereOrRoute: "w".repeat(CAMPAIGN_PLAY_LIMITS.label),
         worldTimeLabel: "l".repeat(CAMPAIGN_PLAY_LIMITS.label),
@@ -1620,6 +1626,8 @@ describe("Campaign Play shared public contracts", () => {
     const wide = "界";
     const largeConsequence = (index: number) => ({
       observationHandle: `observation_${index}`,
+      performingActorHandle: null,
+      performingActorName: null,
       whatChanged: wide.repeat(CAMPAIGN_PLAY_LIMITS.text),
       whereOrRoute: wide.repeat(CAMPAIGN_PLAY_LIMITS.label),
       worldTimeLabel: wide.repeat(CAMPAIGN_PLAY_LIMITS.label),
@@ -1982,6 +1990,12 @@ describe("Campaign Play Judge and Rulebook contracts", () => {
     expect(campaignPlayGameMasterPlanSchema.safeParse({
       commands: [fixtures.find((command) => command.kind === "move_actor")],
     }).success).toBe(true);
+    const recorded = fixtures.find((command) => command.kind === "record_world_event")!;
+    expect(campaignPlayCommandSchema.safeParse({
+      ...recorded,
+      eventClass: "dialogue",
+      performingActorId: "actor_guard",
+    }).success).toBe(false);
   });
 
   it("validates contiguous batch order and mechanical versions", () => {
@@ -2184,6 +2198,12 @@ describe("Campaign Play events, actors, visibility, and recovery contracts", () 
     for (const event of events) {
       expect(campaignPlayWorldEventSchema.parse(event)).toEqual(event);
     }
+    const recorded = events.find((event) => event.kind === "scene_recorded")!;
+    expect(campaignPlayWorldEventSchema.safeParse({
+      ...recorded,
+      eventClass: "dialogue",
+      performingActorId: "actor_guard",
+    }).success).toBe(false);
   });
 
   it("enforces receipt version and hash semantics", () => {

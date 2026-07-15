@@ -359,6 +359,8 @@ describe("Campaign Play API", () => {
       },
       consequences: Array.from({ length: CAMPAIGN_PLAY_LIMITS.newObservations }, (_, index) => ({
         observationHandle: `observation-${index}`,
+        performingActorHandle: null,
+        performingActorName: null,
         whatChanged: longMultibyteText,
         whereOrRoute: "Signal Yard",
         worldTimeLabel: "Before dawn",

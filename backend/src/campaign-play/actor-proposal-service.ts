@@ -290,6 +290,7 @@ function compileProposal(
     const summary = ownsOpeningConsequence && exposure.mode === "projectable"
       ? seed.summary
       : `${frame.actor.name}: ${intent.method ?? intent.kind}${intent.stakes ? `. ${intent.stakes}` : ""}`;
+    const recordedEventClass = eventClass(intent);
     command = {
       commandId: deriveCampaignPlayCommandId(frame.campaignId, frame.turnId, batchId, 0),
       batchId,
@@ -301,7 +302,10 @@ function compileProposal(
       writeScope: [],
       exposure,
       kind: "record_world_event",
-      eventClass: eventClass(intent),
+      eventClass: recordedEventClass,
+      performingActorId: recordedEventClass === "dialogue" || recordedEventClass === "interaction"
+        ? frame.actorId
+        : null,
       summary,
       observableTrace: frame.selection.step.observableTrace,
       affectedRefs,

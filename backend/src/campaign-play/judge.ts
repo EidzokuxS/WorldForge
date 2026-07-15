@@ -338,6 +338,14 @@ function compile(
   const targetsAreVisible = proposal.targets.every((target) => visible.get(target.handle) === target.kind);
   const citationsAreVisible = proposal.citedVisibleFactHandles.every((handle) => visible.has(handle));
   if (!targetsAreVisible || !citationsAreVisible) throw new CampaignPlayJudgeError("model_contract_failed", null);
+  const actionableContact = proposal.kind === "contact"
+    && proposal.disposition !== "impossible"
+    && proposal.disposition !== "clarification_required";
+  const hasVisibleNonplayerActorTarget = proposal.targets.some((target) =>
+    target.kind === "actor" && target.handle !== frameResult.data.playerActorHandle);
+  if (actionableContact && !hasVisibleNonplayerActorTarget) {
+    throw new CampaignPlayJudgeError("model_contract_failed", null);
+  }
   const movementRouteIsVisible = proposal.movementRouteHandle === null
     || visible.get(proposal.movementRouteHandle) === "route";
   if (!movementRouteIsVisible) {

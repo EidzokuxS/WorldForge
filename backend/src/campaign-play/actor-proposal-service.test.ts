@@ -401,6 +401,7 @@ describe("Campaign Play actor proposal service", () => {
 
     expect(actorCommand).toMatchObject({
       kind: "record_world_event",
+      performingActorId: "actor-a",
       observableTrace: "Fresh work marks show that the objective advanced here.",
       exposure: {
         mode: "projectable",

@@ -959,6 +959,30 @@ function applyCommand(
       if (!unique(command.affectedRefs.map(refKey))) {
         deny("precondition_failed", "World event affected references must be unique.", command, index);
       }
+      const performingActor = command.performingActorId === null
+        ? null
+        : actor(frame, state, command.performingActorId);
+      if (
+        command.performingActorId !== null
+        && (
+          performingActor?.kind !== "person"
+          || performingActor.controller !== "agent"
+          || !command.affectedRefs.some((reference) =>
+            reference.kind === "actor" && reference.id === command.performingActorId)
+        )
+      ) {
+        deny("precondition_failed", "World event performer must be one affected agent person.", command, index);
+      }
+      if (command.performingActorId !== null && command.exposure.mode === "projectable") {
+        for (const predicate of command.exposure.predicates) {
+          if (
+            predicate.channel === "direct_perception"
+            && !operativeActorLocations(frame, state, command.performingActorId).includes(predicate.locationId)
+          ) {
+            deny("precondition_failed", "Directly perceived performer must be present at the event location.", command, index);
+          }
+        }
+      }
       break;
     }
     case "create_player_actor": {

@@ -845,6 +845,7 @@ describe("Campaign Play atomic Rulebook execution", () => {
       {
         kind: "record_world_event" as const,
         eventClass: "scene" as const,
+        performingActorId: null,
         summary: "The traveler crosses as passage controls tighten.",
         observableTrace: null,
         affectedRefs: [{ kind: "actor" as const, id: "actor-player" }],
@@ -1001,6 +1002,7 @@ describe("Campaign Play atomic Rulebook execution", () => {
       writeScope: [],
       exposure: { mode: "protected" as const },
       eventClass: "scene" as const,
+      performingActorId: null,
       summary: "A duplicate batch must never append a second ledger.",
       observableTrace: null,
       affectedRefs: [{ kind: "actor" as const, id: "actor-player" }],
