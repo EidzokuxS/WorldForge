@@ -1,6 +1,6 @@
 # Task 18: human playtest contract
 
-Status: Lane A r04 frozen before action 1; Narrator opening repair verified locally and awaiting a fresh r05 live gate.
+Status: three current-contract lane bases are eligible and frozen before character bootstrap; the fresh manual sixty-action sessions have not started.
 
 ## Decision
 
@@ -45,6 +45,20 @@ Before opening, sign a compact character contract from player-visible world mate
 Actions 1-20 cover discovery and goal formation. Actions 21-40 cover pursuit, return, and adaptation. Actions 41-60 cover payoff, escalation, or a new commitment. These phases describe what we observe and do not prescribe actions.
 
 Before turn zero, verify the template manifest and database hash, apply current migrations without modifying accepted world content, prove that character and turn history are empty with setup phase `character_required`, and freeze lane eligibility. Lane C must use the product clone operation rather than a filesystem copy after its eligible source exists.
+
+### Frozen lane eligibility · 2026-07-15
+
+Lane A rebuilt `Lowwater Ledger` once from the saved premise and six authorial DNA fields under the concrete-scene Campaign World contract. The accepted world contains three macro regions, seven persistent scenes, fifteen directed routes, eight agent-controlled people spread across all seven scenes, and five pressures. One semantic advisory remains: a ferry pilot is described as operating a cable-bridge crossing. It does not change spatial authority or causal eligibility. The reusable template is `lowwater-ledger-pristine-fb2c7074`; its accepted content hash is `fb2c7074e89df263b0bf308f0d47aadcd5f246b6832c8274506c8f1dc26855d9`.
+
+Lane B built `Black Rain Passage` once from manually edited DNA and the saved version-2 research artifact owned by campaign `064bba91-3d35-4a8d-bef2-d08340172f79`. Review retained eleven source references and kept the research summary separate from the edited DNA. The accepted world contains three macro regions, seven persistent scenes, fourteen directed routes, nine agent-controlled people spread across all seven scenes, and five distinct pressures. The reusable template is `black-rain-passage-pristine-54df81f3`; its accepted content hash is `54df81f36c0f88bed68aff192b5c635e43f749a3bf97e346aafd990a2f397656`.
+
+Lane C is product clean-start clone `509db3a1-49e3-494b-9128-a89e315ab0e9` of accepted zero-turn `Rainmarket Ledger` source `87acda0d-755a-4dbf-adc5-d943ac2f4aac`. Clone operation `bbef2f52-f55b-4b6c-9b30-af94b2c2da9c` recorded parent accepted-snapshot hash `f1951847c9a47bd219c62e04a5c316bec04575247b05b7ed4f4b357309527339` and source digest `72ed47f35ce8e06a187f666cfe6fa12180dce92d719eab3cd706eef9a61c16bc`. Loading the child through the product initialized a fresh `character_required` play state without creating a character or turn.
+
+All three bases have accepted world version `1`, mechanical world version `1`, runtime revision `1`, zero characters, zero turns, zero foreign-key violations, no collective actors, and exact accepted/current world-hash equality. The two expensive world builds used Z.AI `glm-5.2` with one accepted attempt per model stage, no provider switch, no hidden retry, no taste reroll, and no database edit. The materialized Lane A and Lane B database/config hashes plus the Lane C lineage and runtime hashes are frozen in `output/playtests/campaign-play/task18-lane-eligibility-20260715.json`.
+
+Preparation exposed and repaired one current Forge defect before either world build: a manually entered semicolon-separated Cultural Flavor was persisted as one array element even though Campaign World reserves semicolons as element delimiters. The repair makes comma, semicolon, and newline entry separators agree across editing and payload collection. The focused utility gate passed `32/32`; the first invalid shell was not repaired in place and no world generation had started inside it.
+
+Humanizer/deslop review: the preparation record uses direct evidence language, keeps the Lowwater semantic advisory visible, and does not present eligibility, topology, model success, or completed generation as proof that a lane is fun. Verdict: retain unchanged and let signed manual play own the game-quality decision.
 
 Each lane is played in sittings of at most ten completed actions. End a sitting sooner if the operator starts skimming prose, forgetting what was actually visible, feeling pressure to make progress, or selecting actions for protocol coverage. At the next sitting, record the remembered situation and intended next action before rereading the UI, then record what the interface made easy or hard to recover. Fatigue is not evidence about the game's prose or agency, but the product's support for returning after a break is evidence.
 
