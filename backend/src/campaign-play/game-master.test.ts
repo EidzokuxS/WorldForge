@@ -553,6 +553,12 @@ describe("Campaign Play Game Master", () => {
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
       "use eventClass scene for that arrival",
     );
+    expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
+      "places the player inside the destination's shared location scene",
+    );
+    expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
+      "do not claim that the destination is empty or inaccessible",
+    );
   });
 
   it("requires the Judge's explicit route instead of inferring movement from citations", async () => {

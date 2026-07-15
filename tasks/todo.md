@@ -1671,3 +1671,10 @@ Lane A r02 hard stop at action 13:
 - Protected evidence proves Judge accepted deterministic travel/contact with no visible barrier. Game Master then committed the player move into the atomic destination and a scene record that left her outside a shut door. Marenthos's co-located actor event supplied the ledger trace; visibility behaved correctly and Narrator surfaced the incompatible records.
 - Repair the compound `move + contact` execution contract at its owner: successful travel over an open route enters the destination's shared scene and cannot invent an unrepresented access boundary. Do not add prose parsing, backend-authored replacement narration, compatibility behavior, retry, repair, provider switching, or fallback.
 - After focused contract validation, prove the repair on a fresh clone of the reusable accepted world before replacing Lane A. Standalone smoke additions remain `0`.
+
+Lane A action-13 spatial-contract repair:
+
+- The existing architecture remains unchanged: `movementRouteHandle` selects the route, code compiles `move_actor`, Rulebook places the player at the destination, and visibility projects that destination scene. The fault was the Game Master instruction allowing its arrival summary to contradict the committed placement.
+- Game Master now treats a committed movement destination as one shared location scene. It may report that an unnamed recipient did not reply, but it may not leave the player outside an unrepresented door or claim the destination is empty or inaccessible.
+- The model still authors the scene. No prose parser, backend rewrite, sublocation or door state, compatibility path, retry, repair, provider switch, or fallback was added.
+- Humanizer/deslop review found the instruction direct and mechanical; it does not prescribe finished narrative copy. The focused Game Master suite passes `23/23` and backend typecheck passes. A fresh-clone GLM 5.2 manual proof remains required before a replacement 60-action lane. Standalone smoke additions remain `0`.
