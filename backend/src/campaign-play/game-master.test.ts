@@ -278,6 +278,8 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("Omit exposure from record_world_event");
     expect(String(options.prompt)).toContain("Use adjust_actor_possession whenever the resolved action gives the player a countable possession or consumes one");
     expect(String(options.prompt)).toContain("Do not add record_world_event for the same gain or spend");
+    expect(String(options.prompt)).toContain("Every summary must fit its schema limit: at most 1200 characters");
+    expect(String(options.prompt)).toContain("Do not include planning or reasoning, and do not repeat supporting facts");
     expect(String(options.prompt)).not.toContain("actor-player");
     expect(String(options.prompt)).not.toContain("actor-guard");
   });
