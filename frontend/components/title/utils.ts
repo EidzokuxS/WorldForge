@@ -56,7 +56,7 @@ export function normalizeSeedValue(
       return value.map((item) => item.trim()).filter(Boolean);
     }
     return value
-      .split(",")
+      .split(/[;,\n]/)
       .map((item) => item.trim())
       .filter(Boolean);
   }
@@ -130,7 +130,7 @@ export function collectEnabledSeeds(dnaState: DnaState | null): Partial<WorldSee
       const parsed = Array.isArray(slot.value)
         ? slot.value.filter(Boolean)
         : slot.value
-            .split(",")
+            .split(/[;,\n]/)
             .map((item) => item.trim())
             .filter(Boolean);
       if (parsed.length > 0) {

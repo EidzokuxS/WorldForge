@@ -55,6 +55,10 @@ describe("normalizeSeedValue", () => {
     expect(normalizeSeedValue("culturalFlavor", "A , B , C")).toEqual(["A", "B", "C"]);
   });
 
+  it("splits semicolon- and newline-separated culturalFlavor values", () => {
+    expect(normalizeSeedValue("culturalFlavor", "A; B\nC")).toEqual(["A", "B", "C"]);
+  });
+
   it("filters empty entries for culturalFlavor", () => {
     expect(normalizeSeedValue("culturalFlavor", "A,,B,")).toEqual(["A", "B"]);
   });
@@ -217,7 +221,7 @@ describe("collectEnabledSeeds", () => {
 
   it("parses culturalFlavor string to array", () => {
     const state = createEmptyDnaState();
-    state.culturalFlavor = { value: "A, B, C" as unknown as string[], enabled: true, isCustom: false };
+    state.culturalFlavor = { value: "A; B\nC" as unknown as string[], enabled: true, isCustom: false };
     const result = collectEnabledSeeds(state);
     expect(result).toEqual({ culturalFlavor: ["A", "B", "C"] });
   });
