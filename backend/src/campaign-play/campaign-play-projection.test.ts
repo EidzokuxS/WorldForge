@@ -660,6 +660,70 @@ describe("mechanical and runtime truth", () => {
     expect(publicReordered.hash).toBe(publicState.hash);
   });
 
+  it("preserves the causal sequence of current-turn consequences", () => {
+    const consequences = [
+      {
+        observationHandle: "observation-origin",
+        performingActorHandle: "actor-companion",
+        performingActorName: "Vassara",
+        whatChanged: "Vassara agrees to travel.",
+        whereOrRoute: "Debt-Ward Tenements",
+        worldTimeLabel: "Day 1, 00:15",
+        causalCue: "your_action" as const,
+      },
+      {
+        observationHandle: "observation-movement",
+        performingActorHandle: null,
+        performingActorName: null,
+        whatChanged: "Vassara leaves for the station.",
+        whereOrRoute: "Winch-Shaft Station",
+        worldTimeLabel: "Day 1, 00:15",
+        causalCue: "direct_perception" as const,
+      },
+      {
+        observationHandle: "observation-destination",
+        performingActorHandle: null,
+        performingActorName: null,
+        whatChanged: "Vassara arrives beside the player.",
+        whereOrRoute: "Winch-Shaft Station",
+        worldTimeLabel: "Day 1, 00:15",
+        causalCue: "your_action" as const,
+      },
+    ];
+    const input = {
+      campaignId: CAMPAIGN_ID,
+      acceptedWorldVersion: 7,
+      worldVersion: 10,
+      runtimeRevision: 4,
+      phase: "ready" as const,
+      worldTimeMinutes: 15,
+      currentLocation: null,
+      visibleActors: [],
+      visibleRoutes: [],
+      visiblePressures: [],
+      possessions: [],
+      consequences,
+      journal: [],
+      narration: null,
+    };
+
+    const projected = projectCampaignPlayPublicState(input);
+    const reversed = projectCampaignPlayPublicState({
+      ...input,
+      consequences: [...consequences].reverse(),
+    });
+    const publicProjection = projected.projection as {
+      consequences: Array<{ observationHandle: string }>;
+    };
+
+    expect(publicProjection.consequences.map((row) => row.observationHandle)).toEqual([
+      "observation-origin",
+      "observation-movement",
+      "observation-destination",
+    ]);
+    expect(reversed.hash).not.toBe(projected.hash);
+  });
+
   it("orders actor knowledge by its full schema identity regardless input order", () => {
     const eligibility = projectAcceptedTopologyEligibility(acceptedReviewFixture());
     const knowledge: CampaignPlayProjectionRecord[] = [

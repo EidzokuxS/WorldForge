@@ -866,6 +866,17 @@ describe("Campaign Play visibility service", () => {
     expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
       "Fresh scuff marks and a snapped seal remain beside the route board.",
     );
+    const chronologicalTexts = result.packet.newObservations.map((entry) => entry.text);
+    expect(chronologicalTexts.indexOf(
+      "Fresh scuff marks and a snapped seal remain beside the route board.",
+    )).toBeLessThan(chronologicalTexts.indexOf(
+      "Mara Venn says the signal lantern has failed.",
+    ));
+    expect(chronologicalTexts.indexOf(
+      "Mara Venn says the signal lantern has failed.",
+    )).toBeLessThan(chronologicalTexts.indexOf(
+      "Mara Venn left for Glass Reef Quay.",
+    ));
     expect(result.packet.newObservations.map((entry) => entry.text))
       .not.toContain("Something changed here before you arrived.");
     expect(JSON.stringify(result.packet)).not.toContain(

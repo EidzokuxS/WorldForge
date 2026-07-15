@@ -781,10 +781,7 @@ export function projectCampaignPlayPublicState(
       name: row.name,
       quantity: row.quantity,
     })), (row) => row.handle),
-    consequences: sortByText(
-      input.consequences.map(publicConsequence),
-      (row) => row.observationHandle,
-    ),
+    consequences: input.consequences.map(publicConsequence),
     journal: [...input.journal]
       .sort((left, right) =>
         compareNumber(left.worldTimeMinutes, right.worldTimeMinutes) ||

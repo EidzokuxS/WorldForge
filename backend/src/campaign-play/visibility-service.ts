@@ -1178,7 +1178,10 @@ export function createCampaignPlayVisibilityService(
         knownEventEvidence(handle, baseKnowledge),
         state.worldTimeMinutes,
       );
-      const candidates = [...baseKnowledge, ...witnessKnowledge];
+      const candidates = [...baseKnowledge, ...witnessKnowledge].sort((left, right) =>
+        left.learnedAtWorldTimeMinutes - right.learnedAtWorldTimeMinutes ||
+        left.earnedEventOrder - right.earnedEventOrder ||
+        compareText(knowledgeKey(left), knowledgeKey(right)));
       const existingObservations = new Set((handle.sqlite.prepare(`SELECT event_id AS eventId,
           channel, source_hash AS sourceHash FROM campaign_play_observations
         WHERE campaign_id = ? AND human_actor_id = ?`).all(
