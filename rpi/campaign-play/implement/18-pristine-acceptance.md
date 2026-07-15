@@ -1,6 +1,6 @@
 # Task 18: human playtest contract
 
-Status: all three current-contract lane bases remain frozen and eligible. Lane A completed one signed ten-action sitting and is frozen as rejected evidence at its first audit checkpoint; Lane B and Lane C have not started.
+Status: all three reusable current-contract lane bases remain frozen and eligible. The earlier Lane A materialization remains frozen as rejected evidence. Replacement Lane A materialization `opening-possession-lowwater-r03` completed its first signed ten-action sitting and may continue after a break; Lane B and Lane C have not started.
 
 ## Decision
 
@@ -343,3 +343,19 @@ The three retest turns advanced world version `17 -> 21` and journal cursor `6 -
 The repair is retained. It removed the repeated second beat in `3/3` live turns and improved forward choice in the contact and movement scenes. One residual failure remains: after Lenna inspected the two far doors, the contact choice again suggested asking Thessha about the debtor. The repair reduced the loop but did not eliminate every repeated suggestion. Per the frozen budget, this does not start a second prompt repair. Lane A continues from action 9 with that defect recorded.
 
 Humanizer review: the new instruction uses direct technical language, names the exact prior-action evidence, and does not ask the model to manufacture drama. Deslop review: it removes the forced fractal summary instead of adding style rules, avoids a prose-grading loop, and keeps the action-detail rule specific. Verdict: retain the prompt and compiler change; let later manual actions determine whether residual choice repetition needs a separate design task.
+
+## Replacement Lane A sitting-1 action-10 checkpoint
+
+Disposition: `CONTINUE_LANE_AFTER_BREAK`. The optional-handoff repair remains accepted. No hard state failure, authority mismatch, impossible transition, false possession, protected disclosure, retry, provider switch, or model switch occurred in the first ten player actions. The lane pauses because the protocol caps one sitting at ten completed actions, not because the campaign failed.
+
+Action 9 was signed as the exact visible choice `Ask Dessek Holvar Brunne about the blocked shaft access` against projection `2690c05c5b9bf7f00eb87e8a46c003e04efba009944ab7bbc9fec19e9f36eff4`. Dessek explained the blockade as leverage against lower-ward quota cuts. Action 10 was signed as the freeform question `Ask Dessek whether the chimney order and sealed debt notices in the tenements are part of the quota seizures, and whether delivering these chimneys would help those families or the collectors.` against projection `386bf2ad79439d1bd564b455894b4db975c73af2253bd424797f7c27bdba6c83`. He linked the unpaid repair work to the seizure system and argued that restoring quotas, rather than delivering the glass, would restore household payment capacity.
+
+Both actions used one valid strict-object GLM 5.2 attempt per Judge, Game Master, and Narrator stage. They advanced world version `21 -> 23`, world time `47 -> 53`, and journal cursor `10 -> 12`. The campaign finished the sitting at runtime revision `476` and projection `1e852f3bd8f9204c1eb62f13f4d530172ba37be1991359acb82f5d058088c7d3`. SQLite integrity remained `ok`, foreign-key check remained empty, Lenna stayed at Winch-Shaft Station with Dessek, and all three starting possessions remained current Rulebook truth.
+
+Across all ten player actions, mean wall time was `242600 ms`, median was `224371.5 ms`, minimum was `146178 ms`, maximum was `386658 ms`, and total turn wall time was `2426000 ms`. Five pressure states remained active at progress zero through world minute `53`. The eighth action produced three independent actor-sourced scene events: Dessek at the station and Thessha and Vassara at the tenements. Only Dessek's locally eligible trace entered Lenna's scene. Actions 9 and 10 produced no further autonomous actor turn.
+
+The player developed a coherent goal without being assigned a quest: recover payment for honest lamp work without helping the Compact take a household's last light. The failed tenement search did not manufacture a debtor. Dessek's blockade then gave the crate a political and moral meaning that changed the next decision. The player now wants to hear the Warden side and determine who ordered the chimneys before choosing delivery, refusal, or bargaining.
+
+Taste verdict: comprehension `4/5`, prose readability `3/5`, agency `4/5`, world aliveness `3/5`, desire to continue `4/5`. The game is playable and the player has a reason to return. The last two conversations are too long and too certain: Dessek delivers a complete political explanation instead of a partial, situated answer with a recognizable personal voice. The Play screen also presents the Game Master consequence card and the Narrator beat back to back with nearly the same information. This is separate from the removed synthetic second beat and needs its own later presentation task. One repeated Thessha suggestion after action 7 remains recorded. None of these findings starts another repair inside this sitting.
+
+Humanizer/deslop review: the checkpoint separates observed mechanics, player interpretation, and taste judgment. It quotes only the two signed inputs needed to prove intent, avoids promotional language, and does not convert one coherent dilemma into a claim that long-play quality is proven. Verdict: retain as evidence and resume with a fresh sitting rather than extending the current one.
