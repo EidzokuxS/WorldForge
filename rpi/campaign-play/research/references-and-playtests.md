@@ -15,6 +15,14 @@ Status: research recommendation for the campaign play slice. This document descr
 | [Yuralume](https://github.com/Yuralume/yuralume-core) | Schedule aftermath becomes memory. Proactive delivery passes a heuristic, intention judge, and decider. | Treat background delivery as an explicit decision with an inspectable reason and a visibility gate. | The public repository is an alpha install and product reference. It is not a source-code donor. |
 | TarotEngine local sibling, `R:\Projects\SillytavernUpgrade\TarotEngine\Marinara-Engine`, branch `feature/memory-vault-router`, commit `010cdd373cc4ed508d2e43f80be188357f59cf6c` | Explicit stage owners, resolved mechanics before narration, campaign-local truth precedence, target-perspective packets, prompt-diff evidence, and temporary-game E2E cases. | Preserve clear ownership across Judge, command execution, actor work, visibility, and narration. Use deterministic target-perspective fixtures before live campaigns. | WorldForge owns canonical state, Rulebook receipts, actor scheduler, and visibility projection. |
 
+## Optional Marinara prose sample
+
+An isolated Marinara v2.0.9 profile used the existing GLM 5.2 connection for one opening and three connected player exchanges. The original profile, settings, campaigns, and repository stayed unchanged. The default Tarot background pipeline did not save its opening after more than four minutes, so the temporary profile disabled background agents and sampled the base GM only. This is one prose example, not a WorldForge target or a judgment of Marinara's complete pipeline.
+
+The sample followed a flooded-quay problem through a missing daughter, an underwater bell, a recovered belltower chain, and a dry mortuary-tunnel lead. Its useful habits were concrete objects the player could manipulate, NPC feeling shown through behavior before exposition, and a turn rhythm where one answer creates new pressure. Each completed exchange ended on a physical change or an actionable person or place.
+
+The sample also showed boundaries WorldForge should not copy: raw VN control tags, malformed choice markup, unsupported player actions, contradiction of the stranger premise, Chinese fragments inside Russian prose, and repeated melodramatic atmosphere. WorldForge keeps its own voice, Rulebook authority, living-world simulation, and earned-visibility contract.
+
 Existing project sources already support this direction:
 
 - [Launch-to-Longplay Gameplay Contract](../../../docs/playtest/launch-to-longplay-gameplay-contract.md) defines launch, opening, 10-turn, 30-turn, 60-turn, and long-horizon product gates.
