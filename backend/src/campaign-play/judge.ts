@@ -48,6 +48,10 @@ export const campaignPlayJudgeFrameSchema = z.object({
   turnId: line(CAMPAIGN_PLAY_LIMITS.id),
   playerActorHandle: line(CAMPAIGN_PLAY_LIMITS.handle),
   locationHandle: line(CAMPAIGN_PLAY_LIMITS.handle),
+  visibleRoutes: z.array(z.object({
+    handle: line(CAMPAIGN_PLAY_LIMITS.handle),
+    destinationHandle: line(CAMPAIGN_PLAY_LIMITS.handle),
+  }).strict()).max(CAMPAIGN_PLAY_LIMITS.visibleRoutes),
   worldTimeMinutes: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.worldTimeMinutes),
   sourceMoment: text(CAMPAIGN_PLAY_LIMITS.narrationText),
   visibleFacts: z.array(campaignPlayJudgeVisibleFactSchema).max(40),
@@ -59,6 +63,20 @@ export const campaignPlayJudgeFrameSchema = z.object({
   }
   if (!handles.includes(frame.playerActorHandle) || !handles.includes(frame.locationHandle)) {
     context.addIssue({ code: "custom", path: ["visibleFacts"], message: "Player and location handles must be visible facts." });
+  }
+  const factKinds = new Map(frame.visibleFacts.map((fact) => [fact.handle, fact.kind]));
+  const routeHandles = frame.visibleRoutes.map((route) => route.handle);
+  if (
+    new Set(routeHandles).size !== routeHandles.length
+    || frame.visibleRoutes.some((route) =>
+      factKinds.get(route.handle) !== "route"
+      || factKinds.get(route.destinationHandle) !== "location")
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["visibleRoutes"],
+      message: "Visible routes must uniquely bind visible route handles to visible destination locations.",
+    });
   }
   const visibleActors = new Set(frame.visibleFacts
     .filter((fact) => fact.kind === "actor")
@@ -305,7 +323,7 @@ function prompt(frame: CampaignPlayJudgeFrame, input: CampaignPlayJudgeInput): s
     "Every targets entry must copy one exact {handle, kind} pair from TARGET_CATALOG. Observation and choice handles are not world targets: cite a relevant observation in citedVisibleFactHandles and target its visible location, actor, route, pressure, or possession instead. A detail described only in SOURCE_MOMENT or an observation has no separate object handle; never invent one. Every citation must be copied from CITATION_HANDLES.",
     "Classify the action as deterministic, uncertain, impossible, or clarification_required.",
     "A contact action that only speaks, asks, listens, greets, or offers an ordinary visible object to a present reachable actor is deterministic unless VISIBLE_FRAME shows a physical barrier to the exchange. Do not roll merely because the actor's knowledge, willingness, trust, privacy, or eventual reply is uncertain; the Game Master simulates that response. Use uncertain for attempts to change a decision, deceive, coerce, bargain for contested access, or force disclosure against resistance.",
-    "When the player addresses an unnamed or collective presence established by SOURCE_MOMENT or a cited observation, classify the action as contact and target the exact current location from TARGET_CATALOG. Do not invent an actor handle or redirect the speech to a different visible actor. This only authorizes delivering the words into the established scene; it does not establish identity, trust, knowledge, compliance, or a reply.",
+    "When the player addresses an unnamed or collective presence established by SOURCE_MOMENT or a cited observation, classify the action as contact. Without travel, target the exact current location from TARGET_CATALOG. When the action first travels through movementRouteHandle, target that exact route's destinationHandle from VISIBLE_ROUTES. Do not invent an actor handle or redirect the speech to a different visible actor. This only authorizes delivering the words into the established scene; it does not establish identity, trust, knowledge, compliance, or a reply.",
     "For deterministic rulings, resultBounds.minimum and resultBounds.maximum must be the same literal result tier. Never return a range for deterministic. For impossible or clarification use no_effect for both bounds.",
     "For deterministic, impossible, or clarification_required rulings, uncertainty must be exactly {\"kind\":\"none\"}.",
     "For deterministic or uncertain rulings, resultBounds must not contain no_effect. Impossible and clarification_required use no_effect for both bounds.",
@@ -323,6 +341,7 @@ function prompt(frame: CampaignPlayJudgeFrame, input: CampaignPlayJudgeInput): s
     `SOURCE_MOMENT=${JSON.stringify(frame.sourceMoment)}`,
     `VISIBLE_FRAME=${JSON.stringify(visibleFrame)}`,
     `TARGET_CATALOG=${JSON.stringify(targetCatalog)}`,
+    `VISIBLE_ROUTES=${JSON.stringify(frame.visibleRoutes)}`,
     `CITATION_HANDLES=${JSON.stringify(citationHandles)}`,
     `ACTOR_CONTINUITY=${JSON.stringify(frame.actorContinuity)}`,
     `INPUT_SOURCE=${input.source}`,
@@ -374,7 +393,21 @@ function compile(
     target.kind === "actor" && target.handle !== frameResult.data.playerActorHandle);
   const hasCurrentLocationTarget = proposal.targets.some((target) =>
     target.kind === "location" && target.handle === frameResult.data.locationHandle);
-  if (actionableContact && !hasVisibleNonplayerActorTarget && !hasCurrentLocationTarget) {
+  const movementDestinationHandle = proposal.movementRouteHandle === null
+    ? null
+    : frameResult.data.visibleRoutes.find((route) =>
+      route.handle === proposal.movementRouteHandle)?.destinationHandle ?? null;
+  const hasMovementDestinationTarget = movementDestinationHandle !== null
+    && proposal.targets.some((target) =>
+      target.kind === "location" && target.handle === movementDestinationHandle);
+  const hasAuthorizedAmbientContactTarget = proposal.movementRouteHandle === null
+    ? hasCurrentLocationTarget
+    : hasMovementDestinationTarget;
+  if (
+    actionableContact
+    && !hasVisibleNonplayerActorTarget
+    && !hasAuthorizedAmbientContactTarget
+  ) {
     throw new CampaignPlayJudgeError("model_contract_failed", null);
   }
   const movementRouteIsVisible = proposal.movementRouteHandle === null

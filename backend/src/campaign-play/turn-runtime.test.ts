@@ -978,7 +978,7 @@ describe("Campaign Play player-action turn runtime", () => {
     },
   );
 
-  it("interrupts compound contact when no canonical destination actor is targeted", async () => {
+  it("accepts compound contact through the exact visible route destination", async () => {
     const { handle, state } = await createReadyCampaignWithOpening();
     const time = fixedClock(2_250);
     const runtime = turnRuntime(
@@ -996,13 +996,28 @@ describe("Campaign Play player-action turn runtime", () => {
     });
 
     time.advance();
-    const stopped = await runtime.runNextStage(admission.turnId);
-    expect(stopped.turn).toMatchObject({
-      stage: "interrupted",
-      interruptedStage: "admitted",
-      errorCode: "model_contract_invalid",
+    const judged = await runtime.runNextStage(admission.turnId);
+    expect(judged.turn).toMatchObject({
+      stage: "judged",
+      interruptedStage: null,
+      errorCode: null,
     });
     expect(countForTurn(handle, "campaign_play_commands", admission.turnId)).toBe(0);
+    const stage = handle.sqlite.prepare(`SELECT artifact_json AS artifactJson
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'judge' AND status = 'accepted'`)
+      .get(CAMPAIGN_ID, admission.turnId) as { artifactJson: string };
+    expect(JSON.parse(stage.artifactJson)).toMatchObject({
+      ruling: {
+        normalizedIntent: {
+          kind: "contact",
+          targets: expect.arrayContaining([
+            expect.objectContaining({ kind: "location" }),
+          ]),
+        },
+        movementRouteHandle: expect.any(String),
+      },
+    });
   });
 
   it("settles the exact current suggested action without Judge reinterpretation", async () => {

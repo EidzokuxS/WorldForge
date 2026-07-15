@@ -64,11 +64,13 @@ function frame(): CampaignPlayJudgeFrame {
     turnId: "turn-one",
     playerActorHandle: "actor-you",
     locationHandle: "location-harbor",
+    visibleRoutes: [{ handle: "route-reef", destinationHandle: "location-reef" }],
     worldTimeMinutes: 120,
     sourceMoment: "The guard finishes painting a fresh white line across the gate latch.",
     visibleFacts: [
       { handle: "actor-you", kind: "actor", summary: "You are standing by the gate." },
       { handle: "location-harbor", kind: "location", summary: "The harbor gate is closed." },
+      { handle: "location-reef", kind: "location", summary: "The reef road destination." },
       { handle: "route-reef", kind: "route", summary: "The reef road is guarded." },
       { handle: "actor-guard", kind: "actor", summary: "A tired guard watches the road." },
       { handle: "observation-latch", kind: "observation", summary: "Fresh paint marks the gate latch." },
@@ -173,10 +175,38 @@ describe("Campaign Play Judge", () => {
     expect(ruling.movementRouteHandle).toBe("route-reef");
   });
 
+  it("binds compound contact with an established destination presence to the route destination", () => {
+    const judge = createCampaignPlayJudge();
+    const input = {
+      originalText: "I cross the reef road and call out to the station operators.",
+      source: "freeform" as const,
+      choiceHandle: null,
+    };
+    expect(judge.compile(frame(), input, proposal({
+      kind: "contact",
+      targets: [{ handle: "location-reef", kind: "location" }],
+      movementRouteHandle: "route-reef",
+      citedVisibleFactHandles: ["location-reef", "route-reef"],
+    }))).toMatchObject({
+      normalizedIntent: {
+        kind: "contact",
+        targets: [{ handle: "location-reef", kind: "location" }],
+      },
+      movementRouteHandle: "route-reef",
+    });
+    expect(() => judge.compile(frame(), input, proposal({
+      kind: "contact",
+      targets: [{ handle: "location-harbor", kind: "location" }],
+      movementRouteHandle: "route-reef",
+      citedVisibleFactHandles: ["location-harbor", "route-reef"],
+    }))).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+  });
+
   it("allows actionable contact with an established unnamed presence through the current location", () => {
     const judge = createCampaignPlayJudge();
     const ambientFrame: CampaignPlayJudgeFrame = {
       ...frame(),
+      visibleRoutes: [],
       sourceMoment: "Light dims behind a closed door and someone inside goes still.",
       visibleFacts: [
         { handle: "actor-you", kind: "actor", summary: "You are standing in the corridor." },
@@ -311,10 +341,13 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("Every targets entry must copy one exact {handle, kind} pair from TARGET_CATALOG");
     expect(sentPrompt).toContain("Observation and choice handles are not world targets");
     expect(sentPrompt).toContain(
-      'TARGET_CATALOG=[{"handle":"actor-you","kind":"actor"},{"handle":"location-harbor","kind":"location"},{"handle":"route-reef","kind":"route"},{"handle":"actor-guard","kind":"actor"}]',
+      'TARGET_CATALOG=[{"handle":"actor-you","kind":"actor"},{"handle":"location-harbor","kind":"location"},{"handle":"location-reef","kind":"location"},{"handle":"route-reef","kind":"route"},{"handle":"actor-guard","kind":"actor"}]',
     );
     expect(sentPrompt).toContain(
-      'CITATION_HANDLES=["actor-you","location-harbor","route-reef","actor-guard","observation-latch","choice-ask","choice-cross"]',
+      'VISIBLE_ROUTES=[{"handle":"route-reef","destinationHandle":"location-reef"}]',
+    );
+    expect(sentPrompt).toContain(
+      'CITATION_HANDLES=["actor-you","location-harbor","location-reef","route-reef","actor-guard","observation-latch","choice-ask","choice-cross"]',
     );
     expect(sentPrompt).toContain("stakes ask what the player hopes to learn or accomplish; they are not evidence");
     expect(sentPrompt).toContain("A clean, empty, missing, or disturbed surface proves only its currently observable state");

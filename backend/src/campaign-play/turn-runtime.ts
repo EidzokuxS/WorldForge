@@ -1403,6 +1403,10 @@ export function createCampaignPlayTurnRuntime(
                   turnId: admission.turnId,
                   playerActorHandle: admission.player.actorHandle,
                   locationHandle: admission.sourcePacket.currentLocation.handle,
+                  visibleRoutes: admission.sourcePacket.visibleRoutes.map((route) => ({
+                    handle: route.handle,
+                    destinationHandle: route.destinationHandle,
+                  })),
                   worldTimeMinutes: admission.worldTimeMinutes,
                   sourceMoment: admission.sourceNarration.displayText,
                   visibleFacts: admission.visibleFacts,
