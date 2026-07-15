@@ -173,18 +173,39 @@ describe("Campaign Play Judge", () => {
     expect(ruling.movementRouteHandle).toBe("route-reef");
   });
 
-  it("requires an actionable contact to target a visible nonplayer actor", () => {
+  it("allows actionable contact with an established unnamed presence through the current location", () => {
     const judge = createCampaignPlayJudge();
+    const ambientFrame: CampaignPlayJudgeFrame = {
+      ...frame(),
+      sourceMoment: "Light dims behind a closed door and someone inside goes still.",
+      visibleFacts: [
+        { handle: "actor-you", kind: "actor", summary: "You are standing in the corridor." },
+        { handle: "location-harbor", kind: "location", summary: "A tenement corridor lined with closed doors." },
+        { handle: "observation-presence", kind: "observation", summary: "Someone moved behind the lit door." },
+      ],
+      actorContinuity: [],
+    };
     const input = {
       originalText: "I call out to whoever is there.",
       source: "freeform" as const,
       choiceHandle: null,
     };
-    expect(() => judge.compile(frame(), input, proposal({ targets: [] })))
+    expect(() => judge.compile(ambientFrame, input, proposal({
+      targets: [],
+      citedVisibleFactHandles: ["location-harbor", "observation-presence"],
+    })))
       .toThrow(expect.objectContaining({ code: "model_contract_failed" }));
-    expect(judge.compile(frame(), input, proposal({
+    expect(judge.compile(ambientFrame, input, proposal({
+      targets: [{ handle: "location-harbor", kind: "location" }],
+      citedVisibleFactHandles: ["location-harbor", "observation-presence"],
+    })).normalizedIntent).toMatchObject({
+      kind: "contact",
+      targets: [{ handle: "location-harbor", kind: "location" }],
+    });
+    expect(judge.compile(ambientFrame, input, proposal({
       targets: [],
       disposition: "clarification_required",
+      citedVisibleFactHandles: ["location-harbor", "observation-presence"],
       resultBounds: { minimum: "no_effect", maximum: "no_effect" },
       reason: "No visible person is identified as the intended contact.",
       clarificationQuestion: "Whom are you trying to address?",
@@ -273,6 +294,8 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("cap resultBounds.maximum at limited");
     expect(sentPrompt).toContain("A contact action that only speaks, asks, listens, greets");
     expect(sentPrompt).toContain("Do not roll merely because the actor's knowledge, willingness, trust, privacy, or eventual reply is uncertain");
+    expect(sentPrompt).toContain("addresses an unnamed or collective presence established by SOURCE_MOMENT or a cited observation");
+    expect(sentPrompt).toContain("target the exact current location from TARGET_CATALOG");
     expect(sentPrompt).toContain("A plain question claims only that the question is delivered");
     expect(sentPrompt).toContain("ACTOR_CONTINUITY outranks any conflicting earlier dialogue");
     expect(sentPrompt).toContain("movementRouteHandle is a separate mechanical decision");

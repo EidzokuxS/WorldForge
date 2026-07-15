@@ -305,6 +305,7 @@ function prompt(frame: CampaignPlayJudgeFrame, input: CampaignPlayJudgeInput): s
     "Every targets entry must copy one exact {handle, kind} pair from TARGET_CATALOG. Observation and choice handles are not world targets: cite a relevant observation in citedVisibleFactHandles and target its visible location, actor, route, pressure, or possession instead. A detail described only in SOURCE_MOMENT or an observation has no separate object handle; never invent one. Every citation must be copied from CITATION_HANDLES.",
     "Classify the action as deterministic, uncertain, impossible, or clarification_required.",
     "A contact action that only speaks, asks, listens, greets, or offers an ordinary visible object to a present reachable actor is deterministic unless VISIBLE_FRAME shows a physical barrier to the exchange. Do not roll merely because the actor's knowledge, willingness, trust, privacy, or eventual reply is uncertain; the Game Master simulates that response. Use uncertain for attempts to change a decision, deceive, coerce, bargain for contested access, or force disclosure against resistance.",
+    "When the player addresses an unnamed or collective presence established by SOURCE_MOMENT or a cited observation, classify the action as contact and target the exact current location from TARGET_CATALOG. Do not invent an actor handle or redirect the speech to a different visible actor. This only authorizes delivering the words into the established scene; it does not establish identity, trust, knowledge, compliance, or a reply.",
     "For deterministic rulings, resultBounds.minimum and resultBounds.maximum must be the same literal result tier. Never return a range for deterministic. For impossible or clarification use no_effect for both bounds.",
     "For deterministic, impossible, or clarification_required rulings, uncertainty must be exactly {\"kind\":\"none\"}.",
     "For deterministic or uncertain rulings, resultBounds must not contain no_effect. Impossible and clarification_required use no_effect for both bounds.",
@@ -371,7 +372,9 @@ function compile(
     && proposal.disposition !== "clarification_required";
   const hasVisibleNonplayerActorTarget = proposal.targets.some((target) =>
     target.kind === "actor" && target.handle !== frameResult.data.playerActorHandle);
-  if (actionableContact && !hasVisibleNonplayerActorTarget) {
+  const hasCurrentLocationTarget = proposal.targets.some((target) =>
+    target.kind === "location" && target.handle === frameResult.data.locationHandle);
+  if (actionableContact && !hasVisibleNonplayerActorTarget && !hasCurrentLocationTarget) {
     throw new CampaignPlayJudgeError("model_contract_failed", null);
   }
   const movementRouteIsVisible = proposal.movementRouteHandle === null
