@@ -873,6 +873,12 @@ describe("Campaign Play visibility service", () => {
     );
     expect(result.packet.currentLocation.name).toBe("North Harbor Docks");
     expect(result.packet.visibleActors.map((actor) => actor.name)).not.toContain("Sel Bell");
+    expect(result.packet.actorProfiles).toHaveLength(result.packet.visibleActors.length);
+    expect(result.packet.actorProfiles.map(({ handle, name }) => ({ handle, name }))).toEqual(
+      result.packet.visibleActors.map(({ handle, name }) => ({ handle, name })),
+    );
+    expect(result.packet.actorProfiles.every((profile) => profile.summary.length > 0)).toBe(true);
+    expect(result.packet.actorProfiles.map((profile) => profile.name)).not.toContain("Sel Bell");
     expect(result.packet.visiblePressures).toEqual([]);
     expect(result.packet.availableIntents.some((intent) => intent.kind === "attempt"))
       .toBe(false);
@@ -1059,6 +1065,7 @@ describe("Campaign Play visibility service", () => {
         description: currentLocation.description,
       },
       visibleActors: [],
+      actorProfiles: [],
       visibleRoutes: routeRows.map((route) => ({
         handle: deriveCampaignPlayPublicHandle("route", CAMPAIGN_ID, route.id),
         destinationHandle: deriveCampaignPlayPublicHandle(
@@ -1141,6 +1148,11 @@ describe("Campaign Play visibility service", () => {
           monogram: "MV",
           descriptor: "Person nearby",
           accent: "slate",
+        }],
+        actorProfiles: [{
+          handle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-c"),
+          name: "Mara Venn",
+          summary: "A signal keeper who says she logs every failed lantern.",
         }],
       },
       "actor-player",

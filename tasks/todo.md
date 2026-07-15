@@ -1695,3 +1695,15 @@ Fresh-clone chronological proof r04:
 - The rendered result is a human prose and spatial `PASS`. Thessha answers briefly and resumes hammering her writ; the prose then enters the mechanical platform, shows Dessek's fresh rope work, and ends with Lenna's unanswered call. The UI places Lenna and Dessek at Winch-Shaft and invents no closed door, absent destination, teleported performer, or reply.
 - Judge, Game Master, actor replanner, and Narrator each accepted Z.AI Coding Plan `glm-5.2` attempt 1 with zero errors. No retry, repair, text fallback, provider switch, or model timeout ran. A backend restart preserved the exact public-state hash `427aa8e90e25501b56d0ad60bbda441f9ee41a4310f1c4fa0c283e9032ba4dab`.
 - The finalized bundle at `output/playtests/campaign-play/spatial-arrival-proof-glm52-lowwater-ledger-fb2c7074-r04` validates with 1/1 signed action, replay hash `84e1944fb0b992a9ecb5f37152841ae0516207187f55c242e603b1e33e5236fd`, zero hard failures, and `promotionEligible=true`. Humanizer/deslop review kept the note concrete and separated this repair proof from the still-pending replacement 60-action lane. Standalone smoke additions remain `0`.
+
+Replacement Lane A r03 hard stop before action 1:
+
+- Fresh 60-action clone `62335123-90b0-433e-ae25-b17f562730d5` reused the accepted Lowwater Ledger world and Lenna without generation. Its GLM 5.2 Opening completed, but Narrator called Alderman Thessha Aqueli `he` twice while accepted actor authority explicitly says `She carries seizure writs...`.
+- The lane is frozen before any player action and cannot count toward the 60-action claim. Protected evidence isolates the authority gap: the persisted Narrator packet contained only Thessha's name and public `Person nearby` descriptor, while canonical `actors.summary` did not cross the private narration boundary.
+
+Private narrator actor-profile repair:
+
+- The accepted actor summary remains the truth owner. Visibility now copies the summaries of exactly the currently visible people into required `actorProfiles` inside the private, hashed Narrator packet; public `visibleActors` and Campaign Play state remain unchanged.
+- Packet validation enforces a strict handle/name bijection between profiles and visible actors. Narrator may use profiles only for identity, pronoun, and grammatical continuity; profiles are explicitly not support for scene facts, motive, mood, knowledge, action, or disclosure.
+- No structured-gender migration, pronoun heuristic, regex, prose parser, backend rewrite, compatibility path, retry, repair, provider switch, or fallback was added. Humanizer/deslop review kept the instruction direct and limited to the authority boundary.
+- Focused contracts, visibility, narrator, Opening runtime, and turn runtime verification passes `101/101`; shared build and backend typecheck pass. Public-state tests reject both `actorProfiles` and actor summaries. One fresh GLM 5.2 Opening remains required before starting another replacement lane. Standalone smoke additions remain `0`.
