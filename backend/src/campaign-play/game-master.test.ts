@@ -258,8 +258,8 @@ describe("Campaign Play Game Master", () => {
       'ACTOR_DIRECTIVES=[{"handle":"guard","name":"Oren Tide","summary":"A guard at the northern gate.","traits":["observant"],"tags":["guard"],"conditions":[],"goals":[{"status":"active","priority":4,"objective":"Keep the route orderly.","motivation":"Protect the harbor."}],"relations":[{"direction":"from","counterpartName":"Unknown person","relationType":"association","intensity":1,"summary":"They have just met."}]}]',
     );
     expect(String(options.prompt)).toContain("PLAYER_MOVEMENT is code-authoritative");
-    expect(String(options.prompt)).toContain("put it first in effects");
-    expect(String(options.prompt)).toContain("post-effect location");
+    expect(String(options.prompt)).toContain("origin interaction before move_actor");
+    expect(String(options.prompt)).toContain("current location at that effect's chronological position");
     expect(String(options.prompt)).toContain("PLAYER_MOVEMENT=null");
     expect(String(options.prompt)).toContain("Never return an empty effects array");
     expect(String(options.prompt)).toContain(
@@ -609,22 +609,69 @@ describe("Campaign Play Game Master", () => {
         predicates: [{ channel: "direct_perception", locationId: "location-b" }],
       },
     });
-    expect(() => createCampaignPlayGameMaster().compile(frame(), moveRuling, resolution, null, {
+  });
+
+  it("binds compound origin contact and destination scene in chronological locations", () => {
+    const compoundRuling = ruling({
+      movementRouteHandle: "passage",
+      normalizedIntent: {
+        originalText: "I cross to South Harbor and ask the guard about passage delays.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "contact",
+        targets: [
+          { handle: "passage", kind: "route" },
+          { handle: "south", kind: "location" },
+          { handle: "guard", kind: "actor" },
+        ],
+        method: "Cross the passage, then ask the guard",
+        stakes: "Learn why crossings are delayed",
+      },
+    });
+    const result = createCampaignPlayGameMaster().compile(frame(), compoundRuling, resolution, null, {
       elapsedMinutes: 1,
       effects: [
         {
           kind: "record_world_event",
-          eventClass: "scene",
-          performingActorHandle: null,
-          summary: "The player reaches South Harbor.",
-          affectedHandles: ["you", "south"],
+          eventClass: "dialogue",
+          performingActorHandle: "guard",
+          summary: "The guard points the player toward South Harbor.",
+          affectedHandles: ["you", "guard", "here"],
         },
         { kind: "move_actor" },
+        {
+          kind: "record_world_event",
+          eventClass: "scene",
+          performingActorHandle: null,
+          summary: "At South Harbor, the player's call receives no reply.",
+          affectedHandles: ["you", "south"],
+        },
       ],
-    })).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+    });
+
+    expect(result.batch.commands.map((command) => command.kind)).toEqual([
+      "advance_world_time",
+      "record_world_event",
+      "move_actor",
+      "record_world_event",
+    ]);
+    expect(result.batch.commands[1]).toMatchObject({
+      performingActorId: "actor-guard",
+      exposure: {
+        mode: "projectable",
+        predicates: [{ channel: "direct_perception", locationId: "location-a" }],
+      },
+    });
+    expect(result.batch.commands[3]).toMatchObject({
+      performingActorId: null,
+      exposure: {
+        mode: "projectable",
+        predicates: [{ channel: "direct_perception", locationId: "location-b" }],
+      },
+    });
   });
 
-  it("rejects compound contact with an actor left at the origin", () => {
+  it("rejects an origin performer placed after movement", () => {
     const compoundRuling = ruling({
       movementRouteHandle: "passage",
       normalizedIntent: {

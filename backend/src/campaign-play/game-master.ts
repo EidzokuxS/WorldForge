@@ -483,6 +483,7 @@ function compileEffect(
   map: ReadonlyMap<string, CampaignPlayEntityRef>,
   movement: CanonicalMovement | null,
   ruling: CampaignPlayJudgeRuling,
+  perceptionLocationId: string,
 ): CommandArguments {
   switch (effect.kind) {
     case "move_actor": {
@@ -562,11 +563,6 @@ function compileEffect(
       }
       const refs = [owner, possessionRef, ...affectedRefs].filter((reference, index, values) =>
         values.findIndex((candidate) => referenceKey(candidate) === referenceKey(reference)) === index);
-      const playerPlacement = frame.rulebookFrame.placements.find((placement) =>
-        placement.actorId === owner.id && placement.placementKind === "present");
-      if (!playerPlacement) {
-        throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
-      }
       return {
         kind: effect.kind,
         actorId: owner.id,
@@ -582,7 +578,7 @@ function compileEffect(
           mode: "projectable",
           predicates: [{
             channel: "direct_perception",
-            locationId: movement?.to.id ?? playerPlacement.locationId,
+            locationId: perceptionLocationId,
           }],
         },
       };
@@ -605,11 +601,6 @@ function compileEffect(
       if (playerActorId === null) {
         throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
       }
-      const playerPlacement = frame.rulebookFrame.placements.find((placement) =>
-        placement.actorId === playerActorId && placement.placementKind === "present");
-      if (!playerPlacement) {
-        throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
-      }
       if (!affectedRefs.some((reference) =>
         reference.kind === "actor" && reference.id === playerActorId)) {
         affectedRefs.push({ kind: "actor", id: playerActorId });
@@ -625,7 +616,7 @@ function compileEffect(
           mode: "projectable",
           predicates: [{
             channel: "direct_perception",
-            locationId: movement?.to.id ?? playerPlacement.locationId,
+            locationId: perceptionLocationId,
           }],
         } };
     }
@@ -670,9 +661,6 @@ function compile(
   if ((movement === null && movementEffectCount !== 0) || (movement !== null && movementEffectCount !== 1)) {
     throw new CampaignPlayGameMasterError("model_contract_failed", null);
   }
-  if (movement !== null && proposal.effects[0]?.kind !== "move_actor") {
-    throw new CampaignPlayGameMasterError("model_contract_failed", null);
-  }
   const batchId = `batch:${hashCampaignPlayProjection({
     domain: "campaign_play_game_master_batch",
     campaignId: frame.rulebookFrame.campaignId,
@@ -687,7 +675,28 @@ function compile(
     argumentsList.push({ kind: "advance_world_time", elapsedMinutes: proposal.elapsedMinutes,
       readScope: [], writeScope: [], exposure: { mode: "protected" } });
   }
-  argumentsList.push(...proposal.effects.map((effect) => compileEffect(effect, frame, map, movement, ruling)));
+  const playerPlacement = frame.rulebookFrame.placements.find((placement) =>
+    placement.actorId === frame.authority.actorId && placement.placementKind === "present");
+  if (!playerPlacement) {
+    throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
+  }
+  let perceptionLocationId = playerPlacement.locationId;
+  for (const effect of proposal.effects) {
+    argumentsList.push(compileEffect(
+      effect,
+      frame,
+      map,
+      movement,
+      ruling,
+      perceptionLocationId,
+    ));
+    if (effect.kind === "move_actor") {
+      if (!movement) {
+        throw new CampaignPlayGameMasterError("model_contract_failed", null);
+      }
+      perceptionLocationId = movement.to.id;
+    }
+  }
   let expectedWorldVersion = frame.rulebookFrame.worldVersion;
   const commands = argumentsList.map((argumentsValue, order): CampaignPlayCommand => {
     const commandId = deriveCampaignPlayCommandId(frame.rulebookFrame.campaignId, frame.authority.turnId, batchId, order);
@@ -738,9 +747,9 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     "ACTOR_CONTINUITY is protected causal truth about visible actors' own completed actions and outranks conflicting earlier dialogue in VISIBLE_FACTS. Maintain identity and causality: an actor must not deny, misattribute, or forget an action listed under its handle. Reconcile a prior denial instead of repeating it. Use this truth only when the exact PLAYER_INTENT and RULING make it relevant; do not volunteer unrelated protected history. An absent action means unknown, not that the actor did nothing.",
     "ACTOR_DIRECTIVES is protected roleplay authority for each agent actor targeted by PLAYER_INTENT. Use the person's profile, present conditions, active goals, and relations to choose what they actually say or do. These directives establish characterization and decision pressure, not player knowledge or permission to disclose protected facts. Never quote a hidden goal or motive merely because it appears there.",
     "For contact, write the targeted person's actual spoken reply, silence, gesture, or action in the record_world_event summary and copy that person's handle into performingActorHandle. The performer must be one of PLAYER_INTENT's actor targets. Do not replace the exchange with audit labels such as common knowledge, offers no interpretation, nothing further, or has nothing to share. If the person withholds something, show the words or action used to withhold it. A concrete deflection, counterquestion, or condition is useful when ACTOR_DIRECTIVES support one.",
-    "PLAYER_MOVEMENT is code-authoritative. When it is non-null, return exactly one move_actor effect containing only kind and put it first in effects; code binds the player actor, route, endpoints, and direct perception at the destination. Put any record_world_event describing the arrival after move_actor and use eventClass scene for that arrival. When PLAYER_MOVEMENT is null, never return move_actor. Do not copy PLAYER_MOVEMENT fields or exposure into the effect.",
+    "PLAYER_MOVEMENT is code-authoritative. When it is non-null, return exactly one move_actor effect containing only kind at the chronological point where travel occurs. Order every effect as the action happens: origin interaction before move_actor, then arrival or destination interaction after it. Code binds the player actor, route, endpoints, and direct perception from this order. Put any record_world_event describing the arrival after move_actor and use eventClass scene for that arrival. When PLAYER_MOVEMENT is null, never return move_actor. Do not copy PLAYER_MOVEMENT fields or exposure into the effect.",
     "A committed PLAYER_MOVEMENT places the player inside the destination's shared location scene. An arrival summary must not leave the player outside a door, gate, or other access boundary unless supplied route or location authority already represents that boundary. If an unnamed recipient does not answer, report only the lack of a reply; do not claim that the destination is empty or inaccessible.",
-    "record_world_event accepts exactly four eventClass values: dialogue, interaction, discovery, or scene. These are eventClass values only and must never appear in kind. Dialogue and interaction mean that a targeted nonplayer actor performs the event: set performingActorHandle to that actor and include the same handle in affectedHandles. Discovery and scene are actorless: set performingActorHandle to null, and do not use their summary to make a person speak, decide, transact, disclose information, or become a contact. A player's physical attempt that has no nonplayer performer must use its typed effect or an actorless discovery/scene result. For an observe result that changes no durable entity, return exactly one effect shaped as {\"kind\":\"record_world_event\",\"eventClass\":\"discovery\",\"performingActorHandle\":null,\"summary\":\"grounded observation\",\"affectedHandles\":[\"copied handle\"]}; do not add a second inspect, observe, discover, reveal, or describe effect. Use scene for an arrival or other directly perceived situation that is neither observation nor contact. Return a grounded summary and grounded affectedHandles. Omit exposure from record_world_event; code attaches direct perception at the player's post-effect location.",
+    "record_world_event accepts exactly four eventClass values: dialogue, interaction, discovery, or scene. These are eventClass values only and must never appear in kind. Dialogue and interaction mean that a targeted nonplayer actor performs the event: set performingActorHandle to that actor and include the same handle in affectedHandles. Discovery and scene are actorless: set performingActorHandle to null, and do not use their summary to make a person speak, decide, transact, disclose information, or become a contact. A player's physical attempt that has no nonplayer performer must use its typed effect or an actorless discovery/scene result. For an observe result that changes no durable entity, return exactly one effect shaped as {\"kind\":\"record_world_event\",\"eventClass\":\"discovery\",\"performingActorHandle\":null,\"summary\":\"grounded observation\",\"affectedHandles\":[\"copied handle\"]}; do not add a second inspect, observe, discover, reveal, or describe effect. Use scene for an arrival or other directly perceived situation that is neither observation nor contact. Return a grounded summary and grounded affectedHandles. Omit exposure from record_world_event; code attaches direct perception at the player's current location at that effect's chronological position.",
     "Use adjust_actor_possession whenever the resolved action gives the player a countable possession or consumes one. For a new possession, return operation acquire, the player actor handle, null possessionHandle, its concrete name, positive quantity, a player-visible summary, and grounded affectedHandles. For more of an existing possession, use its visible possessionHandle and null name. To consume one, return operation spend, its visible possessionHandle, null name, and a positive quantity. Do not add record_world_event for the same gain or spend: this typed effect is the public consequence and Rulebook truth.",
     "Return at least one effect. Never return an empty effects array.",
     "Return one strict schema object and no prose.",
