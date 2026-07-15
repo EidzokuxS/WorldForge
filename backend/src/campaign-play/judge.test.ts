@@ -71,6 +71,7 @@ function frame(): CampaignPlayJudgeFrame {
       { handle: "location-harbor", kind: "location", summary: "The harbor gate is closed." },
       { handle: "route-reef", kind: "route", summary: "The reef road is guarded." },
       { handle: "actor-guard", kind: "actor", summary: "A tired guard watches the road." },
+      { handle: "observation-latch", kind: "observation", summary: "Fresh paint marks the gate latch." },
       { handle: "choice-ask", kind: "choice", summary: "Ask the guard why the road is closed." },
       { handle: "choice-cross", kind: "choice", summary: "Cross the reef road." },
     ],
@@ -266,6 +267,14 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("Do not change that detail's origin, age, owner, location, or state");
     expect(sentPrompt).toContain("it never overrides the current visible placement or condition of an object");
     expect(sentPrompt).toContain("never make a visible object vanish or move without explicit evidence");
+    expect(sentPrompt).toContain("Every targets entry must copy one exact {handle, kind} pair from TARGET_CATALOG");
+    expect(sentPrompt).toContain("Observation and choice handles are not world targets");
+    expect(sentPrompt).toContain(
+      'TARGET_CATALOG=[{"handle":"actor-you","kind":"actor"},{"handle":"location-harbor","kind":"location"},{"handle":"route-reef","kind":"route"},{"handle":"actor-guard","kind":"actor"}]',
+    );
+    expect(sentPrompt).toContain(
+      'CITATION_HANDLES=["actor-you","location-harbor","route-reef","actor-guard","observation-latch","choice-ask","choice-cross"]',
+    );
     expect(sentPrompt).toContain("stakes ask what the player hopes to learn or accomplish; they are not evidence");
     expect(sentPrompt).toContain("A clean, empty, missing, or disturbed surface proves only its currently observable state");
     expect(sentPrompt).toContain("reason field explains feasibility and result bounds");
