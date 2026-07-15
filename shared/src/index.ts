@@ -231,7 +231,6 @@ export type {
   CampaignPlayAvailableIntent,
   CampaignPlayOpeningContext,
   CampaignPlayActionContext,
-  CampaignPlayNarratorActorProfile,
   CampaignPlayNarratorPacket,
   CampaignPlayNarrationBeat,
   CampaignPlaySuggestedAction,

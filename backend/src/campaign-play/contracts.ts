@@ -425,12 +425,6 @@ export const campaignPlayVisibleActorSchema = z.object({
   accent: accentSchema,
 }).strict();
 
-const campaignPlayNarratorActorProfileSchema = z.object({
-  handle: handleSchema,
-  name: nameSchema,
-  summary: textSchema,
-}).strict();
-
 export const campaignPlayVisibleRouteSchema = z.object({
   handle: handleSchema,
   destinationHandle: handleSchema,
@@ -542,8 +536,6 @@ const campaignPlayNarratorPacketBaseSchema =
     currentLocation: campaignPlayVisibleLocationSchema,
     visibleActors: z.array(campaignPlayVisibleActorSchema)
       .max(CAMPAIGN_PLAY_LIMITS.visibleActors),
-    actorProfiles: z.array(campaignPlayNarratorActorProfileSchema)
-      .max(CAMPAIGN_PLAY_LIMITS.visibleActors),
     visibleRoutes: z.array(campaignPlayVisibleRouteSchema)
       .max(CAMPAIGN_PLAY_LIMITS.visibleRoutes),
     visiblePressures: z.array(campaignPlayVisiblePressureSchema)
@@ -600,39 +592,6 @@ export const campaignPlayNarratorPacketSchema:
       ["visibleActors"],
       "Visible actor handles",
     );
-    addDuplicateIssue(
-      packet.actorProfiles.map((profile) => profile.handle),
-      context,
-      ["actorProfiles"],
-      "Narrator actor profile handles",
-    );
-    if (packet.actorProfiles.length !== packet.visibleActors.length) {
-      context.addIssue({
-        code: "custom",
-        path: ["actorProfiles"],
-        message: "Narrator actor profiles must match every visible actor exactly.",
-      });
-    }
-    packet.visibleActors.forEach((actor, index) => {
-      const profile = packet.actorProfiles.find((candidate) => candidate.handle === actor.handle);
-      if (!profile || profile.name !== actor.name) {
-        context.addIssue({
-          code: "custom",
-          path: ["actorProfiles", index],
-          message: "Narrator actor profile handle and name must match a visible actor.",
-        });
-      }
-    });
-    packet.actorProfiles.forEach((profile, index) => {
-      const actor = packet.visibleActors.find((candidate) => candidate.handle === profile.handle);
-      if (!actor || actor.name !== profile.name) {
-        context.addIssue({
-          code: "custom",
-          path: ["actorProfiles", index],
-          message: "Narrator actor profile must not name a non-visible actor.",
-        });
-      }
-    });
     addDuplicateIssue(
       packet.visibleRoutes.map((route) => route.handle),
       context,

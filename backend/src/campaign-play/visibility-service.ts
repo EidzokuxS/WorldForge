@@ -54,7 +54,6 @@ interface ActorRow {
   kind: "person";
   controller: "human" | "agent";
   name: string;
-  summary: string;
 }
 
 interface LocationRow {
@@ -750,7 +749,6 @@ function visibleScene(
 ): {
   currentLocation: CampaignPlayVisibleLocation;
   visibleActors: CampaignPlayVisibleActor[];
-  actorProfiles: CampaignPlayNarratorPacket["actorProfiles"];
   visibleRoutes: CampaignPlayVisibleRoute[];
   visiblePressures: CampaignPlayVisiblePressure[];
   possessions: CampaignPlayVisiblePossession[];
@@ -769,7 +767,6 @@ function visibleScene(
     );
   }
   const actors = handle.sqlite.prepare(`SELECT actor.id, actor.kind, actor.controller, actor.name,
-      actor.summary,
       condition.condition
     FROM actor_placements placement JOIN actors actor ON actor.id = placement.actor_id
     LEFT JOIN campaign_play_actor_conditions condition ON condition.actor_id = actor.id
@@ -847,11 +844,6 @@ function visibleScene(
       monogram: [...actor.name].slice(0, 2).join("").toUpperCase(),
       descriptor: actor.condition ? `Appears ${actor.condition}` : "Person nearby",
       accent: "slate",
-    })),
-    actorProfiles: actors.map((actor) => ({
-      handle: publicHandle("actor", handle.campaignId, actor.id),
-      name: actor.name,
-      summary: actor.summary,
     })),
     visibleRoutes: routes.map((route) => ({
       handle: publicHandle("route", handle.campaignId, route.id),

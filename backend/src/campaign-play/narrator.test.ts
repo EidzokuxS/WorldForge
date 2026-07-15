@@ -44,11 +44,6 @@ function packetFixture(): CampaignPlayNarratorPacket {
       descriptor: "A bell keeper gripping a wet signal ledger.",
       accent: "amber-7",
     }],
-    actorProfiles: [{
-      handle: "actor_public_keeper",
-      name: "Mara Venn",
-      summary: "A bell keeper who says she records every signal before acting.",
-    }],
     visibleRoutes: [{
       handle: "route_public_gate",
       destinationHandle: "location_public_market",
@@ -360,9 +355,9 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("do not claim that actor traveled to another place");
     expect(prompt).toContain("sourceMoment is the exact previous accepted player-visible scene");
     expect(prompt).toContain("Every concrete claim in a beat must be supported");
-    expect(prompt).toContain("actorProfiles is private identity and grammatical authority");
-    expect(prompt).toContain("it is not a source of scene facts, motive, mood, knowledge, action, or disclosure");
-    expect(prompt).toContain('"summary":"A bell keeper who says she records every signal before acting."');
+    expect(prompt).toContain("Never guess a person's gender or pronouns from their name, title, role, or appearance");
+    expect(prompt).toContain("only when sourceMoment, newObservations, consequences, or continuity already uses it unambiguously");
+    expect(prompt).toContain("Otherwise repeat the person's name or use a supported role noun");
     expect(prompt).toContain("you may not decide that the ring is hollow or solid");
     expect(prompt).toContain("An action_handoff is optional except when the player must clarify an action");
     expect(prompt).toContain("must not recap the result, restate a stalled goal");
@@ -392,6 +387,7 @@ describe("Campaign Play narrator", () => {
     expect(prompt).not.toContain('"accent"');
     expect(prompt).not.toContain('"monogram"');
     expect(prompt).not.toContain("amber-7");
+    expect(prompt).not.toContain("records every signal before acting");
   });
 
   it("does not treat macro placement as immediate-scene custody", () => {

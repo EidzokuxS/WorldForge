@@ -238,11 +238,6 @@ function narratorPacketFixture(): CampaignPlayNarratorPacket {
       descriptor: "A soaked guard with a dented lantern.",
       accent: "amber-7",
     }],
-    actorProfiles: [{
-      handle: "actor_guard",
-      name: "Mara Venn",
-      summary: "A signal guard who says she records each crossing before opening the gate.",
-    }],
     visibleRoutes: [{
       handle: "route_market",
       destinationHandle: "location_market",
@@ -742,22 +737,6 @@ describe("Campaign Play shared public contracts", () => {
       acceptedWorldVersion: 7,
       worldVersion: 6,
       runtimeRevision: 29,
-    }).success).toBe(false);
-  });
-
-  it("keeps private narrator actor profiles out of public state", () => {
-    const packet = narratorPacketFixture();
-    const state = stateFixture();
-    const summary = packet.actorProfiles[0]!.summary;
-
-    expect(JSON.stringify(campaignPlayStateSchema.parse(state))).not.toContain(summary);
-    expect(campaignPlayStateSchema.safeParse({
-      ...state,
-      actorProfiles: packet.actorProfiles,
-    }).success).toBe(false);
-    expect(campaignPlayStateSchema.safeParse({
-      ...state,
-      visibleActors: [{ ...state.visibleActors[0]!, summary }],
     }).success).toBe(false);
   });
 
@@ -1400,27 +1379,6 @@ describe("Campaign Play shared public contracts", () => {
     }).success).toBe(false);
   });
 
-  it("requires private narrator profiles to match visible actors exactly", () => {
-    const packet = narratorPacketFixture();
-    expect(campaignPlayNarratorPacketSchema.safeParse(packet).success).toBe(true);
-    expect(campaignPlayNarratorPacketSchema.safeParse({
-      ...packet,
-      actorProfiles: [],
-    }).success).toBe(false);
-    expect(campaignPlayNarratorPacketSchema.safeParse({
-      ...packet,
-      actorProfiles: [{ ...packet.actorProfiles[0]!, name: "Another person" }],
-    }).success).toBe(false);
-    expect(campaignPlayNarratorPacketSchema.safeParse({
-      ...packet,
-      actorProfiles: [{ ...packet.actorProfiles[0]!, handle: "actor_hidden" }],
-    }).success).toBe(false);
-    expect(campaignPlayNarratorPacketSchema.safeParse({
-      ...packet,
-      actorProfiles: [packet.actorProfiles[0]!, packet.actorProfiles[0]!],
-    }).success).toBe(false);
-  });
-
   it("keeps every reusable public object strict against unknown and protected keys", () => {
     const packet = narratorPacketFixture();
     const state = stateFixture();
@@ -1560,10 +1518,6 @@ describe("Campaign Play shared public contracts", () => {
         { length: CAMPAIGN_PLAY_LIMITS.visibleActors },
         (_, index) => ({ ...packet.visibleActors[0]!, handle: `actor_${index}` }),
       ),
-      actorProfiles: Array.from(
-        { length: CAMPAIGN_PLAY_LIMITS.visibleActors },
-        (_, index) => ({ ...packet.actorProfiles[0]!, handle: `actor_${index}` }),
-      ),
       visibleRoutes: Array.from(
         { length: CAMPAIGN_PLAY_LIMITS.visibleRoutes },
         (_, index) => ({
@@ -1603,7 +1557,6 @@ describe("Campaign Play shared public contracts", () => {
     expect(campaignPlayNarratorPacketSchema.safeParse(cappedPacket).success).toBe(true);
     for (const key of [
       "visibleActors",
-      "actorProfiles",
       "visibleRoutes",
       "visiblePressures",
       "newObservations",

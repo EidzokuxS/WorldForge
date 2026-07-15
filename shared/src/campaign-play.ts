@@ -295,12 +295,6 @@ export interface CampaignPlayActionContext {
   clarificationQuestion: string | null;
 }
 
-export interface CampaignPlayNarratorActorProfile {
-  handle: string;
-  name: string;
-  summary: string;
-}
-
 export interface CampaignPlayNarratorPacket extends CampaignPlayPublicVersions {
   campaignId: string;
   turnId: string;
@@ -310,7 +304,6 @@ export interface CampaignPlayNarratorPacket extends CampaignPlayPublicVersions {
   sourceMoment: string | null;
   currentLocation: CampaignPlayVisibleLocation;
   visibleActors: CampaignPlayVisibleActor[];
-  actorProfiles: CampaignPlayNarratorActorProfile[];
   visibleRoutes: CampaignPlayVisibleRoute[];
   visiblePressures: CampaignPlayVisiblePressure[];
   possessions: CampaignPlayVisiblePossession[];
