@@ -449,6 +449,67 @@ function openingBatch() {
 }
 
 describe("Campaign Play Rulebook preflight", () => {
+  it("derives the opening base version from exact positive player starting possessions", () => {
+    const frame = frameFixture("opening_required");
+    frame.possessions = ["Copper chit", "Sail needle"].map((name) => {
+      const possessionKey = deriveCampaignPlayPossessionKey(name);
+      return {
+        possessionId: deriveCampaignPlayPossessionId(CAMPAIGN_ID, PLAYER_ID, possessionKey),
+        actorId: PLAYER_ID,
+        possessionKey,
+        name,
+        quantity: 1,
+      };
+    });
+    frame.worldVersion += frame.possessions.length;
+    const authority: CampaignPlayRulebookAuthority = {
+      purpose: "opening",
+      turnId: TURN_ID,
+      actorId: PLAYER_ID,
+      rootParent: { kind: "turn", turnId: TURN_ID },
+      authorizedRefs: [
+        ...allRefs(),
+        ...frame.possessions.map((possession) => ({
+          kind: "possession" as const,
+          id: possession.possessionId,
+        })),
+      ],
+      witnessActorIds: [],
+      knownWorldEventIds: [],
+    };
+    const batch = openingBatch();
+    batch.baseWorldVersion = frame.worldVersion;
+    batch.commands.forEach((command) => {
+      command.expectedWorldVersion += frame.possessions.length;
+    });
+
+    expect(preflightCampaignPlayRulebook({ frame, authority, batch }))
+      .toMatchObject({ accepted: true });
+
+    const stale = structuredClone(frame);
+    stale.worldVersion -= 1;
+    expect(preflightCampaignPlayRulebook({ frame: stale, authority, batch }))
+      .toMatchObject({ accepted: false, denial: { code: "invalid_frame" } });
+
+    const foreignOwned = structuredClone(frame);
+    foreignOwned.possessions[0]!.actorId = "actor-key";
+    foreignOwned.possessions[0]!.possessionId = deriveCampaignPlayPossessionId(
+      CAMPAIGN_ID,
+      "actor-key",
+      foreignOwned.possessions[0]!.possessionKey,
+    );
+    expect(preflightCampaignPlayRulebook({ frame: foreignOwned, authority, batch }))
+      .toMatchObject({ accepted: false, denial: { code: "invalid_frame" } });
+
+    const empty = frameFixture("character_required");
+    empty.possessions = [frame.possessions[0]!];
+    expect(preflightCampaignPlayRulebook({
+      frame: empty,
+      authority,
+      batch,
+    })).toMatchObject({ accepted: false, denial: { code: "invalid_frame" } });
+  });
+
   it("simulates every ordinary command kind in order without mutating the frozen frame", () => {
     const frame = frameFixture();
     const before = structuredClone(frame);

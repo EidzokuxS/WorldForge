@@ -228,16 +228,18 @@ function validFrame(frame: CampaignPlayRulebookFrame): boolean {
   const playerPlacements = frame.human === null
     ? []
     : frame.placements.filter((placement) => placement.actorId === frame.human!.actorId);
-  const expectedOpeningBaseVersion = frame.acceptedWorldVersion + 1;
-  const expectedReadyMinimumVersion = expectedOpeningBaseVersion + 2 + world.pressures.length;
+  const openingPossessionsValid = frame.human !== null && frame.possessions.every((possession) =>
+    possession.actorId === frame.human!.actorId && possession.quantity > 0);
+  const expectedOpeningBaseVersion = frame.acceptedWorldVersion + 1 + frame.possessions.length;
+  const expectedReadyMinimumVersion = frame.acceptedWorldVersion + 3 + world.pressures.length;
   const setupShapeValid = frame.setupPhase === "character_required"
     ? frame.human === null && frame.worldVersion === frame.acceptedWorldVersion
       && frame.worldTimeMinutes === null
-      && frame.pressureStates.length === 0 && !playerPresent
+      && frame.pressureStates.length === 0 && frame.possessions.length === 0 && !playerPresent
     : frame.setupPhase === "opening_required"
       ? frame.human !== null && frame.worldVersion === expectedOpeningBaseVersion
         && frame.worldTimeMinutes === null && playerPlacements.length === 0
-        && frame.pressureStates.length === 0
+        && frame.pressureStates.length === 0 && openingPossessionsValid
       : frame.human !== null && frame.worldVersion >= expectedReadyMinimumVersion
         && frame.worldTimeMinutes !== null && playerPlacements.length === 1 && playerPresent
         && JSON.stringify(currentPressureIds) === JSON.stringify(pressureIds);

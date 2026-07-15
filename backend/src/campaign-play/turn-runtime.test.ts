@@ -994,7 +994,7 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(stopped.turn).toMatchObject({
       stage: "interrupted",
       interruptedStage: "admitted",
-      errorCode: "model_contract_failed",
+      errorCode: "model_contract_invalid",
     });
     expect(countForTurn(handle, "campaign_play_commands", admission.turnId)).toBe(0);
   });
