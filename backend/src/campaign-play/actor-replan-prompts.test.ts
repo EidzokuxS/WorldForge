@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildCampaignPlayActorReplanPrompt,
   campaignPlayActorReplanProposalSchema,
+  campaignPlayActorReplanProposalSchemaForFrame,
   type CampaignPlayActorReplanPromptFrame,
 } from "./actor-replan-prompts.js";
 
@@ -116,6 +117,56 @@ describe("campaign play actor replan prompt", () => {
       ...proposal,
       priority: 6,
     }).success).toBe(false);
+  });
+
+  it("binds active goals and every intent target to the current actor frame", () => {
+    const schema = campaignPlayActorReplanProposalSchemaForFrame(frame);
+    expect(schema).not.toBeNull();
+    if (!schema) throw new Error("The actor frame requires an output schema.");
+    const proposal = {
+      goalHandle: "goal:keep-gate-open",
+      cadenceMinutes: 20,
+      priority: 4,
+      intent: {
+        kind: "contact",
+        targetHandles: ["location:gate"],
+        method: "Question the watch",
+        stakes: "The safe passage may close",
+      },
+      steps: [{
+        intent: {
+          kind: "observe",
+          targetHandles: ["location:gate"],
+          method: "Read the watch rota",
+          stakes: null,
+        },
+        observableTrace: "Fresh chalk marks interrupt the watch rota beside the gate.",
+        elapsedBounds: { minimumMinutes: 5, maximumMinutes: 15 },
+      }],
+    };
+
+    expect(schema.safeParse(proposal).success).toBe(true);
+    expect(schema.safeParse({
+      ...proposal,
+      goalHandle: "goal:foreign",
+    }).success).toBe(false);
+    expect(schema.safeParse({
+      ...proposal,
+      intent: { ...proposal.intent, targetHandles: ["location:foreign"] },
+    }).success).toBe(false);
+    expect(schema.safeParse({
+      ...proposal,
+      steps: [{
+        ...proposal.steps[0],
+        intent: { ...proposal.steps[0]!.intent, targetHandles: ["location:foreign"] },
+      }],
+    }).success).toBe(false);
+    expect(campaignPlayActorReplanProposalSchemaForFrame({
+      ...frame,
+      entities: frame.entities.map((entity) => entity.kind === "goal"
+        ? { ...entity, state: "completed" }
+        : entity),
+    })).toBeNull();
   });
 
   it.each([

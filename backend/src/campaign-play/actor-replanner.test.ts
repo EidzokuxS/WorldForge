@@ -504,6 +504,7 @@ describe("Campaign Play actor replanner", () => {
     const generateObject = vi.fn(async (request: {
       prompt: string;
       abortSignal?: AbortSignal;
+      schema: { safeParse(value: unknown): { success: boolean } };
     }) => ({
       object: replanProposalFromPrompt(request.prompt),
       trace: acceptedTrace(1_025, 1_000),
@@ -535,6 +536,24 @@ describe("Campaign Play actor replanner", () => {
     expect(generateObject.mock.calls[0]![0].prompt).toContain(
       "occurred at world time 0; learned at world time 0",
     );
+    const submitted = replanProposalFromPrompt(generateObject.mock.calls[0]![0].prompt);
+    const submittedSchema = generateObject.mock.calls[0]![0].schema;
+    expect(submittedSchema.safeParse(submitted).success).toBe(true);
+    expect(submittedSchema.safeParse({
+      ...submitted,
+      goalHandle: "goal:foreign",
+    }).success).toBe(false);
+    expect(submittedSchema.safeParse({
+      ...submitted,
+      intent: { ...submitted.intent, targetHandles: ["location:foreign"] },
+    }).success).toBe(false);
+    expect(submittedSchema.safeParse({
+      ...submitted,
+      steps: [{
+        ...submitted.steps[0],
+        intent: { ...submitted.steps[0]!.intent, targetHandles: ["location:foreign"] },
+      }],
+    }).success).toBe(false);
     expect(generateObject.mock.calls[0]![0]).toMatchObject({
       allowRepair: false,
       allowTextFallback: false,
@@ -572,4 +591,5 @@ describe("Campaign Play actor replanner", () => {
       WHERE campaign_id = ? AND actor_id = 'actor-b' AND status = 'active'`).get(CAMPAIGN_ID))
       .toEqual({ count: 1 });
   });
+
 });

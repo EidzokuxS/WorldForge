@@ -27,6 +27,7 @@ import {
 import {
   buildCampaignPlayActorReplanPrompt,
   campaignPlayActorReplanProposalSchema,
+  campaignPlayActorReplanProposalSchemaForFrame,
   type CampaignPlayActorReplanPromptEntity,
   type CampaignPlayActorReplanPromptFrame,
   type CampaignPlayActorReplanProposal,
@@ -524,6 +525,13 @@ export function createCampaignPlayActorReplanner(
       if (job.stage === "interrupted" && job.claimTurnWorkerEpoch === request.token.epoch) {
         throw new CampaignPlayActorReplannerError("replan_epoch_lost");
       }
+      const compilation = compilationFrame(handle, frame);
+      const proposalSchema = campaignPlayActorReplanProposalSchemaForFrame(
+        compilation.promptFrame,
+      );
+      if (!proposalSchema) {
+        throw new CampaignPlayActorReplannerError("replan_state_invalid");
+      }
       const workerEpoch = job.workerEpoch + 1;
       const stageId = deriveCampaignPlayActorReplanStageId(request.jobId);
       const attempt = (handle.sqlite.prepare(`SELECT count(*) AS count
@@ -566,7 +574,6 @@ export function createCampaignPlayActorReplanner(
           );
         },
       });
-      const compilation = compilationFrame(handle, scheduler.buildActorFrame(request.jobId));
       const startedAt = dependencies.now();
       requireTurnLease(handle, request.token, startedAt);
       let observedTrace: Readonly<SafeGenerateTrace> | undefined;
@@ -574,7 +581,7 @@ export function createCampaignPlayActorReplanner(
       try {
         const generated = await dependencies.generateObject({
           model: request.model,
-          schema: campaignPlayActorReplanProposalSchema,
+          schema: proposalSchema,
           prompt: buildCampaignPlayActorReplanPrompt(compilation.promptFrame),
           temperature: request.temperature,
           maxOutputTokens: request.maxOutputTokens,

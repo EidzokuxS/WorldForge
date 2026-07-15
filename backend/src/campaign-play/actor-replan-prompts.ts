@@ -18,16 +18,18 @@ const replanIntentSchema = z.object({
   stakes: boundedLine(CAMPAIGN_PLAY_LIMITS.shortText).nullable(),
 }).strict();
 
+const replanStepSchema = z.object({
+  intent: replanIntentSchema,
+  observableTrace: boundedText(CAMPAIGN_PLAY_LIMITS.shortText),
+  elapsedBounds: campaignPlayElapsedBoundsSchema,
+}).strict();
+
 export const campaignPlayActorReplanProposalSchema = z.object({
   goalHandle: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
   cadenceMinutes: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes),
   priority: z.number().int().min(1).max(5),
   intent: replanIntentSchema,
-  steps: z.array(z.object({
-    intent: replanIntentSchema,
-    observableTrace: boundedText(CAMPAIGN_PLAY_LIMITS.shortText),
-    elapsedBounds: campaignPlayElapsedBoundsSchema,
-  }).strict()).min(1).max(CAMPAIGN_PLAY_LIMITS.planSteps),
+  steps: z.array(replanStepSchema).min(1).max(CAMPAIGN_PLAY_LIMITS.planSteps),
 }).strict();
 
 export type CampaignPlayActorReplanProposal =
@@ -53,6 +55,38 @@ export interface CampaignPlayActorReplanPromptFrame {
     stepCount: number;
   };
   entities: CampaignPlayActorReplanPromptEntity[];
+}
+
+function frameHandleSchema(handles: readonly string[]) {
+  const [first, ...rest] = handles;
+  return first === undefined ? null : z.enum([first, ...rest]);
+}
+
+export function campaignPlayActorReplanProposalSchemaForFrame(
+  frame: CampaignPlayActorReplanPromptFrame,
+) {
+  const entityHandleSchema = frameHandleSchema([
+    ...new Set(frame.entities.map((entity) => entity.handle)),
+  ]);
+  const activeGoalHandleSchema = frameHandleSchema([
+    ...new Set(frame.entities
+      .filter((entity) => entity.kind === "goal" && entity.state === "active")
+      .map((entity) => entity.handle)),
+  ]);
+  if (!entityHandleSchema || !activeGoalHandleSchema) return null;
+
+  const frameIntentSchema = replanIntentSchema.extend({
+    targetHandles: z.array(entityHandleSchema)
+      .max(CAMPAIGN_PLAY_LIMITS.targets)
+      .refine((handles) => new Set(handles).size === handles.length),
+  });
+  return campaignPlayActorReplanProposalSchema.extend({
+    goalHandle: activeGoalHandleSchema,
+    intent: frameIntentSchema,
+    steps: z.array(replanStepSchema.extend({
+      intent: frameIntentSchema,
+    })).min(1).max(CAMPAIGN_PLAY_LIMITS.planSteps),
+  });
 }
 
 function promptData(frame: CampaignPlayActorReplanPromptFrame): string {
