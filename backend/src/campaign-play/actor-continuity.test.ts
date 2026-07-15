@@ -12,18 +12,20 @@ afterEach(() => {
 function handle(): CampaignPlayDatabaseHandle {
   const sqlite = new Database(":memory:");
   databases.push(sqlite);
-  sqlite.exec(`CREATE TABLE campaign_play_actor_jobs (
-      job_id TEXT PRIMARY KEY,
+  sqlite.exec(`CREATE TABLE campaign_play_commands (
+      command_id TEXT PRIMARY KEY,
       campaign_id TEXT NOT NULL,
-      actor_id TEXT NOT NULL,
-      stage TEXT NOT NULL,
-      completed_at INTEGER
+      command_kind TEXT NOT NULL,
+      source_json TEXT NOT NULL,
+      protected_payload_json TEXT NOT NULL
     );
-    CREATE TABLE campaign_play_actor_proposals (
-      proposal_id TEXT PRIMARY KEY,
-      job_id TEXT NOT NULL,
-      status TEXT NOT NULL,
-      commands_json TEXT NOT NULL
+    CREATE TABLE campaign_play_receipts (
+      receipt_id TEXT PRIMARY KEY,
+      campaign_id TEXT NOT NULL,
+      command_id TEXT NOT NULL,
+      outcome TEXT NOT NULL,
+      result_world_version INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
     );`);
   return {
     campaignId: "campaign-continuity",
@@ -34,102 +36,137 @@ function handle(): CampaignPlayDatabaseHandle {
   };
 }
 
-function actorEvent(input: {
-  actorId: string;
-  expectedWorldVersion: number;
-  summary: string;
-}) {
-  return {
-    commandId: `command-${input.expectedWorldVersion}`,
-    batchId: `batch-${input.expectedWorldVersion}`,
-    order: 0,
-    causalParent: { kind: "actor_job" as const, jobId: `job-${input.expectedWorldVersion}` },
-    source: { kind: "actor" as const, actorId: input.actorId },
-    expectedWorldVersion: input.expectedWorldVersion,
-    readScope: [{ kind: "actor" as const, id: input.actorId }],
-    writeScope: [],
-    exposure: { mode: "protected" as const },
-    kind: "record_world_event" as const,
-    eventClass: "interaction" as const,
-    performingActorId: input.actorId,
-    summary: input.summary,
-    observableTrace: "Fresh work remains at the site.",
-    affectedRefs: [{ kind: "actor" as const, id: input.actorId }],
-  };
-}
-
-function insertProposal(input: {
+function insertEvent(input: {
   handle: CampaignPlayDatabaseHandle;
-  actorId: string;
-  jobId: string;
-  completedAt: number;
-  status: "accepted" | "rejected";
-  command: ReturnType<typeof actorEvent>;
+  commandId: string;
+  source: { kind: "actor"; actorId: string } | { kind: "system"; system: string };
+  performingActorId: string | null;
+  resultWorldVersion: number;
+  createdAt: number;
+  summary: string;
+  observableTrace?: string | null;
+  committed?: boolean;
 }) {
-  input.handle.sqlite.prepare(`INSERT INTO campaign_play_actor_jobs
-    (job_id, campaign_id, actor_id, stage, completed_at)
-    VALUES (?, ?, ?, 'settled', ?)`).run(
-    input.jobId,
+  input.handle.sqlite.prepare(`INSERT INTO campaign_play_commands
+    (command_id, campaign_id, command_kind, source_json, protected_payload_json)
+    VALUES (?, ?, 'record_world_event', ?, ?)`).run(
+    input.commandId,
     input.handle.campaignId,
-    input.actorId,
-    input.completedAt,
+    JSON.stringify(input.source),
+    JSON.stringify({
+      eventClass: input.performingActorId === null ? "discovery" : "dialogue",
+      performingActorId: input.performingActorId,
+      summary: input.summary,
+      observableTrace: input.observableTrace === undefined
+        ? "Fresh work remains at the site."
+        : input.observableTrace,
+      affectedRefs: [],
+    }),
   );
-  input.handle.sqlite.prepare(`INSERT INTO campaign_play_actor_proposals
-    (proposal_id, job_id, status, commands_json) VALUES (?, ?, ?, ?)`).run(
-    `proposal-${input.jobId}`,
-    input.jobId,
-    input.status,
-    JSON.stringify([input.command]),
+  if (input.committed === false) return;
+  input.handle.sqlite.prepare(`INSERT INTO campaign_play_receipts
+    (receipt_id, campaign_id, command_id, outcome, result_world_version, created_at)
+    VALUES (?, ?, ?, 'applied', ?, ?)`).run(
+    `receipt-${input.commandId}`,
+    input.handle.campaignId,
+    input.commandId,
+    input.resultWorldVersion,
+    input.createdAt,
   );
 }
 
 describe("Campaign Play actor continuity", () => {
-  it("loads accepted completed actions in causal order without future or rejected proposals", () => {
+  it("loads receipt-backed performed events in causal order for only their owning actor", () => {
     const database = handle();
     const actorId = "actor-tibbs";
-    insertProposal({
+    insertEvent({
       handle: database,
-      actorId,
-      jobId: "job-4",
-      completedAt: 4,
-      status: "accepted",
-      command: actorEvent({ actorId, expectedWorldVersion: 4, summary: "Tibbs salvaged viable seed." }),
+      commandId: "command-actor-4",
+      source: { kind: "actor", actorId },
+      performingActorId: actorId,
+      resultWorldVersion: 4,
+      createdAt: 4,
+      summary: "Tibbs salvaged viable seed.",
     });
-    insertProposal({
+    insertEvent({
       handle: database,
-      actorId,
-      jobId: "job-7",
-      completedAt: 7,
-      status: "accepted",
-      command: actorEvent({ actorId, expectedWorldVersion: 7, summary: "Tibbs marked the new blight line." }),
+      commandId: "command-source-only-4",
+      source: { kind: "actor", actorId },
+      performingActorId: null,
+      resultWorldVersion: 4,
+      createdAt: 5,
+      summary: "Tibbs checks the seed beds for new blight.",
     });
-    insertProposal({
+    insertEvent({
       handle: database,
-      actorId,
-      jobId: "job-9",
-      completedAt: 9,
-      status: "accepted",
-      command: actorEvent({ actorId, expectedWorldVersion: 9, summary: "A future action." }),
+      commandId: "command-opening-5",
+      source: { kind: "system", system: "opening_bootstrap" },
+      performingActorId: actorId,
+      resultWorldVersion: 5,
+      createdAt: 6,
+      summary: "Tibbs asks the newcomer why the blight brought them here.",
+      observableTrace: null,
     });
-    insertProposal({
+    insertEvent({
       handle: database,
-      actorId,
-      jobId: "job-6",
-      completedAt: 6,
-      status: "rejected",
-      command: actorEvent({ actorId, expectedWorldVersion: 6, summary: "A rejected action." }),
+      commandId: "command-dialogue-7",
+      source: { kind: "system", system: "game_master" },
+      performingActorId: actorId,
+      resultWorldVersion: 7,
+      createdAt: 7,
+      summary: "Tibbs refuses to name the seed buyer.",
+      observableTrace: null,
+    });
+    insertEvent({
+      handle: database,
+      commandId: "command-future-9",
+      source: { kind: "actor", actorId },
+      performingActorId: actorId,
+      resultWorldVersion: 9,
+      createdAt: 9,
+      summary: "A future action.",
+    });
+    insertEvent({
+      handle: database,
+      commandId: "command-uncommitted-6",
+      source: { kind: "actor", actorId },
+      performingActorId: actorId,
+      resultWorldVersion: 6,
+      createdAt: 6,
+      summary: "An uncommitted action.",
+      committed: false,
+    });
+    insertEvent({
+      handle: database,
+      commandId: "command-other-6",
+      source: { kind: "system", system: "game_master" },
+      performingActorId: "actor-other",
+      resultWorldVersion: 6,
+      createdAt: 6,
+      summary: "Another actor speaks.",
     });
 
     expect(loadCampaignPlayActorContinuity(
       database,
-      [{ actorHandle: "tibbs", actorId }],
-      7,
-    )).toEqual([{
-      actorHandle: "tibbs",
-      recentOwnActions: [
-        { summary: "Tibbs salvaged viable seed.", observableTrace: "Fresh work remains at the site." },
-        { summary: "Tibbs marked the new blight line.", observableTrace: "Fresh work remains at the site." },
+      [
+        { actorHandle: "tibbs", actorId },
+        { actorHandle: "other", actorId: "actor-other" },
       ],
-    }]);
+      7,
+    )).toEqual([
+      {
+        actorHandle: "other",
+        recentOwnActions: [{ summary: "Another actor speaks.", observableTrace: "Fresh work remains at the site." }],
+      },
+      {
+        actorHandle: "tibbs",
+        recentOwnActions: [
+          { summary: "Tibbs salvaged viable seed.", observableTrace: "Fresh work remains at the site." },
+          { summary: "Tibbs checks the seed beds for new blight.", observableTrace: "Fresh work remains at the site." },
+          { summary: "Tibbs asks the newcomer why the blight brought them here.", observableTrace: null },
+          { summary: "Tibbs refuses to name the seed buyer.", observableTrace: null },
+        ],
+      },
+    ]);
   });
 });

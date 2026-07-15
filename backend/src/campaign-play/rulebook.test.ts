@@ -405,7 +405,7 @@ function ordinaryBatch() {
   return { batchId: BATCH_ID, baseWorldVersion: READY_VERSION, commands };
 }
 
-function openingBatch() {
+function openingBatch(): RulebookCommandBatch {
   const root = { kind: "turn" as const, turnId: TURN_ID };
   return {
     batchId: BATCH_ID,
@@ -446,6 +446,35 @@ function openingBatch() {
       },
     ],
   };
+}
+
+function openingBatchWithPremise(): RulebookCommandBatch {
+  const batch = openingBatch();
+  batch.commands.push({
+    ...commandBase(3, READY_VERSION, { kind: "turn", turnId: TURN_ID }),
+    source: { kind: "system", system: "opening_bootstrap" },
+    kind: "record_world_event",
+    readScope: [
+      { kind: "actor", id: PLAYER_ID },
+      { kind: "actor", id: "actor-key" },
+      { kind: "location", id: "location-a" },
+    ],
+    writeScope: [],
+    exposure: {
+      mode: "projectable",
+      predicates: [{ channel: "direct_perception", locationId: "location-a" }],
+    },
+    eventClass: "dialogue",
+    performingActorId: "actor-key",
+    summary: "The harbor keeper asks the traveler why the signal brought them here.",
+    observableTrace: null,
+    affectedRefs: [
+      { kind: "actor", id: PLAYER_ID },
+      { kind: "actor", id: "actor-key" },
+      { kind: "location", id: "location-a" },
+    ],
+  });
+  return batch;
 }
 
 describe("Campaign Play Rulebook preflight", () => {
@@ -656,6 +685,35 @@ describe("Campaign Play Rulebook preflight", () => {
       status: "active",
       lastAdvancedWorldTimeMinutes: 0,
     }]);
+  });
+
+  it("admits one participant-scoped opening premise without advancing world version", () => {
+    const frame = frameFixture("opening_required");
+    const authority: CampaignPlayRulebookAuthority = {
+      purpose: "opening",
+      turnId: TURN_ID,
+      actorId: PLAYER_ID,
+      rootParent: { kind: "turn", turnId: TURN_ID },
+      authorizedRefs: allRefs(),
+      witnessActorIds: [],
+      knownWorldEventIds: [],
+    };
+    const batch = openingBatchWithPremise();
+    const result = preflightCampaignPlayRulebook({ frame, authority, batch });
+    expect(result).toMatchObject({ accepted: true });
+    if (!result.accepted) return;
+    expect(result.simulation.worldVersion).toBe(READY_VERSION);
+    expect(result.checkpoints.at(-1)?.worldVersion).toBe(READY_VERSION);
+
+    const extra = structuredClone(batch.commands.at(-1)!);
+    extra.commandId = "command-4";
+    extra.order = 4;
+    extra.causalParent = { kind: "command", commandId: "command-3" };
+    batch.commands.push(extra);
+    expect(preflightCampaignPlayRulebook({ frame, authority, batch })).toMatchObject({
+      accepted: false,
+      denial: { code: "invalid_bootstrap_coverage" },
+    });
   });
 
   it("rejects opening bootstrap into a macro region", () => {

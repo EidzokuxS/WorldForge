@@ -218,6 +218,12 @@ function openingProposal(): CampaignPlayOpeningProposal {
         routeId: "route-c",
       }),
     },
+    playerPremise: {
+      motivationIndex: 0,
+      anchor: "openingActor",
+      eventClass: "dialogue",
+      summary: "The signal keeper asks Mara what she has learned about the impossible signal.",
+    },
     actorPlans,
     hiddenConsequence: {
       actorId: "actor-b",

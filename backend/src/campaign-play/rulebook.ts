@@ -653,6 +653,39 @@ function validateCausalParent(
   }
 }
 
+function isOpeningPremiseCommand(
+  frame: CampaignPlayRulebookFrame,
+  state: CampaignPlayRulebookSimulation,
+  command: RulebookBatchCommand,
+): boolean {
+  if (
+    command.kind !== "record_world_event"
+    || command.source.kind !== "system"
+    || command.source.system !== "opening_bootstrap"
+    || (command.eventClass !== "dialogue" && command.eventClass !== "interaction")
+    || command.performingActorId === null
+    || command.observableTrace !== null
+    || command.exposure.mode !== "projectable"
+    || command.exposure.predicates.length !== 1
+    || command.exposure.predicates[0]?.channel !== "direct_perception"
+    || state.human === null
+  ) return false;
+  const playerLocations = operativeActorLocations(frame, state, state.human.actorId);
+  if (playerLocations.length !== 1) return false;
+  const locationId = playerLocations[0]!;
+  const performer = actor(frame, state, command.performingActorId);
+  const expectedRefs: CampaignPlayEntityRef[] = [
+    ref("actor", state.human.actorId),
+    ref("actor", command.performingActorId),
+    ref("location", locationId),
+  ];
+  return performer?.kind === "person"
+    && performer.controller === "agent"
+    && operativeActorLocations(frame, state, command.performingActorId).includes(locationId)
+    && command.exposure.predicates[0].locationId === locationId
+    && refsEqual(command.affectedRefs, expectedRefs);
+}
+
 function validateRefsAndScopes(
   frame: CampaignPlayRulebookFrame,
   authority: CampaignPlayRulebookAuthority,
@@ -696,7 +729,10 @@ function validateRefsAndScopes(
     deny("invalid_write_scope", "Command write scope differs from its exact contract.", command, index);
   }
   if (authority.purpose === "character_bootstrap" || authority.purpose === "opening") {
-    if (command.exposure.mode !== "protected") {
+    if (
+      command.exposure.mode !== "protected"
+      && !(authority.purpose === "opening" && isOpeningPremiseCommand(frame, state, command))
+    ) {
       deny("invalid_exposure", "Bootstrap commands require protected exposure.", command, index);
     }
   }
@@ -800,7 +836,7 @@ function validateAvailability(
     ? command.kind === "create_player_actor"
       || (command.kind === "adjust_actor_possession" && command.quantityDelta > 0)
     : authority.purpose === "opening"
-      ? !modelVisible
+      ? !modelVisible || isOpeningPremiseCommand(frame, state, command)
       : modelVisible;
   if (
     !available
@@ -1074,15 +1110,18 @@ function validateBootstrapCoverage(
   const placements = commands.filter((command) => command.kind === "initialize_player_placement");
   const clocks = commands.filter((command) => command.kind === "initialize_world_time");
   const pressures = commands.filter((command) => command.kind === "initialize_pressure_state");
+  const premises = commands.filter((command) => command.kind === "record_world_event");
   const expectedPressureIds = [...frame.acceptedWorld.pressures].map((pressure) => pressure.id).sort(compareText);
   const actualPressureIds = pressures.map((command) => command.pressureId).sort(compareText);
   if (
     placements.length !== 1
     || clocks.length !== 1
-    || commands.length !== 2 + expectedPressureIds.length
+    || premises.length > 1
+    || (premises.length === 1 && commands.at(-1) !== premises[0])
+    || commands.length !== 2 + expectedPressureIds.length + premises.length
     || JSON.stringify(actualPressureIds) !== JSON.stringify(expectedPressureIds)
   ) {
-    deny("invalid_bootstrap_coverage", "Opening bootstrap must initialize placement, clock, and every pressure exactly once.");
+    deny("invalid_bootstrap_coverage", "Opening must initialize placement, clock, and every pressure exactly once, followed by at most one player-premise event.");
   }
 }
 

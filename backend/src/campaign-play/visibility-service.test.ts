@@ -96,7 +96,9 @@ function acceptPlayableWorld(): void {
       placements: candidate.draft.placements.map((placement) =>
         placement.id === "placement-b"
           ? { ...placement, locationId: "location-a" }
-          : placement),
+          : placement.id === "placement-d"
+            ? { ...placement, locationId: "location-c" }
+            : placement),
     };
     const review = repository.completeBuild({
       buildId: "build-visibility",
@@ -178,6 +180,12 @@ function openingProposal(): CampaignPlayOpeningProposal {
         pressureId: "pressure-b",
         routeId: "route-c",
       }),
+    },
+    playerPremise: {
+      motivationIndex: 0,
+      anchor: "openingActor",
+      eventClass: "dialogue",
+      summary: "The signal keeper asks the player what brought them to the failing route.",
     },
     actorPlans,
     hiddenConsequence: {
@@ -316,6 +324,7 @@ function createVisibilityFixture(
       summary: "A human visitor.",
       traits: [],
       tags: [],
+      motivations: ["Understand why the routes are failing"],
     },
     acceptedWorld: beforeOpening.acceptedReview,
   }, { mode: "delegate" }, openingProposal());
@@ -347,6 +356,7 @@ function createVisibilityFixture(
       rootParent: { kind: "turn", turnId: "turn-opening" },
       authorizedRefs: [
         { kind: "actor", id: "actor-player" },
+        { kind: "actor", id: "actor-c" },
         { kind: "location", id: "location-c" },
         ...openingFrame.acceptedWorld.pressures.map((pressure) => ({
           kind: "pressure" as const,
@@ -368,7 +378,8 @@ function createVisibilityFixture(
   turns.commitDeterministic({
     token: primaryToken,
     transition: "primary_settled",
-    worldVersionAdvance: bootstrapCommands.length,
+    worldVersionAdvance: bootstrapCommands.filter((command) =>
+      command.kind !== "record_world_event").length,
     committedAt: 1_550,
     mutationId: "primary-settled",
     mutate(context) {
@@ -816,6 +827,9 @@ describe("Campaign Play visibility service", () => {
 
   it("earns valid channels while keeping sibling-scene perception and aftermath hidden", () => {
     const fixture = createVisibilityFixture();
+    expect(fixture.handle.sqlite.prepare(`SELECT location_id AS locationId
+      FROM actor_placements WHERE campaign_id = ? AND actor_id = 'actor-d'`)
+      .get(CAMPAIGN_ID)).toEqual({ locationId: "location-c" });
     const before = fixture.states.loadState()!;
     const result = createCampaignPlayVisibilityService(fixture.handle).projectTurn({
       token: fixture.visibilityToken,
@@ -831,14 +845,18 @@ describe("Campaign Play visibility service", () => {
     expect(result.packet.runtimeRevision).toBe(before.authority.runtimeRevision + 1);
     expect(result.packet.newObservations.map((entry) => entry.title).sort()).toEqual([
       "Along the route",
+      "At the start",
       "Seen nearby",
       "Mara Venn moved",
       "Signs of change",
       "Sel Bell's account",
       "Your action",
     ].sort());
-    expect(result.packet.newObservations).toHaveLength(6);
-    expect(result.packet.consequences).toHaveLength(6);
+    expect(result.packet.newObservations).toHaveLength(7);
+    expect(result.packet.consequences).toHaveLength(7);
+    expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
+      "The signal keeper asks the player what brought them to the failing route.",
+    );
     expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
       "Mara Venn says the signal lantern has failed.",
     );
@@ -861,17 +879,38 @@ describe("Campaign Play visibility service", () => {
     expect(result.packet.consequences.filter((entry) => entry.causalCue === "your_action"))
       .toHaveLength(5);
     expect(result.packet.consequences.filter((entry) => entry.causalCue === "direct_perception"))
-      .toHaveLength(1);
+      .toHaveLength(2);
     const performed = result.packet.consequences.find((entry) =>
       entry.whatChanged === "Mara Venn says the signal lantern has failed.");
     expect(performed).toMatchObject({
       performingActorHandle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-a"),
       performingActorName: "Mara Venn",
     });
-    expect(result.packet.consequences.filter((entry) => entry !== performed).every((entry) =>
+    const premise = result.packet.consequences.find((entry) =>
+      entry.whatChanged === "The signal keeper asks the player what brought them to the failing route.");
+    expect(premise).toMatchObject({
+      performingActorHandle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-c"),
+    });
+    expect(result.packet.consequences.filter((entry) =>
+      entry !== performed && entry !== premise).every((entry) =>
       entry.performingActorHandle === null && entry.performingActorName === null)).toBe(true);
-    expect(result.knowledgeInserted).toBeGreaterThanOrEqual(6);
-    expect(result.observationsInserted).toBe(6);
+    expect(result.knowledgeInserted).toBeGreaterThanOrEqual(8);
+    expect(result.observationsInserted).toBe(7);
+
+    const premiseKnowledge = fixture.handle.sqlite.prepare(`SELECT knowledge.actor_id AS actorId
+      FROM campaign_play_actor_knowledge knowledge
+      JOIN campaign_play_commands command ON command.command_id = (
+        SELECT event.command_id FROM campaign_play_events event
+        WHERE event.event_id = knowledge.event_id AND event.campaign_id = knowledge.campaign_id
+      )
+      WHERE knowledge.campaign_id = ?
+        AND command.command_kind = 'record_world_event'
+        AND json_extract(command.source_json, '$.system') = 'opening_bootstrap'
+      ORDER BY knowledge.actor_id`).all(CAMPAIGN_ID);
+    expect(premiseKnowledge).toEqual([
+      { actorId: "actor-c" },
+      { actorId: "actor-player" },
+    ]);
 
     const after = fixture.states.loadState()!;
     expect(after.authority.worldVersion).toBe(before.authority.worldVersion);
@@ -1141,7 +1180,8 @@ describe("Campaign Play visibility service", () => {
 
     expect(result.packet.newObservations.map((entry) => entry.title))
       .not.toContain("Along the route");
-    expect(result.packet.newObservations).toHaveLength(5);
+    expect(result.packet.newObservations.map((entry) => entry.title)).toContain("At the start");
+    expect(result.packet.newObservations).toHaveLength(6);
     expect(result.packet.visibleRoutes[0]?.state).toBe("open");
     expect(fixture.states.loadState()!.protectedAudit.canonicalBytes)
       .toContain('"routeTriggersJson":"[\\"attempt\\"]"');

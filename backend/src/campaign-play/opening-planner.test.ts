@@ -308,6 +308,7 @@ function frameFixture(world = worldFixture()): CampaignPlayOpeningFrame {
       summary: "An itinerant instrument repairer.",
       traits: ["careful"],
       tags: ["outsider"],
+      motivations: ["Understand the impossible signal", "Protect vulnerable witnesses"],
     },
     acceptedWorld: world,
   };
@@ -360,6 +361,12 @@ function proposalFixture(): CampaignPlayOpeningProposal {
         pressureId: "pressure-harbor-lock",
         routeId: "route-harbor-reef",
       }),
+    },
+    playerPremise: {
+      motivationIndex: 0,
+      anchor: "openingActor",
+      eventClass: "dialogue",
+      summary: "Oren Tide asks Ilya what the impossible signal has changed in the harbor instruments.",
     },
     actorPlans: [
       actorPlan(
@@ -473,9 +480,27 @@ describe("Campaign Play opening planner", () => {
       "initialize_world_time",
       "initialize_pressure_state",
       "initialize_pressure_state",
+      "record_world_event",
     ]);
     expect(first.artifact.bootstrapCommands.map((command) =>
-      command.expectedWorldVersion)).toEqual([4, 5, 6, 7]);
+      command.expectedWorldVersion)).toEqual([4, 5, 6, 7, 8]);
+    expect(first.artifact.playerPremise).toEqual({
+      motivation: "Understand the impossible signal",
+      commandId: first.artifact.bootstrapCommands[4]!.commandId,
+    });
+    expect(first.artifact.bootstrapCommands[4]).toMatchObject({
+      kind: "record_world_event",
+      performingActorId: "actor-courier",
+      affectedRefs: [
+        { kind: "actor", id: PLAYER_ID },
+        { kind: "actor", id: "actor-courier" },
+        { kind: "location", id: "scene-harbor-docks" },
+      ],
+      exposure: {
+        mode: "projectable",
+        predicates: [{ channel: "direct_perception", locationId: "scene-harbor-docks" }],
+      },
+    });
     expect(first.artifact.bootstrapCommands.every((command) =>
       command.source.kind === "system"
       && command.source.system === "opening_bootstrap")).toBe(true);
@@ -498,6 +523,37 @@ describe("Campaign Play opening planner", () => {
     expect(narratorJson).not.toContain("Sel Bell");
     expect(narratorJson).not.toContain("goal-bells-explain");
     expect(narratorJson).not.toContain("Lantern Council");
+  });
+
+  it("requires a premise only when the CharacterRecord supplies motivations", () => {
+    const emptyFrame = frameFixture();
+    emptyFrame.player.motivations = [];
+    const emptyProposal = proposalFixture();
+    emptyProposal.playerPremise = null;
+    const empty = createCampaignPlayOpeningPlanner().compile(
+      emptyFrame,
+      chosenConditions,
+      emptyProposal,
+    );
+    expect(empty.artifact.playerPremise).toBeNull();
+    expect(empty.artifact.bootstrapCommands.some((command) =>
+      command.kind === "record_world_event")).toBe(false);
+
+    const missing = proposalFixture();
+    missing.playerPremise = null;
+    expect(() => createCampaignPlayOpeningPlanner().compile(
+      frameFixture(),
+      chosenConditions,
+      missing,
+    )).toThrowError(expect.objectContaining({ code: "opening_proposal_invalid" }));
+
+    const outOfRange = proposalFixture();
+    outOfRange.playerPremise!.motivationIndex = 2;
+    expect(() => createCampaignPlayOpeningPlanner().compile(
+      frameFixture(),
+      chosenConditions,
+      outOfRange,
+    )).toThrowError(expect.objectContaining({ code: "opening_proposal_invalid" }));
   });
 
   it("rejects a macro region as an actor's mechanical location target", () => {
@@ -893,6 +949,10 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain('"activeGoalIds":["goal-bells-explain"]');
     expect(prompt).toContain('"actorLocationIds":["scene-bells-tower"]');
     expect(prompt).toContain("exactly openingConstraints.plannedActors.length items");
+    expect(prompt).toContain("start, scene, playerPremise, actorPlans, hiddenConsequence");
+    expect(prompt).toContain("zero-based motivationIndex");
+    expect(prompt).toContain("If it is empty, set playerPremise to null");
+    expect(prompt).toContain("Choose anchor as openingActor or supportActor");
     expect(prompt).toContain("Every listed person receives a plan regardless of role");
     expect(prompt).toContain("exactly one concrete next step");
     expect(prompt).toContain("Actor replanning owns later steps after the world changes");

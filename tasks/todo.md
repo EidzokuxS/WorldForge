@@ -63,6 +63,22 @@ Execution board:
 - [ ] Task 19: 300-turn long-horizon soak.
 - [ ] Task 20: documentation, independent audit, and handoff.
 
+Task 18 active repair — playable starting premise:
+
+- Outcome: when a player CharacterRecord contains motives or drives, Opening turns one exact selected motivation into a concrete interaction with an existing person in the selected scene. A player with no motives or drives remains free to enter as a tourist without an invented quest.
+- Acceptance: the frozen Opening frame carries an order-preserving exact deduplication of CharacterRecord motives followed by drives; the model selects by index and scene role rather than repeating text or IDs; the compiler commits one dialogue/interaction event whose only affected entities are the player, the resolved present person, and the concrete scene; Rulebook receipt/event, participant-scoped knowledge, public projection, reload, and the person's later own-action continuity all preserve that fact; another co-located person receives no knowledge from it.
+- Scope: `opening-runtime`, `opening-planner`, `opening-prompts`, Opening-specific Rulebook authority and coverage, visibility derivation/projection, receipt-backed actor continuity, focused tests, and the corresponding Campaign Play architecture text.
+- Non-goals: quest or document entities, player goal tables, accepted-world mutation, legacy gameplay imports, prose parsing, fallback, compatibility behavior, journal redesign, latency work, general suggestion tuning, or new world generation.
+- Truth flow: CharacterRecord owns motivation -> frozen Opening admission owns the exact candidate list -> planner chooses the binding -> compiler produces one typed command -> Rulebook command/receipt/event owns the occurrence -> visibility grants it only to participants -> committed event commands own performer continuity.
+- Validation budget: focused planner/runtime/Rulebook/visibility/continuity/turn tests, backend typecheck, one GitNexus scope attempt, one fresh clone of the existing Lowwater template, and 3–5 pre-signed manual UI actions. Allow one in-scope repair cycle and no standalone smoke suite or full repository suite.
+- Stop condition: re-plan instead of expanding if the proof requires a new quest/order/document entity, accepted-world rewriting, a prose parser, legacy authority, or a second persistent truth source.
+- Baseline evidence: the frozen Lowwater r03 lane reached 13 completed player actions but could not identify any client, debtor, intermediary, order mark, relation, goal, or event behind Lenna's exact payment motive. That lane is diagnostic and will not be repaired in place.
+- Review: independent Sol returned `REVISE`; the accepted revision makes the premise conditional, resolves motivation/actor references in code, scopes direct perception to the two participants, replaces proposal-row memory with receipt-backed performed-event continuity, and counts Opening mechanical mutations rather than command rows.
+- Deterministic result: focused Opening planner/runtime, Rulebook, visibility, actor-continuity, and turn-runtime selection passed 119/119; the only first-run failure was an obsolete observation-count expectation caused by the new intended premise entry. The focused visibility/continuity rerun passed 6/6, backend typecheck passed, and `git diff --check` passed.
+- Prompt/copy result: main-agent `humanizer` and `deslop` review kept the instruction direct and authority-focused; it adds no backend-authored narrative, retry, fallback, compatibility path, prose parser, or smoke suite.
+- Tooling gap: every required GitNexus impact and pre-commit `detect_changes` call returned `Transport closed`. Direct caller and changed-file inventories bound the patch to the named Campaign Play seams; no GitNexus repair was added to this task.
+- Remaining gate: commit this verified block, then prove the interaction on a fresh copy of the existing Lowwater template with 3–5 signed manual actions. The frozen 13-action lane remains diagnostic only.
+
 Task 14A execution packet:
 - [x] Add the real `/campaign/[id]/play` route and compose the authoritative controller into the full-screen play layout.
 - [x] Render opening choice, current location, visible presence, routes, pressures, narration beats, and public stage effects from `CampaignPlayState` only.

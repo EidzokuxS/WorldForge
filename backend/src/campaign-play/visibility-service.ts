@@ -168,6 +168,44 @@ function parseRecordArray(value: string, label: string): Record<string, unknown>
   return parsed as Record<string, unknown>[];
 }
 
+function openingPremiseParticipants(exposure: ExposureRow): Set<string> | null {
+  if (exposure.channel !== "direct_perception" || exposure.commandKind !== "record_world_event") {
+    return null;
+  }
+  const source = parseRecord(exposure.eventSourceJson, "Event source");
+  const payload = parseRecord(exposure.commandPayloadJson, "Command payload");
+  const affectedRefs = parseRecordArray(
+    exposure.eventAffectedRefsJson,
+    "Event affected references",
+  );
+  if (source.kind !== "system" || source.system !== "opening_bootstrap") return null;
+  if (
+    (payload.eventClass !== "dialogue" && payload.eventClass !== "interaction")
+    || typeof payload.performingActorId !== "string"
+    || exposure.locationId === null
+  ) {
+    throw new CampaignPlayVisibilityError(
+      "visibility_state_invalid",
+      "Opening premise exposure does not match its participant contract.",
+    );
+  }
+  const actorIds = affectedRefs.flatMap((reference) =>
+    reference.kind === "actor" && typeof reference.id === "string" ? [reference.id] : []);
+  const locationIds = affectedRefs.flatMap((reference) =>
+    reference.kind === "location" && typeof reference.id === "string" ? [reference.id] : []);
+  if (!(actorIds.length === 2
+      && new Set(actorIds).size === 2
+      && actorIds.includes(payload.performingActorId)
+      && locationIds.length === 1
+      && locationIds[0] === exposure.locationId)) {
+    throw new CampaignPlayVisibilityError(
+      "visibility_state_invalid",
+      "Opening premise exposure does not name exactly its two participants and scene.",
+    );
+  }
+  return new Set(actorIds);
+}
+
 function compareText(left: string, right: string): number {
   if (left < right) return -1;
   if (left > right) return 1;
@@ -378,12 +416,14 @@ function deriveBaseKnowledge(
   const candidates = new Map<string, EpistemicCandidate>();
   for (const exposure of exposures) {
     if (exposure.channel === "witness_report") continue;
+    const premiseParticipants = openingPremiseParticipants(exposure);
     for (const actor of actors) {
       let trigger: RouteTrigger | undefined;
       let earnedEventOrder = exposure.eventOrder;
       let earned = false;
       if (exposure.channel === "direct_perception") {
-        earned = actorLocationFromSnapshot(exposure.eventAfterPayloadJson, actor.id) === exposure.locationId;
+        earned = actorLocationFromSnapshot(exposure.eventAfterPayloadJson, actor.id) === exposure.locationId
+          && (premiseParticipants === null || premiseParticipants.has(actor.id));
       } else if (exposure.channel === "local_aftermath") {
         const entryOrder = entries.get(`${actor.id}\u0000${exposure.locationId}`)
           ?.find((order) => order > exposure.eventOrder);
@@ -621,6 +661,14 @@ function publicEntry(
     && typeof commandPayload.summary === "string"
   ) {
     title = "Your action";
+    text = commandPayload.summary;
+  } else if (
+    exposure.channel === "direct_perception" && playerParticipated
+    && eventSource.kind === "system" && eventSource.system === "opening_bootstrap"
+    && exposure.commandKind === "record_world_event"
+    && typeof commandPayload.summary === "string"
+  ) {
+    title = "At the start";
     text = commandPayload.summary;
   } else if (
     exposure.channel === "direct_perception" && exposure.eventKind === "actor_moved" &&

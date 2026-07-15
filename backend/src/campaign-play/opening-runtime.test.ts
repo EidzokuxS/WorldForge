@@ -90,7 +90,7 @@ function playerDraft(): CampaignPlayCharacterDraft {
     },
     motives: ["Understand the celestial signal"],
     beliefs: ["Machines tell the truth"],
-    drives: ["Protect vulnerable witnesses"],
+    drives: ["Understand the celestial signal", "Protect vulnerable witnesses"],
     traits: ["Observant", "Methodical"],
     skills: [{ name: "Instrument repair", tier: "Master" }],
     flaws: ["Overcommits to solvable details"],
@@ -213,6 +213,12 @@ function openingProposal(): CampaignPlayOpeningProposal {
         pressureId: "pressure-b",
         routeId: "route-c",
       }),
+    },
+    playerPremise: {
+      motivationIndex: 0,
+      anchor: "openingActor",
+      eventClass: "dialogue",
+      summary: "The signal keeper asks Mara what she has learned about the impossible signal.",
     },
     actorPlans,
     hiddenConsequence: {
@@ -444,7 +450,14 @@ describe("Campaign Play opening runtime", () => {
       expect(finalState.authority).toMatchObject({ setupPhase: "ready" });
       expect(finalState.authority.openedAt).not.toBeNull();
       expect(planner.plan).toHaveBeenCalledTimes(1);
+      expect(planner.plan.mock.calls[0]![0].frame.player.motivations).toEqual([
+        "Understand the celestial signal",
+        "Protect vulnerable witnesses",
+      ]);
       expect(narrator.narrate).toHaveBeenCalledTimes(1);
+      expect(finalState.authority.worldVersion).toBe(
+        state.authority.worldVersion + 2 + finalState.acceptedReview.pressures.length,
+      );
       expect(count(handle, "campaign_play_actor_plans")).toBe(6);
       expect(count(handle, "campaign_play_actor_schedules")).toBe(6);
       expect(count(handle, "campaign_play_actor_jobs")).toBe(2);
@@ -473,6 +486,8 @@ describe("Campaign Play opening runtime", () => {
       const localTrace = "Fresh work marks show that someone acted here recently.";
       const hiddenTrace = "Fresh sealing wax and torn binding thread mark a ledger removed in haste.";
       expect(openingPacket.turnKind).toBe("opening");
+      expect(openingPacket.consequences.map((consequence) => consequence.whatChanged))
+        .toContain("The signal keeper asks Mara what she has learned about the impossible signal.");
       expect(openingPacket.consequences.map((consequence) => consequence.whatChanged))
         .toContain(localTrace);
       expect(openingPacket.consequences.map((consequence) => consequence.whatChanged))

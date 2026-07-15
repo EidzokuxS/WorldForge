@@ -24,10 +24,12 @@ import {
   campaignPlayBootstrapCommandSchema,
   campaignPlayElapsedBoundsSchema,
   campaignPlayExposurePredicateSchema,
+  recordWorldEventCommandSchema,
   type CampaignPlayActorIntent,
   type CampaignPlayActorPlan,
   type CampaignPlayActorSchedule,
   type CampaignPlayBootstrapCommand,
+  type CampaignPlayCommand,
   type CampaignPlayExposurePredicate,
 } from "./contracts.js";
 import {
@@ -92,6 +94,13 @@ export const campaignPlayOpeningProposalSchema = z.object({
   scene: z.object({
     candidateId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
   }).strict(),
+  playerPremise: z.object({
+    motivationIndex: z.number().int().safe().nonnegative()
+      .max(CAMPAIGN_PLAY_LIMITS.characterList * 2 - 1),
+    anchor: z.enum(["openingActor", "supportActor"]),
+    eventClass: z.enum(["dialogue", "interaction"]),
+    summary: boundedText(CAMPAIGN_PLAY_LIMITS.text),
+  }).strict().nullable(),
   actorPlans: z.array(openingActorPlanProposalSchema)
     .min(1)
     .max(OPENING_MAX_ELIGIBLE_ACTORS),
@@ -152,6 +161,7 @@ export interface CampaignPlayOpeningPlayer {
   summary: string;
   traits: string[];
   tags: string[];
+  motivations: string[];
 }
 
 export interface CampaignPlayOpeningFrame {
@@ -187,6 +197,14 @@ export interface CampaignPlayOpeningNarratorFacts {
   };
 }
 
+type CampaignPlayOpeningCommand = CampaignPlayBootstrapCommand |
+  Extract<CampaignPlayCommand, { kind: "record_world_event" }>;
+
+const campaignPlayOpeningCommandSchema: z.ZodType<CampaignPlayOpeningCommand> = z.union([
+  campaignPlayBootstrapCommandSchema,
+  recordWorldEventCommandSchema,
+]);
+
 export interface CampaignPlayOpeningArtifact {
   artifactId: string;
   campaignId: string;
@@ -197,7 +215,8 @@ export interface CampaignPlayOpeningArtifact {
   frameHash: string;
   proposalHash: string;
   start: CampaignPlayOpeningStart;
-  bootstrapCommands: CampaignPlayBootstrapCommand[];
+  bootstrapCommands: CampaignPlayOpeningCommand[];
+  playerPremise: { motivation: string; commandId: string } | null;
   actorPlans: CampaignPlayActorPlan[];
   actorSchedules: CampaignPlayActorSchedule[];
   exposureSeed: CampaignPlayOpeningExposureSeed;
@@ -245,9 +264,13 @@ export const campaignPlayOpeningArtifactSchema: z.ZodType<CampaignPlayOpeningArt
     frameHash: z.string().length(64),
     proposalHash: z.string().length(64),
     start: campaignPlayOpeningStartSchema,
-    bootstrapCommands: z.array(campaignPlayBootstrapCommandSchema)
+    bootstrapCommands: z.array(campaignPlayOpeningCommandSchema)
       .min(1)
       .max(CAMPAIGN_PLAY_LIMITS.commandsPerBatch),
+    playerPremise: z.object({
+      motivation: boundedLine(CAMPAIGN_PLAY_LIMITS.label),
+      commandId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
+    }).strict().nullable(),
     actorPlans: z.array(campaignPlayActorPlanSchema).min(1).max(OPENING_MAX_ELIGIBLE_ACTORS),
     actorSchedules: z.array(campaignPlayActorScheduleSchema).min(1).max(OPENING_MAX_ELIGIBLE_ACTORS),
     exposureSeed: z.object({
@@ -331,8 +354,8 @@ interface CampaignPlayOpeningPlannerDependencies {
   generateObject: typeof safeGenerateObject;
 }
 
-type OpeningBootstrapInput<T = CampaignPlayBootstrapCommand> =
-  T extends CampaignPlayBootstrapCommand
+type OpeningBootstrapInput<T = CampaignPlayOpeningCommand> =
+  T extends CampaignPlayOpeningCommand
     ? Omit<T, "commandId" | "batchId" | "order" | "expectedWorldVersion" | "causalParent">
     : never;
 
@@ -396,6 +419,14 @@ function assertFrame(frame: CampaignPlayOpeningFrame): void {
       && value === value.trim()
       && !value.includes("\n")
       && !value.includes("\r"));
+  const validMotivations = (values: readonly string[]) =>
+    values.length <= CAMPAIGN_PLAY_LIMITS.characterList * 2
+    && unique(values)
+    && values.every((value) => value.length > 0
+      && value.length <= CAMPAIGN_PLAY_LIMITS.label
+      && value === value.trim()
+      && !value.includes("\n")
+      && !value.includes("\r"));
   const uniqueIds = (values: readonly { id: string }[]) =>
     unique(values.map((value) => value.id));
   if (
@@ -421,6 +452,7 @@ function assertFrame(frame: CampaignPlayOpeningFrame): void {
     || frame.player.summary !== frame.player.summary.trim()
     || !validLabels(frame.player.traits)
     || !validLabels(frame.player.tags)
+    || !validMotivations(frame.player.motivations)
     || !uniqueIds(world.locations)
     || !uniqueIds(world.routes)
     || !uniqueIds(world.actors)
@@ -431,7 +463,8 @@ function assertFrame(frame: CampaignPlayOpeningFrame): void {
     || world.locations.filter((location) => location.kind === "macro" && location.isStarting).length !== 1
     || eligibleActors(world).length < 1
     || eligibleActors(world).length > OPENING_MAX_ELIGIBLE_ACTORS
-    || world.pressures.length + 2 > CAMPAIGN_PLAY_LIMITS.commandsPerBatch
+    || world.pressures.length + 2 + (frame.player.motivations.length > 0 ? 1 : 0)
+      > CAMPAIGN_PLAY_LIMITS.commandsPerBatch
   ) {
     fail("opening_frame_invalid");
   }
@@ -757,7 +790,10 @@ function compilePlans(
 function compileBootstrapCommands(
   frame: CampaignPlayOpeningFrame,
   startLocationId: string,
-): CampaignPlayBootstrapCommand[] {
+  playerPremise: CampaignPlayOpeningProposal["playerPremise"],
+  openingActorId: string,
+  supportActorId: string,
+): CampaignPlayOpeningCommand[] {
   const batchId = stableId("batch", {
     campaignId: frame.campaignId,
     turnId: frame.turnId,
@@ -800,8 +836,43 @@ function compileBootstrapCommands(
         progress: 0,
         status: "active" as const,
       })),
+    ...(playerPremise === null
+      ? []
+      : [{
+          kind: "record_world_event" as const,
+          source,
+          readScope: [
+            { kind: "actor" as const, id: frame.player.actorId },
+            {
+              kind: "actor" as const,
+              id: playerPremise.anchor === "openingActor" ? openingActorId : supportActorId,
+            },
+            { kind: "location" as const, id: startLocationId },
+          ],
+          writeScope: [],
+          exposure: {
+            mode: "projectable" as const,
+            predicates: [{
+              channel: "direct_perception" as const,
+              locationId: startLocationId,
+            }],
+          },
+          eventClass: playerPremise.eventClass,
+          performingActorId:
+            playerPremise.anchor === "openingActor" ? openingActorId : supportActorId,
+          summary: playerPremise.summary,
+          observableTrace: null,
+          affectedRefs: [
+            { kind: "actor" as const, id: frame.player.actorId },
+            {
+              kind: "actor" as const,
+              id: playerPremise.anchor === "openingActor" ? openingActorId : supportActorId,
+            },
+            { kind: "location" as const, id: startLocationId },
+          ],
+        }]),
   ];
-  const commands: CampaignPlayBootstrapCommand[] = [];
+  const commands: CampaignPlayOpeningCommand[] = [];
   for (const [order, input] of inputs.entries()) {
     const causalParent = order === 0
       ? { kind: "turn" as const, turnId: frame.turnId }
@@ -812,7 +883,7 @@ function compileBootstrapCommands(
       batchId,
       order,
     );
-    commands.push(campaignPlayBootstrapCommandSchema.parse({
+    commands.push(campaignPlayOpeningCommandSchema.parse({
       ...input,
       commandId,
       batchId,
@@ -832,6 +903,7 @@ function compileScene(
 ): {
   start: CampaignPlayOpeningStart;
   openingActorId: string;
+  supportActorId: string;
   narratorFacts: CampaignPlayOpeningNarratorFacts;
 } {
   const world = frame.acceptedWorld;
@@ -894,6 +966,7 @@ function compileScene(
   return {
     start,
     openingActorId: openingActor.id,
+    supportActorId: support.id,
     narratorFacts: {
       location: { id: location.id, name: location.name, description: location.description },
       player: {
@@ -1093,12 +1166,21 @@ export function createCampaignPlayOpeningPlanner(
       parsedStartingConditions,
     );
     if (sceneCandidates.length === 0) fail("opening_frame_invalid");
-    const { start, openingActorId, narratorFacts } = compileScene(
+    const { start, openingActorId, supportActorId, narratorFacts } = compileScene(
       frame,
       parsedStartingConditions,
       proposal,
       sceneCandidates,
     );
+    if (
+      (frame.player.motivations.length === 0) !== (proposal.playerPremise === null)
+      || (
+        proposal.playerPremise !== null
+        && proposal.playerPremise.motivationIndex >= frame.player.motivations.length
+      )
+    ) {
+      fail("opening_proposal_invalid");
+    }
     const { plans, schedules } = compilePlans(
       frame,
       proposal,
@@ -1115,6 +1197,15 @@ export function createCampaignPlayOpeningPlanner(
       domain: "campaign_play_opening_proposal",
       proposal,
     });
+    const bootstrapCommands = compileBootstrapCommands(
+      frame,
+      start.sceneLocationId,
+      proposal.playerPremise,
+      openingActorId,
+      supportActorId,
+    );
+    const premiseCommand = bootstrapCommands.find((command) =>
+      command.kind === "record_world_event");
     const artifact = campaignPlayOpeningArtifactSchema.parse({
       artifactId: stableId("opening", { frameHash, proposalHash }),
       campaignId: frame.campaignId,
@@ -1125,7 +1216,13 @@ export function createCampaignPlayOpeningPlanner(
       frameHash,
       proposalHash,
       start: structuredClone(start),
-      bootstrapCommands: compileBootstrapCommands(frame, start.sceneLocationId),
+      bootstrapCommands,
+      playerPremise: proposal.playerPremise === null
+        ? null
+        : {
+            motivation: frame.player.motivations[proposal.playerPremise.motivationIndex]!,
+            commandId: premiseCommand!.commandId,
+          },
       actorPlans: plans,
       actorSchedules: schedules,
       exposureSeed,

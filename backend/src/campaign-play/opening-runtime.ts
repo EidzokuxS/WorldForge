@@ -5,7 +5,9 @@ import type {
   CampaignPlayOpeningAdmissionRequest,
   CampaignPlayTurnAdmissionResponse,
 } from "@worldforge/shared";
+import { CAMPAIGN_PLAY_LIMITS } from "@worldforge/shared";
 import {
+  CAMPAIGN_PLAY_COMMAND_METADATA,
   campaignPlayNarratorPacketSchema,
   campaignPlayOpeningAdmissionRequestSchema,
   validateNarrationAgainstPacket,
@@ -99,6 +101,8 @@ const openingAdmissionFrameSchema = z.object({
     summary: text(2_000),
     traits: z.array(line(200)).max(32),
     tags: z.array(line(200)).max(32),
+    motivations: z.array(line(CAMPAIGN_PLAY_LIMITS.label))
+      .max(CAMPAIGN_PLAY_LIMITS.characterList * 2),
   }).strict(),
   startingConditions: campaignPlayResolvedStartingConditionsSchema,
 }).strict();
@@ -176,6 +180,7 @@ interface PlayerRow {
   summary: string;
   traitsJson: string;
   tagsJson: string;
+  recordJson: string;
 }
 
 interface PendingNarrationRow {
@@ -262,10 +267,55 @@ function parseStringArray(value: string, label: string): string[] {
   }
 }
 
+const openingPlayerRecordProjectionSchema = z.object({
+  identity: z.object({
+    id: line(CAMPAIGN_PLAY_LIMITS.id),
+    campaignId: line(CAMPAIGN_PLAY_LIMITS.id),
+    behavioralCore: z.object({
+      motives: z.array(line(CAMPAIGN_PLAY_LIMITS.label))
+        .max(CAMPAIGN_PLAY_LIMITS.characterList),
+    }).passthrough().optional(),
+  }).passthrough(),
+  motivations: z.object({
+    drives: z.array(line(CAMPAIGN_PLAY_LIMITS.label))
+      .max(CAMPAIGN_PLAY_LIMITS.characterList),
+  }).passthrough(),
+}).passthrough();
+
+function parsePlayerMotivations(row: PlayerRow, campaignId: string): string[] {
+  let stored: unknown;
+  try {
+    stored = JSON.parse(row.recordJson) as unknown;
+  } catch (cause) {
+    throw new CampaignPlayOpeningRuntimeError(
+      "opening_player_invalid",
+      "Campaign Play player CharacterRecord is invalid.",
+      { cause },
+    );
+  }
+  const result = openingPlayerRecordProjectionSchema.safeParse(stored);
+  if (
+    !result.success
+    || result.data.identity.id !== row.actorId
+    || result.data.identity.campaignId !== campaignId
+  ) {
+    throw new CampaignPlayOpeningRuntimeError(
+      "opening_player_invalid",
+      "Campaign Play player CharacterRecord does not match its durable actor.",
+      { cause: result.success ? undefined : result.error },
+    );
+  }
+  return [...new Set([
+    ...(result.data.identity.behavioralCore?.motives ?? []),
+    ...result.data.motivations.drives,
+  ])];
+}
+
 function loadPlayer(handle: CampaignPlayDatabaseHandle): CampaignPlayOpeningAdmissionFrame["player"] {
   const rows = handle.sqlite.prepare(`SELECT a.id AS actorId,
       c.record_hash AS profileDigest, a.name, a.summary,
-      a.traits AS traitsJson, a.tags AS tagsJson
+      a.traits AS traitsJson, a.tags AS tagsJson,
+      c.record_json AS recordJson
     FROM actors a
     JOIN campaign_play_characters c
       ON c.actor_id = a.id AND c.campaign_id = a.campaign_id
@@ -285,6 +335,7 @@ function loadPlayer(handle: CampaignPlayDatabaseHandle): CampaignPlayOpeningAdmi
     summary: row.summary,
     traits: parseStringArray(row.traitsJson, "traits"),
     tags: parseStringArray(row.tagsJson, "tags"),
+    motivations: parsePlayerMotivations(row, handle.campaignId),
   });
 }
 
@@ -708,7 +759,8 @@ export function createCampaignPlayOpeningRuntime(
               repository.commitDeterministic({
                 token: context.token,
                 transition: "primary_settled",
-                worldVersionAdvance: artifact.bootstrapCommands.length,
+                worldVersionAdvance: artifact.bootstrapCommands.filter((command) =>
+                  CAMPAIGN_PLAY_COMMAND_METADATA[command.kind].mechanicalMutation).length,
                 committedAt,
                 mutationId: runtimeId("opening-primary-settled", {
                   turnId: context.turn.turnId,

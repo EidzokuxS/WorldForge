@@ -1,10 +1,9 @@
 import { z } from "zod";
 import { CAMPAIGN_PLAY_LIMITS } from "@worldforge/shared";
-import { rulebookBatchCommandSchema } from "./contracts.js";
 import type { CampaignPlayDatabaseHandle } from "./campaign-play-database.js";
 
 const RECENT_OWN_ACTION_LIMIT = 12;
-const RECENT_PROPOSAL_SCAN_LIMIT = 24;
+const RECENT_EVENT_SCAN_LIMIT = 24;
 
 export interface CampaignPlayActorContinuityBinding {
   actorHandle: string;
@@ -26,33 +25,24 @@ export type CampaignPlayActorContinuity = z.infer<
   typeof campaignPlayActorContinuitySchema
 >;
 
-interface StoredActorProposalRow {
-  commandsJson: string;
+interface StoredActorEventRow {
+  payloadJson: string;
 }
 
+const actorEventPayloadSchema = z.object({
+  summary: z.string().min(1).max(CAMPAIGN_PLAY_LIMITS.text),
+  observableTrace: z.string().min(1).max(CAMPAIGN_PLAY_LIMITS.text).nullable(),
+}).passthrough();
+
 function ownActionsFromRows(
-  rows: StoredActorProposalRow[],
-  actorId: string,
-  maximumWorldVersion: number,
+  rows: StoredActorEventRow[],
 ): CampaignPlayActorOwnAction[] {
-  const newestFirst = rows.flatMap((row) => {
-    const commands = rulebookBatchCommandSchema.array().parse(
-      JSON.parse(row.commandsJson) as unknown,
-    );
-    return commands.flatMap((command) => {
-      if (
-        command.kind !== "record_world_event"
-        || command.source.kind !== "actor"
-        || command.source.actorId !== actorId
-        || command.expectedWorldVersion > maximumWorldVersion
-      ) {
-        return [];
-      }
-      return [{
-        summary: command.summary,
-        observableTrace: command.observableTrace,
-      }];
-    });
+  const newestFirst = rows.map((row) => {
+    const payload = actorEventPayloadSchema.parse(JSON.parse(row.payloadJson) as unknown);
+    return {
+      summary: payload.summary,
+      observableTrace: payload.observableTrace,
+    };
   }).slice(0, RECENT_OWN_ACTION_LIMIT);
   return newestFirst.reverse();
 }
@@ -69,12 +59,20 @@ export function loadCampaignPlayActorContinuity(
     }
   }
 
-  const loadRows = handle.sqlite.prepare(`SELECT p.commands_json AS commandsJson
-    FROM campaign_play_actor_jobs j
-    JOIN campaign_play_actor_proposals p ON p.job_id = j.job_id
-    WHERE j.campaign_id = ? AND j.actor_id = ?
-      AND j.stage = 'settled' AND p.status = 'accepted'
-    ORDER BY j.completed_at DESC, j.job_id DESC
+  const loadRows = handle.sqlite.prepare(`SELECT c.protected_payload_json AS payloadJson
+    FROM campaign_play_commands c
+    JOIN campaign_play_receipts r
+      ON r.command_id = c.command_id AND r.campaign_id = c.campaign_id
+    WHERE c.campaign_id = ? AND c.command_kind = 'record_world_event'
+      AND r.outcome = 'applied' AND r.result_world_version <= ?
+      AND (
+        json_extract(c.protected_payload_json, '$.performingActorId') = ?
+        OR (
+          json_extract(c.source_json, '$.kind') = 'actor'
+          AND json_extract(c.source_json, '$.actorId') = ?
+        )
+      )
+    ORDER BY r.created_at DESC, c.command_id DESC
     LIMIT ?`);
 
   return campaignPlayActorContinuitySchema.array().parse([...uniqueBindings.values()]
@@ -83,11 +81,11 @@ export function loadCampaignPlayActorContinuity(
       const recentOwnActions = ownActionsFromRows(
         loadRows.all(
           handle.campaignId,
+          maximumWorldVersion,
           binding.actorId,
-          RECENT_PROPOSAL_SCAN_LIMIT,
-        ) as StoredActorProposalRow[],
-        binding.actorId,
-        maximumWorldVersion,
+          binding.actorId,
+          RECENT_EVENT_SCAN_LIMIT,
+        ) as StoredActorEventRow[],
       );
       return recentOwnActions.length === 0
         ? []

@@ -70,7 +70,8 @@ Concept
   -> Character
   -> create, generate, or import the human actor
   -> choose starting conditions or delegate them
-  -> opening planner commits turn zero and typed actor plans
+  -> opening planner binds one existing player motivation to a present person when motivations exist
+  -> opening planner commits turn zero, the participant-scoped premise event, and typed actor plans
   -> Play shows one local situation
   -> player chooses a suggestion or submits freeform intent
   -> Judge bounds the attempt and code resolves uncertainty
@@ -192,9 +193,9 @@ type CampaignPlayBootstrapCommand =
 type RulebookBatchCommand = CampaignPlayBootstrapCommand | CampaignPlayCommand;
 ```
 
-Bootstrap commands are internal harness commands. Models receive no schema or handle that can emit them. `CreatePlayerActorCommand` is valid only in `character_required` with no human actor. The same character-bootstrap batch may then issue one protected positive `AdjustActorPossessionCommand` per normalized `CharacterRecord.loadout.inventorySeed` entry; repeated names become quantity, and signature-item prose is not materialized again. Opening-kind turns may initialize exactly one player placement, the absent world clock, and one state row for each accepted pressure. Each bootstrap command has strict phase/absence guards, receipt/event output, mechanical hash effects, and exhaustive preflight/executor coverage.
+Bootstrap commands are internal harness commands. Models receive no schema or handle that can emit them. `CreatePlayerActorCommand` is valid only in `character_required` with no human actor. The same character-bootstrap batch may then issue one protected positive `AdjustActorPossessionCommand` per normalized `CharacterRecord.loadout.inventorySeed` entry; repeated names become quantity, and signature-item prose is not materialized again. Opening-kind turns initialize exactly one player placement, the absent world clock, and one state row for each accepted pressure. The frozen Opening frame also carries an order-preserving exact deduplication of `CharacterRecord` motives followed by drives. When that list is non-empty, the planner selects one motivation by index and one selected-scene person by role; code resolves both values and appends exactly one `RecordWorldEventCommand` after initialization. That dialogue or interaction affects only the player, the present person, and the concrete start scene, uses direct perception, receives a Rulebook receipt/event, and does not advance mechanical world version. An empty list compiles no premise event and does not invent a quest. Each bootstrap command and the optional premise command have strict phase, source, participant, exposure, coverage, receipt/event, and exhaustive preflight/executor guards.
 
-Each command carries command ID, causal parent, actor/system source, expected mechanical world version, read scope, write scope, typed arguments, and an exposure policy. The first character-bootstrap command is rooted in the immutable accepted-world campaign/version/hash provenance; later commands use turn, command, world-event, or actor-job parents. Player observations are derived by visibility predicates; GM and narrator stages receive no direct observation writer.
+Each command carries command ID, causal parent, actor/system source, expected mechanical world version, read scope, write scope, typed arguments, and an exposure policy. The first character-bootstrap command is rooted in the immutable accepted-world campaign/version/hash provenance; later commands use turn, command, world-event, or actor-job parents. Player observations are derived by visibility predicates; GM and narrator stages receive no direct observation writer. Direct perception normally follows scene presence. The Opening premise is narrower: only its affected player and performing person earn knowledge, even when another person is co-located. Protected actor continuity reads applied Rulebook event commands, so a person remembers both actor-authored autonomous events and dialogue or interactions they performed under Opening or Game Master authority; rejected proposals and uncommitted commands confer no continuity.
 
 ### Rulebook invariants
 
