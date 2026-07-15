@@ -4,7 +4,7 @@
 **Current Behavior:** Campaign World persists locations, routes, actors, goals, placements, relations, and pressures. The mounted `/game` flow reads a separate player, NPC, clock, item, chat-history, and clean-gameplay model. An accepted world therefore has no valid handoff into character setup, opening, or play.
 **Expected Outcome:** Review acceptance leads to character creation or Character Card V2 import, grounded opening turn zero, and repeated player turns on `/campaign/[id]/play`. Judge and GM stages propose bounded results, the Rulebook commits every mechanical change with receipts, due actors act through the same boundary, visibility projects earned knowledge, and the narrator renders only committed player-visible facts.
 **Target-Perspective Output:** A player enters a world that already has motion, sees one local situation rather than a cast dump, submits a suggested or freeform action, reloads safely, and discovers distant change through travel, aftermath, route state, or an informed witness. A playtest operator can trace every consequential sentence to a public observation and every world mutation to a Rulebook receipt while hidden state stays absent from the player surface.
-**Truth Owner:** The campaign `state.db` owns immutable accepted-world provenance and mutable Campaign Play state. Existing Campaign World entity tables own locations, routes, actors, goals, placements, relations, and pressure definitions. Receipt-bearing Rulebook/bootstrap transactions exclusively advance mechanical `worldVersion/worldHash`. Fenced runtime transactions exclusively advance `runtimeRevision/runtimeHash` for turns, plans, schedules, knowledge, observations, narration packets, and worker state.
+**Truth Owner:** The campaign `state.db` owns immutable accepted-world provenance and mutable Campaign Play state. Existing Campaign World entity tables own macro regions, concrete persistent sublocations, routes, actors, goals, exact-scene placements, relations, and pressure definitions. Macro locations group player choices and world geography; persistent sublocations alone own playable scene presence, route endpoints, direct perception, and local aftermath. Receipt-bearing Rulebook/bootstrap transactions exclusively advance mechanical `worldVersion/worldHash`. Fenced runtime transactions exclusively advance `runtimeRevision/runtimeHash` for turns, plans, schedules, knowledge, observations, narration packets, and worker state.
 **Contract Boundary:** `@worldforge/shared` publishes Campaign Play DTOs and discriminated unions. `backend/src/campaign-play/` owns perception, Judge and GM orchestration, Rulebook validation and execution, actor scheduling, visibility, narration packets, persistence, and recovery. `/api/campaigns/:id/play/*` is the only active gameplay API.
 **Cutover:** World Review links accepted campaigns to `/campaign/[id]/character`; character completion links to `/campaign/[id]/play`. The new page consumes one campaign-scoped public projection and one durable turn ledger. Backend startup mounts Campaign Play and stops mounting `/api/chat`.
 **Displaced Path:** `/game`, `/api/chat/*`, `chat_history.json`, the global active-campaign gameplay controller, old world projection as gameplay authority, `players`, `npcs`, `world_clocks`, `turn_sagas`, `clean_gameplay_*`, Campaign Kernel play state, and `engine/gameplay-cycle-runtime` leave the active player path. Their source remains donor/reference material until later deletion work has caller proof.
@@ -91,7 +91,7 @@ Opening is turn zero. Playtest counts begin with the first submitted player acti
 | Accepted world and provenance | Campaign World repository | `campaign_worlds.accepted_snapshot_json`, accepted version/hash/time | World Review |
 | Mechanical world version/hash/time | receipt-bearing Rulebook/bootstrap transactions | `campaign_play_states` plus canonical entity/play-state rows | Campaign Play state |
 | Runtime revision/hash/phase | fenced Campaign Play runtime transactions | `campaign_play_states` plus current runtime rows | Campaign Play state |
-| Locations and routes | Campaign World entities plus live route state | `locations`, `location_edges`, `campaign_play_route_states` | Perception projector |
+| Regions, concrete scenes, and routes | Campaign World entities plus live route state | macro and `persistent_sublocation` rows in `locations`, concrete-only `location_edges`, `campaign_play_route_states` | Opening selector and perception projector |
 | People and collectives | Campaign World actors | `actors` | Perception and actor frames |
 | Human profile | Character service | human `actors` row plus `campaign_play_characters` | Character and player projection |
 | Goals and actor plans | Campaign World goal definition plus Campaign Play planner | `actor_goals`, `campaign_play_actor_plans` | actor scheduler only |
@@ -1336,6 +1336,43 @@ node --import tsx e2e/campaign-play/playtest-runner.ts --validate <bundle-path>
 
 **Parallel:** live lanes run sequentially against fresh campaign IDs.
 
+### Task 17B: concrete scene topology and exact visibility cutover
+
+**Files:** `backend/src/campaign-world/contracts.ts`, `world-prompts.ts`, `world-validator.ts`, paired Campaign World tests, `backend/src/campaign-play/campaign-play-projection.ts`, `opening-options.ts`, `opening-location.ts`, `opening-planner.ts`, Rulebook/actor/visibility/runtime readers and paired tests, shared public contracts, Campaign Play UI current-place/presence tests, `rpi/campaign-play/implement/17b-concrete-scenes.md`.
+
+**Outcome:** a player occupies one canonical concrete scene inside a macro region. An event in a sibling establishment never becomes direct perception merely because both establishments share the same macro.
+
+**Acceptance criteria and provenance:**
+
+1. `currentLocation`, present actor chips, player and agent present placements, opening bootstrap, direct perception, local aftermath, and player-visible route endpoints use `persistent_sublocation` IDs only. This is required by the user's one-local-scene outcome and the r08 cross-room visibility regression.
+2. Every player scene change uses one visible concrete-to-concrete route and the existing receipt-bearing `move_actor` command. Prose cannot relocate the player to an unmodeled establishment. This preserves the pre-existing Rulebook movement contract.
+3. Macro locations remain selection and grouping regions only. Opening may accept a macro choice, but resolves and persists one exact child scene with an exact support actor, exact local pressure anchor, and outgoing concrete route. This preserves the player-facing opening choice while removing the cast-dump cause.
+4. The generated concrete route graph supports actor planning and return travel without macro placements. Exact-scene actor work uses the same Rulebook, schedule, receipt, and exposure contracts as player movement. This is required by the existing autonomous-actor and Task 18 return-visit outcomes.
+5. Accepted templates without the concrete-scene topology fail Campaign Play eligibility. No migration adapter, macro-placement fallback, or compatibility route is added. This follows the user's explicit clean-break policy.
+6. A fresh rendered-UI diagnostic proves that two establishments under one macro remain separate: a sibling actor and sibling direct-perception event stay absent, exact local aftermath stays absent until entry, and travel or a valid report reveals only the earned consequence. This is the minimum live proof for the observed user-visible failure.
+
+**Architecture delta:** Campaign World `locations`, `location_edges`, and actor placements remain the only spatial truth; no scene-context table is introduced. A current-contract frame contains exactly three macro regions and six or seven persistent sublocations, with at least two children per macro and no more than ten total locations. Directed routes connect persistent sublocations directly, including cross-region gateways; macros are never route endpoints or present placements. The concrete graph is strongly connected so an eligible scene cannot strand player or actor work. Every pressure used by opening has an exact concrete anchor. Starting conditions retain the selected macro separately from the resolved scene; opening artifacts, narrator facts, bootstrap commands, public state, and exposure predicates carry the concrete scene.
+
+**Displaced path:** macro `openingLocationId` as a persisted scene, descendant-wide support presence, macro route endpoints, macro actor placements, macro direct perception, and prose-only movement between establishments leave the current contract.
+
+**Non-goals:** dynamic room creation during play, coordinates or line-of-sight simulation, semantic parsing of prose into locations, procedural interiors, legacy-template repair, combat/economy, or a pristine 60-action claim.
+
+**Work:**
+
+1. Tighten the Campaign World frame to three macros plus six or seven concrete sublocations within the existing ten-location cap. Require exact parentage, at least two children per macro, concrete-only directed endpoints, and a strongly connected concrete route graph.
+2. Require every present actor placement to use a concrete sublocation. Require pressures needed for play/opening to carry an exact concrete location anchor. Update model instructions and semantic validation without repair, retry, fallback, or backend-authored content.
+3. Cut Campaign Play eligibility over to concrete reachability, exact active-actor placement, exact opening pressure/support placement, and an outgoing concrete route. Rename persisted semantic fields to distinguish selected macro region from resolved opening scene; old hashes/templates become ineligible.
+4. Resolve macro starting choices to exact child-scene candidates. Bootstrap the human there and compile all actor plans against concrete placements/routes. Remove descendant-wide actor presence from opening and public play.
+5. Keep visibility's exact-location predicate as authority and add sibling-scene regressions for direct perception and local aftermath. Prove Rulebook rejects macro bootstrap/movement and that actor scheduling can traverse the concrete graph.
+6. Update the rendered current-place/presence/route fixtures and run humanizer/deslop review on changed prompts and player copy.
+7. Build one new world once with GLM 5.2, snapshot it before character bootstrap, and manually play the two-establishment diagnostic through the normal UI. Stop on any cross-scene observation, macro current location, prose-only move, recovery requirement, or reload divergence.
+
+**Validation budget:** narrow Campaign World contract/build tests; eligibility/opening/bootstrap tests; Rulebook, actor scheduling, visibility, public state, and touched UI tests; backend/frontend typechecks; at most two evidence-based repair cycles; one fresh-world live diagnostic and one rerun only after an in-scope repair. No standalone smoke suite and no pristine 60-action run inside this task.
+
+**Acceptance evidence:** one accepted fresh-world snapshot with exact concrete topology; focused tests proving macro placement/route rejection and sibling-scene secrecy; one rendered transcript where movement between two establishments has a visible route and receipt, the sibling event stays hidden before the eligible channel, and the public current place/presence remain exact after reload.
+
+**Parallel:** follows Task 17 diagnosis and blocks every Task 18 lane.
+
 ### Task 18: one reusable-template, one new-template, and one clone/provenance pristine 60-turn campaign
 
 **Files:** three complete `output/playtests/campaign-play/<run-id>/` bundles, `rpi/campaign-play/implement/18-pristine-acceptance.md`.
@@ -1344,7 +1381,7 @@ node --import tsx e2e/campaign-play/playtest-runner.ts --validate <bundle-path>
 
 **Work:**
 
-1. Materialize Lane A into an isolated campaign root from the current-contract `Lowwater Ledger` clean-world template. Verify the reusable-world manifest and file hashes, apply current migrations without changing accepted world content, prove empty character/play/turn tables, then freeze a new lane eligibility manifest before turn zero.
+1. Rebuild `Lowwater Ledger` once from its saved source under Task 17B's concrete-scene Campaign World contract, accept and snapshot it before character bootstrap, then materialize Lane A from that new clean-world template. The pre-cutover `a6272027` template must fail eligibility and receives no migration adapter. Verify the new reusable-world manifest and file hashes, empty character/play/turn tables, and frozen lane eligibility before turn zero.
 2. Build and accept one distinct Lane B world with the current person-only Campaign World contract, using edited DNA plus saved research. Before character bootstrap, snapshot it as a reusable clean-world template, materialize the play lane from that template, and freeze its eligibility manifest. Generate this world once; later playtests reuse the snapshot.
 3. Create Lane C through the product clone operation from an accepted zero-turn current-contract campaign before character bootstrap. Record parent campaign, accepted snapshot/source hashes, clone operation metadata, empty child play tables before bootstrap, fresh child play-state identity, and eligibility manifest; complete the same 60-action policy.
 4. Keep one declared provider/model configuration per lane with zero provider swap, hidden retry, database edit, action resubmission, restore, or checkpoint rewind.
@@ -1519,7 +1556,7 @@ This goal creates no standalone smoke suite. Focused contract tests, transaction
 3B -> 10A
 5/6B/6C/9/10A -> 10B
 6B/7/8B/9/10A/10B -> 10C -> 11
-11/12 -> 13 -> 14A -> 14B -> 15 -> 16A -> 16B -> 17 -> 18 -> 19 -> 20
+11/12 -> 13 -> 14A -> 14B -> 15 -> 16A -> 16B -> 17 -> 17B -> 18 -> 19 -> 20
 ```
 
 Safe parallel windows:
@@ -1534,7 +1571,7 @@ Integration tasks own shared files exclusively. Concurrent workers must preserve
 
 - Accepted Review reads the immutable acceptance snapshot after live play changes current rows.
 - Character setup creates one human person actor through Campaign Play.
-- Opening commits a valid placement, local situation, typed actor plans, schedules, observations, and narration.
+- Opening resolves a selected macro region to one concrete persistent sublocation and commits exact-scene placement, local situation, typed actor plans, schedules, observations, and narration.
 - Every player/actor mechanical mutation crosses Rulebook and has receipts/world events; every runtime mutation has a fenced revision and campaign runtime event; turn-owned runtime changes also have sanitized turn events.
 - One active turn and one pending job per actor are enforced by SQLite.
 - SSE reconnect changes delivery only.
