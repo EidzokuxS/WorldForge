@@ -125,10 +125,11 @@ function planJson(
   actorId: string,
   goalId: string,
   actorBRouteId = "route-a",
-  actorBIntent: "move" | "wait" = "move",
+  actorBIntent: "move" | "wait" | "remote_wait" = "move",
 ) {
   const move = actorId === "actor-b" && actorBIntent === "move";
-  const wait = actorId === "actor-b" && actorBIntent === "wait";
+  const wait = actorId === "actor-b" &&
+    (actorBIntent === "wait" || actorBIntent === "remote_wait");
   const intent = move
     ? {
         kind: "move" as const,
@@ -143,7 +144,7 @@ function planJson(
       ? {
           kind: "wait" as const,
           targets: [
-            { kind: "location" as const, id: "location-a" },
+            { kind: "location" as const, id: actorBIntent === "remote_wait" ? "location-b" : "location-a" },
             { kind: "goal" as const, id: goalId },
           ],
           method: "Wait beside the reef ledger office for the clerk to return",
@@ -180,7 +181,7 @@ function createReadyFixture(
   playerLocationId = "location-c",
   actorBRouteId = "route-a",
   actorBPlanVersion = 1,
-  actorBIntent: "move" | "wait" = "move",
+  actorBIntent: "move" | "wait" | "remote_wait" = "move",
 ) {
   buildAcceptedCampaign();
   const handle = track(openCampaignPlayDatabase(CAMPAIGN_ID));
@@ -486,6 +487,35 @@ describe("Campaign Play actor proposal service", () => {
       WHERE campaign_id = ? AND actor_id = 'actor-b' AND plan_version = 1`).get(
         CAMPAIGN_ID,
       )).toEqual({ status: "blocked" });
+    expect(() => createCampaignPlayActorScheduler(handle).validateTurnSettlement(token.turnId))
+      .not.toThrow();
+  });
+
+  it("rejects a non-move step aimed at a location outside the actor's scene", () => {
+    const { handle, token } = createReadyFixture("location-c", "route-a", 1, "remote_wait");
+
+    const outcomes = processDueActors(createCampaignPlayActorProposalService(handle, {
+      now: () => 1_700,
+    }), {
+      turnId: token.turnId,
+      token,
+      createdAt: 1_700,
+      openingExposureSeed: TEST_EXPOSURE_SEED,
+    });
+
+    expect(outcomes).toContainEqual(expect.objectContaining({
+      kind: "rejected",
+      proposalId: null,
+      reason: "invalid_step",
+    }));
+    expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_proposals
+      WHERE campaign_id = ? AND actor_id = 'actor-b'`).get(CAMPAIGN_ID)).toEqual({ count: 0 });
+    expect(handle.sqlite.prepare(`SELECT stage FROM campaign_play_actor_jobs
+      WHERE campaign_id = ? AND actor_id = 'actor-b'`).get(CAMPAIGN_ID))
+      .toEqual({ stage: "rejected" });
+    expect(handle.sqlite.prepare(`SELECT status FROM campaign_play_actor_plans
+      WHERE campaign_id = ? AND actor_id = 'actor-b' AND plan_version = 1`).get(CAMPAIGN_ID))
+      .toEqual({ status: "blocked" });
     expect(() => createCampaignPlayActorScheduler(handle).validateTurnSettlement(token.turnId))
       .not.toThrow();
   });

@@ -300,6 +300,7 @@ function compilePlan(
   const resolveIntent = (
     intent: CampaignPlayActorReplanProposal["intent"],
     originLocationId: string | null,
+    enforceStepLocation = true,
   ): { intent: CampaignPlayActorIntent; destinationLocationId: string | null } => {
     const targets = intent.targetHandles.map((targetHandle) => {
       const reference = compilation.refsByHandle.get(targetHandle);
@@ -321,6 +322,11 @@ function compilePlan(
         throw new CampaignPlayActorReplannerError("replan_state_invalid");
       }
       destinationLocationId = route.toLocationId;
+    } else if (
+      enforceStepLocation &&
+      targets.some((target) => target.kind === "location" && target.id !== originLocationId)
+    ) {
+      throw new CampaignPlayActorReplannerError("replan_state_invalid");
     }
     return {
       intent: {
@@ -349,7 +355,11 @@ function compilePlan(
     actorId: frame.actorId,
     locationId: operative.locationId,
   });
-  const planIntent = resolveIntent(proposal.intent, operative?.locationId ?? null).intent;
+  const planIntent = resolveIntent(
+    proposal.intent,
+    operative?.locationId ?? null,
+    false,
+  ).intent;
   let stepLocationId = operative?.locationId ?? null;
   const steps = proposal.steps.map((step, order) => {
     const resolved = resolveIntent(step.intent, stepLocationId);

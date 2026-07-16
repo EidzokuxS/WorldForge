@@ -981,7 +981,7 @@ npm --prefix backend test -- src/campaign-play/actor-scheduler.test.ts
 3. Reject genuinely stale detached work with zero mutation, clear the pending job, increase agency debt, and schedule one bounded future retry.
 4. Replan only completed or invalid plans through an explicit strict model attempt protected by worker epoch.
 5. Prove the opening's scheduled non-local consequence becomes eligible within the first five player actions without global disclosure.
-6. Compile every move from exactly one supplied directed route whose origin is the actor's current or preceding-step location; an optional location target must equal the route destination. A semantically invalid replan interrupts as `model_contract_invalid` before plan persistence.
+6. Compile every move from exactly one supplied directed route whose origin is the actor's current or preceding-step location; an optional location target must equal the route destination. Every executable non-move step that targets a location must target the actor's location established for that step, never an earlier or remote scene. A semantically invalid replan interrupts as `model_contract_invalid` before plan persistence.
 7. If a persisted active step cannot compile against current typed state, commit one proposal-less `rejected` job, block the invalid plan, add agency debt, and schedule a bounded retry in one zero-world-version actor transition. Do not create a proposal, command, receipt, event prose, or mechanical mutation for that step.
 
 **Verification:**

@@ -239,6 +239,13 @@ function compileProposal(
   const causalParent = { kind: "actor_job" as const, jobId: frame.jobId };
   const intent = frame.selection.step.intent;
   const present = frame.placements.find((placement) => placement.placementKind === "present");
+  const locationTargets = intent.targets.filter((target) => target.kind === "location");
+  if (
+    intent.kind !== "move" &&
+    locationTargets.some((target) => target.id !== present?.locationId)
+  ) {
+    return null;
+  }
   const explicitTargetLocation = intent.targets.find((target) => target.kind === "location");
   const explicitRoute = intent.targets.find((target) => target.kind === "route");
   const route = present
