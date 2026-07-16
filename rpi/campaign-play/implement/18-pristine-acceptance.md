@@ -653,3 +653,19 @@ The human verdict is `FREEZE_R17_AS_DIAGNOSTIC_AFTER_ACTION_7`. Comprehension is
 Actions 6 and 7 were signed before submission and bound after completion. All seven stages across those actions used `zai-coding-plan` `glm-5.2`, strict native objects, and attempt 1. Action 6 took `39865 ms` for Judge, `73419 ms` for Game Master, and `88333 ms` for Narrator. Action 7 took `34467 ms`, `68146 ms`, `96163 ms` for one Actor Replanner, and `63289 ms` for Narrator. SQLite integrity is `ok`, and foreign-key check is empty.
 
 Focused Game Master verification passes `26/26`, and backend typecheck passes. Screenshot hashes are `cf7a599e14ffb74d3fc72b662675ba696945e387b0e10043535b3ffc18396ac4` for action 6 and `4d82d70fb2ad80f462e8ead7008babe1d44f490b4d2a467db38e3e0c0345a445` for action 7. Humanizer/deslop review kept the instruction mechanical and replaced the first weaker wording instead of stacking another rule. A fresh clean-world copy must test the first offer before this change receives product acceptance.
+
+## r18 clean roster-bound offer proof
+
+r18 materialized `lowwater-ledger-pristine-fb2c7074` at its zero-character and zero-turn boundary. No world generation ran. The live session is pinned to commit `bffafeb8`. Lenna was rebuilt through the rendered Character UI from a specific description; the generated draft preserved her ordinary trade, cautious temperament, lack of authority, and the same three starting possessions.
+
+The explicit `Lower Wards / Outsider / Just arrived / Following a lead` opening completed on one strict GLM 5.2 attempt per stage. Vassara herself offered salves and a dry corner for repaired corridor panels. She did not create a household resident or promise payment owned by an absent person. Seven charcoal tallies and a diminishing row of herb bundles supplied a separate visible pressure without turning Lenna into its cause.
+
+The signed first action asked Vassara to identify one panel she personally controlled or had authority to commission, define success, state exact payment, and name the person who would accept the work. Vassara selected the split housing over her own doorframe. She described tenant responsibility under the old lease, defined a successful seal through draft, damp, and token-burn behavior, offered one week-long salve packet per panel or one dry night per two panels, and kept acceptance authority with herself. Tools remained packed, and Lenna did not agree before inspection.
+
+This is a clean product `PASS` for roster-bound actionable leads. The offer has one canonical owner, one visible object, observable acceptance conditions, bounded payment, and a next decision that does not require an actor to emerge from prose. The reply is dense and uses several em dashes, so prose readability remains `4/5`; comprehension is `5/5`, agency `5/5`, world aliveness `4/5`, and desire to continue `5/5`.
+
+Opening Planner took `273710 ms`, Opening Narrator `112849 ms`, Judge `37444 ms`, Game Master `60895 ms`, and action Narrator `121813 ms`. All five persisted stages used `zai-coding-plan` `glm-5.2`, strict native objects, attempt 1, and valid schema outcomes. No retry, repair, fallback, provider switch, model switch, interruption, or Resume ran.
+
+SQLite integrity is `ok`, foreign-key check is empty, and runtime event sequence and revision are contiguous from `1` through `99`. The action-1 backend restart and actual browser reload preserved public-state hash `c0a3990df3aa412d02257a396027e530e8ab7267ad8a1219988213fc4da193a0`. Restart stderr is empty. Screenshot SHA-256 values are `c953c5a5fda70749ee1eb1686b53c93aecfbdb827131cdd46392f11695c938fc` for opening and `7d54117fc5a2d3c3b731279e6b30d448d5ce4964128588506b50761415959297` for action 1.
+
+r18 is the active replacement Lane A at one of sixty eligible player actions. Humanizer/deslop review keeps the clean mechanical proof, prose density advisory, human score, and still-unmet long-lane claim separate.
