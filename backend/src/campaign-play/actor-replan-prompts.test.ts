@@ -79,6 +79,24 @@ describe("campaign play actor replan prompt", () => {
     expect(prompt).toContain("another person's tools or materials");
   });
 
+  it("keeps scene objects behind when movement changes only the actor placement", () => {
+    const prompt = buildCampaignPlayActorReplanPrompt({
+      ...frame,
+      entities: [...frame.entities, {
+        handle: "world_event:basket-handed-off",
+        kind: "world_event",
+        name: "scene_recorded",
+        summary: "The keeper left the loaded basket with another traveler before walking through the gate.",
+        state: "occurred at world time 178; learned at world time 178",
+      }],
+    });
+
+    expect(prompt).toContain("move_actor changes only the named actor's placement");
+    expect(prompt).toContain("does not move, copy, or recreate a basket, cargo, tool, material");
+    expect(prompt).toContain("treat it as absent from this actor's current scene");
+    expect(prompt).toContain("until a later accepted event explicitly brings it here");
+  });
+
   it("accepts bounded handle-only plans and rejects invented output fields", () => {
     const proposal = {
       goalHandle: "goal:keep-gate-open",
