@@ -832,6 +832,10 @@ function compile(
 
 function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRuling, resolution: CampaignPlayUncertaintyResolution): string {
   const allowedHandles = frame.visibleFacts.map((fact) => fact.handle);
+  const canonicalPersonNames = frame.rulebookFrame.acceptedWorld.actors
+    .filter((actor) => actor.kind === "person")
+    .map((actor) => actor.name)
+    .sort();
   const handlesByKind = frame.handleBindings.reduce<Record<string, string[]>>((grouped, binding) => {
     const kind = binding.reference.kind;
     (grouped[kind] ??= []).push(binding.handle);
@@ -855,6 +859,7 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     "When the resolved action reveals, records, communicates, or verifies concrete information whose value was previously unspecified—such as a name, marking, code, number, date, quantity, direction, or instruction—materialize each usable player-visible value in the committed summary. Never say that a value was read, written down, repeated, counted, or confirmed while omitting the value itself. If the current action relies on earlier concrete values present in SOURCE_MOMENT or VISIBLE_FACTS, preserve and repeat them exactly. Do not substitute opaque handles or internal IDs for in-world values.",
     "ACTOR_CONTINUITY is protected causal truth about visible actors' own completed actions and outranks conflicting earlier dialogue in VISIBLE_FACTS. Maintain identity and causality: an actor must not deny, misattribute, or forget an action listed under its handle. Reconcile a prior denial instead of repeating it. Use this truth only when the exact PLAYER_INTENT and RULING make it relevant; do not volunteer unrelated protected history. An absent action means unknown, not that the actor did nothing.",
     "ACTOR_DIRECTIVES is protected roleplay authority for each agent actor targeted by PLAYER_INTENT. Use the person's profile, present conditions, active goals, and relations to choose what they actually say or do. These directives establish characterization and decision pressure, not player knowledge or permission to disclose protected facts. Never quote a hidden goal or motive merely because it appears there.",
+    "CANONICAL_PEOPLE is the complete person roster for this call, not permission to disclose anyone. Mention a listed person only when VISIBLE_FACTS, ACTOR_CONTINUITY, or ACTOR_DIRECTIVES supports the reference. A person name outside this list does not identify an actor, even when SOURCE_MOMENT or prior prose mentions it. Do not repeat or introduce that name; treat any prior mention as unverified hearsay about an unnamed resident. An unlisted resident cannot own a job, payment, permission, appointment, access, or future reply. Do not offer knocking, calling, or waiting for one as the next playable step. Keep a concrete offer or transaction with the targeted actor. If no listed actor can own the requested transaction from supplied facts, have the targeted actor state that no actionable offer exists.",
     "For contact, write the targeted person's actual spoken reply, silence, gesture, or action in the record_world_event summary and copy that person's handle into performingActorHandle. The performer must be one of PLAYER_INTENT's actor targets. Do not replace the exchange with audit labels such as common knowledge, offers no interpretation, nothing further, or has nothing to share. If the person withholds something, show the words or action used to withhold it. A concrete deflection, counterquestion, or condition is useful when ACTOR_DIRECTIVES support one.",
     "PLAYER_MOVEMENT is code-authoritative. When it is non-null, return exactly one {\"kind\":\"move_actor\",\"actorHandle\":null} effect for the player at the chronological point where travel occurs. Code binds the player actor, route, endpoints, and direct perception from this order. When PLAYER_MOVEMENT is null, never return move_actor. Do not copy PLAYER_MOVEMENT fields or exposure into an effect.",
     "A targeted visible agent may voluntarily travel with the player over PLAYER_MOVEMENT. First record that person's explicit agreement or willing action as an origin dialogue/interaction. After the player's move_actor effect, return at most one second move_actor effect with that targeted person's exact actorHandle. Code binds the same route and endpoints. Never move an untargeted, remote, incapacitated, non-agent, or unwilling person. If the person does not travel, omit the second effect and do not describe that person at the destination.",
@@ -872,6 +877,7 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     `VISIBLE_FACTS=${JSON.stringify(frame.visibleFacts)}`,
     `ACTOR_CONTINUITY=${JSON.stringify(frame.actorContinuity)}`,
     `ACTOR_DIRECTIVES=${JSON.stringify(directives)}`,
+    `CANONICAL_PEOPLE=${JSON.stringify(canonicalPersonNames)}`,
     `PLAYER_INTENT=${JSON.stringify(ruling.normalizedIntent)}`,
     `RULING=${JSON.stringify({ ...ruling, normalizedIntent: undefined })}`,
     `RESOLUTION=${JSON.stringify(resolution)}`,

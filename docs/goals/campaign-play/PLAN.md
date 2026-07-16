@@ -211,6 +211,7 @@ Each command carries command ID, causal parent, actor/system source, expected me
 - Validation failure produces zero domain writes and a typed denial record.
 - The player and agent actors use the same command schemas and executor.
 - Actor possessions are current Rulebook state. Acquisition and spending use typed quantity adjustments; prose-only possession claims carry no mechanical authority. A model-authored `transform` of a retained possession compiles to an atomic source spend followed by a result acquire in the same Rulebook batch. Only the result command is projected as the public consequence, so the Narrator receives one authored summary while both state changes receive receipts.
+- The accepted actor roster owns person identity. A Game Master event may name only a roster person whose mention is supported by the supplied frame. Other residents remain unnamed ambient presence and cannot own a job, payment, permission, appointment, access, or expected reply in prose. Creating an actionable person requires a future typed Rulebook contract rather than a name embedded in an event summary.
 - Character bootstrap is the one-way boundary from immutable `inventorySeed` provenance to current possession quantities. Opening setup and recovery expose those quantities before the first player action; CharacterRecord never becomes a second live inventory owner.
 - Narrator, frontend, and SSE delivery possess zero mutation authority.
 
