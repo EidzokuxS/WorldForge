@@ -100,6 +100,16 @@ const judgeProposalSchema = z.object({
   method: line(CAMPAIGN_PLAY_LIMITS.shortText).nullable(),
   stakes: line(CAMPAIGN_PLAY_LIMITS.shortText).nullable(),
   movementRouteHandle: line(CAMPAIGN_PLAY_LIMITS.handle).nullable(),
+  requiredPossessionEffect: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("none") }).strict(),
+    z.object({
+      kind: z.literal("adjust_actor_possession"),
+      operation: z.enum(["acquire", "spend", "transform"]),
+      possessionHandle: line(CAMPAIGN_PLAY_LIMITS.handle).nullable(),
+      quantity: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+      minimumResult: z.enum(["setback", "limited", "success", "strong_success"]),
+    }).strict(),
+  ]),
   disposition: campaignPlayJudgmentDispositionSchema,
   citedVisibleFactHandles: z.array(line(CAMPAIGN_PLAY_LIMITS.handle)).max(CAMPAIGN_PLAY_LIMITS.citedFacts),
   resultBounds: campaignPlayResultBoundsSchema,
@@ -336,11 +346,12 @@ function prompt(frame: CampaignPlayJudgeFrame, input: CampaignPlayJudgeInput): s
     "For suggested input, copy FROZEN_CHOICE kind and targets exactly. targets must always be a JSON array. When FROZEN_CHOICE contains one target, return that object inside a one-element array. Judge feasibility and outcome without reinterpreting the selected action.",
     "movementRouteHandle is a separate mechanical decision from the primary kind. Set it to the exact visible route when the action includes travel before or during its primary action, including compound requests such as travel then contact. Otherwise set it to null. A move kind always requires a non-null movementRouteHandle. Never infer travel from a cited route alone. The route does not need to be repeated in targets; targets describe the action's semantic subjects or destination.",
     "For suggested input, a move choice must use its exact frozen route target as movementRouteHandle. Every suggested non-move choice must set movementRouteHandle to null; never add travel that the frozen choice did not authorize.",
+    "requiredPossessionEffect is Judge-owned mechanical intent, not prose. Use kind adjust_actor_possession when an actionable result at or above minimumResult must acquire a countable possession, spend one, or durably transform an existing retained possession. Writing measurements or other usable records into a visible notebook, form, chart, ledger, or similar retained object is transform with that exact possession handle and quantity 1. Set minimumResult to the lowest result tier that still produces the retained change. Use acquire with null possessionHandle for a new item; spend or transform with an exact visible possession handle for an existing item. Cite every non-null possessionHandle in citedVisibleFactHandles. Use kind none when no durable possession change is part of the ruled outcome. Impossible and clarification rulings always use none.",
     "PLAYER_INPUT stakes ask what the player hopes to learn or accomplish; they are not evidence and do not authorize an answer. For observation, authorize only conclusions supported by SOURCE_MOMENT, VISIBLE_FRAME, or ACTOR_CONTINUITY. Preserve unknown authorship, motive, provenance, prior contents, and hidden causes. A clean, empty, missing, or disturbed surface proves only its currently observable state; it does not prove that something existed, was found, removed, stolen, concealed, or carried away.",
     "The reason field explains feasibility and result bounds. It must not add world facts beyond the supplied frames or resolve an uncertainty that the visible evidence leaves open.",
     "ACTOR_CONTINUITY outranks any conflicting earlier dialogue in VISIBLE_FRAME for authorship and actor knowledge of its own actions. Never cite a prior denial to erase an own action; Judge the current request from the accepted action truth and preserve any separate uncertainty, privacy, or willingness to disclose.",
     "Outcome tiers never create trust, permission, leverage, knowledge, or access absent from VISIBLE_FRAME or ACTOR_CONTINUITY. Absence of visible trust or leverage means none is established. A plain question claims only that the question is delivered; Judge that delivery deterministically and leave the response to the Game Master. For an attempt to persuade, coerce, or extract private information against resistance, cap resultBounds.maximum at limited unless supplied facts already justify fuller cooperation.",
-    "Return exactly these top-level keys: kind, targets, method, stakes, movementRouteHandle, disposition, citedVisibleFactHandles, resultBounds, elapsedBounds, uncertainty, reason, clarificationQuestion. Spell citedVisibleFactHandles exactly; never use citedVisibleFacts or another key.",
+    "Return exactly these top-level keys: kind, targets, method, stakes, movementRouteHandle, requiredPossessionEffect, disposition, citedVisibleFactHandles, resultBounds, elapsedBounds, uncertainty, reason, clarificationQuestion. Spell citedVisibleFactHandles exactly; never use citedVisibleFacts or another key.",
     "Return one strict schema object and no prose.",
     `SOURCE_MOMENT=${JSON.stringify(frame.sourceMoment)}`,
     `VISIBLE_FRAME=${JSON.stringify(visibleFrame)}`,
@@ -390,6 +401,15 @@ function compile(
   const targetsAreVisible = proposal.targets.every((target) => visible.get(target.handle) === target.kind);
   const citationsAreVisible = proposal.citedVisibleFactHandles.every((handle) => visible.has(handle));
   if (!targetsAreVisible || !citationsAreVisible) throw new CampaignPlayJudgeError("model_contract_failed", null);
+  if (proposal.requiredPossessionEffect.kind === "adjust_actor_possession") {
+    const possessionHandle = proposal.requiredPossessionEffect.possessionHandle;
+    if (
+      (possessionHandle !== null && visible.get(possessionHandle) !== "possession")
+      || (possessionHandle !== null && !proposal.citedVisibleFactHandles.includes(possessionHandle))
+    ) {
+      throw new CampaignPlayJudgeError("model_contract_failed", null);
+    }
+  }
   const actionableContact = proposal.kind === "contact"
     && proposal.disposition !== "impossible"
     && proposal.disposition !== "clarification_required";

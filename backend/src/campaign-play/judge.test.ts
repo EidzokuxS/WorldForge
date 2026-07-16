@@ -77,6 +77,7 @@ function frame(): CampaignPlayJudgeFrame {
       { handle: "observation-latch", kind: "observation", summary: "Fresh paint marks the gate latch." },
       { handle: "choice-ask", kind: "choice", summary: "Ask the guard why the road is closed." },
       { handle: "choice-cross", kind: "choice", summary: "Cross the reef road." },
+      { handle: "notebook", kind: "possession", summary: "A blank waxed notebook." },
     ],
     actorContinuity: [{
       actorHandle: "actor-guard",
@@ -95,6 +96,7 @@ function proposal(overrides: Record<string, unknown> = {}) {
     method: "Ask calmly",
     stakes: "Learn why the road is closed",
     movementRouteHandle: null,
+    requiredPossessionEffect: { kind: "none" },
     disposition: "deterministic",
     citedVisibleFactHandles: ["actor-guard", "route-reef"],
     resultBounds: { minimum: "success", maximum: "success" },
@@ -107,6 +109,50 @@ function proposal(overrides: Record<string, unknown> = {}) {
 }
 
 describe("Campaign Play Judge", () => {
+  it("binds a durable written record to one visible possession effect", () => {
+    const judge = createCampaignPlayJudge();
+    const input = {
+      originalText: "I measure the seepage and record a condition list in my notebook.",
+      source: "freeform" as const,
+      choiceHandle: null,
+    };
+    const value = proposal({
+      kind: "attempt",
+      targets: [{ handle: "location-harbor", kind: "location" }],
+      method: "Measure the seepage and record a condition list in the visible notebook",
+      stakes: "Produce a retained condition list",
+      requiredPossessionEffect: {
+        kind: "adjust_actor_possession",
+        operation: "transform",
+        possessionHandle: "notebook",
+        quantity: 1,
+        minimumResult: "limited",
+      },
+      citedVisibleFactHandles: ["location-harbor", "notebook"],
+      disposition: "uncertain",
+      resultBounds: { minimum: "limited", maximum: "success" },
+      uncertainty: {
+        kind: "check",
+        dieSides: 20,
+        difficulty: 9,
+        modifierMinimum: -2,
+        modifierMaximum: 2,
+      },
+    });
+
+    expect(judge.compile(frame(), input, value).requiredPossessionEffect).toEqual({
+      kind: "adjust_actor_possession",
+      operation: "transform",
+      possessionHandle: "notebook",
+      quantity: 1,
+      minimumResult: "limited",
+    });
+    expect(() => judge.compile(frame(), input, {
+      ...value,
+      citedVisibleFactHandles: ["location-harbor"],
+    })).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+  });
+
   it("normalizes one freeform action while code preserves its original authority fields", async () => {
     const workerController = new AbortController();
     const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => (
@@ -344,13 +390,13 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("Every targets entry must copy one exact {handle, kind} pair from TARGET_CATALOG");
     expect(sentPrompt).toContain("Observation and choice handles are not world targets");
     expect(sentPrompt).toContain(
-      'TARGET_CATALOG=[{"handle":"actor-you","kind":"actor"},{"handle":"location-harbor","kind":"location"},{"handle":"location-reef","kind":"location"},{"handle":"route-reef","kind":"route"},{"handle":"actor-guard","kind":"actor"}]',
+      'TARGET_CATALOG=[{"handle":"actor-you","kind":"actor"},{"handle":"location-harbor","kind":"location"},{"handle":"location-reef","kind":"location"},{"handle":"route-reef","kind":"route"},{"handle":"actor-guard","kind":"actor"},{"handle":"notebook","kind":"possession"}]',
     );
     expect(sentPrompt).toContain(
       'VISIBLE_ROUTES=[{"handle":"route-reef","destinationHandle":"location-reef"}]',
     );
     expect(sentPrompt).toContain(
-      'CITATION_HANDLES=["actor-you","location-harbor","location-reef","route-reef","actor-guard","observation-latch","choice-ask","choice-cross"]',
+      'CITATION_HANDLES=["actor-you","location-harbor","location-reef","route-reef","actor-guard","observation-latch","choice-ask","choice-cross","notebook"]',
     );
     expect(sentPrompt).toContain("stakes ask what the player hopes to learn or accomplish; they are not evidence");
     expect(sentPrompt).toContain("A clean, empty, missing, or disturbed surface proves only its currently observable state");

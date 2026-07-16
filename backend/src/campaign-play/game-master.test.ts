@@ -134,6 +134,7 @@ function ruling(overrides: Partial<CampaignPlayJudgeRuling> = {}): CampaignPlayJ
       kind: "contact", targets: [{ handle: "guard", kind: "actor" }], method: "Ask calmly", stakes: "Learn the reason",
     },
     movementRouteHandle: null,
+    requiredPossessionEffect: { kind: "none" },
     citedVisibleFactHandles: ["guard", "passage"],
     resultBounds: { minimum: "success", maximum: "success" },
     elapsedBounds: { minimumMinutes: 1, maximumMinutes: 3 },
@@ -421,7 +422,16 @@ describe("Campaign Play Game Master", () => {
 
     const transformation = createCampaignPlayGameMaster().compile(
       spendingFrame,
-      ruling(),
+      ruling({
+        requiredPossessionEffect: {
+          kind: "adjust_actor_possession",
+          operation: "transform",
+          possessionHandle: "copper-chit",
+          quantity: 1,
+          minimumResult: "limited",
+        },
+        citedVisibleFactHandles: ["guard", "passage", "copper-chit"],
+      }),
       resolution,
       null,
       {
@@ -454,6 +464,22 @@ describe("Campaign Play Game Master", () => {
       exposure: { mode: "projectable" },
     }]);
     expect(transformation.preflight.accepted).toBe(true);
+    expect(() => createCampaignPlayGameMaster().compile(
+      spendingFrame,
+      ruling({
+        requiredPossessionEffect: {
+          kind: "adjust_actor_possession",
+          operation: "transform",
+          possessionHandle: "copper-chit",
+          quantity: 1,
+          minimumResult: "limited",
+        },
+        citedVisibleFactHandles: ["guard", "passage", "copper-chit"],
+      }),
+      resolution,
+      null,
+      proposal,
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
   });
 
   it("rejects impossible and clarification rulings before any GM model call", async () => {

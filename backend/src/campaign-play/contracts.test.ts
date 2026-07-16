@@ -1731,12 +1731,55 @@ describe("Campaign Play shared public contracts", () => {
 });
 
 describe("Campaign Play Judge and Rulebook contracts", () => {
+  it("requires reachable and well-shaped possession effects in Judge rulings", () => {
+    const ruling = {
+      disposition: "uncertain" as const,
+      normalizedIntent: intentFixture(),
+      movementRouteHandle: null,
+      requiredPossessionEffect: {
+        kind: "adjust_actor_possession" as const,
+        operation: "transform" as const,
+        possessionHandle: "possession_notebook",
+        quantity: 1,
+        minimumResult: "limited" as const,
+      },
+      citedVisibleFactHandles: ["possession_notebook"],
+      resultBounds: { minimum: "limited" as const, maximum: "success" as const },
+      elapsedBounds: { minimumMinutes: 30, maximumMinutes: 120 },
+      uncertainty: {
+        kind: "check" as const,
+        dieSides: 20 as const,
+        difficulty: 9,
+        modifierMinimum: -2,
+        modifierMaximum: 2,
+      },
+      reason: "A retained condition list requires writing in the notebook.",
+      clarificationQuestion: null,
+    };
+    expect(campaignPlayJudgeRulingSchema.safeParse(ruling).success).toBe(true);
+    expect(campaignPlayJudgeRulingSchema.safeParse({
+      ...ruling,
+      requiredPossessionEffect: {
+        ...ruling.requiredPossessionEffect,
+        possessionHandle: null,
+      },
+    }).success).toBe(false);
+    expect(campaignPlayJudgeRulingSchema.safeParse({
+      ...ruling,
+      requiredPossessionEffect: {
+        ...ruling.requiredPossessionEffect,
+        minimumResult: "strong_success",
+      },
+    }).success).toBe(false);
+  });
+
   it("round-trips every judgment and uncertainty variant", () => {
     for (const disposition of CAMPAIGN_PLAY_JUDGMENT_DISPOSITION_VALUES) {
       const ruling = {
         disposition,
         normalizedIntent: intentFixture(),
         movementRouteHandle: null,
+        requiredPossessionEffect: { kind: "none" as const },
         citedVisibleFactHandles: ["fact_bridge"],
         resultBounds: disposition === "impossible" || disposition === "clarification_required"
           ? { minimum: "no_effect", maximum: "no_effect" }
@@ -1799,6 +1842,7 @@ describe("Campaign Play Judge and Rulebook contracts", () => {
       disposition: "deterministic" as const,
       normalizedIntent: intentFixture(),
       movementRouteHandle: null,
+      requiredPossessionEffect: { kind: "none" as const },
       citedVisibleFactHandles: [],
       resultBounds: { minimum: "limited" as const, maximum: "success" as const },
       elapsedBounds: { minimumMinutes: 0, maximumMinutes: 10 },
@@ -1841,6 +1885,7 @@ describe("Campaign Play Judge and Rulebook contracts", () => {
       disposition: "deterministic" as const,
       normalizedIntent: intentFixture(),
       movementRouteHandle: null,
+      requiredPossessionEffect: { kind: "none" as const },
       citedVisibleFactHandles: [],
       resultBounds: { minimum: "success" as const, maximum: "success" as const },
       elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
@@ -1885,6 +1930,7 @@ describe("Campaign Play Judge and Rulebook contracts", () => {
         disposition: "deterministic" as const,
         normalizedIntent: intentFixture(),
         movementRouteHandle: null,
+        requiredPossessionEffect: { kind: "none" as const },
         citedVisibleFactHandles: [],
         resultBounds: { minimum: "limited" as const, maximum: "success" as const },
         elapsedBounds: { minimumMinutes: 0, maximumMinutes: 10 },
@@ -2093,6 +2139,7 @@ describe("Campaign Play Judge and Rulebook contracts", () => {
       disposition: "deterministic",
       normalizedIntent: intentFixture(),
       movementRouteHandle: null,
+      requiredPossessionEffect: { kind: "none" as const },
       citedVisibleFactHandles: Array.from(
         { length: CAMPAIGN_PLAY_LIMITS.citedFacts },
         (_, index) => `fact_${index}`,

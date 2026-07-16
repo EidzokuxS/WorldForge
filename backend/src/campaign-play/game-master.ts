@@ -13,6 +13,7 @@ import {
 } from "../ai/structured-output-capabilities.js";
 import { createLogger } from "../lib/index.js";
 import {
+  CAMPAIGN_PLAY_RESULT_TIER_VALUES,
   CAMPAIGN_PLAY_COMMAND_METADATA,
   campaignPlayActorConditionSchema,
   campaignPlayGoalStatusSchema,
@@ -771,6 +772,21 @@ function compile(
     throw new CampaignPlayGameMasterError("model_contract_failed", null);
   }
   const movement = canonicalMovement(frame, ruling, map);
+  const requiredPossessionEffect = ruling.requiredPossessionEffect.kind === "adjust_actor_possession"
+    && CAMPAIGN_PLAY_RESULT_TIER_VALUES.indexOf(resolution.result)
+      >= CAMPAIGN_PLAY_RESULT_TIER_VALUES.indexOf(ruling.requiredPossessionEffect.minimumResult)
+    ? ruling.requiredPossessionEffect
+    : null;
+  if (requiredPossessionEffect !== null) {
+    const matchingEffects = proposal.effects.filter((effect) =>
+      effect.kind === "adjust_actor_possession"
+      && effect.operation === requiredPossessionEffect.operation
+      && effect.possessionHandle === requiredPossessionEffect.possessionHandle
+      && effect.quantity === requiredPossessionEffect.quantity);
+    if (matchingEffects.length !== 1) {
+      throw new CampaignPlayGameMasterError("model_contract_failed", null);
+    }
+  }
   const movementEffects = proposal.effects.flatMap((effect, index) =>
     effect.kind === "move_actor" ? [{ effect, index }] : []);
   const playerMovementEffects = movementEffects.filter(({ effect }) => effect.actorHandle === null);
@@ -902,6 +918,7 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     "DESTINATION_SCENE is code-authoritative arrival context when PLAYER_MOVEMENT is non-null. Its description contains only player-visible surface facts, and every name in presentPeople is directly perceivable and identifiable in that exact scene. Ground the arrival in this context. Do not call the scene empty, move a listed person behind an unentered boundary, or contradict their presence. Do not make a listed person speak or act unless the accepted effects establish that action.",
     "record_world_event accepts exactly four eventClass values: dialogue, interaction, discovery, or scene. These are eventClass values only and must never appear in kind. Dialogue and interaction mean that a targeted nonplayer actor performs the event: set performingActorHandle to that actor and include the same handle in affectedHandles. Discovery and scene are actorless: set performingActorHandle to null, and do not use their summary to make a person speak, decide, transact, disclose information, or become a contact. A player's physical attempt that has no nonplayer performer must use its typed effect or an actorless discovery/scene result. For an observe result that changes no durable entity, return exactly one effect shaped as {\"kind\":\"record_world_event\",\"eventClass\":\"discovery\",\"performingActorHandle\":null,\"summary\":\"grounded observation\",\"affectedHandles\":[\"copied handle\"]}; do not add a second inspect, observe, discover, reveal, or describe effect. Use scene for an arrival or other directly perceived situation that is neither observation nor contact. Return a grounded summary and grounded affectedHandles. Omit exposure from record_world_event; code attaches direct perception at the player's current location at that effect's chronological position.",
     "Use adjust_actor_possession whenever the resolved action gives the player a countable possession, consumes one, or durably changes what an existing possession is. This effect has exactly these fields: kind, operation, actorHandle, possessionHandle, name, quantity, summary, and affectedHandles. Put the player's copied handle in actorHandle. performingActorHandle is forbidden on adjust_actor_possession and exists only on record_world_event. For a new possession, return operation acquire, the player actor handle, null possessionHandle, its concrete name, positive quantity, a player-visible summary, and grounded affectedHandles. For more of an existing possession, use operation acquire with its visible possessionHandle and null name. To consume one, return operation spend, its visible possessionHandle, null name, and a positive quantity. When an action writes on, repairs, assembles, opens, fills, empties, or otherwise turns an existing possession into a materially different retained item, return operation transform with the source possessionHandle and the concrete resulting name. Transform consumes the requested source quantity and acquires the same quantity under the resulting name in one Rulebook batch. Do not add record_world_event for the same gain, spend, or transformation: the typed effect is the public consequence and Rulebook truth.",
+    "requiredPossessionEffect in RULING is code-enforced Judge authority. When the resolved result meets its minimumResult, include exactly one adjust_actor_possession effect with the same operation, possessionHandle, and quantity. Choose the concrete resulting name and summary from the resolved outcome. Omitting or duplicating that matching effect invalidates the whole proposal before Rulebook execution.",
     `Every summary must fit its schema limit: at most ${CAMPAIGN_PLAY_LIMITS.text} characters for record_world_event and adjust_actor_possession, and at most ${CAMPAIGN_PLAY_LIMITS.shortText} characters for condition, relation, or goal updates. Include only the committed result. Do not include planning or reasoning, and do not repeat supporting facts.`,
     "Return at least one effect. Never return an empty effects array.",
     "Return one strict schema object and no prose.",

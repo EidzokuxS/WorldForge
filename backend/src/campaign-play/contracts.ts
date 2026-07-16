@@ -1645,10 +1645,31 @@ export const campaignPlayUncertaintySpecSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
+export const campaignPlayRequiredPossessionEffectSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("none") }).strict(),
+  z.object({
+    kind: z.literal("adjust_actor_possession"),
+    operation: z.enum(["acquire", "spend", "transform"]),
+    possessionHandle: handleSchema.nullable(),
+    quantity: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+    minimumResult: z.enum(["setback", "limited", "success", "strong_success"]),
+  }).strict().superRefine((effect, context) => {
+    const requiresExisting = effect.operation === "spend" || effect.operation === "transform";
+    if (requiresExisting !== (effect.possessionHandle !== null)) {
+      context.addIssue({
+        code: "custom",
+        path: ["possessionHandle"],
+        message: "Spend and transform require one existing possession; acquire requires none.",
+      });
+    }
+  }),
+]);
+
 const campaignPlayJudgeRulingBaseSchema = z.object({
   disposition: campaignPlayJudgmentDispositionSchema,
   normalizedIntent: playerIntentSchema,
   movementRouteHandle: handleSchema.nullable(),
+  requiredPossessionEffect: campaignPlayRequiredPossessionEffectSchema,
   citedVisibleFactHandles: z.array(handleSchema)
     .max(CAMPAIGN_PLAY_LIMITS.citedFacts),
   resultBounds: campaignPlayResultBoundsSchema,
@@ -1733,6 +1754,31 @@ export const campaignPlayJudgeRulingSchema =
         path: ["uncertainty"],
         message: "The current code-owned uncertainty modifier requires a range containing zero.",
       });
+    }
+    if (
+      (ruling.disposition === "impossible" || asksClarification)
+      && ruling.requiredPossessionEffect.kind !== "none"
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["requiredPossessionEffect"],
+        message: "No-effect rulings cannot require a possession effect.",
+      });
+    }
+    if (ruling.requiredPossessionEffect.kind === "adjust_actor_possession") {
+      const rank = new Map(
+        CAMPAIGN_PLAY_RESULT_TIER_VALUES.map((tier, index) => [tier, index]),
+      );
+      if (
+        (rank.get(ruling.requiredPossessionEffect.minimumResult) ?? 0)
+        > (rank.get(ruling.resultBounds.maximum) ?? 0)
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["requiredPossessionEffect", "minimumResult"],
+          message: "Required possession effect must be reachable inside the result bounds.",
+        });
+      }
     }
   });
 
