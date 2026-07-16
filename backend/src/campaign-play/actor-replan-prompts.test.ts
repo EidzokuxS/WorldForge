@@ -93,6 +93,8 @@ describe("campaign play actor replan prompt", () => {
 
     expect(prompt).toContain("move_actor changes only the named actor's placement");
     expect(prompt).toContain("does not move, copy, or recreate a basket, cargo, tool, material");
+    expect(prompt).toContain("Never propose a move step whose method, stakes, or later steps require a vehicle, cargo");
+    expect(prompt).toContain("If the goal cannot continue after actor-only movement");
     expect(prompt).toContain("treat it as absent from this actor's current scene");
     expect(prompt).toContain("until a later accepted event explicitly brings it here");
   });
@@ -208,6 +210,8 @@ describe("campaign play actor replan prompt", () => {
     expect(prompt).toContain("Do not introduce an absent handle, identifier, state, or fact");
     expect(prompt).toContain("If the actor removes or carries away an object");
     expect(prompt).toContain("the trace must not leave that object at the location");
+    expect(prompt).toContain("state that final relation in the trace and preserve it in every later step");
+    expect(prompt).toContain("Do not schedule a later load, haul, or placement step");
     expect(prompt).toContain("do not label the trace by an administrative meaning");
     expect(prompt).toContain("hidden category, or inferred function");
     expect(prompt).toContain("Code owns canonical identifiers");

@@ -345,6 +345,10 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("possessions is current player custody");
     expect(prompt).toContain("An item with positive quantity there is already acquired");
     expect(prompt).toContain("choose another unresolved step");
+    expect(prompt).toContain("Treat the latest explicit object relation in newObservations or consequences as final");
+    expect(prompt).toContain("already at that fixture or inside that container");
+    expect(prompt).toContain("Never make an actionDetail load, haul, insert, or move it there again");
+    expect(prompt).toContain("Do not infer a changed object position when the packet does not state one");
     expect(prompt).toContain("Do not point an intent back at an observation, question, or attempt that already resolved");
     expect(prompt).toContain("Do not disguise the old action with synonyms");
     expect(prompt).toContain("Purposes label a beat's work. Do not emit one beat for every purpose");

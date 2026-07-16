@@ -223,6 +223,9 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("Do not change that detail's origin, age, owner, location, or state");
     expect(String(options.prompt)).toContain("It never overrides the current visible placement or condition of an object");
     expect(String(options.prompt)).toContain("never make a visible object vanish or move without explicit evidence");
+    expect(String(options.prompt)).toContain("commit one unambiguous final relation in the summary");
+    expect(String(options.prompt)).toContain("state whether it was first put inside");
+    expect(String(options.prompt)).toContain("never defer that spatial decision to a later stage");
     expect(String(options.prompt)).toContain("RULING defines feasibility, result bounds, and elapsed bounds");
     expect(String(options.prompt)).toContain("not a new source of world facts");
     expect(String(options.prompt)).toContain("A clean, empty, missing, or disturbed surface establishes only its current observable state");
