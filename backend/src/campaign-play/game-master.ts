@@ -94,7 +94,7 @@ const effectProposalSchema = z.discriminatedUnion("kind", [
     amount: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.pressureAdvance),
     resultStatus: campaignPlayPressureStatusSchema }).strict(),
   z.object({ kind: z.literal("adjust_actor_possession"),
-    operation: z.enum(["acquire", "spend"]), actorHandle: handle,
+    operation: z.enum(["acquire", "spend", "transform"]), actorHandle: handle,
     possessionHandle: handle.nullable(), name: line(CAMPAIGN_PLAY_LIMITS.name).nullable(),
     quantity: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
     summary: text(CAMPAIGN_PLAY_LIMITS.text),
@@ -484,7 +484,7 @@ function compileEffect(
   movement: CanonicalMovement | null,
   ruling: CampaignPlayJudgeRuling,
   perceptionLocationId: string,
-): CommandArguments {
+): CommandArguments | CommandArguments[] {
   switch (effect.kind) {
     case "move_actor": {
       if (!movement) throw new CampaignPlayGameMasterError("model_contract_failed", null);
@@ -562,13 +562,73 @@ function compileEffect(
         : frame.rulebookFrame.possessions.find((row) =>
           row.possessionId === existingRef.id && row.actorId === owner.id) ?? null;
       const creates = effect.operation === "acquire" && existingRef === null;
+      const transforms = effect.operation === "transform";
       if (
         (creates && effect.name === null)
-        || (!creates && effect.name !== null)
-        || (!creates && existing === null)
-        || (effect.operation === "spend" && existingRef === null)
+        || (effect.operation === "acquire" && existingRef !== null
+          && (existing === null || effect.name !== null))
+        || (effect.operation === "spend"
+          && (existingRef === null || existing === null || effect.name !== null))
+        || (transforms && (existingRef === null || existing === null || effect.name === null))
       ) {
         throw new CampaignPlayGameMasterError("model_contract_failed", null);
+      }
+      if (transforms) {
+        const resultName = effect.name!;
+        const resultPossessionKey = deriveCampaignPlayPossessionKey(resultName);
+        if (resultPossessionKey === existing!.possessionKey) {
+          throw new CampaignPlayGameMasterError("model_contract_failed", null);
+        }
+        const resultPossessionId = deriveCampaignPlayPossessionId(
+          frame.rulebookFrame.campaignId,
+          owner.id,
+          resultPossessionKey,
+        );
+        const sourcePossessionRef = { kind: "possession" as const, id: existing!.possessionId };
+        const resultPossessionRef = { kind: "possession" as const, id: resultPossessionId };
+        const affectedRefs = effect.affectedHandles.map((value) => requireRef(map, value));
+        if (!affectedRefs.some((reference) => referenceKey(reference) === referenceKey(owner))) {
+          affectedRefs.push(owner);
+        }
+        const uniqueRefs = (references: CampaignPlayEntityRef[]) => references.filter(
+          (reference, index, values) => values.findIndex((candidate) =>
+            referenceKey(candidate) === referenceKey(reference)) === index,
+        );
+        return [{
+          kind: effect.kind,
+          actorId: owner.id,
+          possessionId: existing!.possessionId,
+          possessionKey: existing!.possessionKey,
+          name: existing!.name,
+          quantityDelta: -effect.quantity,
+          summary: effect.summary,
+          affectedRefs,
+          readScope: uniqueRefs([owner, sourcePossessionRef, ...affectedRefs]),
+          writeScope: [sourcePossessionRef],
+          exposure: { mode: "protected" },
+        }, {
+          kind: effect.kind,
+          actorId: owner.id,
+          possessionId: resultPossessionId,
+          possessionKey: resultPossessionKey,
+          name: resultName,
+          quantityDelta: effect.quantity,
+          summary: effect.summary,
+          affectedRefs,
+          readScope: uniqueRefs([
+            owner,
+            resultPossessionRef,
+            ...affectedRefs,
+          ]),
+          writeScope: [resultPossessionRef],
+          exposure: {
+            mode: "projectable",
+            predicates: [{
+              channel: "direct_perception",
+              locationId: perceptionLocationId,
+            }],
+          },
+        }];
       }
       const name = creates ? effect.name! : existing!.name;
       const possessionKey = creates
@@ -726,20 +786,24 @@ function compile(
   }
   let perceptionLocationId = playerPlacement.locationId;
   for (const effect of proposal.effects) {
-    argumentsList.push(compileEffect(
+    const compiled = compileEffect(
       effect,
       frame,
       map,
       movement,
       ruling,
       perceptionLocationId,
-    ));
+    );
+    argumentsList.push(...(Array.isArray(compiled) ? compiled : [compiled]));
     if (effect.kind === "move_actor" && effect.actorHandle === null) {
       if (!movement) {
         throw new CampaignPlayGameMasterError("model_contract_failed", null);
       }
       perceptionLocationId = movement.to.id;
     }
+  }
+  if (argumentsList.length > CAMPAIGN_PLAY_LIMITS.commandsPerBatch) {
+    throw new CampaignPlayGameMasterError("model_contract_failed", null);
   }
   let expectedWorldVersion = frame.rulebookFrame.worldVersion;
   const commands = argumentsList.map((argumentsValue, order): CampaignPlayCommand => {
@@ -797,7 +861,7 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     "Order movement effects as origin interaction, player move_actor with null actorHandle, optional companion move_actor with the targeted actorHandle, then arrival or destination interaction. Put any record_world_event describing the arrival after the movement effects and use eventClass scene for an actorless arrival. Every person described as present in a destination summary must already be there or have a preceding accepted move_actor effect, and their handle must appear in affectedHandles.",
     "A committed PLAYER_MOVEMENT places the player inside the destination's shared location scene. An arrival summary must not leave the player outside a door, gate, or other access boundary unless supplied route or location authority already represents that boundary. If an unnamed recipient does not answer, report only the lack of a reply; do not claim that the destination is empty or inaccessible.",
     "record_world_event accepts exactly four eventClass values: dialogue, interaction, discovery, or scene. These are eventClass values only and must never appear in kind. Dialogue and interaction mean that a targeted nonplayer actor performs the event: set performingActorHandle to that actor and include the same handle in affectedHandles. Discovery and scene are actorless: set performingActorHandle to null, and do not use their summary to make a person speak, decide, transact, disclose information, or become a contact. A player's physical attempt that has no nonplayer performer must use its typed effect or an actorless discovery/scene result. For an observe result that changes no durable entity, return exactly one effect shaped as {\"kind\":\"record_world_event\",\"eventClass\":\"discovery\",\"performingActorHandle\":null,\"summary\":\"grounded observation\",\"affectedHandles\":[\"copied handle\"]}; do not add a second inspect, observe, discover, reveal, or describe effect. Use scene for an arrival or other directly perceived situation that is neither observation nor contact. Return a grounded summary and grounded affectedHandles. Omit exposure from record_world_event; code attaches direct perception at the player's current location at that effect's chronological position.",
-    "Use adjust_actor_possession whenever the resolved action gives the player a countable possession or consumes one. For a new possession, return operation acquire, the player actor handle, null possessionHandle, its concrete name, positive quantity, a player-visible summary, and grounded affectedHandles. For more of an existing possession, use its visible possessionHandle and null name. To consume one, return operation spend, its visible possessionHandle, null name, and a positive quantity. Do not add record_world_event for the same gain or spend: this typed effect is the public consequence and Rulebook truth.",
+    "Use adjust_actor_possession whenever the resolved action gives the player a countable possession, consumes one, or durably changes what an existing possession is. For a new possession, return operation acquire, the player actor handle, null possessionHandle, its concrete name, positive quantity, a player-visible summary, and grounded affectedHandles. For more of an existing possession, use operation acquire with its visible possessionHandle and null name. To consume one, return operation spend, its visible possessionHandle, null name, and a positive quantity. When an action writes on, repairs, assembles, opens, fills, empties, or otherwise turns an existing possession into a materially different retained item, return operation transform with the source possessionHandle and the concrete resulting name. Transform consumes the requested source quantity and acquires the same quantity under the resulting name in one Rulebook batch. Do not add record_world_event for the same gain, spend, or transformation: the typed effect is the public consequence and Rulebook truth.",
     `Every summary must fit its schema limit: at most ${CAMPAIGN_PLAY_LIMITS.text} characters for record_world_event and adjust_actor_possession, and at most ${CAMPAIGN_PLAY_LIMITS.shortText} characters for condition, relation, or goal updates. Include only the committed result. Do not include planning or reasoning, and do not repeat supporting facts.`,
     "Return at least one effect. Never return an empty effects array.",
     "Return one strict schema object and no prose.",

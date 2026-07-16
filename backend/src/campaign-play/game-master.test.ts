@@ -278,8 +278,9 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("cannot establish an absolute chronology");
     expect(String(options.prompt)).toContain("without supplied expertise and reference evidence");
     expect(String(options.prompt)).toContain("Omit exposure from record_world_event");
-    expect(String(options.prompt)).toContain("Use adjust_actor_possession whenever the resolved action gives the player a countable possession or consumes one");
-    expect(String(options.prompt)).toContain("Do not add record_world_event for the same gain or spend");
+    expect(String(options.prompt)).toContain("Use adjust_actor_possession whenever the resolved action gives the player a countable possession, consumes one, or durably changes what an existing possession is");
+    expect(String(options.prompt)).toContain("return operation transform with the source possessionHandle and the concrete resulting name");
+    expect(String(options.prompt)).toContain("Do not add record_world_event for the same gain, spend, or transformation");
     expect(String(options.prompt)).toContain("Every summary must fit its schema limit: at most 1200 characters");
     expect(String(options.prompt)).toContain("Do not include planning or reasoning, and do not repeat supporting facts");
     expect(String(options.prompt)).not.toContain("actor-player");
@@ -325,7 +326,7 @@ describe("Campaign Play Game Master", () => {
     })).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
   });
 
-  it("compiles acquisition and spending into the typed Rulebook possession effect", () => {
+  it("compiles acquisition, spending, and transformation into typed Rulebook possession effects", () => {
     const acquisition = createCampaignPlayGameMaster().compile(
       frame(),
       ruling(),
@@ -409,6 +410,42 @@ describe("Campaign Play Game Master", () => {
       quantityDelta: -1,
     });
     expect(spending.preflight.accepted).toBe(true);
+
+    const transformation = createCampaignPlayGameMaster().compile(
+      spendingFrame,
+      ruling(),
+      resolution,
+      null,
+      {
+        elapsedMinutes: 2,
+        effects: [{
+          kind: "adjust_actor_possession",
+          operation: "transform",
+          actorHandle: "you",
+          possessionHandle: "copper-chit",
+          name: "Copper chit stamped for lodging",
+          quantity: 1,
+          summary: "You stamp one copper chit as paid lodging credit.",
+          affectedHandles: [],
+        }],
+      },
+    );
+    const resultKey = deriveCampaignPlayPossessionKey("Copper chit stamped for lodging");
+    const resultId = deriveCampaignPlayPossessionId(CAMPAIGN_ID, PLAYER_ID, resultKey);
+    expect(transformation.batch.commands.slice(1)).toMatchObject([{
+      kind: "adjust_actor_possession",
+      possessionId,
+      quantityDelta: -1,
+      exposure: { mode: "protected" },
+    }, {
+      kind: "adjust_actor_possession",
+      possessionId: resultId,
+      possessionKey: resultKey,
+      name: "Copper chit stamped for lodging",
+      quantityDelta: 1,
+      exposure: { mode: "projectable" },
+    }]);
+    expect(transformation.preflight.accepted).toBe(true);
   });
 
   it("rejects impossible and clarification rulings before any GM model call", async () => {

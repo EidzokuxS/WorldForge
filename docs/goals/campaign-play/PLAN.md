@@ -210,7 +210,7 @@ Each command carries command ID, causal parent, actor/system source, expected me
 - The batch updates mechanical `worldVersion/worldHash` once from its final state and advances `runtimeRevision/runtimeHash` when it also changes the turn stage.
 - Validation failure produces zero domain writes and a typed denial record.
 - The player and agent actors use the same command schemas and executor.
-- Actor possessions are current Rulebook state. Acquisition and spending use one typed quantity adjustment; prose-only possession claims carry no mechanical authority.
+- Actor possessions are current Rulebook state. Acquisition and spending use typed quantity adjustments; prose-only possession claims carry no mechanical authority. A model-authored `transform` of a retained possession compiles to an atomic source spend followed by a result acquire in the same Rulebook batch. Only the result command is projected as the public consequence, so the Narrator receives one authored summary while both state changes receive receipts.
 - Character bootstrap is the one-way boundary from immutable `inventorySeed` provenance to current possession quantities. Opening setup and recovery expose those quantities before the first player action; CharacterRecord never becomes a second live inventory owner.
 - Narrator, frontend, and SSE delivery possess zero mutation authority.
 
