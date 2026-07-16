@@ -275,6 +275,12 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain(
       "record_world_event accepts exactly four eventClass values: dialogue, interaction, discovery, or scene",
     );
+    expect(String(options.prompt)).toContain(
+      "When PLAYER_INTENT targets no actor, every record_world_event must be actorless",
+    );
+    expect(String(options.prompt)).toContain(
+      "leave that response for a later contact action",
+    );
     expect(String(options.prompt)).toContain('"eventClass":"discovery"');
     expect(String(options.prompt)).toContain(
       "effects[].kind accepts exactly: move_actor, set_route_state, set_actor_condition, update_actor_relation, update_actor_goal, advance_pressure, adjust_actor_possession, or record_world_event",
