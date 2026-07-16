@@ -249,6 +249,10 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain(
       "local_aftermath has exactly channel, anchorHandle, and the required integer visibleForMinutes",
     );
+    expect(String(options.prompt)).toContain("Every exposure field is one object, never an array");
+    expect(String(options.prompt)).toContain(
+      'It is exactly {"mode":"protected"} or {"mode":"projectable","predicates":[...]}; predicates is the only array',
+    );
     expect(String(options.prompt)).toContain(
       "route_state has exactly channel, anchorHandle, and the required non-empty triggers array",
     );
@@ -293,6 +297,16 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain('"eventClass":"discovery"');
     expect(String(options.prompt)).toContain(
       "effects[].kind accepts exactly: move_actor, set_route_state, set_actor_condition, update_actor_relation, update_actor_goal, advance_pressure, adjust_actor_possession, or record_world_event",
+    );
+    expect(String(options.prompt)).toContain(
+      "set_actor_condition has exactly these fields: kind, exposure, actorHandle, condition, operation, and summary",
+    );
+    expect(String(options.prompt)).toContain(
+      "condition must be exactly occupied, strained, or incapacitated; operation must be exactly set or clear",
+    );
+    expect(String(options.prompt)).toContain("affectedHandles is forbidden");
+    expect(String(options.prompt)).toContain(
+      "If none of those three conditions fits the resolved result, do not use set_actor_condition",
     );
     expect(String(options.prompt)).toContain("These are eventClass values only and must never appear in kind");
     expect(String(options.prompt)).toContain(
