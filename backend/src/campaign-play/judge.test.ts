@@ -394,6 +394,10 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("it never overrides the current visible placement or condition of an object");
     expect(sentPrompt).toContain("never make a visible object vanish or move without explicit evidence");
     expect(sentPrompt).toContain("Every targets entry must copy one exact {handle, kind} pair from TARGET_CATALOG");
+    expect(sentPrompt).toContain(
+      "For movement with a named willing companion, include both the destination and the companion actor in targets",
+    );
+    expect(sentPrompt).toContain("Citing the actor does not make the actor a target");
     expect(sentPrompt).toContain("Observation and choice handles are not world targets");
     expect(sentPrompt).toContain(
       'TARGET_CATALOG=[{"handle":"actor-you","kind":"actor"},{"handle":"location-harbor","kind":"location"},{"handle":"location-reef","kind":"location"},{"handle":"route-reef","kind":"route"},{"handle":"actor-guard","kind":"actor"},{"handle":"notebook","kind":"possession"}]',
