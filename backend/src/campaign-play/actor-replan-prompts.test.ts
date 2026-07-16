@@ -210,8 +210,11 @@ describe("campaign play actor replan prompt", () => {
     expect(prompt).toContain("Do not introduce an absent handle, identifier, state, or fact");
     expect(prompt).toContain("If the actor removes or carries away an object");
     expect(prompt).toContain("the trace must not leave that object at the location");
-    expect(prompt).toContain("Every spatial relation in observableTrace must be caused by handling stated in that step's method");
-    expect(prompt).toContain("the trace cannot make its object level, closed, secure, or correctly placed");
+    expect(prompt).toContain("Steps execute in array order as one causal chain");
+    expect(prompt).toContain("Each later step must begin from state established by accepted events or the preceding step's observableTrace");
+    expect(prompt).toContain("The trace may contain only an after-state caused by handling or work stated in that step's method");
+    expect(prompt).toContain("A raw, unfinished, tilted, open, damaged, displaced, or unpaid subject cannot become finished");
+    expect(prompt).toContain("The transforming step must state the required work, and its trace must establish the result");
     expect(prompt).toContain("Do not assume an unmentioned intermediate action");
     expect(prompt).toContain("state that final relation in the trace and preserve it in every later step");
     expect(prompt).toContain("Do not schedule a later load, haul, or placement step");
