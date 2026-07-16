@@ -305,6 +305,8 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("Put the player's copied handle in actorHandle. performingActorHandle is forbidden on adjust_actor_possession and exists only on record_world_event");
     expect(String(options.prompt)).toContain("return operation transform with the source possessionHandle and the concrete resulting name");
     expect(String(options.prompt)).toContain("Do not add record_world_event for the same gain, spend, or transformation");
+    expect(String(options.prompt)).toContain("Every non-null adjust_actor_possession name must be at most 120 characters");
+    expect(String(options.prompt)).toContain("put state, contents, provenance, and other details in summary");
     expect(String(options.prompt)).toContain("Every summary must fit its schema limit: at most 1200 characters");
     expect(String(options.prompt)).toContain("Do not include planning or reasoning, and do not repeat supporting facts");
     expect(String(options.prompt)).not.toContain("actor-player");

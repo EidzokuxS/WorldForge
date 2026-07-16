@@ -189,7 +189,8 @@ function projectableExposure(
       predicates: [{ channel: "direct_perception", locationId: humanLocationId }],
     };
   }
-  if (seed.sourceActorId === frame.actorId && seed.sourceGoalId === frame.plan.goalId
+  if (frame.plan.planVersion === 1
+    && seed.sourceActorId === frame.actorId && seed.sourceGoalId === frame.plan.goalId
     && frame.selection.kind === "step" && frame.selection.settledStepCount === 0) {
     return { mode: "projectable", predicates: [structuredClone(seed.predicate)] };
   }
@@ -237,19 +238,31 @@ function compileProposal(
   const causalParent = { kind: "actor_job" as const, jobId: frame.jobId };
   const intent = frame.selection.step.intent;
   const present = frame.placements.find((placement) => placement.placementKind === "present");
-  const targetLocation = intent.targets.find((target) => target.kind === "location");
-  const route = present && targetLocation
-    ? frame.localRoutes.find((candidate) => candidate.state !== "blocked"
-      && candidate.fromLocationId === present.locationId
-      && candidate.toLocationId === targetLocation.id)
+  const explicitTargetLocation = intent.targets.find((target) => target.kind === "location");
+  const explicitRoute = intent.targets.find((target) => target.kind === "route");
+  const route = present
+    ? explicitRoute
+      ? frame.localRoutes.find((candidate) => candidate.id === explicitRoute.id
+        && candidate.state !== "blocked"
+        && candidate.fromLocationId === present.locationId)
+      : explicitTargetLocation
+        ? frame.localRoutes.find((candidate) => candidate.state !== "blocked"
+          && candidate.fromLocationId === present.locationId
+          && candidate.toLocationId === explicitTargetLocation.id)
+        : undefined
     : undefined;
+  const targetLocationId = route?.toLocationId;
   const movesActor = intent.kind === "move" && present !== undefined
-    && targetLocation !== undefined && route !== undefined;
+    && route !== undefined && targetLocationId !== undefined
+    && (explicitTargetLocation === undefined || explicitTargetLocation.id === targetLocationId);
+  if (intent.kind === "move" && !movesActor) {
+    throw new CampaignPlayActorProposalServiceError("proposal_state_invalid");
+  }
   const exposure = projectableExposure(
     frame,
     seed,
     humanLocationId,
-    movesActor ? [present.locationId, targetLocation.id] : present ? [present.locationId] : [],
+    movesActor ? [present.locationId, targetLocationId] : present ? [present.locationId] : [],
     movesActor ? null : present?.locationId ?? null,
   );
   let command: RulebookBatchCommand;
@@ -258,12 +271,12 @@ function compileProposal(
       { kind: "actor", id: frame.actorId },
       { kind: "route", id: route.id },
       { kind: "location", id: present.locationId },
-      { kind: "location", id: targetLocation.id },
+      { kind: "location", id: targetLocationId },
     ]);
     const writeScope = uniqueRefs([
       { kind: "actor", id: frame.actorId },
       { kind: "location", id: present.locationId },
-      { kind: "location", id: targetLocation.id },
+      { kind: "location", id: targetLocationId },
     ]);
     command = {
       commandId: deriveCampaignPlayCommandId(frame.campaignId, frame.turnId, batchId, 0),
@@ -279,13 +292,14 @@ function compileProposal(
       actorId: frame.actorId,
       routeId: route.id,
       fromLocationId: present.locationId,
-      toLocationId: targetLocation.id,
+      toLocationId: targetLocationId,
       observableTrace: frame.selection.step.observableTrace,
     };
   } else {
     const affectedRefs = uniqueRefs([{ kind: "actor", id: frame.actorId }, ...intent.targets]);
     const readScope = affectedRefs;
-    const ownsOpeningConsequence = seed.sourceActorId === frame.actorId
+    const ownsOpeningConsequence = frame.plan.planVersion === 1
+      && seed.sourceActorId === frame.actorId
       && seed.sourceGoalId === frame.plan.goalId
       && frame.selection.settledStepCount === 0;
     const summary = ownsOpeningConsequence && exposure.mode === "projectable"

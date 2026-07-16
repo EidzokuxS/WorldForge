@@ -121,20 +121,35 @@ function modelEvidence(actualModel: string) {
   };
 }
 
-function planJson(actorId: string, goalId: string) {
-  const move = actorId === "actor-b";
+function planJson(
+  actorId: string,
+  goalId: string,
+  actorBRouteId = "route-a",
+  actorBIntent: "move" | "wait" = "move",
+) {
+  const move = actorId === "actor-b" && actorBIntent === "move";
+  const wait = actorId === "actor-b" && actorBIntent === "wait";
   const intent = move
     ? {
         kind: "move" as const,
         targets: [
-          { kind: "location" as const, id: "location-b" },
-          { kind: "location" as const, id: "location-a" },
+          { kind: "route" as const, id: actorBRouteId },
           { kind: "goal" as const, id: goalId },
         ],
         method: "Carry the sealed route ledger to Glass Reef",
         stakes: "The reef passage may close",
       }
-    : {
+    : wait
+      ? {
+          kind: "wait" as const,
+          targets: [
+            { kind: "location" as const, id: "location-a" },
+            { kind: "goal" as const, id: goalId },
+          ],
+          method: "Wait beside the reef ledger office for the clerk to return",
+          stakes: "The current route answer is still unknown",
+        }
+      : {
         kind: "attempt" as const,
         targets: [{ kind: "goal" as const, id: goalId }],
         method: "Advance the active goal",
@@ -147,7 +162,9 @@ function planJson(actorId: string, goalId: string) {
       { stepId: `step-${actorId}-one`, order: 0, intent,
         observableTrace: move
           ? "Fresh wet wheel tracks end beside the reef ledger office."
-          : "Fresh work marks show that the objective advanced here.",
+          : wait
+            ? "A fresh pacing track marks the stones outside the ledger office."
+            : "Fresh work marks show that the objective advanced here.",
         elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 } },
       { stepId: `step-${actorId}-two`, order: 1,
         intent: { ...intent, method: move ? "Return with the route answer" : "Continue the active goal" },
@@ -159,7 +176,12 @@ function planJson(actorId: string, goalId: string) {
   };
 }
 
-function createReadyFixture(playerLocationId = "location-c") {
+function createReadyFixture(
+  playerLocationId = "location-c",
+  actorBRouteId = "route-a",
+  actorBPlanVersion = 1,
+  actorBIntent: "move" | "wait" = "move",
+) {
   buildAcceptedCampaign();
   const handle = track(openCampaignPlayDatabase(CAMPAIGN_ID));
   const states = createCampaignPlayStateRepository(handle);
@@ -196,13 +218,32 @@ function createReadyFixture(playerLocationId = "location-c") {
       ];
       for (const schedule of schedules) {
         const planId = `plan-${schedule.actorId}`;
-        const json = planJson(schedule.actorId, schedule.goalId);
+        const json = planJson(schedule.actorId, schedule.goalId, actorBRouteId, actorBIntent);
+        const planVersion = schedule.actorId === "actor-b" ? actorBPlanVersion : 1;
+        if (planVersion > 1) {
+          const prior = planJson(schedule.actorId, schedule.goalId, actorBRouteId);
+          context.sqlite.prepare(`INSERT INTO campaign_play_actor_plans (
+            plan_id, campaign_id, actor_id, goal_id, plan_version, intent_json,
+            preconditions_json, cadence_minutes, priority, steps_json, status, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 'active', 1399, 1399)`).run(
+            `${planId}-prior`, context.campaignId, schedule.actorId, schedule.goalId,
+            prior.intentJson, prior.preconditionsJson, schedule.cadence, schedule.priority,
+            prior.stepsJson,
+          );
+          context.sqlite.prepare(`UPDATE campaign_play_actor_plans
+            SET status = 'completed', updated_at = 1400
+            WHERE campaign_id = ? AND plan_id = ?`).run(
+              context.campaignId,
+              `${planId}-prior`,
+            );
+        }
         context.sqlite.prepare(`INSERT INTO campaign_play_actor_plans (
           plan_id, campaign_id, actor_id, goal_id, plan_version, intent_json,
           preconditions_json, cadence_minutes, priority, steps_json, status, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 'active', 1400, 1400)`).run(
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 1400, 1400)`).run(
           planId, context.campaignId, schedule.actorId, schedule.goalId,
-          json.intentJson, json.preconditionsJson, schedule.cadence, schedule.priority, json.stepsJson,
+          planVersion, json.intentJson, json.preconditionsJson, schedule.cadence, schedule.priority,
+          json.stepsJson,
         );
         context.sqlite.prepare(`INSERT INTO campaign_play_actor_schedules (
           schedule_id, campaign_id, actor_id, plan_id, next_act_at_world_time_minutes,
@@ -386,6 +427,52 @@ describe("Campaign Play actor proposal service", () => {
     });
     expect(unrelatedActorSummary).not.toBe(TEST_EXPOSURE_SEED.summary);
     expect(unrelatedActorSummary).toContain("Advance the active goal");
+  });
+
+  it("does not reuse the opening consequence after an actor replan", () => {
+    const { handle, token } = createReadyFixture("location-c", "route-a", 2, "wait");
+    let actorCommand: unknown = null;
+
+    processDueActors(createCampaignPlayActorProposalService(handle, {
+      now: () => 1_700,
+    }), {
+      turnId: token.turnId,
+      token,
+      createdAt: 1_700,
+      openingExposureSeed: TEST_EXPOSURE_SEED,
+      beforeSettlement(proposal) {
+        if (proposal.actorId === "actor-b") actorCommand = proposal.commands[0];
+      },
+    });
+
+    expect(actorCommand).toMatchObject({
+      kind: "record_world_event",
+      summary: expect.stringContaining("Wait beside the reef ledger office"),
+      exposure: {
+        mode: "projectable",
+        predicates: [{
+          channel: "local_aftermath",
+          locationId: "location-a",
+          validUntilWorldTimeMinutes: 1_440,
+        }],
+      },
+    });
+    expect(actorCommand).not.toMatchObject({ summary: TEST_EXPOSURE_SEED.summary });
+  });
+
+  it("rejects an unresolved move instead of recording travel prose", () => {
+    const { handle, token } = createReadyFixture("location-a", "route-b");
+
+    expect(() => processDueActors(createCampaignPlayActorProposalService(handle, {
+      now: () => 1_700,
+    }), {
+      turnId: token.turnId,
+      token,
+      createdAt: 1_700,
+      openingExposureSeed: TEST_EXPOSURE_SEED,
+    })).toThrow("proposal_state_invalid");
+    expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_proposals
+      WHERE campaign_id = ? AND actor_id = 'actor-b'`).get(CAMPAIGN_ID)).toEqual({ count: 0 });
   });
 
   it("leaves a finite sensory aftermath for an offscreen autonomous action", () => {
