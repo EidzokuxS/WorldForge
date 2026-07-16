@@ -263,6 +263,7 @@ function createReadyFixture(playerLocationId = "location-c") {
           stakes: null,
         },
         movementRouteHandle: null,
+        requiredPossessionEffect: { kind: "none" },
         citedVisibleFactHandles: [],
         resultBounds: { minimum: "no_effect", maximum: "no_effect" },
         elapsedBounds: { minimumMinutes: 0, maximumMinutes: 0 },
@@ -355,7 +356,7 @@ function processDueActors(
 describe("Campaign Play actor proposal service", () => {
   it("projects a co-located actor action through direct perception", () => {
     const { handle, token } = createReadyFixture("location-a");
-    let actorMoveExposure: unknown = null;
+    let actorMoveCommand: unknown = null;
     let unrelatedActorSummary: string | null = null;
 
     processDueActors(createCampaignPlayActorProposalService(handle, {
@@ -364,10 +365,10 @@ describe("Campaign Play actor proposal service", () => {
       turnId: token.turnId,
       token,
       createdAt: 1_700,
-      openingExposureSeed: TEST_EXPOSURE_SEED,
+        openingExposureSeed: TEST_EXPOSURE_SEED,
       beforeSettlement(proposal) {
         if (proposal.actorId === "actor-b") {
-          actorMoveExposure = proposal.commands[0]?.exposure;
+          actorMoveCommand = proposal.commands[0];
         }
         if (proposal.actorId === "actor-a" && proposal.commands[0]?.kind === "record_world_event") {
           unrelatedActorSummary = proposal.commands[0].summary;
@@ -375,9 +376,13 @@ describe("Campaign Play actor proposal service", () => {
       },
     });
 
-    expect(actorMoveExposure).toEqual({
-      mode: "projectable",
-      predicates: [{ channel: "direct_perception", locationId: "location-a" }],
+    expect(actorMoveCommand).toMatchObject({
+      kind: "move_actor",
+      observableTrace: "Fresh wet wheel tracks end beside the reef ledger office.",
+      exposure: {
+        mode: "projectable",
+        predicates: [{ channel: "direct_perception", locationId: "location-a" }],
+      },
     });
     expect(unrelatedActorSummary).not.toBe(TEST_EXPOSURE_SEED.summary);
     expect(unrelatedActorSummary).toContain("Advance the active goal");

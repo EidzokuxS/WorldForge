@@ -1009,6 +1009,8 @@ describe("Campaign Play visibility service", () => {
       discoverableWithinPlayerActions: 2,
     };
     const matching = {
+      openingTurnId: "opening-turn",
+      eventTurnId: "opening-turn",
       sourceActorId: seed.sourceActorId,
       channel: seed.predicate.channel,
       locationId: seed.predicate.channel === "local_aftermath" ? seed.predicate.locationId : null,
@@ -1020,6 +1022,10 @@ describe("Campaign Play visibility service", () => {
     expect(resolveCampaignPlayOpeningObservableTrace(seed, matching)).toBe(
       "Fresh sealing wax and torn binding thread mark a ledger removed in haste.",
     );
+    expect(resolveCampaignPlayOpeningObservableTrace(seed, {
+      ...matching,
+      eventTurnId: "later-player-turn",
+    })).toBeNull();
     expect(resolveCampaignPlayOpeningObservableTrace(seed, {
       ...matching,
       sourceActorId: "actor-a",

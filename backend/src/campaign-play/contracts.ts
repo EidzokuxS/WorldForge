@@ -2064,6 +2064,7 @@ export const moveActorCommandSchema = z.object({
   routeId: idSchema,
   fromLocationId: idSchema,
   toLocationId: idSchema,
+  observableTrace: textSchema.optional(),
 }).strict();
 
 export const setRouteStateCommandSchema = z.object({

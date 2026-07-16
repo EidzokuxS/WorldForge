@@ -280,6 +280,7 @@ function compileProposal(
       routeId: route.id,
       fromLocationId: present.locationId,
       toLocationId: targetLocation.id,
+      observableTrace: frame.selection.step.observableTrace,
     };
   } else {
     const affectedRefs = uniqueRefs([{ kind: "actor", id: frame.actorId }, ...intent.targets]);

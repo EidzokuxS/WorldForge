@@ -502,6 +502,8 @@ function knownEventEvidence(
 export function resolveCampaignPlayOpeningObservableTrace(
   seed: CampaignPlayOpeningExposureSeed,
   exposure: {
+    openingTurnId: string;
+    eventTurnId: string | null;
     sourceActorId: string | null;
     channel: ExposureChannel;
     locationId: string | null;
@@ -511,7 +513,11 @@ export function resolveCampaignPlayOpeningObservableTrace(
     observableTrace: unknown;
   },
 ): string | null {
-  if (exposure.sourceActorId !== seed.sourceActorId || exposure.channel !== seed.predicate.channel) {
+  if (
+    exposure.eventTurnId !== exposure.openingTurnId
+    || exposure.sourceActorId !== seed.sourceActorId
+    || exposure.channel !== seed.predicate.channel
+  ) {
     return null;
   }
   if (
@@ -596,6 +602,7 @@ function publicEntry(
   candidate: EpistemicCandidate,
   humanActorId: string,
   currentTurnId: string,
+  openingTurnId: string,
   openingExposureSeed: CampaignPlayOpeningExposureSeed,
 ): CampaignPlayJournalEntry {
   const exposure = candidate.exposure;
@@ -639,6 +646,8 @@ function publicEntry(
       .get(commandPayload.performingActorId, handle.campaignId) as { id: string; name: string } | undefined
     : undefined;
   const openingTrace = resolveCampaignPlayOpeningObservableTrace(openingExposureSeed, {
+    openingTurnId,
+    eventTurnId: exposure.eventTurnId,
     sourceActorId: eventSourceActorId(exposure),
     channel: exposure.channel,
     locationId: exposure.locationId,
@@ -701,7 +710,10 @@ function publicEntry(
     title = "Signs of change";
     if (openingTrace !== null) {
       text = openingTrace;
-    } else if (eventSource.kind === "actor" && exposure.commandKind === "record_world_event") {
+    } else if (
+      eventSource.kind === "actor"
+      && (exposure.commandKind === "record_world_event" || exposure.commandKind === "move_actor")
+    ) {
       if (typeof commandPayload.observableTrace !== "string") {
         throw new CampaignPlayVisibilityError(
           "visibility_projection_invalid",
@@ -1130,7 +1142,7 @@ export function createCampaignPlayVisibilityService(
       const openingArtifact = openingTurnId
         ? turnRepository.loadAcceptedModelArtifact(openingTurnId, "opening_planner")
         : null;
-      if (!openingArtifact) {
+      if (!openingTurnId || !openingArtifact) {
         throw new CampaignPlayVisibilityError(
           "visibility_state_invalid",
           "Visibility projection requires the accepted opening exposure seed.",
@@ -1211,6 +1223,7 @@ export function createCampaignPlayVisibilityService(
               candidate,
               human.id,
               turn.turnId,
+              openingTurnId,
               openingExposureSeed,
             ),
           };
