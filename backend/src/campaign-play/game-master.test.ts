@@ -549,6 +549,46 @@ describe("Campaign Play Game Master", () => {
   });
 
   it("binds movement mechanics from Judge targets and current placement instead of model-authored handles", async () => {
+    const moveFrame = frame();
+    moveFrame.rulebookFrame.acceptedWorld.actors.push({
+      id: "actor-merchant",
+      kind: "person",
+      controller: "agent",
+      role: "background",
+      name: "Mara Quay",
+      summary: "A fish merchant sorting the morning catch.",
+      traits: ["practical"],
+      tags: ["merchant"],
+    });
+    moveFrame.rulebookFrame.acceptedWorld.goals.push({
+      id: "goal-merchant",
+      actorId: "actor-merchant",
+      objective: "Sell the morning catch.",
+      motivation: "Keep the stall solvent.",
+      horizon: "immediate",
+      priority: 3,
+      status: "active",
+    });
+    moveFrame.rulebookFrame.acceptedWorld.placements.push({
+      id: "placement-merchant",
+      actorId: "actor-merchant",
+      locationId: "location-b",
+      placementKind: "present",
+    });
+    moveFrame.rulebookFrame.placements.push({
+      placementId: "placement-merchant",
+      actorId: "actor-merchant",
+      locationId: "location-b",
+      placementKind: "present",
+    });
+    moveFrame.rulebookFrame.goals.push({
+      goalId: "goal-merchant",
+      actorId: "actor-merchant",
+      status: "active",
+      priority: 3,
+      objective: "Sell the morning catch.",
+      motivation: "Keep the stall solvent.",
+    });
     const moveRuling = ruling({
       movementRouteHandle: "passage",
       normalizedIntent: {
@@ -565,7 +605,7 @@ describe("Campaign Play Game Master", () => {
       ({ object: moveProposal, trace: trace() }));
     const result = await createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
-    }).plan({ frame: frame(), ruling: moveRuling, resolution, uncertaintyAuthority: null,
+    }).plan({ frame: moveFrame, ruling: moveRuling, resolution, uncertaintyAuthority: null,
       model: model(), temperature: 0.2, budget });
 
     expect(result.batch.commands[1]).toMatchObject({
@@ -604,6 +644,12 @@ describe("Campaign Play Game Master", () => {
     );
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
       "places the player inside the destination's shared location scene",
+    );
+    expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
+      'DESTINATION_SCENE={"locationName":"South Harbor Market","description":"A market beyond the passage.","presentPeople":["Mara Quay"]}',
+    );
+    expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
+      "Do not call the scene empty, move a listed person behind an unentered boundary, or contradict their presence",
     );
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
       "A targeted visible agent may voluntarily travel with the player",

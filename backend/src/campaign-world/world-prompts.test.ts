@@ -36,7 +36,9 @@ describe("Campaign World prompts", () => {
     const prompt = buildWorldFramePrompt(source);
 
     expect(prompt).toContain("A macro region groups and selects scenes. It is not a place anyone can occupy or visit.");
-    expect(prompt).toContain("Every persistent sublocation is a concrete establishment or site.");
+    expect(prompt).toContain("Every persistent sublocation is one concrete, directly perceivable scene");
+    expect(prompt).toContain("Its description is shown verbatim to the player whenever that scene is current.");
+    expect(prompt).toContain("Never put a secret, concealed discovery, private motive, disputed hidden cause, future event, or another actor's private knowledge in a location description");
     expect(prompt).toContain("Every route connects persistent sublocations directly, never macro regions.");
     expect(prompt).toContain("The directed graph of persistent sublocations must be strongly connected");
   });
@@ -47,6 +49,8 @@ describe("Campaign World prompts", () => {
     expect(prompt).toContain("[\"location:signal-yard\"]");
     expect(prompt).not.toContain("[\"location:signal-region\",\"location:signal-yard\"]");
     expect(prompt).toContain("Present and home placements must name exact persistent sublocations, never macro regions.");
+    expect(prompt).toContain("A present placement means the person is directly perceivable and identifiable by name whenever the player shares that exact scene.");
+    expect(prompt).toContain("place them in a different persistent sublocation instead of the same scene");
     expect(prompt).toContain("Set every goal priority to an integer from 1 (lowest) through 5 (highest).");
   });
 

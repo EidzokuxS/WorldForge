@@ -357,6 +357,39 @@ interface CanonicalMovement {
   to: CampaignPlayEntityRef;
 }
 
+interface DestinationScene {
+  locationName: string;
+  description: string;
+  presentPeople: string[];
+}
+
+function destinationScene(
+  frame: CampaignPlayGameMasterFrame,
+  movement: CanonicalMovement | null,
+): DestinationScene | null {
+  if (movement === null) return null;
+  const location = frame.rulebookFrame.acceptedWorld.locations.find((candidate) =>
+    candidate.id === movement.to.id && candidate.kind === "persistent_sublocation");
+  if (!location) {
+    throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
+  }
+  const presentActorIds = new Set(frame.rulebookFrame.placements
+    .filter((placement) =>
+      placement.locationId === movement.to.id
+      && placement.placementKind === "present"
+      && placement.actorId !== frame.authority.actorId)
+    .map((placement) => placement.actorId));
+  const presentPeople = frame.rulebookFrame.acceptedWorld.actors
+    .filter((actor) => actor.kind === "person" && presentActorIds.has(actor.id))
+    .map((actor) => actor.name)
+    .sort((left, right) => left.localeCompare(right));
+  return {
+    locationName: location.name,
+    description: location.description,
+    presentPeople,
+  };
+}
+
 function canonicalMovement(
   frame: CampaignPlayGameMasterFrame,
   ruling: CampaignPlayJudgeRuling,
@@ -843,6 +876,7 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
   }, {});
   const map = bindings(frame);
   const movement = canonicalMovement(frame, ruling, map);
+  const arrivalScene = destinationScene(frame, movement);
   const directives = actorDirectives(frame, ruling, map);
   return [
     "You are the Campaign Game Master. Plan effects within the Judge ruling and resolved result.",
@@ -865,6 +899,7 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     "A targeted visible agent may voluntarily travel with the player over PLAYER_MOVEMENT. First record that person's explicit agreement or willing action as an origin dialogue/interaction. After the player's move_actor effect, return at most one second move_actor effect with that targeted person's exact actorHandle. Code binds the same route and endpoints. Never move an untargeted, remote, incapacitated, non-agent, or unwilling person. If the person does not travel, omit the second effect and do not describe that person at the destination.",
     "Order movement effects as origin interaction, player move_actor with null actorHandle, optional companion move_actor with the targeted actorHandle, then arrival or destination interaction. Put any record_world_event describing the arrival after the movement effects and use eventClass scene for an actorless arrival. Every person described as present in a destination summary must already be there or have a preceding accepted move_actor effect, and their handle must appear in affectedHandles.",
     "A committed PLAYER_MOVEMENT places the player inside the destination's shared location scene. An arrival summary must not leave the player outside a door, gate, or other access boundary unless supplied route or location authority already represents that boundary. If an unnamed recipient does not answer, report only the lack of a reply; do not claim that the destination is empty or inaccessible.",
+    "DESTINATION_SCENE is code-authoritative arrival context when PLAYER_MOVEMENT is non-null. Its description contains only player-visible surface facts, and every name in presentPeople is directly perceivable and identifiable in that exact scene. Ground the arrival in this context. Do not call the scene empty, move a listed person behind an unentered boundary, or contradict their presence. Do not make a listed person speak or act unless the accepted effects establish that action.",
     "record_world_event accepts exactly four eventClass values: dialogue, interaction, discovery, or scene. These are eventClass values only and must never appear in kind. Dialogue and interaction mean that a targeted nonplayer actor performs the event: set performingActorHandle to that actor and include the same handle in affectedHandles. Discovery and scene are actorless: set performingActorHandle to null, and do not use their summary to make a person speak, decide, transact, disclose information, or become a contact. A player's physical attempt that has no nonplayer performer must use its typed effect or an actorless discovery/scene result. For an observe result that changes no durable entity, return exactly one effect shaped as {\"kind\":\"record_world_event\",\"eventClass\":\"discovery\",\"performingActorHandle\":null,\"summary\":\"grounded observation\",\"affectedHandles\":[\"copied handle\"]}; do not add a second inspect, observe, discover, reveal, or describe effect. Use scene for an arrival or other directly perceived situation that is neither observation nor contact. Return a grounded summary and grounded affectedHandles. Omit exposure from record_world_event; code attaches direct perception at the player's current location at that effect's chronological position.",
     "Use adjust_actor_possession whenever the resolved action gives the player a countable possession, consumes one, or durably changes what an existing possession is. This effect has exactly these fields: kind, operation, actorHandle, possessionHandle, name, quantity, summary, and affectedHandles. Put the player's copied handle in actorHandle. performingActorHandle is forbidden on adjust_actor_possession and exists only on record_world_event. For a new possession, return operation acquire, the player actor handle, null possessionHandle, its concrete name, positive quantity, a player-visible summary, and grounded affectedHandles. For more of an existing possession, use operation acquire with its visible possessionHandle and null name. To consume one, return operation spend, its visible possessionHandle, null name, and a positive quantity. When an action writes on, repairs, assembles, opens, fills, empties, or otherwise turns an existing possession into a materially different retained item, return operation transform with the source possessionHandle and the concrete resulting name. Transform consumes the requested source quantity and acquires the same quantity under the resulting name in one Rulebook batch. Do not add record_world_event for the same gain, spend, or transformation: the typed effect is the public consequence and Rulebook truth.",
     `Every summary must fit its schema limit: at most ${CAMPAIGN_PLAY_LIMITS.text} characters for record_world_event and adjust_actor_possession, and at most ${CAMPAIGN_PLAY_LIMITS.shortText} characters for condition, relation, or goal updates. Include only the committed result. Do not include planning or reasoning, and do not repeat supporting facts.`,
@@ -874,6 +909,7 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     `ALLOWED_HANDLES=${JSON.stringify(allowedHandles)}`,
     `HANDLES_BY_KIND=${JSON.stringify(handlesByKind)}`,
     `PLAYER_MOVEMENT=${JSON.stringify(movement?.handles ?? null)}`,
+    `DESTINATION_SCENE=${JSON.stringify(arrivalScene)}`,
     `VISIBLE_FACTS=${JSON.stringify(frame.visibleFacts)}`,
     `ACTOR_CONTINUITY=${JSON.stringify(frame.actorContinuity)}`,
     `ACTOR_DIRECTIVES=${JSON.stringify(directives)}`,
