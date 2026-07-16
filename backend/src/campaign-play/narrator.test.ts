@@ -342,6 +342,9 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("grounded fragment of three to eight words");
     expect(prompt).toContain("never a sentence or explanation");
     expect(prompt).toContain("actionContext and continuity as a record of what the player has already tried and learned");
+    expect(prompt).toContain("possessions is current player custody");
+    expect(prompt).toContain("An item with positive quantity there is already acquired");
+    expect(prompt).toContain("choose another unresolved step");
     expect(prompt).toContain("Do not point an intent back at an observation, question, or attempt that already resolved");
     expect(prompt).toContain("Do not disguise the old action with synonyms");
     expect(prompt).toContain("Purposes label a beat's work. Do not emit one beat for every purpose");
