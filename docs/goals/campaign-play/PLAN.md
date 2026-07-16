@@ -333,11 +333,12 @@ After primary settlement:
 2. Freeze actor IDs and order by `(nextActAt, priority descending, actorId)`; frames and proposals remain unfrozen.
 3. Allow one job per actor in the player turn and one pending job per actor.
 4. Build each actor frame from the latest committed mechanical version and that actor's profile, goals, placement, directed relations, durable knowledge, local routes, and known pressures. Before durable visibility projection, merge only applied current-player-turn direct-perception events that the event-time placement snapshot proves this actor witnessed; do not infer knowledge from current location alone.
-5. Execute a valid typed step or persist a proposal based on that latest version.
-6. Immediately preflight and commit the proposal through Rulebook before building the next actor frame.
-7. Record a typed rejection for genuinely stale or invalid detached work with zero mutation, clear its pending job, increase agency debt, and schedule one bounded future retry from settled time.
-8. Calculate `nextActAt` from settled world time to prevent catch-up storms.
-9. Increase agency debt when policy defers a due actor and record the reason.
+5. If the actor perceived a later external accepted event after its active plan was authored, stop at a typed `world_advanced` boundary and replan from the newest accepted continuity before executing another old step. An actor's own settled plan events do not invalidate its remaining causal chain.
+6. Execute a valid typed step or persist a proposal based on that latest version.
+7. Immediately preflight and commit the proposal through Rulebook before building the next actor frame.
+8. Record a typed rejection for genuinely stale or invalid detached work with zero mutation, clear its pending job, increase agency debt, and schedule one bounded future retry from settled time.
+9. Calculate `nextActAt` from settled world time to prevent catch-up storms.
+10. Increase agency debt when policy defers a due actor and record the reason.
 
 The first acceptance envelope uses one key person, two support people, one collective, at least three reachable macro locations, and two pressures. Every key/support/collective actor must have an active goal, valid placement, typed plan, and schedule before opening completes.
 

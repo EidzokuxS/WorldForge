@@ -52,7 +52,7 @@ export type CampaignPlayActorProposalOutcome =
   | { kind: "settled"; jobId: string; proposalId: string; receiptIds: string[]; resultWorldVersion: number }
   | { kind: "rejected"; jobId: string; proposalId: string; reason: CampaignPlayActorProposalRejectionReason }
   | { kind: "deferred"; jobId: string; reason: "replan_capacity" }
-  | { kind: "replan_required"; jobId: string; reason: "plan_inactive" | "plan_exhausted" | "precondition_failed"; failedPreconditionIndexes: number[] };
+  | { kind: "replan_required"; jobId: string; reason: "plan_inactive" | "plan_exhausted" | "precondition_failed" | "world_advanced"; failedPreconditionIndexes: number[] };
 
 type CampaignPlayActorProposalRejectionReason =
   | "stale_world_version"

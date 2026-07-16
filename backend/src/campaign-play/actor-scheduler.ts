@@ -129,7 +129,7 @@ export type CampaignPlayActorStepSelection =
     }
   | {
       kind: "replan_required";
-      reason: "plan_inactive" | "plan_exhausted" | "precondition_failed";
+      reason: "plan_inactive" | "plan_exhausted" | "precondition_failed" | "world_advanced";
       failedPreconditionIndexes: number[];
     };
 
@@ -527,6 +527,7 @@ export function selectCampaignPlayActorPlanStep(input: {
   plan: CampaignPlayActorPlan;
   settledStepCount: number;
   failedPreconditionIndexes: number[];
+  worldAdvanced?: boolean;
 }): CampaignPlayActorStepSelection {
   if (!Number.isSafeInteger(input.settledStepCount) || input.settledStepCount < 0
     || input.failedPreconditionIndexes.some((index) =>
@@ -542,6 +543,9 @@ export function selectCampaignPlayActorPlanStep(input: {
       reason: "precondition_failed",
       failedPreconditionIndexes: [...input.failedPreconditionIndexes],
     });
+  }
+  if (input.worldAdvanced === true) {
+    return freeze({ kind: "replan_required", reason: "world_advanced", failedPreconditionIndexes: [] });
   }
   if (input.settledStepCount >= input.plan.steps.length) {
     return freeze({ kind: "replan_required", reason: "plan_exhausted", failedPreconditionIndexes: [] });
@@ -582,6 +586,7 @@ function currentTurnDirectPerceptionRows(
       e.event_kind AS eventKind, e.world_time_minutes AS eventWorldTimeMinutes,
       e.world_version AS eventWorldVersion, e.affected_refs_json AS affectedRefsJson,
       e.before_payload_json AS beforePayloadJson, e.after_payload_json AS afterPayloadJson,
+      e.created_at AS knowledgeCreatedAt,
       c.command_kind AS commandKind, c.protected_payload_json AS protectedPayloadJson
     FROM campaign_play_events e
     JOIN campaign_play_turns t ON t.id = e.turn_id AND t.campaign_id = e.campaign_id
@@ -1246,13 +1251,14 @@ export function createCampaignPlayActorScheduler(
         SELECT plan_id AS planId, campaign_id AS campaignId, actor_id AS actorId,
           goal_id AS goalId, plan_version AS planVersion, intent_json AS intentJson,
           preconditions_json AS preconditionsJson, cadence_minutes AS cadenceMinutes,
-          priority, steps_json AS stepsJson, status
+          priority, steps_json AS stepsJson, status, updated_at AS updatedAt
         FROM campaign_play_actor_plans WHERE plan_id = ? AND campaign_id = ?
-      `).get(job.planId, handle.campaignId) as Parameters<typeof planFromRow>[0] | undefined;
+      `).get(job.planId, handle.campaignId) as
+        (Parameters<typeof planFromRow>[0] & { updatedAt: number }) | undefined;
       if (!planRow || planRow.actorId !== job.actorId) {
         throw new CampaignPlayActorSchedulerError("scheduler_frame_invalid");
       }
-      const plan = planFromRow(planRow);
+       const plan = planFromRow(planRow);
       const actor = state.acceptedReview.actors.find((candidate) => candidate.id === job.actorId);
       if (!actor || actor.controller !== "agent") {
         throw new CampaignPlayActorSchedulerError("scheduler_frame_invalid");
@@ -1320,6 +1326,7 @@ export function createCampaignPlayActorScheduler(
           e.event_kind AS eventKind, e.world_time_minutes AS eventWorldTimeMinutes,
           e.world_version AS eventWorldVersion, e.affected_refs_json AS affectedRefsJson,
           e.before_payload_json AS beforePayloadJson, e.after_payload_json AS afterPayloadJson,
+          e.source_json AS eventSourceJson, k.created_at AS knowledgeCreatedAt,
           c.command_kind AS commandKind, c.protected_payload_json AS protectedPayloadJson
         FROM campaign_play_actor_knowledge k
         JOIN campaign_play_events e ON e.event_id = k.event_id
@@ -1360,6 +1367,16 @@ export function createCampaignPlayActorScheduler(
       }));
       const failedPreconditionIndexes = plan.preconditions.flatMap((precondition, index) =>
         preconditionSatisfied(handle, precondition) ? [] : [index]);
+      const worldAdvanced = knownEventRows.some((row) => {
+        if (typeof row.knowledgeCreatedAt !== "number" || row.knowledgeCreatedAt <= planRow.updatedAt) {
+          return false;
+        }
+        const source = parseJson(
+          row.eventSourceJson as string,
+          "Actor-visible event source",
+        ) as Record<string, unknown>;
+        return source.kind !== "actor" || source.actorId !== actor.id;
+      });
       const settledStepCount = (handle.sqlite.prepare(`SELECT count(*) AS count
         FROM campaign_play_actor_jobs WHERE campaign_id = ? AND actor_id = ?
           AND plan_id = ? AND stage = 'settled'`).get(
@@ -1371,6 +1388,7 @@ export function createCampaignPlayActorScheduler(
         plan,
         settledStepCount,
         failedPreconditionIndexes,
+        worldAdvanced,
       });
       const authorizedRefs = uniqueRefs([
         { kind: "actor", id: actor.id },

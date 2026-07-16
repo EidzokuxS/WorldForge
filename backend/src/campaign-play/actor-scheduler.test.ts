@@ -235,6 +235,7 @@ function createReadyFixture(completedActions: 30 | 60 = 30) {
         resultBounds: { minimum: "limited", maximum: "success" },
         elapsedBounds: { minimumMinutes: 0, maximumMinutes: 10 },
         uncertainty: { kind: "none" },
+        requiredPossessionEffect: { kind: "none" },
         reason: "Waiting and watching is directly possible.",
         clarificationQuestion: null,
       },
@@ -317,6 +318,7 @@ function persistIncapacitatedCondition(
   handle: CampaignPlayDatabaseHandle,
   actorId: string,
   createdAt: number,
+  perceivedByActorId?: string,
 ): void {
   const states = createCampaignPlayStateRepository(handle);
   const state = states.loadState()!;
@@ -331,6 +333,17 @@ function persistIncapacitatedCondition(
       summary: "The actor cannot take an action during this cadence.",
     }].sort((left, right) => String(left.actorId).localeCompare(String(right.actorId))),
   });
+  const exposureSource = perceivedByActorId === undefined ? null : {
+    channel: "direct_perception" as const,
+    locationId: "location-a",
+    perceivedActorId: null,
+  };
+  const exposurePolicy = exposureSource === null
+    ? { mode: "protected" as const }
+    : { mode: "projectable" as const, predicates: [{
+      channel: "direct_perception" as const,
+      locationId: "location-a",
+    }] };
   states.commitMechanical({
     updatedAt: createdAt,
     worldVersionAdvance: 1,
@@ -350,11 +363,12 @@ function persistIncapacitatedCondition(
       ) VALUES (?, ?, 'turn-player', ?, 0, 'set_actor_condition',
         '{"kind":"turn","turnId":"turn-player"}',
         '{"kind":"system","system":"game_master"}', ?, ?, ?,
-        '{"mode":"protected"}', ?, ?, ?, ?)`).run(
+        ?, ?, ?, ?, ?)`).run(
         commandId, context.campaignId, `fixture-batch-incapacitate-${actorId}`,
         context.priorWorldVersion,
         canonicalizeCampaignPlayProjection([{ kind: "actor", id: actorId }]),
         canonicalizeCampaignPlayProjection([{ kind: "actor", id: actorId }]),
+        canonicalizeCampaignPlayProjection(exposurePolicy),
         HASH_A, payload, hashCampaignPlayProjection(payload), createdAt,
       );
       context.sqlite.prepare(`INSERT INTO campaign_play_receipts (
@@ -388,6 +402,38 @@ function persistIncapacitatedCondition(
         .run(actorId, context.campaignId, receiptId, context.targetWorldVersion, createdAt);
     },
   });
+  if (exposureSource !== null && perceivedByActorId !== undefined) {
+    const eventId = `fixture-event-incapacitate-${actorId}`;
+    const exposureId = `fixture-exposure-incapacitate-${actorId}`;
+    const sourceJson = canonicalizeCampaignPlayProjection(exposureSource);
+    const sourceHash = hashCampaignPlayProjection(exposureSource);
+    states.commitRuntime({
+      event: {
+        eventId: `fixture-knowledge-event-${actorId}`,
+        turnId: "turn-player",
+        kind: "visibility_projected",
+        workerEpoch: 3,
+        protectedPayloadHash: sourceHash,
+        createdAt: createdAt + 10,
+      },
+      mutate(context) {
+        context.sqlite.prepare(`INSERT INTO campaign_play_event_exposures (
+          exposure_id, campaign_id, event_id, channel, location_id, route_id,
+          witness_actor_id, valid_until_world_time_minutes, route_triggers_json, created_at
+        ) VALUES (?, ?, ?, 'direct_perception', 'location-a', NULL, NULL, NULL, NULL, ?)`)
+          .run(exposureId, context.campaignId, eventId, createdAt);
+        context.sqlite.prepare(`INSERT INTO campaign_play_actor_knowledge (
+          knowledge_id, campaign_id, actor_id, event_id, exposure_id, channel,
+          source_location_id, source_route_id, source_trigger, source_witness_actor_id,
+          perceived_actor_id, source_json, source_hash, learned_at_world_time_minutes, created_at
+        ) VALUES (?, ?, ?, ?, ?, 'direct_perception', 'location-a', NULL, NULL, NULL,
+          NULL, ?, ?, ?, ?)`)
+          .run(`fixture-knowledge-incapacitate-${actorId}`, context.campaignId,
+            perceivedByActorId, eventId, exposureId, sourceJson, sourceHash,
+            state.authority.worldTimeMinutes, createdAt + 10);
+      },
+    });
+  }
 }
 
 describe("Campaign Play actor scheduler", () => {
@@ -542,6 +588,30 @@ describe("Campaign Play actor scheduler", () => {
     });
   });
 
+  it("replans before a stale next step when the actor learned a later external event", () => {
+    const { handle, states } = createReadyFixture();
+    const scheduler = createCampaignPlayActorScheduler(handle);
+    const dueSet = freezeCurrent(handle);
+    let jobs = scheduler.listTurnJobs("turn-player");
+    states.commitRuntime({
+      event: {
+        eventId: "jobs-for-world-advance", turnId: "turn-player", kind: "actor_job_transitioned",
+        workerEpoch: 3, protectedPayloadHash: hashCampaignPlayProjection(dueSet), createdAt: 1_600,
+      },
+      mutate(context) { jobs = scheduler.admitDueSet({ dueSet, context, createdAt: 1_600 }); },
+    });
+    const actorAJob = jobs.find((job) => job.actorId === "actor-a")!;
+    expect(scheduler.buildActorFrame(actorAJob.jobId).selection).toMatchObject({ kind: "step" });
+
+    persistIncapacitatedCondition(handle, "actor-d", 1_610, "actor-a");
+
+    expect(scheduler.buildActorFrame(actorAJob.jobId).selection).toEqual({
+      kind: "replan_required",
+      reason: "world_advanced",
+      failedPreconditionIndexes: [],
+    });
+  });
+
   it("returns a replan boundary after the final persisted plan step settles", () => {
     const plan = {
       planId: "plan-actor-a",
@@ -579,6 +649,37 @@ describe("Campaign Play actor scheduler", () => {
     })).toEqual({
       kind: "replan_required",
       reason: "plan_exhausted",
+      failedPreconditionIndexes: [],
+    });
+  });
+
+  it("selects an explicit replan boundary when accepted external world state advanced", () => {
+    const plan = {
+      planId: "plan-actor-a",
+      campaignId: CAMPAIGN_ID,
+      actorId: "actor-a",
+      goalId: "goal-a",
+      planVersion: 1,
+      intent: { kind: "attempt" as const, targets: [], method: null, stakes: null },
+      preconditions: [],
+      cadenceMinutes: 20,
+      priority: 3,
+      steps: [{
+        stepId: "step-a-one", order: 0,
+        intent: { kind: "attempt" as const, targets: [], method: null, stakes: null },
+        observableTrace: "Fresh work remains visible.",
+        elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
+      }],
+      status: "active" as const,
+    };
+    expect(selectCampaignPlayActorPlanStep({
+      plan,
+      settledStepCount: 0,
+      failedPreconditionIndexes: [],
+      worldAdvanced: true,
+    })).toEqual({
+      kind: "replan_required",
+      reason: "world_advanced",
       failedPreconditionIndexes: [],
     });
   });

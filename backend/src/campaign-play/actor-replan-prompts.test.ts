@@ -198,6 +198,7 @@ describe("campaign play actor replan prompt", () => {
     ["plan_inactive", []],
     ["plan_exhausted", []],
     ["precondition_failed", [0, 2]],
+    ["world_advanced", []],
   ] as const)("explains the %s boundary without granting model-owned authority", (reason, failedIndexes) => {
     const prompt = buildCampaignPlayActorReplanPrompt({
       ...frame,
