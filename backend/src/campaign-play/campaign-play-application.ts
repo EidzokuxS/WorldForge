@@ -670,6 +670,10 @@ export function createCampaignPlayApplication(
           }
           return;
         }
+        if (result.recovery.kind === "external_ready") {
+          schedule(campaignId, active.turnId);
+          return;
+        }
         if (
           result.recovery.kind !== "deterministic_ready" &&
           result.recovery.kind !== "deterministic_in_flight"

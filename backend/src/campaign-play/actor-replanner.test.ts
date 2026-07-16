@@ -154,6 +154,49 @@ function replanProposalFromPrompt(prompt: string) {
   };
 }
 
+function reverseMoveProposalFromPrompt(prompt: string) {
+  const startMarker = "ACTOR_FRAME\n";
+  const endMarker = "\nEND_ACTOR_FRAME";
+  const start = prompt.indexOf(startMarker);
+  const end = prompt.indexOf(endMarker);
+  if (start < 0 || end < 0) throw new Error("Actor frame markers are missing.");
+  const frame = JSON.parse(prompt.slice(start + startMarker.length, end)) as {
+    entities: Array<{
+      handle: string;
+      kind: string;
+      name: string;
+      state: string | null;
+    }>;
+  };
+  const goal = frame.entities.find((entity) => entity.kind === "goal" && entity.state === "active");
+  const occupied = frame.entities.find((entity) => entity.kind === "location" && entity.state === "occupied");
+  const reverseRoute = occupied
+    ? frame.entities.find((entity) => entity.kind === "route"
+      && entity.name.endsWith(` to ${occupied.handle}`)
+      && !entity.name.startsWith(`Route from ${occupied.handle} `))
+    : undefined;
+  if (!goal || !occupied || !reverseRoute) {
+    throw new Error("Actor replan frame requires one active goal and an incoming route.");
+  }
+  const intent = {
+    kind: "move" as const,
+    targetHandles: [reverseRoute.handle],
+    method: "Follow the supplied route away from the current scene",
+    stakes: "The route ledger remains unresolved",
+  };
+  return {
+    goalHandle: goal.handle,
+    cadenceMinutes: 15,
+    priority: 4,
+    intent,
+    steps: [{
+      intent,
+      observableTrace: "Fresh boot prints continue along the wet stones.",
+      elapsedBounds: { minimumMinutes: 2, maximumMinutes: 10 },
+    }],
+  };
+}
+
 function acceptedTrace(outputTokens = 25, reasoningTokens = 0): SafeGenerateTrace {
   return {
     text: "private actor plan",
@@ -587,6 +630,57 @@ describe("Campaign Play actor replanner", () => {
     expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_plans
       WHERE campaign_id = ? AND actor_id = 'actor-b' AND status = 'active'`).get(CAMPAIGN_ID))
       .toEqual({ count: 1 });
+  });
+
+  it("interrupts a reverse-route move before replacing the active schedule plan", async () => {
+    const { handle, token, jobId } = createReplanFixture();
+    const generateObject = vi.fn(async (request: { prompt: string }) => ({
+      object: reverseMoveProposalFromPrompt(request.prompt),
+      trace: acceptedTrace(),
+    }));
+    const replanner = createCampaignPlayActorReplanner(handle, {
+      now: () => 1_600,
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const outcome = await replanner.replan({
+      jobId,
+      token,
+      model: {} as LanguageModel,
+      temperature: 0.2,
+      maxOutputTokens: 100,
+      maximumInputTokens: 1_000,
+      maximumOutputTokens: 100,
+      maximumTotalTokens: 2_000,
+      maximumCostMicros: 10_000,
+      createdAt: 1_590,
+    });
+
+    expect(outcome).toEqual({
+      kind: "interrupted",
+      jobId,
+      errorCode: "model_contract_invalid",
+      workerEpoch: 1,
+    });
+    expect(createCampaignPlayActorScheduler(handle).listTurnJobs("turn-player")[0])
+      .toMatchObject({
+        stage: "interrupted",
+        admittedPlanId: "actor-replanner-plan",
+        planId: "actor-replanner-plan",
+      });
+    expect(handle.sqlite.prepare(`SELECT status, schema_outcome AS schemaOutcome,
+        error_code AS errorCode FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = 'turn-player' AND kind = 'actor_replanner'`).get(
+        CAMPAIGN_ID,
+      )).toEqual({
+        status: "interrupted",
+        schemaOutcome: "invalid",
+        errorCode: "model_contract_invalid",
+      });
+    expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_plans
+      WHERE campaign_id = ? AND actor_id = 'actor-b' AND plan_id <> 'actor-replanner-plan'`).get(
+        CAMPAIGN_ID,
+      )).toEqual({ count: 0 });
   });
 
 });

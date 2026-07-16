@@ -463,16 +463,31 @@ describe("Campaign Play actor proposal service", () => {
   it("rejects an unresolved move instead of recording travel prose", () => {
     const { handle, token } = createReadyFixture("location-a", "route-b");
 
-    expect(() => processDueActors(createCampaignPlayActorProposalService(handle, {
+    const outcomes = processDueActors(createCampaignPlayActorProposalService(handle, {
       now: () => 1_700,
     }), {
       turnId: token.turnId,
       token,
       createdAt: 1_700,
       openingExposureSeed: TEST_EXPOSURE_SEED,
-    })).toThrow("proposal_state_invalid");
+    });
+    expect(outcomes).toContainEqual(expect.objectContaining({
+      kind: "rejected",
+      proposalId: null,
+      reason: "invalid_step",
+    }));
     expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_proposals
       WHERE campaign_id = ? AND actor_id = 'actor-b'`).get(CAMPAIGN_ID)).toEqual({ count: 0 });
+    expect(handle.sqlite.prepare(`SELECT stage, proposal_id AS proposalId
+      FROM campaign_play_actor_jobs WHERE campaign_id = ? AND actor_id = 'actor-b'`).get(
+        CAMPAIGN_ID,
+      )).toEqual({ stage: "rejected", proposalId: null });
+    expect(handle.sqlite.prepare(`SELECT status FROM campaign_play_actor_plans
+      WHERE campaign_id = ? AND actor_id = 'actor-b' AND plan_version = 1`).get(
+        CAMPAIGN_ID,
+      )).toEqual({ status: "blocked" });
+    expect(() => createCampaignPlayActorScheduler(handle).validateTurnSettlement(token.turnId))
+      .not.toThrow();
   });
 
   it("leaves a finite sensory aftermath for an offscreen autonomous action", () => {

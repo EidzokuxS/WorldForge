@@ -1036,14 +1036,15 @@ export function createCampaignPlayActorScheduler(
           throw new CampaignPlayActorSchedulerError("scheduler_job_invalid");
         }
         const schedulePair = handle.sqlite.prepare(`SELECT
-            schedule.plan_id AS planId, plan.actor_id AS planActorId
+            schedule.plan_id AS planId, plan.actor_id AS planActorId,
+            plan.status AS planStatus
           FROM campaign_play_actor_schedules schedule
           JOIN campaign_play_actor_plans plan
             ON plan.campaign_id = schedule.campaign_id AND plan.plan_id = schedule.plan_id
           WHERE schedule.campaign_id = ? AND schedule.actor_id = ?`).get(
             handle.campaignId,
             job.actorId,
-          ) as { planId: string; planActorId: string } | undefined;
+          ) as { planId: string; planActorId: string; planStatus: string } | undefined;
         if (!schedulePair || schedulePair.planActorId !== job.actorId) {
           throw new CampaignPlayActorSchedulerError("scheduler_job_invalid");
         }
@@ -1108,6 +1109,12 @@ export function createCampaignPlayActorScheduler(
         }
         if (job.deferReason !== null || decision.disposition !== "wake") {
           throw new CampaignPlayActorSchedulerError("scheduler_job_invalid");
+        }
+        if (job.stage === "rejected" && job.proposalId === null) {
+          if (proposalRows.length !== 0 || schedulePair.planStatus !== "blocked") {
+            throw new CampaignPlayActorSchedulerError("scheduler_job_invalid");
+          }
+          continue;
         }
         const proposal = proposalRows[0];
         if (

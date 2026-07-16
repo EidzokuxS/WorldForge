@@ -50,7 +50,7 @@ const ACTOR_AFTERMATH_VISIBILITY_MINUTES = 1_440;
 
 export type CampaignPlayActorProposalOutcome =
   | { kind: "settled"; jobId: string; proposalId: string; receiptIds: string[]; resultWorldVersion: number }
-  | { kind: "rejected"; jobId: string; proposalId: string; reason: CampaignPlayActorProposalRejectionReason }
+  | { kind: "rejected"; jobId: string; proposalId: string | null; reason: CampaignPlayActorProposalRejectionReason }
   | { kind: "deferred"; jobId: string; reason: "replan_capacity" }
   | { kind: "replan_required"; jobId: string; reason: "plan_inactive" | "plan_exhausted" | "precondition_failed" | "world_advanced"; failedPreconditionIndexes: number[] };
 
@@ -59,7 +59,8 @@ type CampaignPlayActorProposalRejectionReason =
   | "precondition_failed"
   | "scope_denied"
   | "command_denied"
-  | "expired";
+  | "expired"
+  | "invalid_step";
 
 export interface ProcessCampaignPlayActorProposalsInput {
   turnId: string;
@@ -224,7 +225,7 @@ function compileProposal(
   frame: CampaignPlayActorFrame,
   seed: CampaignPlayOpeningExposureSeed,
   humanLocationId: string | null,
-): CampaignPlayActorProposal {
+): CampaignPlayActorProposal | null {
   if (frame.selection.kind !== "step") {
     throw new CampaignPlayActorProposalServiceError("proposal_state_invalid");
   }
@@ -256,7 +257,7 @@ function compileProposal(
     && route !== undefined && targetLocationId !== undefined
     && (explicitTargetLocation === undefined || explicitTargetLocation.id === targetLocationId);
   if (intent.kind === "move" && !movesActor) {
-    throw new CampaignPlayActorProposalServiceError("proposal_state_invalid");
+    return null;
   }
   const exposure = projectableExposure(
     frame,
@@ -630,6 +631,69 @@ export function createCampaignPlayActorProposalService(
     return { kind: "rejected", jobId: proposal.jobId, proposalId: proposal.proposalId, reason };
   }
 
+  function rejectClaimedStep(
+    job: CampaignPlayActorJob,
+    token: CampaignPlayWorkerLeaseToken,
+    createdAt: number,
+  ): Extract<CampaignPlayActorProposalOutcome, { kind: "rejected" }> {
+    const state = stateRepository.loadState();
+    if (!state || state.authority.worldTimeMinutes === null || job.stage !== "claimed") {
+      throw new CampaignPlayActorProposalServiceError("proposal_state_invalid");
+    }
+    const schedule = scheduleRow(handle, job.actorId);
+    const reason = "invalid_step" as const;
+    turnRepository.commitActorTransition({
+      token,
+      leaseMode: "live",
+      worldVersionAdvance: 0,
+      mutationId: stableId("actor-job-event", {
+        jobId: job.jobId,
+        stage: "rejected",
+        reason,
+      }),
+      protectedPayloadHash: hashCampaignPlayProjection({
+        jobId: job.jobId,
+        planId: job.planId,
+        reason,
+        actorWorkerEpoch: job.workerEpoch,
+      }),
+      committedAt: createdAt,
+      mutate(context) {
+        requireTurnLeaseInContext(context, token, createdAt);
+        transitionSchedule(
+          context,
+          schedule,
+          job.actorId,
+          state.authority.worldTimeMinutes!,
+          "deferred",
+          createdAt,
+        );
+        const jobUpdate = context.sqlite.prepare(`UPDATE campaign_play_actor_jobs
+          SET stage = 'rejected', completed_at = ?
+          WHERE job_id = ? AND campaign_id = ? AND stage = 'claimed'
+            AND proposal_id IS NULL AND worker_epoch = ? AND claim_turn_worker_epoch = ?`).run(
+          createdAt,
+          job.jobId,
+          context.campaignId,
+          job.workerEpoch,
+          job.claimTurnWorkerEpoch,
+        );
+        const planUpdate = context.sqlite.prepare(`UPDATE campaign_play_actor_plans
+          SET status = 'blocked', updated_at = ?
+          WHERE plan_id = ? AND campaign_id = ? AND actor_id = ? AND status = 'active'`).run(
+          createdAt,
+          job.planId,
+          context.campaignId,
+          job.actorId,
+        );
+        if (planUpdate.changes !== 1 || jobUpdate.changes !== 1) {
+          throw new CampaignPlayActorProposalServiceError("proposal_state_invalid");
+        }
+      },
+    });
+    return { kind: "rejected", jobId: job.jobId, proposalId: null, reason };
+  }
+
   const processNext = (
     input: ProcessCampaignPlayActorProposalsInput,
   ): CampaignPlayActorProposalOutcome | null => {
@@ -686,11 +750,15 @@ export function createCampaignPlayActorProposalService(
         if (job.stage !== "claimed" || latestFrame.selection.kind !== "step") {
           throw new CampaignPlayActorProposalServiceError("proposal_state_invalid");
         }
-        proposal = compileProposal(
+        const compiled = compileProposal(
           latestFrame,
           input.openingExposureSeed,
           humanLocation(handle),
         );
+        if (compiled === null) {
+          return rejectClaimedStep(job, input.token, input.createdAt);
+        }
+        proposal = compiled;
         turnRepository.commitActorTransition({
           token: input.token,
           leaseMode: "live",

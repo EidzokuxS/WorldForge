@@ -438,6 +438,38 @@ describe("CampaignPlayApplication", () => {
     resumedHandle.close();
   });
 
+  it("continues an unclaimed external stage once during startup recovery", async () => {
+    createAcceptedCampaign();
+    const firstApplication = createCampaignPlayApplication({
+      now: () => 1_300,
+      runtimeFactory: {
+        createOpening: (handle) => fakeOpeningRuntime(handle, { runNextStage: vi.fn() }),
+        createTurn: () => { throw new Error("Player runtime is outside this test."); },
+      },
+    });
+    firstApplication.loadState(CAMPAIGN_ID);
+    bootstrapPlayer(firstApplication);
+    firstApplication.admitOpening(
+      CAMPAIGN_ID,
+      openingRequest(firstApplication, "opening-external-ready"),
+    );
+    await firstApplication.waitForIdle(CAMPAIGN_ID);
+
+    const recoveredRun = vi.fn();
+    const restarted = createCampaignPlayApplication({
+      now: () => 1_400,
+      runtimeFactory: {
+        createOpening: (handle) => fakeOpeningRuntime(handle, { runNextStage: recoveredRun }),
+        createTurn: () => { throw new Error("Player runtime is outside this test."); },
+      },
+    });
+
+    await restarted.recoverCampaign(CAMPAIGN_ID);
+    await restarted.waitForIdle(CAMPAIGN_ID);
+
+    expect(recoveredRun).toHaveBeenCalledTimes(1);
+  });
+
   it("wakes startup recovery when a foreign deterministic lease reaches its durable expiry", async () => {
     createAcceptedCampaign();
     const firstApplication = createCampaignPlayApplication({

@@ -295,16 +295,43 @@ function compilePlan(
     : undefined;
   if (!goal) throw new CampaignPlayActorReplannerError("replan_state_invalid");
   const actorName = frame.actor.name.toLowerCase();
-  const resolveIntent = (intent: CampaignPlayActorReplanProposal["intent"]): CampaignPlayActorIntent => ({
-    kind: intent.kind,
-    targets: intent.targetHandles.map((targetHandle) => {
+  const operative = frame.placements.find((placement) =>
+    placement.placementKind === "present");
+  const resolveIntent = (
+    intent: CampaignPlayActorReplanProposal["intent"],
+    originLocationId: string | null,
+  ): { intent: CampaignPlayActorIntent; destinationLocationId: string | null } => {
+    const targets = intent.targetHandles.map((targetHandle) => {
       const reference = compilation.refsByHandle.get(targetHandle);
       if (!reference) throw new CampaignPlayActorReplannerError("replan_state_invalid");
       return { ...reference };
-    }),
-    method: intent.method,
-    stakes: intent.stakes,
-  });
+    });
+    let destinationLocationId: string | null = originLocationId;
+    if (intent.kind === "move") {
+      const routeTargets = targets.filter((target) => target.kind === "route");
+      const locationTargets = targets.filter((target) => target.kind === "location");
+      const route = routeTargets.length === 1
+        ? frame.localRoutes.find((candidate) => candidate.id === routeTargets[0]!.id)
+        : undefined;
+      if (
+        originLocationId === null || !route || route.state === "blocked" ||
+        route.fromLocationId !== originLocationId || locationTargets.length > 1 ||
+        (locationTargets[0] !== undefined && locationTargets[0].id !== route.toLocationId)
+      ) {
+        throw new CampaignPlayActorReplannerError("replan_state_invalid");
+      }
+      destinationLocationId = route.toLocationId;
+    }
+    return {
+      intent: {
+        kind: intent.kind,
+        targets,
+        method: intent.method,
+        stakes: intent.stakes,
+      },
+      destinationLocationId,
+    };
+  };
   const version = (handle.sqlite.prepare(`SELECT COALESCE(MAX(plan_version), 0) + 1 AS version
     FROM campaign_play_actor_plans WHERE actor_id = ?`).get(frame.actorId) as { version: number }).version;
   const planId = stableId("actor-plan", {
@@ -317,27 +344,20 @@ function compilePlan(
     { kind: "goal_status", goalId: goal.id, status: "active" },
     { kind: "actor_condition", actorId: frame.actorId, condition: "incapacitated", present: false },
   ];
-  const operative = frame.placements.find((placement) =>
-    placement.placementKind === "present");
   if (operative) preconditions.push({
     kind: "actor_at_location",
     actorId: frame.actorId,
     locationId: operative.locationId,
   });
-  return campaignPlayActorPlanSchema.parse({
-    planId,
-    campaignId: frame.campaignId,
-    actorId: frame.actorId,
-    goalId: goal.id,
-    planVersion: version,
-    intent: resolveIntent(proposal.intent),
-    preconditions,
-    cadenceMinutes: proposal.cadenceMinutes,
-    priority: proposal.priority,
-    steps: proposal.steps.map((step, order) => ({
+  const planIntent = resolveIntent(proposal.intent, operative?.locationId ?? null).intent;
+  let stepLocationId = operative?.locationId ?? null;
+  const steps = proposal.steps.map((step, order) => {
+    const resolved = resolveIntent(step.intent, stepLocationId);
+    stepLocationId = resolved.destinationLocationId;
+    return {
       stepId: stableId("actor-step", { planId, order }),
       order,
-      intent: resolveIntent(step.intent),
+      intent: resolved.intent,
       observableTrace: (() => {
         if (step.observableTrace.toLowerCase().includes(actorName)) {
           throw new CampaignPlayActorReplannerError("replan_state_invalid");
@@ -345,7 +365,19 @@ function compilePlan(
         return step.observableTrace;
       })(),
       elapsedBounds: { ...step.elapsedBounds },
-    })),
+    };
+  });
+  return campaignPlayActorPlanSchema.parse({
+    planId,
+    campaignId: frame.campaignId,
+    actorId: frame.actorId,
+    goalId: goal.id,
+    planVersion: version,
+    intent: planIntent,
+    preconditions,
+    cadenceMinutes: proposal.cadenceMinutes,
+    priority: proposal.priority,
+    steps,
     status: "active",
   });
 }
