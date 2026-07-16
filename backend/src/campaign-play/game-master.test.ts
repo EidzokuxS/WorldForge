@@ -7,6 +7,7 @@ import {
 } from "../ai/structured-output-capabilities.js";
 import { safeGenerateObject, type SafeGenerateTrace } from "../ai/generate-object-safe.js";
 import {
+  campaignPlayGameMasterProposalSchema,
   createCampaignPlayGameMaster,
   type CampaignPlayGameMasterFrame,
 } from "./game-master.js";
@@ -308,6 +309,33 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("Do not include planning or reasoning, and do not repeat supporting facts");
     expect(String(options.prompt)).not.toContain("actor-player");
     expect(String(options.prompt)).not.toContain("actor-guard");
+  });
+
+  it("constrains every generated handle field to admitted frame bindings", async () => {
+    const requestFrame = frame();
+    requestFrame.visibleFacts.push({ handle: "choice-only", kind: "choice", summary: "A UI choice, not an entity ref." });
+    const generateObject = vi.fn(async (options: Parameters<typeof safeGenerateObject>[0]) => {
+      const schema = options.schema as typeof campaignPlayGameMasterProposalSchema;
+      expect(schema.safeParse(proposal).success).toBe(true);
+      expect(schema.safeParse({
+        ...proposal,
+        effects: [{ ...proposal.effects[0], performingActorHandle: "guar" }],
+      }).success).toBe(false);
+      expect(schema.safeParse({
+        ...proposal,
+        effects: [{ ...proposal.effects[0], affectedHandles: ["you", "choice-only"] }],
+      }).success).toBe(false);
+      return { object: proposal, trace: trace() };
+    });
+    await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({ frame: requestFrame, ruling: ruling(), resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget });
+    const promptText = String(generateObject.mock.calls[0]![0].prompt);
+    const allowedLine = promptText.split("\n").find((value) => value.startsWith("ALLOWED_HANDLES="));
+    expect(JSON.parse(allowedLine!.slice("ALLOWED_HANDLES=".length))).toEqual(
+      requestFrame.handleBindings.map((binding) => binding.handle),
+    );
   });
 
   it("binds every recorded player-action event to the player actor", () => {

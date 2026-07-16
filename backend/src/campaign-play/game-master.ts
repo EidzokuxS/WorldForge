@@ -58,54 +58,60 @@ const text = (maximum: number) => z.string().min(1).max(maximum)
   .refine((value) => value === value.trim());
 const handle = line(CAMPAIGN_PLAY_LIMITS.handle);
 
-const exposureProposalSchema = z.discriminatedUnion("mode", [
+function createExposureProposalSchema(handleSchema: z.ZodType<string>) {
+  return z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("protected") }).strict(),
   z.object({
     mode: z.literal("projectable"),
     predicates: z.array(z.discriminatedUnion("channel", [
-      z.object({ channel: z.literal("direct_perception"), anchorHandle: handle }).strict(),
+      z.object({ channel: z.literal("direct_perception"), anchorHandle: handleSchema }).strict(),
       z.object({
         channel: z.literal("local_aftermath"),
-        anchorHandle: handle,
+        anchorHandle: handleSchema,
         visibleForMinutes: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes),
       }).strict(),
       z.object({
         channel: z.literal("route_state"),
-        anchorHandle: handle,
+        anchorHandle: handleSchema,
         triggers: z.array(z.enum(["inspect", "attempt", "traverse"])).min(1).max(3),
       }).strict(),
-      z.object({ channel: z.literal("witness_report"), anchorHandle: handle }).strict(),
+      z.object({ channel: z.literal("witness_report"), anchorHandle: handleSchema }).strict(),
     ])).min(1).max(CAMPAIGN_PLAY_LIMITS.exposuresPerEvent),
   }).strict(),
-]);
+  ]);
+}
 
-const effectBase = { exposure: exposureProposalSchema };
-const effectProposalSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("move_actor"), actorHandle: handle.nullable() }).strict(),
-  z.object({ ...effectBase, kind: z.literal("set_route_state"), routeHandle: handle,
+function createEffectProposalSchema(
+  handleSchema: z.ZodType<string>,
+  exposureSchema: ReturnType<typeof createExposureProposalSchema>,
+) {
+  const effectBase = { exposure: exposureSchema };
+  return z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("move_actor"), actorHandle: handleSchema.nullable() }).strict(),
+  z.object({ ...effectBase, kind: z.literal("set_route_state"), routeHandle: handleSchema,
     state: z.enum(CAMPAIGN_PLAY_ROUTE_STATE_VALUES), reason: line(CAMPAIGN_PLAY_LIMITS.shortText) }).strict(),
-  z.object({ ...effectBase, kind: z.literal("set_actor_condition"), actorHandle: handle,
+  z.object({ ...effectBase, kind: z.literal("set_actor_condition"), actorHandle: handleSchema,
     condition: campaignPlayActorConditionSchema, operation: z.enum(["set", "clear"]),
     summary: line(CAMPAIGN_PLAY_LIMITS.shortText) }).strict(),
-  z.object({ ...effectBase, kind: z.literal("update_actor_relation"), relationHandle: handle,
+  z.object({ ...effectBase, kind: z.literal("update_actor_relation"), relationHandle: handleSchema,
     intensity: z.number().int().min(1).max(5), summary: line(CAMPAIGN_PLAY_LIMITS.shortText) }).strict(),
-  z.object({ ...effectBase, kind: z.literal("update_actor_goal"), goalHandle: handle,
+  z.object({ ...effectBase, kind: z.literal("update_actor_goal"), goalHandle: handleSchema,
     status: campaignPlayGoalStatusSchema, summary: line(CAMPAIGN_PLAY_LIMITS.shortText) }).strict(),
-  z.object({ ...effectBase, kind: z.literal("advance_pressure"), pressureHandle: handle,
+  z.object({ ...effectBase, kind: z.literal("advance_pressure"), pressureHandle: handleSchema,
     amount: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.pressureAdvance),
     resultStatus: campaignPlayPressureStatusSchema }).strict(),
   z.object({ kind: z.literal("adjust_actor_possession"),
-    operation: z.enum(["acquire", "spend", "transform"]), actorHandle: handle,
-    possessionHandle: handle.nullable(), name: line(CAMPAIGN_PLAY_LIMITS.name).nullable(),
+    operation: z.enum(["acquire", "spend", "transform"]), actorHandle: handleSchema,
+    possessionHandle: handleSchema.nullable(), name: line(CAMPAIGN_PLAY_LIMITS.name).nullable(),
     quantity: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
     summary: text(CAMPAIGN_PLAY_LIMITS.text),
-    affectedHandles: z.array(handle).max(CAMPAIGN_PLAY_LIMITS.affectedRefs)
+    affectedHandles: z.array(handleSchema).max(CAMPAIGN_PLAY_LIMITS.affectedRefs)
       .refine((values) => new Set(values).size === values.length) }).strict(),
   z.object({ kind: z.literal("record_world_event"),
     eventClass: z.enum(["dialogue", "interaction", "discovery", "scene"]),
-    performingActorHandle: handle.nullable(),
+    performingActorHandle: handleSchema.nullable(),
     summary: text(CAMPAIGN_PLAY_LIMITS.text),
-    affectedHandles: z.array(handle).min(1).max(CAMPAIGN_PLAY_LIMITS.affectedRefs)
+    affectedHandles: z.array(handleSchema).min(1).max(CAMPAIGN_PLAY_LIMITS.affectedRefs)
       .refine((values) => new Set(values).size === values.length) }).strict()
     .superRefine((effect, context) => {
       const requiresPerformer = effect.eventClass === "dialogue" || effect.eventClass === "interaction";
@@ -117,12 +123,21 @@ const effectProposalSchema = z.discriminatedUnion("kind", [
         });
       }
     }),
-]);
+  ]);
+}
 
-export const campaignPlayGameMasterProposalSchema = z.object({
-  elapsedMinutes: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes),
-  effects: z.array(effectProposalSchema).min(1).max(CAMPAIGN_PLAY_LIMITS.commandsPerBatch - 1),
-}).strict();
+function createProposalSchema(handleSchema: z.ZodType<string>) {
+  const exposureSchema = createExposureProposalSchema(handleSchema);
+  const effectSchema = createEffectProposalSchema(handleSchema, exposureSchema);
+  return z.object({
+    elapsedMinutes: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes),
+    effects: z.array(effectSchema).min(1).max(CAMPAIGN_PLAY_LIMITS.commandsPerBatch - 1),
+  }).strict();
+}
+
+const exposureProposalSchema = createExposureProposalSchema(handle);
+const effectProposalSchema = createEffectProposalSchema(handle, exposureProposalSchema);
+export const campaignPlayGameMasterProposalSchema = createProposalSchema(handle);
 
 export interface CampaignPlayGameMasterHandleBinding {
   handle: string;
@@ -289,6 +304,14 @@ function requireRef(
     throw new CampaignPlayGameMasterError("model_contract_failed", null);
   }
   return reference;
+}
+
+function constrainedProposalSchema(map: ReadonlyMap<string, CampaignPlayEntityRef>) {
+  const allowedHandles = [...map.keys()];
+  if (allowedHandles.length === 0) {
+    throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
+  }
+  return createProposalSchema(z.enum(allowedHandles as [string, ...string[]]));
 }
 
 function exposure(
@@ -880,7 +903,8 @@ function compile(
 }
 
 function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRuling, resolution: CampaignPlayUncertaintyResolution): string {
-  const allowedHandles = frame.visibleFacts.map((fact) => fact.handle);
+  const map = bindings(frame);
+  const allowedHandles = [...map.keys()];
   const canonicalPersonNames = frame.rulebookFrame.acceptedWorld.actors
     .filter((actor) => actor.kind === "person")
     .map((actor) => actor.name)
@@ -890,7 +914,6 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     (grouped[kind] ??= []).push(binding.handle);
     return grouped;
   }, {});
-  const map = bindings(frame);
   const movement = canonicalMovement(frame, ruling, map);
   const arrivalScene = destinationScene(frame, movement);
   const directives = actorDirectives(frame, ruling, map);
@@ -957,7 +980,7 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
   return {
     compile,
     async plan(request: CampaignPlayGameMasterRequest): Promise<CampaignPlayGameMasterCandidate> {
-      bindings(request.frame);
+      const handleMap = bindings(request.frame);
       const admittedRuling = campaignPlayJudgeRulingSchema.safeParse(request.ruling);
       const admittedResolution = campaignPlayUncertaintyResolutionSchema.safeParse(request.resolution);
       if (!admittedRuling.success || !admittedResolution.success
@@ -993,7 +1016,7 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
       try {
         generated = await dependencies.generateObject({
           model: request.model,
-          schema: campaignPlayGameMasterProposalSchema,
+          schema: constrainedProposalSchema(handleMap),
           prompt: promptText,
           temperature: request.temperature,
           maxOutputTokens: request.budget.maximumOutputTokens,
