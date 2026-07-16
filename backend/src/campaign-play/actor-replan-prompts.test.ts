@@ -72,6 +72,9 @@ describe("campaign play actor replan prompt", () => {
     expect(prompt).toContain("complete it, hand it off, postpone it, or abandon it");
     expect(prompt).toContain("for a grounded reason represented in ACTOR_FRAME");
     expect(prompt).toContain("Do not silently contradict or forget it");
+    expect(prompt).toContain("not evidence that promised work has been completed");
+    expect(prompt).toContain("Only an accepted world_event can establish an outcome");
+    expect(prompt).toContain("another person's tools or materials");
   });
 
   it("accepts bounded handle-only plans and rejects invented output fields", () => {

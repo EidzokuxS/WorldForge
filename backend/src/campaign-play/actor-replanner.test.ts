@@ -407,6 +407,15 @@ function persistKnownScene(
   const affectedRefsJson = canonicalizeCampaignPlayProjection(affectedRefs);
   const payloadJson = canonicalizeCampaignPlayProjection(payload);
   const payloadHash = hashCampaignPlayProjection(payload);
+  const eventSnapshotJson = canonicalizeCampaignPlayProjection({
+    placements: [{
+      actorId: "actor-b",
+      locationId: "location-a",
+      placementKind: "present",
+    }],
+    worldTimeMinutes: state.worldTimeMinutes,
+    worldVersion: state.worldVersion,
+  });
 
   createCampaignPlayStateRepository(handle).commitRuntime({
     event: {
@@ -467,7 +476,7 @@ function persistKnownScene(
           state.worldTimeMinutes,
           state.worldVersion,
           affectedRefsJson,
-          payloadJson,
+          eventSnapshotJson,
           payloadHash,
         );
       context.sqlite.prepare(`INSERT INTO campaign_play_event_exposures (
@@ -475,23 +484,6 @@ function persistKnownScene(
         witness_actor_id, valid_until_world_time_minutes, route_triggers_json, created_at
       ) VALUES ('known-scene-exposure', ?, 'known-scene-event', 'direct_perception',
         'location-a', NULL, NULL, NULL, NULL, 1574)`).run(context.campaignId);
-      const epistemicSource = {
-        channel: "direct_perception",
-        locationId: "location-a",
-        perceivedActorId: null,
-      };
-      context.sqlite.prepare(`INSERT INTO campaign_play_actor_knowledge (
-        knowledge_id, campaign_id, actor_id, event_id, exposure_id, channel,
-        source_location_id, source_route_id, source_trigger, source_witness_actor_id,
-        perceived_actor_id, source_json, source_hash, learned_at_world_time_minutes, created_at
-      ) VALUES ('known-scene-knowledge', ?, 'actor-b', 'known-scene-event',
-        'known-scene-exposure', 'direct_perception', 'location-a', NULL, NULL, NULL,
-        NULL, ?, ?, ?, 1575)`).run(
-        context.campaignId,
-        canonicalizeCampaignPlayProjection(epistemicSource),
-        hashCampaignPlayProjection(epistemicSource),
-        state.worldTimeMinutes,
-      );
     },
   });
 }
@@ -500,6 +492,10 @@ describe("Campaign Play actor replanner", () => {
   it("accepts one strict job-owned attempt and atomically replaces its completed plan", async () => {
     const { handle, token, jobId } = createReplanFixture();
     const knownScene = "Magda promised to stay through second bell and change the patients' dressings.";
+    expect(handle.sqlite.prepare(`SELECT count(*) AS count
+      FROM campaign_play_actor_knowledge
+      WHERE campaign_id = ? AND event_id = 'known-scene-event'`).get(handle.campaignId))
+      .toEqual({ count: 0 });
     let now = 1_600;
     const generateObject = vi.fn(async (request: {
       prompt: string;

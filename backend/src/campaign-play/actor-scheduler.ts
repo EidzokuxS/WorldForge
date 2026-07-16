@@ -554,6 +554,84 @@ function parseKnowledgeSource(row: Record<string, unknown>): CampaignPlayEpistem
   return parseJson(row.sourceJson as string, "Actor knowledge source") as CampaignPlayEpistemicSource;
 }
 
+function actorLocationFromEventSnapshot(
+  afterPayloadJson: string,
+  actorId: string,
+): string | null {
+  const snapshot = parseJson(afterPayloadJson, "Actor-visible event after-payload") as Record<string, unknown>;
+  if (!Array.isArray(snapshot.placements)) return null;
+  for (const placement of snapshot.placements) {
+    if (!placement || typeof placement !== "object" || Array.isArray(placement)) continue;
+    const row = placement as Record<string, unknown>;
+    if (
+      row.actorId === actorId && row.placementKind === "present" &&
+      typeof row.locationId === "string"
+    ) return row.locationId;
+  }
+  return null;
+}
+
+function currentTurnDirectPerceptionRows(
+  handle: CampaignPlayDatabaseHandle,
+  turnId: string,
+  actorId: string,
+): Array<Record<string, unknown>> {
+  const rows = handle.sqlite.prepare(`
+    SELECT e.event_id AS eventId, x.exposure_id AS exposureId,
+      x.location_id AS exposureLocationId, e.source_json AS eventSourceJson,
+      e.event_kind AS eventKind, e.world_time_minutes AS eventWorldTimeMinutes,
+      e.world_version AS eventWorldVersion, e.affected_refs_json AS affectedRefsJson,
+      e.before_payload_json AS beforePayloadJson, e.after_payload_json AS afterPayloadJson,
+      c.command_kind AS commandKind, c.protected_payload_json AS protectedPayloadJson
+    FROM campaign_play_events e
+    JOIN campaign_play_turns t ON t.id = e.turn_id AND t.campaign_id = e.campaign_id
+      AND t.turn_kind = 'player_action'
+    JOIN campaign_play_commands c ON c.command_id = e.command_id
+      AND c.campaign_id = e.campaign_id
+    JOIN campaign_play_receipts r ON r.receipt_id = e.receipt_id
+      AND r.campaign_id = e.campaign_id AND r.outcome = 'applied'
+    JOIN campaign_play_event_exposures x ON x.event_id = e.event_id
+      AND x.campaign_id = e.campaign_id AND x.channel = 'direct_perception'
+    WHERE e.campaign_id = ? AND e.turn_id = ?
+      AND NOT EXISTS (
+        SELECT 1 FROM campaign_play_actor_knowledge k
+        WHERE k.campaign_id = e.campaign_id AND k.actor_id = ?
+          AND k.event_id = e.event_id AND k.exposure_id = x.exposure_id
+      )
+    ORDER BY e.rowid, x.exposure_id
+  `).all(handle.campaignId, turnId, actorId) as Array<Record<string, unknown>>;
+  return rows.flatMap((row): Array<Record<string, unknown>> => {
+    const locationId = row.exposureLocationId;
+    if (
+      typeof locationId !== "string" ||
+      actorLocationFromEventSnapshot(row.afterPayloadJson as string, actorId) !== locationId
+    ) return [];
+    const eventSource = parseJson(
+      row.eventSourceJson as string,
+      "Actor-visible event source",
+    ) as Record<string, unknown>;
+    const source: CampaignPlayEpistemicSource = {
+      channel: "direct_perception",
+      locationId,
+      perceivedActorId: eventSource.kind === "actor" && typeof eventSource.actorId === "string"
+        ? eventSource.actorId
+        : null,
+    };
+    return [{
+      ...row,
+      knowledgeId: `turn-knowledge:${hashCampaignPlayProjection({
+        campaignId: handle.campaignId,
+        actorId,
+        eventId: row.eventId,
+        exposureId: row.exposureId,
+        source,
+      }).slice(0, 32)}`,
+      sourceJson: canonicalizeCampaignPlayProjection(source),
+      learnedAtWorldTimeMinutes: row.eventWorldTimeMinutes,
+    }];
+  });
+}
+
 export function createCampaignPlayActorScheduler(
   handle: CampaignPlayDatabaseHandle,
 ): CampaignPlayActorScheduler {
@@ -1254,7 +1332,17 @@ export function createCampaignPlayActorScheduler(
         actor.id,
         CAMPAIGN_PLAY_LIMITS.continuityEntries,
       ).reverse() as Array<Record<string, unknown>>;
-      const knownEvents = knowledgeRows.map((row): CampaignPlayActorKnownEvent => ({
+      const knownEventRows = [
+        ...knowledgeRows,
+        ...currentTurnDirectPerceptionRows(handle, job.turnId, actor.id),
+      ].sort((left, right) => {
+        const time = (left.learnedAtWorldTimeMinutes as number) -
+          (right.learnedAtWorldTimeMinutes as number);
+        return time !== 0
+          ? time
+          : compareText(left.knowledgeId as string, right.knowledgeId as string);
+      }).slice(-CAMPAIGN_PLAY_LIMITS.continuityEntries);
+      const knownEvents = knownEventRows.map((row): CampaignPlayActorKnownEvent => ({
         knowledgeId: row.knowledgeId as string,
         eventId: row.eventId as string,
         exposureId: row.exposureId as string,
