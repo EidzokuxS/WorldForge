@@ -380,6 +380,8 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("movementRouteHandle is a separate mechanical decision");
     expect(sentPrompt).toContain("compound requests such as travel then contact");
     expect(sentPrompt).toContain("Every suggested non-move choice must set movementRouteHandle to null");
+    expect(sentPrompt).toContain('{"kind":"adjust_actor_possession","operation":"transform","possessionHandle":"copied visible handle","quantity":1,"minimumResult":"lowest applicable tier"}');
+    expect(sentPrompt).toContain("there is no adjustment field");
     expect(sentPrompt).toContain("SOURCE_MOMENT is the exact accepted player-visible scene");
     expect(sentPrompt).toContain(
       'SOURCE_MOMENT="The guard finishes painting a fresh white line across the gate latch."',
