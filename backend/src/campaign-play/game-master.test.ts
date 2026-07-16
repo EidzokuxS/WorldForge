@@ -268,6 +268,11 @@ describe("Campaign Play Game Master", () => {
     );
     expect(String(options.prompt)).toContain('CANONICAL_PEOPLE=["Oren Tide"]');
     expect(String(options.prompt)).toContain("PLAYER_MOVEMENT is code-authoritative");
+    expect(String(options.prompt)).toContain("CURRENT_EXACT_SCENE is the only scene the player occupies before movement");
+    expect(String(options.prompt)).toContain("Crossing that boundary requires PLAYER_MOVEMENT");
+    expect(String(options.prompt)).toContain(
+      'CURRENT_EXACT_SCENE={"locationName":"North Harbor Gate","description":"A guarded passage gate."}',
+    );
     expect(String(options.prompt)).toContain("Order movement effects as origin interaction");
     expect(String(options.prompt)).toContain("current location at that effect's chronological position");
     expect(String(options.prompt)).toContain("PLAYER_MOVEMENT=null");
