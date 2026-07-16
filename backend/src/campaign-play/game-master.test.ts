@@ -286,6 +286,7 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("without supplied expertise and reference evidence");
     expect(String(options.prompt)).toContain("Omit exposure from record_world_event");
     expect(String(options.prompt)).toContain("Use adjust_actor_possession whenever the resolved action gives the player a countable possession, consumes one, or durably changes what an existing possession is");
+    expect(String(options.prompt)).toContain("Put the player's copied handle in actorHandle. performingActorHandle is forbidden on adjust_actor_possession and exists only on record_world_event");
     expect(String(options.prompt)).toContain("return operation transform with the source possessionHandle and the concrete resulting name");
     expect(String(options.prompt)).toContain("Do not add record_world_event for the same gain, spend, or transformation");
     expect(String(options.prompt)).toContain("Every summary must fit its schema limit: at most 1200 characters");
