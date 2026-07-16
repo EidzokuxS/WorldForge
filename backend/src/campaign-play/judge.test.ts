@@ -1,5 +1,6 @@
 import type { LanguageModel } from "ai";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import {
   buildStructuredOutputModelMetadata,
   rememberStructuredOutputModelMetadata,
@@ -327,6 +328,8 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("addresses an unnamed or collective presence established by SOURCE_MOMENT or a cited observation");
     expect(sentPrompt).toContain("target the exact current location from TARGET_CATALOG");
     expect(sentPrompt).toContain("A plain question claims only that the question is delivered");
+    expect(sentPrompt).toContain("targets must always be a JSON array");
+    expect(sentPrompt).toContain("return that object inside a one-element array");
     expect(sentPrompt).toContain("ACTOR_CONTINUITY outranks any conflicting earlier dialogue");
     expect(sentPrompt).toContain("movementRouteHandle is a separate mechanical decision");
     expect(sentPrompt).toContain("compound requests such as travel then contact");
@@ -415,6 +418,47 @@ describe("Campaign Play Judge", () => {
       targets: suggestedMove.frozenChoice.targets,
       movementRouteHandle: null,
     }))).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
+  });
+
+  it("presents a one-target suggested action as a standard JSON array schema", async () => {
+    const validProposal = proposal();
+    const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
+      object: validProposal,
+      trace: trace(),
+    }));
+    const judge = createCampaignPlayJudge({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    await judge.judge({
+      frame: frame(),
+      input: {
+        originalText: "Ask the guard.",
+        source: "suggested",
+        choiceHandle: "choice-ask",
+        frozenChoice: {
+          kind: "contact",
+          targets: [{ handle: "actor-guard", kind: "actor" }],
+        },
+      },
+      model: model(),
+      temperature: 0.2,
+      budget,
+    });
+
+    const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    const targetsSchema = (options.schema as unknown as {
+      shape: { targets: z.ZodType };
+    }).shape.targets;
+    const targetsJsonSchema = z.toJSONSchema(targetsSchema);
+    expect(targetsJsonSchema).toMatchObject({
+      type: "array",
+      minItems: 1,
+      maxItems: 1,
+    });
+    expect(targetsJsonSchema).toHaveProperty("items");
+    expect(targetsJsonSchema).not.toHaveProperty("prefixItems");
+    expect(options.schema.safeParse(validProposal).success).toBe(true);
+    expect(options.schema.safeParse({ ...validProposal, targets: "actor-guard" }).success).toBe(false);
   });
 
   it("binds a suggested wait to its frozen kind and empty target list before compilation", async () => {

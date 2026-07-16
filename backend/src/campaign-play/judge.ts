@@ -152,11 +152,15 @@ function judgeProposalSchemaForFrame(
       kind: z.literal(target.kind),
     }));
   const frozenTargetsSchema = frozenTargetSchemas.length === 0
-    ? z.tuple([])
-    : z.tuple(frozenTargetSchemas as [
-      (typeof frozenTargetSchemas)[number],
-      ...(typeof frozenTargetSchemas)[number][],
-    ]);
+    ? z.array(campaignPlayVisibleTargetSchema).length(0)
+    : z.array(frozenTargetSchemas.length === 1
+      ? frozenTargetSchemas[0]!
+      : z.union(frozenTargetSchemas as [
+        (typeof frozenTargetSchemas)[number],
+        (typeof frozenTargetSchemas)[number],
+        ...(typeof frozenTargetSchemas)[number][],
+      ]))
+      .length(frozenTargetSchemas.length);
   const frozenRouteHandle = input.frozenChoice.kind === "move"
     && input.frozenChoice.targets.length === 1
     && input.frozenChoice.targets[0]?.kind === "route"
@@ -329,7 +333,7 @@ function prompt(frame: CampaignPlayJudgeFrame, input: CampaignPlayJudgeInput): s
     "For deterministic or uncertain rulings, resultBounds must not contain no_effect. Impossible and clarification_required use no_effect for both bounds.",
     "clarificationQuestion must be non-null only for clarification_required and null for every other disposition.",
     "For uncertain rulings, uncertainty.kind must be check and must include dieSides=20, difficulty, modifierMinimum, and modifierMaximum. The modifier range must contain zero. Code performs the roll; never claim a roll result.",
-    "For suggested input, copy FROZEN_CHOICE kind and targets exactly. Judge feasibility and outcome without reinterpreting the selected action.",
+    "For suggested input, copy FROZEN_CHOICE kind and targets exactly. targets must always be a JSON array. When FROZEN_CHOICE contains one target, return that object inside a one-element array. Judge feasibility and outcome without reinterpreting the selected action.",
     "movementRouteHandle is a separate mechanical decision from the primary kind. Set it to the exact visible route when the action includes travel before or during its primary action, including compound requests such as travel then contact. Otherwise set it to null. A move kind always requires a non-null movementRouteHandle. Never infer travel from a cited route alone. The route does not need to be repeated in targets; targets describe the action's semantic subjects or destination.",
     "For suggested input, a move choice must use its exact frozen route target as movementRouteHandle. Every suggested non-move choice must set movementRouteHandle to null; never add travel that the frozen choice did not authorize.",
     "PLAYER_INPUT stakes ask what the player hopes to learn or accomplish; they are not evidence and do not authorize an answer. For observation, authorize only conclusions supported by SOURCE_MOMENT, VISIBLE_FRAME, or ACTOR_CONTINUITY. Preserve unknown authorship, motive, provenance, prior contents, and hidden causes. A clean, empty, missing, or disturbed surface proves only its currently observable state; it does not prove that something existed, was found, removed, stolen, concealed, or carried away.",
