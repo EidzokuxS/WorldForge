@@ -65,7 +65,7 @@ function frame(): CampaignPlayJudgeFrame {
     turnId: "turn-one",
     playerActorHandle: "actor-you",
     locationHandle: "location-harbor",
-    visibleRoutes: [{ handle: "route-reef", destinationHandle: "location-reef" }],
+    visibleRoutes: [{ handle: "route-reef", destinationHandle: "location-reef", travelCost: 5 }],
     worldTimeMinutes: 120,
     sourceMoment: "The guard finishes painting a fresh white line across the gate latch.",
     visibleFacts: [
@@ -216,6 +216,7 @@ describe("Campaign Play Judge", () => {
       ],
       method: "Cross the road, then ask the guard",
       movementRouteHandle: "route-reef",
+      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 6 },
     }));
 
     expect(ruling.normalizedIntent.kind).toBe("contact");
@@ -233,6 +234,7 @@ describe("Campaign Play Judge", () => {
       kind: "contact",
       targets: [{ handle: "location-reef", kind: "location" }],
       movementRouteHandle: "route-reef",
+      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 6 },
       citedVisibleFactHandles: ["location-reef", "route-reef"],
     }))).toMatchObject({
       normalizedIntent: {
@@ -245,6 +247,7 @@ describe("Campaign Play Judge", () => {
       kind: "contact",
       targets: [{ handle: "location-harbor", kind: "location" }],
       movementRouteHandle: "route-reef",
+      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 6 },
       citedVisibleFactHandles: ["location-harbor", "route-reef"],
     }))).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
   });
@@ -380,6 +383,7 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("movementRouteHandle is a separate mechanical decision");
     expect(sentPrompt).toContain("compound requests such as travel then contact");
     expect(sentPrompt).toContain("Every suggested non-move choice must set movementRouteHandle to null");
+    expect(sentPrompt).toContain("For a pure move, elapsedBounds.minimumMinutes and elapsedBounds.maximumMinutes must both equal the selected route's travelCost");
     expect(sentPrompt).toContain('{"kind":"adjust_actor_possession","operation":"transform","possessionHandle":"copied visible handle","quantity":1,"minimumResult":"lowest applicable tier"}');
     expect(sentPrompt).toContain("there is no adjustment field");
     expect(sentPrompt).toContain("SOURCE_MOMENT is the exact accepted player-visible scene");
@@ -395,7 +399,7 @@ describe("Campaign Play Judge", () => {
       'TARGET_CATALOG=[{"handle":"actor-you","kind":"actor"},{"handle":"location-harbor","kind":"location"},{"handle":"location-reef","kind":"location"},{"handle":"route-reef","kind":"route"},{"handle":"actor-guard","kind":"actor"},{"handle":"notebook","kind":"possession"}]',
     );
     expect(sentPrompt).toContain(
-      'VISIBLE_ROUTES=[{"handle":"route-reef","destinationHandle":"location-reef"}]',
+      'VISIBLE_ROUTES=[{"handle":"route-reef","destinationHandle":"location-reef","travelCost":5}]',
     );
     expect(sentPrompt).toContain(
       'CITATION_HANDLES=["actor-you","location-harbor","location-reef","route-reef","actor-guard","observation-latch","choice-ask","choice-cross","notebook"]',
@@ -460,6 +464,7 @@ describe("Campaign Play Judge", () => {
       kind: "move",
       targets: suggestedMove.frozenChoice.targets,
       movementRouteHandle: "route-reef",
+      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 5 },
     })).movementRouteHandle).toBe("route-reef");
     expect(() => judge.compile(frame(), suggestedMove, proposal({
       kind: "move",
@@ -588,6 +593,31 @@ describe("Campaign Play Judge", () => {
       targets: [{ handle: "route-reef", kind: "route" }],
       movementRouteHandle: null,
     }))).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
+    expect(() => judge.compile(frame(), input, proposal({
+      kind: "move",
+      targets: [{ handle: "route-reef", kind: "route" }],
+      movementRouteHandle: "route-reef",
+      elapsedBounds: { minimumMinutes: 1, maximumMinutes: 30 },
+    }))).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
+    expect(() => judge.compile(frame(), input, proposal({
+      kind: "contact",
+      targets: [{ handle: "location-reef", kind: "location" }],
+      movementRouteHandle: "route-reef",
+      elapsedBounds: { minimumMinutes: 4, maximumMinutes: 10 },
+    }))).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
+  });
+
+  it("binds pure movement time to the canonical visible route cost", () => {
+    const ruling = createCampaignPlayJudge().compile(frame(), {
+      originalText: "I cross the reef road.", source: "freeform", choiceHandle: null,
+    }, proposal({
+      kind: "move",
+      targets: [{ handle: "route-reef", kind: "route" }],
+      movementRouteHandle: "route-reef",
+      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 5 },
+    }));
+
+    expect(ruling.elapsedBounds).toEqual({ minimumMinutes: 5, maximumMinutes: 5 });
   });
 
   it("owns uncertainty in code and produces stable roll evidence inside Judge bounds", () => {

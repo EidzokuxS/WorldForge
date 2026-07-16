@@ -619,6 +619,7 @@ describe("Campaign Play Game Master", () => {
   ])("compiles the supported $kind effect through Rulebook", (effect) => {
     const effectRuling = effect.kind === "move_actor" ? ruling({
       movementRouteHandle: "passage",
+      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 5 },
       normalizedIntent: {
         originalText: "I cross to South Harbor.", source: "freeform", choiceHandle: null,
         kind: "move", targets: [{ handle: "passage", kind: "route" }],
@@ -626,7 +627,7 @@ describe("Campaign Play Game Master", () => {
       },
     }) : ruling();
     const result = createCampaignPlayGameMaster().compile(frame(), effectRuling, resolution, null, {
-      elapsedMinutes: 1, effects: [effect],
+      elapsedMinutes: effect.kind === "move_actor" ? 5 : 1, effects: [effect],
     });
     expect(result.preflight.accepted).toBe(true);
     expect(result.batch.commands[1]!.kind).toBe(effect.kind);
@@ -675,6 +676,7 @@ describe("Campaign Play Game Master", () => {
     });
     const moveRuling = ruling({
       movementRouteHandle: "passage",
+      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 5 },
       normalizedIntent: {
         originalText: "I cross to South Harbor.", source: "freeform", choiceHandle: null,
         kind: "move", targets: [{ handle: "passage", kind: "route" }, { handle: "south", kind: "location" }],
@@ -682,7 +684,7 @@ describe("Campaign Play Game Master", () => {
       },
     });
     const moveProposal = {
-      elapsedMinutes: 1,
+      elapsedMinutes: 5,
       effects: [{ kind: "move_actor" as const, actorHandle: null }],
     };
     const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) =>
@@ -704,6 +706,14 @@ describe("Campaign Play Game Master", () => {
       },
     });
     expect(moveProposal.effects[0]).toEqual({ kind: "move_actor", actorHandle: null });
+    expect(result.batch.commands[0]).toMatchObject({ kind: "advance_world_time", elapsedMinutes: 5 });
+    expect(() => createCampaignPlayGameMaster().compile(
+      frame(),
+      moveRuling,
+      resolution,
+      null,
+      { ...moveProposal, elapsedMinutes: 1 },
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
     expect(() => createCampaignPlayGameMaster().compile(
       frame(),
       moveRuling,
@@ -715,7 +725,10 @@ describe("Campaign Play Game Master", () => {
       },
     )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
-      'PLAYER_MOVEMENT={"actorHandle":"you","routeHandle":"passage","fromLocationHandle":"here","toLocationHandle":"south"}',
+      'PLAYER_MOVEMENT={"actorHandle":"you","routeHandle":"passage","fromLocationHandle":"here","toLocationHandle":"south","travelCost":5}',
+    );
+    expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
+      "For a pure move, elapsedMinutes must equal travelCost exactly",
     );
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
       'return exactly one {"kind":"move_actor","actorHandle":null} effect for the player',
@@ -767,6 +780,7 @@ describe("Campaign Play Game Master", () => {
   it("binds a movement result event to the destination after the move command", () => {
     const moveRuling = ruling({
       movementRouteHandle: "passage",
+      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 5 },
       normalizedIntent: {
         originalText: "I cross to South Harbor.", source: "freeform", choiceHandle: null,
         kind: "move", targets: [{ handle: "passage", kind: "route" }],
@@ -774,7 +788,7 @@ describe("Campaign Play Game Master", () => {
       },
     });
     const result = createCampaignPlayGameMaster().compile(frame(), moveRuling, resolution, null, {
-      elapsedMinutes: 1,
+      elapsedMinutes: 5,
       effects: [
         { kind: "move_actor", actorHandle: null },
         {
@@ -799,6 +813,7 @@ describe("Campaign Play Game Master", () => {
   it("binds compound origin contact and destination scene in chronological locations", () => {
     const compoundRuling = ruling({
       movementRouteHandle: "passage",
+      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 8 },
       normalizedIntent: {
         originalText: "I cross to South Harbor and ask the guard about passage delays.",
         source: "freeform",
@@ -814,7 +829,7 @@ describe("Campaign Play Game Master", () => {
       },
     });
     const result = createCampaignPlayGameMaster().compile(frame(), compoundRuling, resolution, null, {
-      elapsedMinutes: 1,
+      elapsedMinutes: 5,
       effects: [
         {
           kind: "record_world_event",
@@ -859,6 +874,7 @@ describe("Campaign Play Game Master", () => {
   it("moves one willing targeted companion through Rulebook after the player", () => {
     const companionRuling = ruling({
       movementRouteHandle: "passage",
+      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 5 },
       normalizedIntent: {
         originalText: "I ask Oren to walk with me to South Harbor and we set out together.",
         source: "freeform",
@@ -873,7 +889,7 @@ describe("Campaign Play Game Master", () => {
       },
     });
     const result = createCampaignPlayGameMaster().compile(frame(), companionRuling, resolution, null, {
-      elapsedMinutes: 1,
+      elapsedMinutes: 5,
       effects: [
         {
           kind: "record_world_event",
@@ -939,6 +955,7 @@ describe("Campaign Play Game Master", () => {
   it("rejects companion movement without prior consent or after invalid ordering", () => {
     const companionRuling = ruling({
       movementRouteHandle: "passage",
+      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 5 },
       normalizedIntent: {
         originalText: "I tell Oren to walk with me to South Harbor.",
         source: "freeform",
@@ -960,7 +977,7 @@ describe("Campaign Play Game Master", () => {
       affectedHandles: ["you", "guard", "south"],
     };
     expect(() => createCampaignPlayGameMaster().compile(frame(), companionRuling, resolution, null, {
-      elapsedMinutes: 1,
+      elapsedMinutes: 5,
       effects: [
         { kind: "move_actor", actorHandle: null },
         { kind: "move_actor", actorHandle: "guard" },
@@ -968,7 +985,7 @@ describe("Campaign Play Game Master", () => {
       ],
     })).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
     expect(() => createCampaignPlayGameMaster().compile(frame(), companionRuling, resolution, null, {
-      elapsedMinutes: 1,
+      elapsedMinutes: 5,
       effects: [
         {
           kind: "record_world_event",
@@ -987,6 +1004,7 @@ describe("Campaign Play Game Master", () => {
   it("rejects an origin performer placed after movement", () => {
     const compoundRuling = ruling({
       movementRouteHandle: "passage",
+      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 8 },
       normalizedIntent: {
         originalText: "I cross to South Harbor and ask the guard about passage delays.",
         source: "freeform",
@@ -1002,7 +1020,7 @@ describe("Campaign Play Game Master", () => {
       },
     });
     expect(() => createCampaignPlayGameMaster().compile(frame(), compoundRuling, resolution, null, {
-      elapsedMinutes: 1,
+      elapsedMinutes: 5,
       effects: [
         { kind: "move_actor", actorHandle: null },
         {

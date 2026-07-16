@@ -1397,16 +1397,32 @@ export function createCampaignPlayTurnRuntime(
                   "Campaign Play suggested action lost its frozen binding.",
                 );
               }
+              const judgeVisibleRoutes = admission.sourcePacket.visibleRoutes.map((route) => {
+                const routeBinding = admission.handleBindings.find((binding) =>
+                  binding.handle === route.handle && binding.reference.kind === "route");
+                const canonicalRoute = routeBinding === undefined
+                  ? undefined
+                  : current.frame.rulebookFrame.acceptedWorld.routes.find((candidate) =>
+                      candidate.id === routeBinding.reference.id);
+                if (canonicalRoute === undefined) {
+                  throw new CampaignPlayTurnRuntimeError(
+                    "turn_artifact_invalid",
+                    "Campaign Play visible route lost its canonical travel cost.",
+                  );
+                }
+                return {
+                  handle: route.handle,
+                  destinationHandle: route.destinationHandle,
+                  travelCost: canonicalRoute.travelCost,
+                };
+              });
               const result = await judge.judge({
                 frame: campaignPlayJudgeFrameSchema.parse({
                   campaignId: admission.campaignId,
                   turnId: admission.turnId,
                   playerActorHandle: admission.player.actorHandle,
                   locationHandle: admission.sourcePacket.currentLocation.handle,
-                  visibleRoutes: admission.sourcePacket.visibleRoutes.map((route) => ({
-                    handle: route.handle,
-                    destinationHandle: route.destinationHandle,
-                  })),
+                  visibleRoutes: judgeVisibleRoutes,
                   worldTimeMinutes: admission.worldTimeMinutes,
                   sourceMoment: admission.sourceNarration.displayText,
                   visibleFacts: admission.visibleFacts,

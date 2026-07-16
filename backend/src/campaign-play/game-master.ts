@@ -379,6 +379,7 @@ interface CanonicalMovement {
   route: CampaignPlayEntityRef;
   from: CampaignPlayEntityRef;
   to: CampaignPlayEntityRef;
+  travelCost: number;
 }
 
 interface DestinationScene {
@@ -467,6 +468,7 @@ function canonicalMovement(
     route,
     from: requireRef(map, fromLocationHandle, "location"),
     to: requireRef(map, toLocationHandle, "location"),
+    travelCost: routeRecord.travelCost,
   };
 }
 
@@ -790,11 +792,20 @@ function compile(
   const parsed = campaignPlayGameMasterProposalSchema.safeParse(rawProposal);
   if (!parsed.success) throw new CampaignPlayGameMasterError("model_contract_failed", null, null, { cause: parsed.error });
   const proposal = parsed.data;
+  const movement = canonicalMovement(frame, ruling, map);
   if (proposal.elapsedMinutes < ruling.elapsedBounds.minimumMinutes
     || proposal.elapsedMinutes > ruling.elapsedBounds.maximumMinutes) {
     throw new CampaignPlayGameMasterError("model_contract_failed", null);
   }
-  const movement = canonicalMovement(frame, ruling, map);
+  if (
+    movement !== null
+    && (
+      (ruling.normalizedIntent.kind === "move" && proposal.elapsedMinutes !== movement.travelCost)
+      || (ruling.normalizedIntent.kind !== "move" && proposal.elapsedMinutes < movement.travelCost)
+    )
+  ) {
+    throw new CampaignPlayGameMasterError("model_contract_failed", null);
+  }
   const requiredPossessionEffect = ruling.requiredPossessionEffect.kind === "adjust_actor_possession"
     && CAMPAIGN_PLAY_RESULT_TIER_VALUES.indexOf(resolution.result)
       >= CAMPAIGN_PLAY_RESULT_TIER_VALUES.indexOf(ruling.requiredPossessionEffect.minimumResult)
@@ -949,6 +960,7 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     "CANONICAL_PEOPLE is the complete person roster for this call, not permission to disclose anyone. Mention a listed person only when VISIBLE_FACTS, ACTOR_CONTINUITY, or ACTOR_DIRECTIVES supports the reference. A person name outside this list does not identify an actor, even when SOURCE_MOMENT or prior prose mentions it. Do not repeat or introduce that name; treat any prior mention as unverified hearsay about an unnamed resident. An unlisted resident cannot own a job, payment, permission, appointment, access, or future reply. Do not offer knocking, calling, or waiting for one as the next playable step. Keep a concrete offer or transaction with the targeted actor. If no listed actor can own the requested transaction from supplied facts, have the targeted actor state that no actionable offer exists.",
     "For contact, write the targeted person's actual spoken reply, silence, gesture, or action in the record_world_event summary and copy that person's handle into performingActorHandle. The performer must be one of PLAYER_INTENT's actor targets. Do not replace the exchange with audit labels such as common knowledge, offers no interpretation, nothing further, or has nothing to share. If the person withholds something, show the words or action used to withhold it. A concrete deflection, counterquestion, or condition is useful when ACTOR_DIRECTIVES support one.",
     "PLAYER_MOVEMENT is code-authoritative. When it is non-null, return exactly one {\"kind\":\"move_actor\",\"actorHandle\":null} effect for the player at the chronological point where travel occurs. Code binds the player actor, route, endpoints, and direct perception from this order. When PLAYER_MOVEMENT is null, never return move_actor. Do not copy PLAYER_MOVEMENT fields or exposure into an effect.",
+    "PLAYER_MOVEMENT also carries the route's code-authoritative travelCost ticks. For a pure move, elapsedMinutes must equal travelCost exactly. For a compound action that includes travel, elapsedMinutes must be at least travelCost and remain within RULING.elapsedBounds. Never estimate a different route duration.",
     "CURRENT_EXACT_SCENE is the only scene the player occupies before movement. When PLAYER_MOVEMENT is null, every result must remain inside it. A trail may point toward another named location or route destination, but stop before the player enters, reaches, stands on, or inspects that location's surfaces. Do not place evidence on its door, ramp, gate, floor, wall, or other scene detail. Crossing that boundary requires PLAYER_MOVEMENT.",
     "A targeted visible agent may voluntarily travel with the player over PLAYER_MOVEMENT. First record that person's explicit agreement or willing action as an origin dialogue/interaction. After the player's move_actor effect, return at most one second move_actor effect with that targeted person's exact actorHandle. Code binds the same route and endpoints. Never move an untargeted, remote, incapacitated, non-agent, or unwilling person. If the person does not travel, omit the second effect and do not describe that person at the destination.",
     "Order movement effects as origin interaction, player move_actor with null actorHandle, optional companion move_actor with the targeted actorHandle, then arrival or destination interaction. Put any record_world_event describing the arrival after the movement effects and use eventClass scene for an actorless arrival. Every person described as present in a destination summary must already be there or have a preceding accepted move_actor effect, and their handle must appear in affectedHandles.",
@@ -965,7 +977,10 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     `ALLOWED_HANDLES=${JSON.stringify(allowedHandles)}`,
     `HANDLES_BY_KIND=${JSON.stringify(handlesByKind)}`,
     `CURRENT_EXACT_SCENE=${JSON.stringify(currentExactScene)}`,
-    `PLAYER_MOVEMENT=${JSON.stringify(movement?.handles ?? null)}`,
+    `PLAYER_MOVEMENT=${JSON.stringify(movement === null ? null : {
+      ...movement.handles,
+      travelCost: movement.travelCost,
+    })}`,
     `DESTINATION_SCENE=${JSON.stringify(arrivalScene)}`,
     `VISIBLE_FACTS=${JSON.stringify(frame.visibleFacts)}`,
     `ACTOR_CONTINUITY=${JSON.stringify(frame.actorContinuity)}`,

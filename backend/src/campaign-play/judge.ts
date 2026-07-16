@@ -51,6 +51,7 @@ export const campaignPlayJudgeFrameSchema = z.object({
   visibleRoutes: z.array(z.object({
     handle: line(CAMPAIGN_PLAY_LIMITS.handle),
     destinationHandle: line(CAMPAIGN_PLAY_LIMITS.handle),
+    travelCost: z.number().int().min(1).max(10),
   }).strict()).max(CAMPAIGN_PLAY_LIMITS.visibleRoutes),
   worldTimeMinutes: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.worldTimeMinutes),
   sourceMoment: text(CAMPAIGN_PLAY_LIMITS.narrationText),
@@ -346,6 +347,7 @@ function prompt(frame: CampaignPlayJudgeFrame, input: CampaignPlayJudgeInput): s
     "For suggested input, copy FROZEN_CHOICE kind and targets exactly. targets must always be a JSON array. When FROZEN_CHOICE contains one target, return that object inside a one-element array. Judge feasibility and outcome without reinterpreting the selected action.",
     "movementRouteHandle is a separate mechanical decision from the primary kind. Set it to the exact visible route when the action includes travel before or during its primary action, including compound requests such as travel then contact. Otherwise set it to null. A move kind always requires a non-null movementRouteHandle. Never infer travel from a cited route alone. The route does not need to be repeated in targets; targets describe the action's semantic subjects or destination.",
     "For suggested input, a move choice must use its exact frozen route target as movementRouteHandle. Every suggested non-move choice must set movementRouteHandle to null; never add travel that the frozen choice did not authorize.",
+    "VISIBLE_ROUTES carries code-authoritative travelCost ticks. For a pure move, elapsedBounds.minimumMinutes and elapsedBounds.maximumMinutes must both equal the selected route's travelCost. For a compound action that includes travel, elapsedBounds.minimumMinutes must be at least that travelCost. Never estimate a different route duration.",
     "requiredPossessionEffect is Judge-owned mechanical intent, not prose. Use kind adjust_actor_possession when an actionable result at or above minimumResult must acquire a countable possession, spend one, or durably transform an existing retained possession. Writing measurements or other usable records into a visible notebook, form, chart, ledger, or similar retained object is transform with that exact possession handle and quantity 1. The exact notebook shape is {\"kind\":\"adjust_actor_possession\",\"operation\":\"transform\",\"possessionHandle\":\"copied visible handle\",\"quantity\":1,\"minimumResult\":\"lowest applicable tier\"}. operation accepts only acquire, spend, or transform; there is no adjustment field. Set minimumResult to the lowest result tier that still produces the retained change. Use acquire with null possessionHandle for a new item; spend or transform with an exact visible possession handle for an existing item. Cite every non-null possessionHandle in citedVisibleFactHandles. Use kind none when no durable possession change is part of the ruled outcome. Impossible and clarification rulings always use none.",
     "PLAYER_INPUT stakes ask what the player hopes to learn or accomplish; they are not evidence and do not authorize an answer. For observation, authorize only conclusions supported by SOURCE_MOMENT, VISIBLE_FRAME, or ACTOR_CONTINUITY. Preserve unknown authorship, motive, provenance, prior contents, and hidden causes. A clean, empty, missing, or disturbed surface proves only its currently observable state; it does not prove that something existed, was found, removed, stolen, concealed, or carried away.",
     "The reason field explains feasibility and result bounds. It must not add world facts beyond the supplied frames or resolve an uncertainty that the visible evidence leaves open.",
@@ -440,6 +442,21 @@ function compile(
     throw new CampaignPlayJudgeError("model_contract_failed", null);
   }
   if (proposal.kind === "move" && proposal.movementRouteHandle === null) {
+    throw new CampaignPlayJudgeError("model_contract_failed", null);
+  }
+  const movementRoute = proposal.movementRouteHandle === null
+    ? null
+    : frameResult.data.visibleRoutes.find((route) => route.handle === proposal.movementRouteHandle) ?? null;
+  if (
+    movementRoute !== null
+    && (
+      (proposal.kind === "move"
+        && (proposal.elapsedBounds.minimumMinutes !== movementRoute.travelCost
+          || proposal.elapsedBounds.maximumMinutes !== movementRoute.travelCost))
+      || (proposal.kind !== "move"
+        && proposal.elapsedBounds.minimumMinutes < movementRoute.travelCost)
+    )
+  ) {
     throw new CampaignPlayJudgeError("model_contract_failed", null);
   }
   if (inputResult.data.source === "suggested") {
