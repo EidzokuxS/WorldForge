@@ -671,6 +671,7 @@ describe("Campaign Play Judge", () => {
       method: "Watch the patrol rounds",
       stakes: "Learn their route",
       citedVisibleFactHandles: ["location-harbor"],
+      elapsedBounds: { minimumMinutes: 10, maximumMinutes: 10 },
     });
     const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
       object: validProposal,
@@ -706,6 +707,14 @@ describe("Campaign Play Judge", () => {
     expect(options.schema.safeParse({
       ...validProposal,
       movementRouteHandle: "route-reef",
+    }).success).toBe(false);
+    expect(options.schema.safeParse({
+      ...validProposal,
+      elapsedBounds: { minimumMinutes: 0, maximumMinutes: 0 },
+    }).success).toBe(false);
+    expect(options.schema.safeParse({
+      ...validProposal,
+      disposition: "uncertain",
     }).success).toBe(false);
   });
 

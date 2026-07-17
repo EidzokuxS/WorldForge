@@ -209,6 +209,126 @@ describe("Campaign Play narrator", () => {
     })).toThrow();
   });
 
+  it("reserves the first action for replying to the visible actor who just acted", async () => {
+    const consequence = {
+      observationHandle: "observation_offer",
+      performingActorHandle: "actor_public_keeper",
+      performingActorName: "Mara Venn",
+      whatChanged: "Mara offers an uncertain share.",
+      whereOrRoute: "Salt Harbor",
+      worldTimeLabel: "Day 1, 00:10",
+      causalCue: "direct_perception" as const,
+    };
+    const packet: CampaignPlayNarratorPacket = {
+      ...packetFixture(),
+      turnKind: "player_action",
+      openingContext: null,
+      sourceMoment: "Mara studies the divided catch while you wait for an answer.",
+      actionContext: {
+        submittedText: "Ask Mara for a share.",
+        intentKind: "contact",
+        disposition: "deterministic",
+        result: "success",
+        clarificationQuestion: null,
+      },
+      newObservations: [{
+        observationHandle: "observation_offer",
+        title: "Mara's offer",
+        text: "Mara offers an uncertain share.",
+        whereOrRoute: "Salt Harbor",
+        worldTimeLabel: "Day 1, 00:10",
+        consequence,
+      }],
+      consequences: [consequence],
+      availableIntents: [
+        {
+          handle: "choice_public_observe",
+          label: "Look around",
+          kind: "observe",
+          targets: [{ handle: "location_public_harbor", kind: "location" }],
+        },
+        {
+          handle: "choice_public_contact",
+          label: "Talk to Mara Venn",
+          kind: "contact",
+          targets: [{ handle: "actor_public_keeper", kind: "actor" }],
+        },
+        {
+          handle: "choice_public_move",
+          label: "Go to Flood Market",
+          kind: "move",
+          targets: [{ handle: "route_public_gate", kind: "route" }],
+        },
+        {
+          handle: "choice_public_wait",
+          label: "Wait 10 minutes",
+          kind: "wait",
+          targets: [],
+        },
+      ],
+    };
+    const beats = [{
+      purpose: "consequence" as const,
+      text: "Mara offers you an uncertain share and waits for your answer.",
+    }];
+    const replyProposal = {
+      beats,
+      actionSelections: [1, 0, 2, 3].map((intentIndex) => ({
+        intentIndex,
+        detail: intentIndex === 1 ? "accept the uncertain share" : `visible option ${intentIndex}`,
+      })),
+    };
+    const narrator = createCampaignPlayNarrator();
+    expect(() => narrator.compile({
+      narrationId: "narration-reply-missing",
+      packet,
+      proposal: {
+        beats,
+        actionSelections: [0, 2, 3, 1].map((intentIndex) => ({
+          intentIndex,
+          detail: intentIndex === 1 ? "accept the uncertain share" : `visible option ${intentIndex}`,
+        })),
+      },
+      createdAt: 1_000,
+    })).toThrow();
+
+    const result = narrator.compile({
+      narrationId: "narration-reply-present",
+      packet,
+      proposal: replyProposal,
+      createdAt: 1_000,
+    });
+    expect(result.narration.suggestedActions[0]).toEqual({
+      choiceHandle: "choice_public_contact",
+      label: "Talk to Mara Venn: accept the uncertain share",
+    });
+
+    const generateObject = vi.fn(async (
+      _options: Parameters<typeof safeGenerateObject>[0],
+    ) => ({ object: replyProposal, trace: trace() }));
+    await createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).narrate({
+      narrationId: "narration-reply-schema",
+      packetBytes: canonicalizeCampaignPlayProjection(packet),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+    });
+    const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    expect(options.schema.safeParse(replyProposal).success).toBe(true);
+    expect(options.schema.safeParse({
+      ...replyProposal,
+      actionSelections: [
+        replyProposal.actionSelections[1],
+        replyProposal.actionSelections[0],
+        ...replyProposal.actionSelections.slice(2),
+      ],
+    }).success).toBe(false);
+    expect(String(options.prompt)).toContain("REQUIRED_REPLY_INTENT_INDEX=1");
+  });
+
   it("allows opening pressure to remain part of orientation without a consequence beat", () => {
     const narrator = createCampaignPlayNarrator();
     const proposal: CampaignPlayNarratorProposal = {

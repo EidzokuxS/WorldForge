@@ -1771,6 +1771,26 @@ describe("Campaign Play shared public contracts", () => {
 });
 
 describe("Campaign Play Judge and Rulebook contracts", () => {
+  it("requires every actionable wait to advance world time", () => {
+    const ruling = {
+      disposition: "deterministic" as const,
+      normalizedIntent: intentFixture("wait"),
+      movementRouteHandle: null,
+      requiredPossessionEffect: { kind: "none" as const },
+      citedVisibleFactHandles: [],
+      resultBounds: { minimum: "success" as const, maximum: "success" as const },
+      elapsedBounds: { minimumMinutes: 10, maximumMinutes: 10 },
+      uncertainty: { kind: "none" as const },
+      reason: "The player remains in place while world time advances.",
+      clarificationQuestion: null,
+    };
+    expect(campaignPlayJudgeRulingSchema.safeParse(ruling).success).toBe(true);
+    expect(campaignPlayJudgeRulingSchema.safeParse({
+      ...ruling,
+      elapsedBounds: { minimumMinutes: 0, maximumMinutes: 0 },
+    }).success).toBe(false);
+  });
+
   it("requires reachable and well-shaped possession effects in Judge rulings", () => {
     const ruling = {
       disposition: "uncertain" as const,

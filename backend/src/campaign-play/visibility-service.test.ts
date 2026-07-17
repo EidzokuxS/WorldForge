@@ -1146,6 +1146,7 @@ describe("Campaign Play visibility service", () => {
       "attempt",
       "wait",
     ]);
+    expect(continuation.at(-1)?.label).toBe("Wait 10 minutes");
     expect(continuation.find((intent) =>
       intent.kind === "attempt" && !intent.targets.some((target) => target.kind === "route"))?.targets)
       .toEqual([{

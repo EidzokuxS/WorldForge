@@ -51,6 +51,8 @@ export const CAMPAIGN_PLAY_LIMITS = {
   actorOpportunitiesPerTurn: 3,
 } as const;
 
+export const CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES = 10;
+
 export const CAMPAIGN_PLAY_SETUP_PHASE_VALUES = [
   "character_required",
   "opening_required",

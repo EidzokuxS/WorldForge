@@ -1,7 +1,11 @@
 import crypto from "node:crypto";
 import type { LanguageModel } from "ai";
 import { z } from "zod";
-import { CAMPAIGN_PLAY_LIMITS, type PlayerIntent } from "@worldforge/shared";
+import {
+  CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES,
+  CAMPAIGN_PLAY_LIMITS,
+  type PlayerIntent,
+} from "@worldforge/shared";
 import {
   getSafeGenerateObjectErrorCode,
   getSafeGenerateObjectTrace,
@@ -194,6 +198,13 @@ function judgeProposalSchemaForFrame(
     movementRouteHandle: frozenRouteHandle === null
       ? z.null()
       : z.literal(frozenRouteHandle),
+    ...(input.frozenChoice.kind === "wait" ? {
+      disposition: z.literal("deterministic"),
+      elapsedBounds: z.object({
+        minimumMinutes: z.literal(CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES),
+        maximumMinutes: z.literal(CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES),
+      }).strict(),
+    } : {}),
   });
 }
 
@@ -358,6 +369,7 @@ function prompt(frame: CampaignPlayJudgeFrame, input: CampaignPlayJudgeInput): s
     "For suggested input, copy FROZEN_CHOICE kind and every frozen target. targets must always be a JSON array. You may add only visible nonplayer actors whose participation, consent, or reaction is material to the rendered action. Add each such actor from TARGET_CATALOG. Never add a destination location or another route, location, pressure, possession, or the player actor. Judge feasibility and outcome without changing the selected action.",
     "movementRouteHandle is a separate mechanical decision from the primary kind. Set it to the exact visible route when the action includes travel before or during its primary action, including compound requests such as travel then contact. Otherwise set it to null. A move kind always requires a non-null movementRouteHandle. Never infer travel from a cited route alone. The route does not need to be repeated in targets; targets describe the action's semantic subjects or destination.",
     "For suggested input, set movementRouteHandle to the exact route target in FROZEN_CHOICE when it has one, including a route-bound attempt. Set it to null when FROZEN_CHOICE has no route target. Never add, remove, or change travel that the frozen choice did not authorize.",
+    `A suggested wait always means waiting exactly ${CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES} world minutes. Classify it as deterministic and set both elapsed bounds to ${CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES}. A freeform actionable wait must advance at least one world minute.`,
     "VISIBLE_ROUTES carries code-authoritative travelCost ticks. For a pure move, elapsedBounds.minimumMinutes and elapsedBounds.maximumMinutes must both equal the selected route's travelCost. For a compound action that includes travel, elapsedBounds.minimumMinutes must be at least that travelCost. Never estimate a different route duration.",
     "requiredPossessionEffect is Judge-owned mechanical intent, not prose. Use kind adjust_actor_possession when an actionable result at or above minimumResult must acquire a countable possession, spend one, or durably transform an existing retained possession. Writing measurements or other usable records into a visible notebook, form, chart, ledger, or similar retained object is transform with that exact possession handle and quantity 1. The exact notebook shape is {\"kind\":\"adjust_actor_possession\",\"operation\":\"transform\",\"possessionHandle\":\"copied visible handle\",\"quantity\":1,\"minimumResult\":\"lowest applicable tier\"}. operation accepts only acquire, spend, or transform; there is no adjustment field. Set minimumResult to the lowest result tier that still produces the retained change. Use acquire with null possessionHandle for a new item; spend or transform with an exact visible possession handle for an existing item. Cite every non-null possessionHandle in citedVisibleFactHandles. Use kind none when no durable possession change is part of the ruled outcome. Impossible and clarification rulings always use none.",
     "PLAYER_INPUT stakes ask what the player hopes to learn or accomplish; they are not evidence and do not authorize an answer. For observation, authorize only conclusions supported by SOURCE_MOMENT, VISIBLE_FRAME, or ACTOR_CONTINUITY. Preserve unknown authorship, motive, provenance, prior contents, and hidden causes. A clean, empty, missing, or disturbed surface proves only its currently observable state; it does not prove that something existed, was found, removed, stolen, concealed, or carried away.",
@@ -525,6 +537,16 @@ function compile(
       ? frozenRouteHandles[0]!
       : null;
     if (proposal.movementRouteHandle !== expectedMovementRouteHandle) {
+      throw new CampaignPlayJudgeError("model_contract_failed", null);
+    }
+    if (
+      frozenChoice.kind === "wait" &&
+      (
+        proposal.disposition !== "deterministic" ||
+        proposal.elapsedBounds.minimumMinutes !== CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES ||
+        proposal.elapsedBounds.maximumMinutes !== CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES
+      )
+    ) {
       throw new CampaignPlayJudgeError("model_contract_failed", null);
     }
   }

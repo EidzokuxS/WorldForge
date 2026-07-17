@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import type { LanguageModel } from "ai";
 import { z } from "zod";
 import {
+  CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES,
   CAMPAIGN_PLAY_LIMITS,
   type CampaignPlayActionContext,
   type CampaignPlayJournalEntry,
@@ -921,6 +922,11 @@ function assertSuggestedRuling(
   if (
     !binding || ruling.normalizedIntent.kind !== binding.kind ||
     ruling.movementRouteHandle !== expectedMovementRouteHandle ||
+    (binding.kind === "wait" && (
+      ruling.disposition !== "deterministic" ||
+      ruling.elapsedBounds.minimumMinutes !== CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES ||
+      ruling.elapsedBounds.maximumMinutes !== CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES
+    )) ||
     !campaignPlaySuggestedTargetsAreAuthorized({
       frozenTargets: binding.targets,
       proposedTargets: ruling.normalizedIntent.targets,

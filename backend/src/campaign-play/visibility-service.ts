@@ -1,4 +1,5 @@
 import {
+  CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES,
   CAMPAIGN_PLAY_LIMITS,
   type CampaignPlayActionContext,
   type CampaignPlayAvailableIntent,
@@ -941,7 +942,7 @@ export function availableIntents(
   }));
   intents.push({
     handle: publicHandle("choice", campaignId, `${turnId}:wait`),
-    label: "Wait",
+    label: `Wait ${CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES} minutes`,
     kind: "wait",
     targets: [],
   });

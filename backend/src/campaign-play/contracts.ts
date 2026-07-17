@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   CAMPAIGN_PLAY_CONSEQUENCE_CUE_VALUES,
   CAMPAIGN_PLAY_CHARACTER_SOURCE_VALUES,
+  CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES,
   CAMPAIGN_PLAY_EFFECT_KIND_VALUES,
   CAMPAIGN_PLAY_INTENT_SOURCE_VALUES,
   CAMPAIGN_PLAY_LIMITS,
@@ -733,7 +734,7 @@ export function campaignPlaySuggestedActionLabelPrefix(
 ): string {
   switch (intent.kind) {
     case "observe": return "Examine ";
-    case "wait": return "Wait and ";
+    case "wait": return `Wait ${CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES} minutes and `;
     case "attempt": {
       const routeHandle = intent.targets.find((target) => target.kind === "route")?.handle;
       if (routeHandle === undefined) return "Try to ";
@@ -766,7 +767,7 @@ export function campaignPlaySuggestedActionLabelPrefix(
           "Contact action label requires its frozen visible actor.",
         );
       }
-      return `Ask ${actor.name} about `;
+      return `Talk to ${actor.name}: `;
     }
   }
 }
@@ -1718,6 +1719,17 @@ const campaignPlayJudgeRulingBaseSchema = z.object({
 
 export const campaignPlayJudgeRulingSchema =
   campaignPlayJudgeRulingBaseSchema.superRefine((ruling, context) => {
+    if (
+      ruling.normalizedIntent.kind === "wait" &&
+      (ruling.disposition === "deterministic" || ruling.disposition === "uncertain") &&
+      ruling.elapsedBounds.minimumMinutes < 1
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["elapsedBounds", "minimumMinutes"],
+        message: "An actionable wait must advance world time.",
+      });
+    }
     if (ruling.normalizedIntent.kind === "move" && ruling.movementRouteHandle === null) {
       context.addIssue({
         code: "custom",
