@@ -4417,14 +4417,18 @@
 /* Campaign Play */
 .campaign-play-page {
   --campaign-play-violet: #b49cff;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  height: 100dvh;
   min-height: 100dvh;
+  overflow: hidden;
   background: var(--bg);
   color: var(--fg);
 }
 
 .campaign-play-stage {
   position: relative;
-  min-height: 100dvh;
+  min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
   isolation: isolate;
@@ -4575,9 +4579,9 @@
   align-items: end;
   gap: clamp(28px, 5vw, 88px);
   width: min(1540px, 100%);
-  min-height: 100dvh;
+  min-height: 100%;
   margin: 0 auto;
-  padding: 100px clamp(28px, 5vw, 88px) clamp(300px, 38vh, 390px);
+  padding: 100px clamp(28px, 5vw, 88px) 32px;
 }
 
 .campaign-play-stage-body > :only-child {
@@ -5089,11 +5093,8 @@
 }
 
 .campaign-play-action-dock {
-  position: fixed;
+  position: relative;
   z-index: 8;
-  right: 0;
-  bottom: 0;
-  left: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -5419,8 +5420,8 @@
     grid-template-columns: minmax(0, 1fr);
     align-items: start;
     gap: 18px;
-    min-height: calc(100dvh - 60px);
-    padding: 20px 16px 56dvh;
+    min-height: calc(100% - 60px);
+    padding: 20px 16px;
   }
 
   .campaign-play-scene,
