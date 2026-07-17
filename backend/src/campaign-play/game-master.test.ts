@@ -14,6 +14,7 @@ import {
 import type { CampaignPlayJudgeRuling, CampaignPlayUncertaintyResolution } from "./contracts.js";
 import { resolveCampaignPlayUncertainty, type CampaignPlayModelBudget } from "./judge.js";
 import {
+  deriveCampaignPlayObligationId,
   deriveCampaignPlayPossessionId,
   deriveCampaignPlayPossessionKey,
 } from "./campaign-play-projection.js";
@@ -100,6 +101,7 @@ function frame(): CampaignPlayGameMasterFrame {
       routeStates: [],
       actorConditions: [],
       possessions: [],
+      obligations: [],
       pressureStates: [{ pressureId: "pressure-passage", progress: 40, status: "active", lastAdvancedWorldTimeMinutes: 0 }],
       placements: [
         { placementId: "placement-player", actorId: PLAYER_ID, locationId: "location-a", placementKind: "present" },
@@ -136,6 +138,7 @@ function ruling(overrides: Partial<CampaignPlayJudgeRuling> = {}): CampaignPlayJ
     },
     movementRouteHandle: null,
     requiredPossessionEffect: { kind: "none" },
+    requiredObligationEffect: { kind: "none" },
     citedVisibleFactHandles: ["guard", "passage"],
     resultBounds: { minimum: "success", maximum: "success" },
     elapsedBounds: { minimumMinutes: 1, maximumMinutes: 3 },
@@ -157,6 +160,66 @@ const proposal = {
     affectedHandles: ["you", "guard"],
   }],
 };
+
+describe("Campaign Play Game Master obligations", () => {
+  it("compiles one Judge-required debt with code-owned identity, order, scopes, and version", () => {
+    const requiredObligationEffect = {
+      kind: "incur_actor_obligation" as const,
+      creditorHandle: "guard",
+      unitKey: "copper" as const,
+      amount: 8,
+      minimumResult: "setback" as const,
+    };
+    const candidate = createCampaignPlayGameMaster().compile(
+      frame(),
+      ruling({ requiredObligationEffect }),
+      resolution,
+      null,
+      {
+        elapsedMinutes: 1,
+        effects: [{
+          kind: "incur_actor_obligation",
+          debtorActorHandle: "you",
+          creditorActorHandle: "guard",
+          unitKey: "copper",
+          amount: 8,
+          summary: "You now owe Oren Tide eight copper for the broken glass.",
+          affectedHandles: [],
+        }],
+      },
+    );
+    const obligationId = deriveCampaignPlayObligationId(
+      CAMPAIGN_ID,
+      PLAYER_ID,
+      "actor-guard",
+      "copper",
+    );
+    expect(candidate.batch.commands[1]).toMatchObject({
+      kind: "incur_actor_obligation",
+      order: 1,
+      expectedWorldVersion: 8,
+      debtorActorId: PLAYER_ID,
+      creditorActorId: "actor-guard",
+      obligationId,
+      unitKey: "copper",
+      amount: 8,
+      readScope: [
+        { kind: "actor", id: PLAYER_ID },
+        { kind: "actor", id: "actor-guard" },
+        { kind: "obligation", id: obligationId },
+      ],
+      writeScope: [{ kind: "obligation", id: obligationId }],
+    });
+    expect(candidate.preflight.accepted).toBe(true);
+    expect(() => createCampaignPlayGameMaster().compile(
+      frame(),
+      ruling({ requiredObligationEffect }),
+      resolution,
+      null,
+      proposal,
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+  });
+});
 
 function model(): LanguageModel {
   const value = {} as LanguageModel;
@@ -303,7 +366,7 @@ describe("Campaign Play Game Master", () => {
     );
     expect(String(options.prompt)).toContain('"eventClass":"discovery"');
     expect(String(options.prompt)).toContain(
-      "effects[].kind accepts exactly: move_actor, set_route_state, set_actor_condition, update_actor_relation, update_actor_goal, advance_pressure, adjust_actor_possession, or record_world_event",
+      "effects[].kind accepts exactly: move_actor, set_route_state, set_actor_condition, update_actor_relation, update_actor_goal, advance_pressure, adjust_actor_possession, incur_actor_obligation, or record_world_event",
     );
     expect(String(options.prompt)).toContain(
       "set_actor_condition has exactly these fields: kind, exposure, actorHandle, condition, operation, and summary",

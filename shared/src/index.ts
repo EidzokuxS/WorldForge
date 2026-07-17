@@ -227,6 +227,7 @@ export type {
   CampaignPlayVisibleRoute,
   CampaignPlayVisiblePressure,
   CampaignPlayVisiblePossession,
+  CampaignPlayVisibleObligation,
   CampaignPlayConsequence,
   CampaignPlayJournalEntry,
   CampaignPlayAvailableIntent,

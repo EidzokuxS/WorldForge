@@ -6,6 +6,7 @@ import {
   type CampaignPlayRulebookFrame,
 } from "./rulebook.js";
 import {
+  deriveCampaignPlayObligationId,
   deriveCampaignPlayPossessionId,
   deriveCampaignPlayPossessionKey,
 } from "./campaign-play-projection.js";
@@ -190,6 +191,7 @@ function frameFixture(
     routeStates: [],
     actorConditions: [],
     possessions: [],
+    obligations: [],
     pressureStates: setupPhase === "ready" ? [{
       pressureId: "pressure-passage",
       progress: 80,
@@ -659,6 +661,60 @@ describe("Campaign Play Rulebook preflight", () => {
       denial: { code: "precondition_failed" },
     });
     expect(frame.possessions[0]?.quantity).toBe(2);
+  });
+
+  it("incurs one deterministic copper obligation and accumulates the same debt", () => {
+    const obligationId = deriveCampaignPlayObligationId(
+      CAMPAIGN_ID,
+      PLAYER_ID,
+      "actor-key",
+      "copper",
+    );
+    const first = {
+      ...commandBase(0, READY_VERSION),
+      kind: "incur_actor_obligation" as const,
+      debtorActorId: PLAYER_ID,
+      creditorActorId: "actor-key",
+      obligationId,
+      unitKey: "copper" as const,
+      amount: 8,
+      summary: "The traveler owes Mara eight copper for passage.",
+      affectedRefs: [
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "actor" as const, id: "actor-key" },
+      ],
+      readScope: [
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "actor" as const, id: "actor-key" },
+        { kind: "obligation" as const, id: obligationId },
+      ],
+      writeScope: [{ kind: "obligation" as const, id: obligationId }],
+    };
+    const second = {
+      ...first,
+      ...commandBase(1, READY_VERSION + 1),
+    };
+    const accepted = preflightCampaignPlayRulebook({
+      frame: frameFixture(),
+      authority: playerAuthority(),
+      batch: {
+        batchId: BATCH_ID,
+        baseWorldVersion: READY_VERSION,
+        commands: [first, second],
+      },
+    });
+
+    expect(accepted.accepted).toBe(true);
+    if (!accepted.accepted) return;
+    expect(accepted.simulation.worldVersion).toBe(READY_VERSION + 2);
+    expect(accepted.simulation.obligations).toEqual([{
+      obligationId,
+      debtorActorId: PLAYER_ID,
+      creditorActorId: "actor-key",
+      unitKey: "copper",
+      principalAmount: 16,
+      outstandingAmount: 16,
+    }]);
   });
 
   it("accepts the complete opening bootstrap and simulates earlier outputs", () => {

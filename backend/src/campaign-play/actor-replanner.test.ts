@@ -380,6 +380,7 @@ function createReplanFixture(): {
         elapsedBounds: { minimumMinutes: 0, maximumMinutes: 0 },
         uncertainty: { kind: "none" },
         requiredPossessionEffect: { kind: "none" },
+        requiredObligationEffect: { kind: "none" },
         reason: "The fixture keeps primary settlement unchanged.",
         clarificationQuestion: "How long do you wait?",
       },

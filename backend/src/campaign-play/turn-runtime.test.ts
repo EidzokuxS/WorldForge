@@ -560,6 +560,7 @@ function judgeFixture(disposition: Disposition, compoundDestinationName: string 
         stakes: "Learn what changes at the signal gate",
         movementRouteHandle,
         requiredPossessionEffect: { kind: "none" },
+        requiredObligationEffect: { kind: "none" },
         disposition,
         citedVisibleFactHandles: [request.frame.locationHandle],
         resultBounds: noEffect

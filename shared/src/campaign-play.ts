@@ -35,6 +35,7 @@ export const CAMPAIGN_PLAY_LIMITS = {
   visibleRoutes: 8,
   visiblePressures: 4,
   visiblePossessions: 32,
+  visibleObligations: 32,
   possessionQuantity: 1_000_000,
   openingLocations: 12,
   openingDetails: 8,
@@ -109,6 +110,7 @@ export const CAMPAIGN_PLAY_VISIBLE_TARGET_KIND_VALUES = [
   "route",
   "pressure",
   "possession",
+  "obligation",
 ] as const;
 
 export const CAMPAIGN_PLAY_PUBLIC_PROGRESS_VALUES = [
@@ -249,6 +251,14 @@ export interface CampaignPlayVisiblePossession {
   quantity: number;
 }
 
+export interface CampaignPlayVisibleObligation {
+  handle: string;
+  creditorHandle: string;
+  creditorName: string;
+  unitKey: "copper";
+  outstandingAmount: number;
+}
+
 export interface CampaignPlayConsequence {
   observationHandle: string;
   performingActorHandle: string | null;
@@ -310,6 +320,7 @@ export interface CampaignPlayNarratorPacket extends CampaignPlayPublicVersions {
   visibleRoutes: CampaignPlayVisibleRoute[];
   visiblePressures: CampaignPlayVisiblePressure[];
   possessions: CampaignPlayVisiblePossession[];
+  obligations: CampaignPlayVisibleObligation[];
   newObservations: CampaignPlayJournalEntry[];
   consequences: CampaignPlayConsequence[];
   continuity: CampaignPlayJournalEntry[];
@@ -384,6 +395,7 @@ export interface CampaignPlayState extends CampaignPlayPublicVersions {
   visibleRoutes: CampaignPlayVisibleRoute[];
   visiblePressures: CampaignPlayVisiblePressure[];
   possessions: CampaignPlayVisiblePossession[];
+  obligations: CampaignPlayVisibleObligation[];
   narration: CampaignPlayNarration | null;
   consequences: CampaignPlayConsequence[];
   activeTurn: CampaignPlayPublicTurn | null;

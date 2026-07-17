@@ -32,6 +32,13 @@ describe("SceneCard", () => {
           name: "Brass signal key",
           quantity: 2,
         }]}
+        obligations={[{
+          handle: "obligation-secret",
+          creditorHandle: "actor-creditor-secret",
+          creditorName: "Orsa Pell",
+          unitKey: "copper",
+          outstandingAmount: 16,
+        }]}
         consequences={[{
           observationHandle: "observation-secret",
           performingActorHandle: null,
@@ -52,6 +59,7 @@ describe("SceneCard", () => {
     expect(within(routes).getByText("Restricted")).toBeInTheDocument();
     expect(screen.getByText("The late train")).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Carrying" })).toHaveTextContent("Brass signal key×2");
+    expect(screen.getByRole("region", { name: "Owed" })).toHaveTextContent("Orsa Pell16 copper");
     expect(screen.getByRole("region", { name: "What changed" })).toHaveTextContent("Route changed");
     expect(document.body.textContent?.includes("secret")).toBe(false);
   });
@@ -70,6 +78,7 @@ describe("SceneCard", () => {
         routes={[]}
         pressures={[]}
         possessions={[]}
+        obligations={[]}
       />,
     )).toThrow("Unsupported Campaign Play actor accent");
   });

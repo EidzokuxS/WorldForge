@@ -71,6 +71,7 @@ const state = {
   visibleRoutes: [],
   visiblePressures: [],
   possessions: [],
+  obligations: [],
   narration: null,
   consequences: [],
   activeTurn: null,
@@ -167,11 +168,13 @@ describe("Campaign Play API", () => {
         { handle: "possession-crate", name: "Padded chimney crate", quantity: 1 },
         { handle: "possession-tools", name: "Lamp-glass mending tools", quantity: 1 },
       ],
+      obligations: [],
     };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse(openingState)));
     await expect(loadCampaignPlayState("campaign-one")).resolves.toMatchObject({
       phase: "opening_required",
       possessions: openingState.possessions,
+      obligations: openingState.obligations,
     });
   });
 

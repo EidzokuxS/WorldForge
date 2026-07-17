@@ -246,6 +246,7 @@ export const campaignPlayCommandKindValues = [
   "update_actor_relation",
   "update_actor_goal",
   "advance_pressure",
+  "incur_actor_obligation",
   "record_world_event",
   "create_player_actor",
   "initialize_player_placement",
@@ -265,6 +266,7 @@ export const campaignPlayWorldEventKindValues = [
   "actor_relation_changed",
   "actor_goal_changed",
   "pressure_advanced",
+  "actor_obligation_incurred",
   "scene_recorded",
 ] as const;
 
@@ -3146,6 +3148,64 @@ export const campaignPlayActorPossessions = sqliteTable(
         AND length(${table.possessionKey}) BETWEEN 1 AND 240
         AND length(${table.name}) BETWEEN 1 AND 120
         AND ${table.quantity} BETWEEN 0 AND 1000000
+        AND ${table.worldVersion} >= 1`,
+    ),
+  ],
+);
+
+export const campaignPlayActorObligations = sqliteTable(
+  "campaign_play_actor_obligations",
+  {
+    obligationId: text("obligation_id").primaryKey(),
+    campaignId: text("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    debtorActorId: text("debtor_actor_id")
+      .notNull()
+      .references(() => actors.id, { onDelete: "cascade" }),
+    creditorActorId: text("creditor_actor_id")
+      .notNull()
+      .references(() => actors.id, { onDelete: "cascade" }),
+    unitKey: text("unit_key", { enum: ["copper"] }).notNull(),
+    principalAmount: integer("principal_amount").notNull(),
+    outstandingAmount: integer("outstanding_amount").notNull(),
+    causalReceiptId: text("causal_receipt_id")
+      .notNull()
+      .references(() => campaignPlayReceipts.receiptId, { onDelete: "restrict" }),
+    worldVersion: integer("world_version").notNull(),
+    updatedAt: integer("updated_at", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("campaign_play_actor_obligations_debtor_creditor_unit_unique").on(
+      table.debtorActorId,
+      table.creditorActorId,
+      table.unitKey,
+    ),
+    uniqueIndex("campaign_play_actor_obligations_receipt_unique").on(
+      table.causalReceiptId,
+    ),
+    index("idx_campaign_play_actor_obligations_campaign_debtor").on(
+      table.campaignId,
+      table.debtorActorId,
+    ),
+    index("idx_campaign_play_actor_obligations_campaign_creditor").on(
+      table.campaignId,
+      table.creditorActorId,
+    ),
+    index("idx_campaign_play_actor_obligations_campaign_version").on(
+      table.campaignId,
+      table.worldVersion,
+    ),
+    check(
+      "campaign_play_actor_obligations_valid",
+      sql`length(${table.obligationId}) BETWEEN 1 AND 128
+        AND length(${table.campaignId}) BETWEEN 1 AND 128
+        AND length(${table.debtorActorId}) BETWEEN 1 AND 128
+        AND length(${table.creditorActorId}) BETWEEN 1 AND 128
+        AND ${table.debtorActorId} <> ${table.creditorActorId}
+        AND ${table.unitKey} = 'copper'
+        AND ${table.principalAmount} BETWEEN 1 AND 1000000
+        AND ${table.outstandingAmount} BETWEEN 1 AND ${table.principalAmount}
         AND ${table.worldVersion} >= 1`,
     ),
   ],

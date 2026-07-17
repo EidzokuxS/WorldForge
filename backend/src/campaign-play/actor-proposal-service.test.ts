@@ -325,6 +325,7 @@ function createReadyFixture(
         },
         movementRouteHandle: null,
         requiredPossessionEffect: { kind: "none" },
+        requiredObligationEffect: { kind: "none" },
         citedVisibleFactHandles: [],
         resultBounds: { minimum: "no_effect", maximum: "no_effect" },
         elapsedBounds: { minimumMinutes: 0, maximumMinutes: 0 },

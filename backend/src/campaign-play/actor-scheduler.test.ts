@@ -238,6 +238,7 @@ function createReadyFixture(completedActions: 30 | 60 = 30) {
         elapsedBounds: { minimumMinutes: 0, maximumMinutes: 10 },
         uncertainty: { kind: "none" },
         requiredPossessionEffect: { kind: "none" },
+        requiredObligationEffect: { kind: "none" },
         reason: "Waiting and watching is directly possible.",
         clarificationQuestion: null,
       },

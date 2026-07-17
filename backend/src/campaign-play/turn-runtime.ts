@@ -575,6 +575,8 @@ function candidateBindings(
     add("pressure", { kind: "pressure", id: pressure.id }));
   frame.possessions.forEach((possession) =>
     add("possession", { kind: "possession", id: possession.possessionId }));
+  frame.obligations.forEach((obligation) =>
+    add("obligation", { kind: "obligation", id: obligation.obligationId }));
   const observations = handle.sqlite.prepare(`SELECT event_id AS eventId,
       public_entry_json AS publicEntryJson FROM campaign_play_observations
     WHERE campaign_id = ? ORDER BY observation_id`).all(
@@ -642,6 +644,11 @@ function buildPublicAuthority(input: {
     handle: possession.handle,
     kind: "possession",
     summary: `${possession.name}: ${possession.quantity}`,
+  }));
+  packet.obligations.forEach((obligation) => addFact({
+    handle: obligation.handle,
+    kind: "obligation",
+    summary: `Owed to ${obligation.creditorName}: ${obligation.outstandingAmount} ${obligation.unitKey}`,
   }));
   const choiceBindings = narration.suggestedActions.map((suggestion) => {
     const available = packet.availableIntents.find((intent) =>

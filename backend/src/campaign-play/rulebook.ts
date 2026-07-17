@@ -13,6 +13,7 @@ import {
 } from "./contracts.js";
 import {
   canonicalizeCampaignPlayProjection,
+  deriveCampaignPlayObligationId,
   deriveCampaignPlayPossessionId,
   deriveCampaignPlayPossessionKey,
   hashCampaignPlayProjection,
@@ -22,6 +23,7 @@ import type { CampaignPlayMutationContext } from "./campaign-play-state-reposito
 import type {
   CampaignPlayHumanMechanicalIdentity,
   CampaignPlayLiveActorCondition,
+  CampaignPlayLiveActorObligation,
   CampaignPlayLiveActorPossession,
   CampaignPlayLiveGoal,
   CampaignPlayLivePlacement,
@@ -48,6 +50,7 @@ export interface CampaignPlayRulebookFrame {
   routeStates: CampaignPlayLiveRouteState[];
   actorConditions: CampaignPlayLiveActorCondition[];
   possessions: CampaignPlayLiveActorPossession[];
+  obligations: CampaignPlayLiveActorObligation[];
   pressureStates: CampaignPlayLivePressureState[];
   placements: CampaignPlayLivePlacement[];
   relations: CampaignPlayLiveRelation[];
@@ -100,6 +103,7 @@ export interface CampaignPlayRulebookSimulation {
   routeStates: CampaignPlayLiveRouteState[];
   actorConditions: CampaignPlayLiveActorCondition[];
   possessions: CampaignPlayLiveActorPossession[];
+  obligations: CampaignPlayLiveActorObligation[];
   pressureStates: CampaignPlayLivePressureState[];
   placements: CampaignPlayLivePlacement[];
   relations: CampaignPlayLiveRelation[];
@@ -209,6 +213,9 @@ function validFrame(frame: CampaignPlayRulebookFrame): boolean {
     frame.actorConditions.map((row) => `${row.actorId}\u0000${row.condition}`),
     frame.possessions.map((row) => row.possessionId),
     frame.possessions.map((row) => `${row.actorId}\u0000${row.possessionKey}`),
+    frame.obligations.map((row) => row.obligationId),
+    frame.obligations.map((row) =>
+      `${row.debtorActorId}\u0000${row.creditorActorId}\u0000${row.unitKey}`),
     frame.pressureStates.map((row) => row.pressureId),
     frame.placements.map((row) => row.placementId),
     frame.relations.map((row) => row.relationId),
@@ -235,7 +242,8 @@ function validFrame(frame: CampaignPlayRulebookFrame): boolean {
   const setupShapeValid = frame.setupPhase === "character_required"
     ? frame.human === null && frame.worldVersion === frame.acceptedWorldVersion
       && frame.worldTimeMinutes === null
-      && frame.pressureStates.length === 0 && frame.possessions.length === 0 && !playerPresent
+      && frame.pressureStates.length === 0 && frame.possessions.length === 0
+      && frame.obligations.length === 0 && !playerPresent
     : frame.setupPhase === "opening_required"
       ? frame.human !== null && frame.worldVersion === expectedOpeningBaseVersion
         && frame.worldTimeMinutes === null && playerPlacements.length === 0
@@ -272,6 +280,22 @@ function validFrame(frame: CampaignPlayRulebookFrame): boolean {
       && Number.isInteger(row.quantity)
       && row.quantity >= 0
       && row.quantity <= CAMPAIGN_PLAY_LIMITS.possessionQuantity)
+    && frame.obligations.every((row) => actorIds.has(row.debtorActorId)
+      && actorIds.has(row.creditorActorId)
+      && row.debtorActorId !== row.creditorActorId
+      && row.unitKey === "copper"
+      && row.obligationId === deriveCampaignPlayObligationId(
+        frame.campaignId,
+        row.debtorActorId,
+        row.creditorActorId,
+        row.unitKey,
+      )
+      && Number.isInteger(row.principalAmount)
+      && Number.isInteger(row.outstandingAmount)
+      && row.principalAmount >= 1
+      && row.principalAmount <= CAMPAIGN_PLAY_LIMITS.possessionQuantity
+      && row.outstandingAmount >= 1
+      && row.outstandingAmount <= row.principalAmount)
     && frame.pressureStates.every((row) =>
       world.pressures.some((pressure) => pressure.id === row.pressureId)
       && Number.isInteger(row.progress)
@@ -392,6 +416,7 @@ function cloneSimulation(frame: CampaignPlayRulebookFrame): CampaignPlayRulebook
     routeStates: structuredClone(frame.routeStates),
     actorConditions: structuredClone(frame.actorConditions),
     possessions: structuredClone(frame.possessions),
+    obligations: structuredClone(frame.obligations),
     pressureStates: structuredClone(frame.pressureStates),
     placements: structuredClone(frame.placements),
     relations: structuredClone(frame.relations),
@@ -431,6 +456,7 @@ function entityExists(
     case "goal": return state.goals.some((row) => row.goalId === reference.id);
     case "pressure": return frame.acceptedWorld.pressures.some((row) => row.id === reference.id);
     case "possession": return state.possessions.some((row) => row.possessionId === reference.id);
+    case "obligation": return state.obligations.some((row) => row.obligationId === reference.id);
     case "world_event": return knownWorldEventIds.has(reference.id);
   }
 }
@@ -476,6 +502,16 @@ function commandEntityRefs(
         reference.kind !== "actor" || reference.id !== command.actorId),
     ].filter((reference, index, values) =>
       values.findIndex((candidate) => refKey(candidate) === refKey(reference)) === index);
+    case "incur_actor_obligation": return [
+      ref("actor", command.debtorActorId),
+      ref("actor", command.creditorActorId),
+      ref("obligation", command.obligationId),
+      ...command.affectedRefs.filter((reference) =>
+        (reference.kind !== "actor"
+          || (reference.id !== command.debtorActorId && reference.id !== command.creditorActorId))
+        && (reference.kind !== "obligation" || reference.id !== command.obligationId)),
+    ].filter((reference, index, values) =>
+      values.findIndex((candidate) => refKey(candidate) === refKey(reference)) === index);
     case "record_world_event": return command.affectedRefs;
     case "create_player_actor": return [ref("actor", command.actorId)];
     case "initialize_player_placement": return [
@@ -505,6 +541,7 @@ function expectedScopes(
     case "update_actor_relation":
     case "update_actor_goal": return { read: refs, write: [refs[0]!] };
     case "adjust_actor_possession": return { read: refs, write: [refs[1]!] };
+    case "incur_actor_obligation": return { read: refs.slice(0, 3), write: [refs[2]!] };
     case "record_world_event": return { read: refs, write: [] };
     case "initialize_player_placement": return { read: refs, write: refs };
   }
@@ -584,6 +621,15 @@ function exposureGrounding(
         if (possession) addActor(possession.actorId);
         break;
       }
+      case "obligation": {
+        const obligation = state.obligations.find((candidate) =>
+          candidate.obligationId === reference.id);
+        if (obligation) {
+          addActor(obligation.debtorActorId);
+          addActor(obligation.creditorActorId);
+        }
+        break;
+      }
       case "world_event": break;
     }
   };
@@ -601,6 +647,10 @@ function exposureGrounding(
     case "update_actor_goal": addReference(ref("goal", command.goalId)); break;
     case "advance_pressure": addPressure(command.pressureId); break;
     case "adjust_actor_possession": addActor(command.actorId); break;
+    case "incur_actor_obligation":
+      addActor(command.debtorActorId);
+      addActor(command.creditorActorId);
+      break;
     case "record_world_event": command.affectedRefs.forEach(addReference); break;
     case "create_player_actor": addActor(command.actorId); break;
     case "initialize_player_placement": locationIds.add(command.locationId); addActor(command.actorId); break;
@@ -720,6 +770,9 @@ function validateRefsAndScopes(
   const existingPossession = command.kind === "adjust_actor_possession"
     ? state.possessions.find((row) => row.possessionId === command.possessionId)
     : undefined;
+  const existingObligation = command.kind === "incur_actor_obligation"
+    ? state.obligations.find((row) => row.obligationId === command.obligationId)
+    : undefined;
   const grantedPossessionRef = command.kind === "adjust_actor_possession"
     && command.quantityDelta > 0
     && command.possessionKey === deriveCampaignPlayPossessionKey(command.name)
@@ -730,14 +783,26 @@ function validateRefsAndScopes(
     )
     ? refKey(ref("possession", command.possessionId))
     : null;
+  const grantedObligationRef = command.kind === "incur_actor_obligation"
+    && command.obligationId === deriveCampaignPlayObligationId(
+      frame.campaignId,
+      command.debtorActorId,
+      command.creditorActorId,
+      command.unitKey,
+    )
+    ? refKey(ref("obligation", command.obligationId))
+    : null;
   if (!allRefs.every((reference) =>
-    refKey(reference) === grantedPossessionRef || authorized.has(refKey(reference)))) {
+    refKey(reference) === grantedPossessionRef
+    || refKey(reference) === grantedObligationRef
+    || authorized.has(refKey(reference)))) {
     deny("unauthorized_reference", "Command references an entity outside its frozen frame.", command, index);
   }
   const newPlayerRef = command.kind === "create_player_actor" ? refKey(ref("actor", command.actorId)) : null;
   if (!allRefs.every((reference) =>
     refKey(reference) === newPlayerRef
     || (existingPossession === undefined && refKey(reference) === grantedPossessionRef)
+    || (existingObligation === undefined && refKey(reference) === grantedObligationRef)
     || entityExists(frame, state, knownEvents, reference))) {
     deny("invalid_reference", "Command references an entity that does not exist.", command, index);
   }
@@ -835,6 +900,7 @@ function actorJobOwns(
         || pressure.locationIds.some((locationId) => actorLocations.has(locationId)));
     }
     case "adjust_actor_possession": return command.actorId === actorId;
+    case "incur_actor_obligation": return false;
     case "record_world_event": return command.affectedRefs.some((reference) =>
       reference.kind === "actor" && reference.id === actorId);
     case "create_player_actor":
@@ -852,6 +918,12 @@ function validateAvailability(
   index: number,
 ): void {
   const modelVisible = CAMPAIGN_PLAY_COMMAND_METADATA[command.kind].modelVisible;
+  const obligationAvailable = command.kind !== "incur_actor_obligation"
+    || (
+      authority.purpose === "player_action"
+      && state.human?.actorId === command.debtorActorId
+      && actor(frame, state, command.debtorActorId)?.controller === "human"
+    );
   const available = authority.purpose === "character_bootstrap"
     ? command.kind === "create_player_actor"
       || (command.kind === "adjust_actor_possession" && command.quantityDelta > 0)
@@ -862,6 +934,7 @@ function validateAvailability(
       : modelVisible;
   if (
     !available
+    || !obligationAvailable
     || !actorJobOwns(frame, state, authority, command)
   ) {
     deny("command_unavailable", "Command kind is unavailable to this authority.", command, index);
@@ -1015,6 +1088,53 @@ function applyCommand(
       });
       break;
     }
+    case "incur_actor_obligation": {
+      const debtor = actor(frame, state, command.debtorActorId);
+      const creditor = actor(frame, state, command.creditorActorId);
+      const expectedId = deriveCampaignPlayObligationId(
+        frame.campaignId,
+        command.debtorActorId,
+        command.creditorActorId,
+        command.unitKey,
+      );
+      const row = state.obligations.find((candidate) =>
+        candidate.obligationId === command.obligationId);
+      if (
+        debtor?.controller !== "human"
+        || creditor === null
+        || command.debtorActorId === command.creditorActorId
+        || command.obligationId !== expectedId
+        || (row !== undefined && (
+          row.debtorActorId !== command.debtorActorId
+          || row.creditorActorId !== command.creditorActorId
+          || row.unitKey !== command.unitKey
+        ))
+      ) {
+        deny("precondition_failed", "Obligation identity does not match distinct campaign actors.", command, index);
+      }
+      const principalAmount = (row?.principalAmount ?? 0) + command.amount;
+      const outstandingAmount = (row?.outstandingAmount ?? 0) + command.amount;
+      if (
+        principalAmount > CAMPAIGN_PLAY_LIMITS.possessionQuantity
+        || outstandingAmount > principalAmount
+      ) {
+        deny("precondition_failed", "Obligation amount transition is unavailable.", command, index);
+      }
+      if (row) {
+        row.principalAmount = principalAmount;
+        row.outstandingAmount = outstandingAmount;
+      } else {
+        state.obligations.push({
+          obligationId: command.obligationId,
+          debtorActorId: command.debtorActorId,
+          creditorActorId: command.creditorActorId,
+          unitKey: command.unitKey,
+          principalAmount,
+          outstandingAmount,
+        });
+      }
+      break;
+    }
     case "record_world_event": {
       if (!unique(command.affectedRefs.map(refKey))) {
         deny("precondition_failed", "World event affected references must be unique.", command, index);
@@ -1156,6 +1276,7 @@ function sortSimulation(state: CampaignPlayRulebookSimulation): void {
   state.actorConditions.sort((left, right) =>
     compareText(`${left.actorId}\u0000${left.condition}`, `${right.actorId}\u0000${right.condition}`));
   state.possessions.sort((left, right) => compareText(left.possessionId, right.possessionId));
+  state.obligations.sort((left, right) => compareText(left.obligationId, right.obligationId));
   state.pressureStates.sort((left, right) => compareText(left.pressureId, right.pressureId));
   state.placements.sort((left, right) => compareText(left.placementId, right.placementId));
   state.relations.sort((left, right) => compareText(left.relationId, right.relationId));
@@ -1172,6 +1293,7 @@ function snapshotSimulation(
     routeStates: state.routeStates.map((row) => ({ ...row })),
     actorConditions: state.actorConditions.map((row) => ({ ...row })),
     possessions: state.possessions.map((row) => ({ ...row })),
+    obligations: state.obligations.map((row) => ({ ...row })),
     pressureStates: state.pressureStates.map((row) => ({ ...row })),
     placements: state.placements.map((row) => ({ ...row })),
     relations: state.relations.map((row) => ({ ...row })),
@@ -1353,6 +1475,7 @@ function mechanicalHash(
     routeStates: state.routeStates,
     actorConditions: state.actorConditions,
     possessions: state.possessions,
+    obligations: state.obligations,
     pressureStates: state.pressureStates,
     placements: acceptedBaseRowsUnchanged ? [] : state.placements,
     relations: acceptedBaseRowsUnchanged ? [] : state.relations,
@@ -1370,6 +1493,7 @@ function eventKind(command: RulebookBatchCommand): string {
     case "update_actor_goal": return "actor_goal_changed";
     case "advance_pressure": return "pressure_advanced";
     case "adjust_actor_possession": return "actor_possession_adjusted";
+    case "incur_actor_obligation": return "actor_obligation_incurred";
     case "record_world_event": return "scene_recorded";
     case "create_player_actor": return "player_actor_created";
     case "initialize_player_placement": return "player_placement_initialized";
@@ -1386,6 +1510,7 @@ function eventAffectedRefs(
 ): CampaignPlayEntityRef[] {
   if (command.kind === "record_world_event") return command.affectedRefs;
   if (command.kind === "adjust_actor_possession") return commandEntityRefs(frame, after, command);
+  if (command.kind === "incur_actor_obligation") return commandEntityRefs(frame, after, command);
   const refs = command.writeScope.length > 0 ? command.writeScope : command.readScope;
   if (refs.length > 0) return refs;
   if (command.source.kind === "actor") return [ref("actor", command.source.actorId)];
@@ -1464,6 +1589,27 @@ function applyStoredMutation(
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
           .run(command.possessionId, campaignId, command.actorId, command.possessionKey,
             command.name, command.quantityDelta, receiptId, resultWorldVersion, input.createdAt);
+      }
+      return;
+    }
+    case "incur_actor_obligation": {
+      const exists = sqlite.prepare(`SELECT 1 FROM campaign_play_actor_obligations
+        WHERE obligation_id = ? AND campaign_id = ?`).get(command.obligationId, campaignId);
+      if (exists) {
+        sqlite.prepare(`UPDATE campaign_play_actor_obligations SET
+          principal_amount = principal_amount + ?, outstanding_amount = outstanding_amount + ?,
+          causal_receipt_id = ?, world_version = ?, updated_at = ?
+          WHERE obligation_id = ? AND campaign_id = ?`)
+          .run(command.amount, command.amount, receiptId, resultWorldVersion, input.createdAt,
+            command.obligationId, campaignId);
+      } else {
+        sqlite.prepare(`INSERT INTO campaign_play_actor_obligations
+          (obligation_id, campaign_id, debtor_actor_id, creditor_actor_id, unit_key,
+            principal_amount, outstanding_amount, causal_receipt_id, world_version, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(command.obligationId, campaignId, command.debtorActorId, command.creditorActorId,
+            command.unitKey, command.amount, command.amount, receiptId, resultWorldVersion,
+            input.createdAt);
       }
       return;
     }
@@ -1604,7 +1750,7 @@ export function executeCampaignPlayRulebookBatch(
         hashCampaignPlayProjection(argumentsPayload),
         createdAt);
 
-    if (command.kind === "adjust_actor_possession") {
+    if (command.kind === "adjust_actor_possession" || command.kind === "incur_actor_obligation") {
       applyStoredMutation(input, command, receiptId, after.worldVersion);
     }
 
@@ -1643,7 +1789,11 @@ export function executeCampaignPlayRulebookBatch(
             createdAt);
       }
     }
-    if (command.kind !== "create_player_actor" && command.kind !== "adjust_actor_possession") {
+    if (
+      command.kind !== "create_player_actor"
+      && command.kind !== "adjust_actor_possession"
+      && command.kind !== "incur_actor_obligation"
+    ) {
       applyStoredMutation(input, command, receiptId, after.worldVersion);
     }
     const observedHash = context.mechanicalHash();

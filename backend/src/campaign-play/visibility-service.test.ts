@@ -27,6 +27,7 @@ import {
 } from "./campaign-play-database.js";
 import {
   canonicalizeCampaignPlayProjection,
+  deriveCampaignPlayObligationId,
   deriveCampaignPlayPossessionId,
   deriveCampaignPlayPossessionKey,
   deriveCampaignPlayPublicHandle,
@@ -259,6 +260,7 @@ function rulebookFrame(handle: CampaignPlayDatabaseHandle): CampaignPlayRulebook
     routeStates,
     actorConditions,
     possessions: [],
+    obligations: [],
     pressureStates,
     placements,
     relations,
@@ -269,6 +271,7 @@ function rulebookFrame(handle: CampaignPlayDatabaseHandle): CampaignPlayRulebook
 function createVisibilityFixture(
   routeTriggers: Array<"inspect" | "attempt" | "traverse"> = ["inspect"],
   actorBAcquiresPossession = false,
+  playerIncursObligation = false,
 ) {
   acceptPlayableWorld();
   const handle = track(openCampaignPlayDatabase(CAMPAIGN_ID));
@@ -454,6 +457,13 @@ function createVisibilityFixture(
   const seventhId = deriveCampaignPlayCommandId(CAMPAIGN_ID, "turn-opening", batchId, 6);
   const eighthId = deriveCampaignPlayCommandId(CAMPAIGN_ID, "turn-opening", batchId, 7);
   const ninthId = deriveCampaignPlayCommandId(CAMPAIGN_ID, "turn-opening", batchId, 8);
+  const tenthId = deriveCampaignPlayCommandId(CAMPAIGN_ID, "turn-opening", batchId, 9);
+  const obligationId = deriveCampaignPlayObligationId(
+    CAMPAIGN_ID,
+    "actor-player",
+    "actor-a",
+    "copper",
+  );
   const evidenceAccepted = preflightCampaignPlayRulebook({
     frame,
     authority: {
@@ -730,6 +740,35 @@ function createVisibilityFixture(
           observableTrace: "Wet seals and a fresh thumbprint mark the office counter.",
           affectedRefs: [{ kind: "location", id: "location-a-office" }],
         },
+        ...(playerIncursObligation ? [{
+          commandId: tenthId,
+          batchId,
+          order: 9,
+          kind: "incur_actor_obligation",
+          causalParent: { kind: "command", commandId: ninthId },
+          source: { kind: "system", system: "game_master" },
+          expectedWorldVersion: frame.worldVersion + 3,
+          readScope: [
+            { kind: "actor", id: "actor-player" },
+            { kind: "actor", id: "actor-a" },
+            { kind: "obligation", id: obligationId },
+          ],
+          writeScope: [{ kind: "obligation", id: obligationId }],
+          exposure: {
+            mode: "projectable",
+            predicates: [{ channel: "direct_perception", locationId: "location-a" }],
+          },
+          debtorActorId: "actor-player",
+          creditorActorId: "actor-a",
+          obligationId,
+          unitKey: "copper",
+          amount: 4,
+          summary: "Player owes Mara Venn four copper for the signal work.",
+          affectedRefs: [
+            { kind: "actor", id: "actor-player" },
+            { kind: "actor", id: "actor-a" },
+          ],
+        }] : []),
       ],
     },
   });
@@ -738,7 +777,7 @@ function createVisibilityFixture(
   }
   states.commitMechanical({
     updatedAt: 1_600,
-    worldVersionAdvance: 3,
+    worldVersionAdvance: playerIncursObligation ? 4 : 3,
     mutate(context) {
       executeCampaignPlayRulebookBatch({
         frame,
@@ -968,7 +1007,7 @@ describe("Campaign Play visibility service", () => {
   });
 
   it("earns valid channels while keeping sibling-scene perception and aftermath hidden", () => {
-    const fixture = createVisibilityFixture();
+    const fixture = createVisibilityFixture(["inspect"], false, true);
     expect(fixture.handle.sqlite.prepare(`SELECT location_id AS locationId
       FROM actor_placements WHERE campaign_id = ? AND actor_id = 'actor-d'`)
       .get(CAMPAIGN_ID)).toEqual({ locationId: "location-c" });
@@ -993,9 +1032,10 @@ describe("Campaign Play visibility service", () => {
       "Signs of change",
       "Sel Bell's account",
       "Your action",
+      "Your action",
     ].sort());
-    expect(result.packet.newObservations).toHaveLength(7);
-    expect(result.packet.consequences).toHaveLength(7);
+    expect(result.packet.newObservations).toHaveLength(8);
+    expect(result.packet.consequences).toHaveLength(8);
     expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
       "The signal keeper asks the player what brought them to the failing route.",
     );
@@ -1004,6 +1044,9 @@ describe("Campaign Play visibility service", () => {
     );
     expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
       "Mara Venn left for Glass Reef Quay.",
+    );
+    expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
+      "Player owes Mara Venn four copper for the signal work.",
     );
     expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
       "Fresh scuff marks and a snapped seal remain beside the route board.",
@@ -1030,7 +1073,7 @@ describe("Campaign Play visibility service", () => {
     expect(result.packet.availableIntents.some((intent) => intent.kind === "attempt"))
       .toBe(false);
     expect(result.packet.consequences.filter((entry) => entry.causalCue === "your_action"))
-      .toHaveLength(5);
+      .toHaveLength(6);
     expect(result.packet.consequences.filter((entry) => entry.causalCue === "direct_perception"))
       .toHaveLength(2);
     const performed = result.packet.consequences.find((entry) =>
@@ -1048,7 +1091,7 @@ describe("Campaign Play visibility service", () => {
       entry !== performed && entry !== premise).every((entry) =>
       entry.performingActorHandle === null && entry.performingActorName === null)).toBe(true);
     expect(result.knowledgeInserted).toBeGreaterThanOrEqual(8);
-    expect(result.observationsInserted).toBe(7);
+    expect(result.observationsInserted).toBe(8);
 
     const premiseKnowledge = fixture.handle.sqlite.prepare(`SELECT knowledge.actor_id AS actorId
       FROM campaign_play_actor_knowledge knowledge
@@ -1231,6 +1274,7 @@ describe("Campaign Play visibility service", () => {
       })),
       visiblePressures: [],
       possessions: [],
+      obligations: [],
     };
 
     const syntheticOpeningSeed: CampaignPlayOpeningExposureSeed = {

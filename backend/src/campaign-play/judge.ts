@@ -43,7 +43,7 @@ const text = (maximum: number) => z.string().min(1).max(maximum)
 
 export const campaignPlayJudgeVisibleFactSchema = z.object({
   handle: line(CAMPAIGN_PLAY_LIMITS.handle),
-  kind: z.enum(["actor", "location", "route", "pressure", "possession", "observation", "choice"]),
+  kind: z.enum(["actor", "location", "route", "pressure", "possession", "obligation", "observation", "choice"]),
   summary: text(CAMPAIGN_PLAY_LIMITS.text),
 }).strict();
 
@@ -113,6 +113,16 @@ const judgeProposalSchema = z.object({
       operation: z.enum(["acquire", "spend", "transform"]),
       possessionHandle: line(CAMPAIGN_PLAY_LIMITS.handle).nullable(),
       quantity: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+      minimumResult: z.enum(["setback", "limited", "success", "strong_success"]),
+    }).strict(),
+  ]),
+  requiredObligationEffect: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("none") }).strict(),
+    z.object({
+      kind: z.literal("incur_actor_obligation"),
+      creditorHandle: line(CAMPAIGN_PLAY_LIMITS.handle),
+      unitKey: z.literal("copper"),
+      amount: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
       minimumResult: z.enum(["setback", "limited", "success", "strong_success"]),
     }).strict(),
   ]),
@@ -374,11 +384,12 @@ function prompt(frame: CampaignPlayJudgeFrame, input: CampaignPlayJudgeInput): s
     `A suggested wait always means waiting exactly ${CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES} world minutes. Classify it as deterministic and set both elapsed bounds to ${CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES}. A freeform actionable wait must advance at least one world minute.`,
     "VISIBLE_ROUTES carries code-authoritative travelCost ticks. For a pure move, elapsedBounds.minimumMinutes and elapsedBounds.maximumMinutes must both equal the selected route's travelCost. For a compound action that includes travel, elapsedBounds.minimumMinutes must be at least that travelCost. Never estimate a different route duration.",
     "requiredPossessionEffect is Judge-owned mechanical intent, not prose. Use kind adjust_actor_possession when an actionable result at or above minimumResult must acquire a countable possession, spend one, or durably transform an existing retained possession. Writing measurements or other usable records into a visible notebook, form, chart, ledger, or similar retained object is transform with that exact possession handle and quantity 1. The exact notebook shape is {\"kind\":\"adjust_actor_possession\",\"operation\":\"transform\",\"possessionHandle\":\"copied visible handle\",\"quantity\":1,\"minimumResult\":\"lowest applicable tier\"}. operation accepts only acquire, spend, or transform; there is no adjustment field. Set minimumResult to the lowest result tier that still produces the retained change. Use acquire with null possessionHandle for a new item; spend or transform with an exact visible possession handle for an existing item. Cite every non-null possessionHandle in citedVisibleFactHandles. Use kind none when no durable possession change is part of the ruled outcome. Impossible and clarification rulings always use none.",
+    "requiredObligationEffect is Judge-owned mechanical intent, not prose. Use kind incur_actor_obligation when an actionable result at or above minimumResult makes the player owe a definite copper amount to one visible nonplayer actor. Copy that actor's handle into creditorHandle, cite it in citedVisibleFactHandles, use unitKey copper, and set amount to the exact newly incurred amount rather than the running total. Use kind none when the result creates no binding debt. A warning, possible charge, quoted price, requested payment, or declined offer is not debt. Impossible and clarification rulings always use none. Never create a binding debt only in stakes, reason, or prose.",
     "PLAYER_INPUT stakes ask what the player hopes to learn or accomplish; they are not evidence and do not authorize an answer. For observation, authorize only conclusions supported by SOURCE_MOMENT, VISIBLE_FRAME, or ACTOR_CONTINUITY. Preserve unknown authorship, motive, provenance, prior contents, and hidden causes. A clean, empty, missing, or disturbed surface proves only its currently observable state; it does not prove that something existed, was found, removed, stolen, concealed, or carried away.",
     "The reason field explains feasibility and result bounds. It must not add world facts beyond the supplied frames or resolve an uncertainty that the visible evidence leaves open.",
     "ACTOR_CONTINUITY outranks any conflicting earlier dialogue in VISIBLE_FRAME for authorship and actor knowledge of its own actions. Never cite a prior denial to erase an own action; Judge the current request from the accepted action truth and preserve any separate uncertainty, privacy, or willingness to disclose.",
     "Outcome tiers never create trust, permission, leverage, knowledge, or access absent from VISIBLE_FRAME or ACTOR_CONTINUITY. Absence of visible trust or leverage means none is established. A plain question claims only that the question is delivered; Judge that delivery deterministically and leave the response to the Game Master. For an attempt to persuade, coerce, or extract private information against resistance, cap resultBounds.maximum at limited unless supplied facts already justify fuller cooperation.",
-    "Return exactly these top-level keys: kind, targets, method, stakes, movementRouteHandle, requiredPossessionEffect, disposition, citedVisibleFactHandles, resultBounds, elapsedBounds, uncertainty, reason, clarificationQuestion. Spell citedVisibleFactHandles exactly; never use citedVisibleFacts or another key.",
+    "Return exactly these top-level keys: kind, targets, method, stakes, movementRouteHandle, requiredPossessionEffect, requiredObligationEffect, disposition, citedVisibleFactHandles, resultBounds, elapsedBounds, uncertainty, reason, clarificationQuestion. Spell citedVisibleFactHandles exactly; never use citedVisibleFacts or another key.",
     "Return one strict schema object and no prose.",
     `SOURCE_MOMENT=${JSON.stringify(frame.sourceMoment)}`,
     `VISIBLE_FRAME=${JSON.stringify(visibleFrame)}`,
@@ -467,6 +478,16 @@ function compile(
     if (
       (possessionHandle !== null && visible.get(possessionHandle) !== "possession")
       || (possessionHandle !== null && !proposal.citedVisibleFactHandles.includes(possessionHandle))
+    ) {
+      throw new CampaignPlayJudgeError("model_contract_failed", null);
+    }
+  }
+  if (proposal.requiredObligationEffect.kind === "incur_actor_obligation") {
+    const creditorHandle = proposal.requiredObligationEffect.creditorHandle;
+    if (
+      creditorHandle === frameResult.data.playerActorHandle
+      || visible.get(creditorHandle) !== "actor"
+      || !proposal.citedVisibleFactHandles.includes(creditorHandle)
     ) {
       throw new CampaignPlayJudgeError("model_contract_failed", null);
     }

@@ -73,6 +73,7 @@ function state(
     visibleRoutes: [],
     visiblePressures: [],
     possessions: [],
+    obligations: [],
     narration: hasSettledScene ? {
       narrationId: "narration-0",
       turnId: "opening-1",

@@ -2,6 +2,7 @@ import type {
   CampaignPlayConsequence,
   CampaignPlayVisibleActor,
   CampaignPlayVisibleLocation,
+  CampaignPlayVisibleObligation,
   CampaignPlayVisiblePossession,
   CampaignPlayVisiblePressure,
   CampaignPlayVisibleRoute,
@@ -16,6 +17,7 @@ export interface SceneCardProps {
   routes: CampaignPlayVisibleRoute[];
   pressures: CampaignPlayVisiblePressure[];
   possessions: CampaignPlayVisiblePossession[];
+  obligations: CampaignPlayVisibleObligation[];
   consequences?: CampaignPlayConsequence[];
 }
 
@@ -40,7 +42,7 @@ function actorAccentStyle(accent: string): CSSProperties {
   return { "--campaign-play-actor-accent": color } as CSSProperties;
 }
 
-export function SceneCard({ location, actors, routes, pressures, possessions, consequences = [] }: SceneCardProps) {
+export function SceneCard({ location, actors, routes, pressures, possessions, obligations, consequences = [] }: SceneCardProps) {
   return (
     <section className="campaign-play-scene" aria-labelledby="campaign-play-location">
       <div className="campaign-play-scene-copy">
@@ -71,6 +73,20 @@ export function SceneCard({ location, actors, routes, pressures, possessions, co
               <li key={possession.handle}>
                 <strong>{possession.name}</strong>
                 <small>×{possession.quantity}</small>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {obligations.length > 0 ? (
+        <section className="campaign-play-obligations" aria-labelledby="campaign-play-obligations-heading">
+          <h2 id="campaign-play-obligations-heading">Owed</h2>
+          <ul>
+            {obligations.map((obligation) => (
+              <li key={obligation.handle}>
+                <strong>{obligation.creditorName}</strong>
+                <small>{obligation.outstandingAmount} {obligation.unitKey}</small>
               </li>
             ))}
           </ul>

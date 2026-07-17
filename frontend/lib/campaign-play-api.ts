@@ -40,6 +40,7 @@ import {
   type CampaignPlayTurnPublicResult,
   type CampaignPlayVisibleActor,
   type CampaignPlayVisibleLocation,
+  type CampaignPlayVisibleObligation,
   type CampaignPlayVisiblePossession,
   type CampaignPlayVisiblePressure,
   type CampaignPlayVisibleRoute,
@@ -355,6 +356,22 @@ function parseVisiblePossession(value: unknown): CampaignPlayVisiblePossession |
   return asParsed<CampaignPlayVisiblePossession>(value);
 }
 
+function parseVisibleObligation(value: unknown): CampaignPlayVisibleObligation | null {
+  if (
+    !isObject(value) ||
+    !hasExactKeys(value, ["handle", "creditorHandle", "creditorName", "unitKey", "outstandingAmount"]) ||
+    !isHandle(value.handle) ||
+    !isHandle(value.creditorHandle) ||
+    !isName(value.creditorName) ||
+    value.unitKey !== "copper" ||
+    !isPositiveInteger(value.outstandingAmount) ||
+    value.outstandingAmount > CAMPAIGN_PLAY_LIMITS.possessionQuantity
+  ) {
+    return null;
+  }
+  return asParsed<CampaignPlayVisibleObligation>(value);
+}
+
 function parseConsequence(value: unknown): CampaignPlayConsequence | null {
   if (
     !isObject(value) ||
@@ -599,6 +616,7 @@ function parseState(value: unknown): CampaignPlayState | null {
       "visibleRoutes",
       "visiblePressures",
       "possessions",
+      "obligations",
       "narration",
       "consequences",
       "activeTurn",
@@ -643,6 +661,11 @@ function parseState(value: unknown): CampaignPlayState | null {
     parseVisiblePossession,
     CAMPAIGN_PLAY_LIMITS.visiblePossessions,
   );
+  const obligations = parseArray(
+    value.obligations,
+    parseVisibleObligation,
+    CAMPAIGN_PLAY_LIMITS.visibleObligations,
+  );
   const narration = value.narration === null ? null : parseNarration(value.narration);
   const consequences = parseArray(
     value.consequences,
@@ -658,6 +681,7 @@ function parseState(value: unknown): CampaignPlayState | null {
     visibleRoutes === null ||
     visiblePressures === null ||
     possessions === null ||
+    obligations === null ||
     (narration === null && value.narration !== null) ||
     consequences === null ||
     (activeTurn === null && value.activeTurn !== null) ||
@@ -667,7 +691,7 @@ function parseState(value: unknown): CampaignPlayState | null {
   }
   const noLiveScene = currentLocation === null && narration === null &&
     visibleActors.length === 0 && visibleRoutes.length === 0 &&
-    visiblePressures.length === 0 && consequences.length === 0;
+    visiblePressures.length === 0 && obligations.length === 0 && consequences.length === 0;
   if ((value.phase === "opening_required") !== (openingOptions.length > 0)) return null;
   if (value.phase === "character_required") {
     if (character !== null || activeTurn !== null || !noLiveScene || possessions.length > 0) return null;

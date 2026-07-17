@@ -22,6 +22,7 @@ import {
   hashCampaignPlayProjection,
   type CampaignPlayHumanMechanicalIdentity,
   type CampaignPlayLiveActorCondition,
+  type CampaignPlayLiveActorObligation,
   type CampaignPlayLiveActorPossession,
   type CampaignPlayLiveGoal,
   type CampaignPlayLivePlacement,
@@ -418,6 +419,12 @@ function loadRulebookFrame(handle: CampaignPlayDatabaseHandle): CampaignPlayRule
     actor_id AS actorId, possession_key AS possessionKey, name, quantity
     FROM campaign_play_actor_possessions WHERE campaign_id = ?
     ORDER BY possession_id`).all(campaignId) as CampaignPlayLiveActorPossession[];
+  const obligations = sqlite.prepare(`SELECT obligation_id AS obligationId,
+    debtor_actor_id AS debtorActorId, creditor_actor_id AS creditorActorId,
+    unit_key AS unitKey, principal_amount AS principalAmount,
+    outstanding_amount AS outstandingAmount
+    FROM campaign_play_actor_obligations WHERE campaign_id = ?
+    ORDER BY obligation_id`).all(campaignId) as CampaignPlayLiveActorObligation[];
   const pressureStates = sqlite.prepare(`SELECT pressure_id AS pressureId, progress, status,
     last_advanced_world_time_minutes AS lastAdvancedWorldTimeMinutes
     FROM campaign_play_pressure_states WHERE campaign_id = ? ORDER BY pressure_id`).all(campaignId) as CampaignPlayLivePressureState[];
@@ -441,6 +448,7 @@ function loadRulebookFrame(handle: CampaignPlayDatabaseHandle): CampaignPlayRule
     routeStates,
     actorConditions,
     possessions,
+    obligations,
     pressureStates,
     placements,
     relations,

@@ -4,6 +4,7 @@ import type {
   CampaignPlayJournalEntry,
   CampaignPlayVisibleActor,
   CampaignPlayVisibleLocation,
+  CampaignPlayVisibleObligation,
   CampaignPlayVisiblePossession,
   CampaignPlayVisiblePressure,
   CampaignPlayVisibleRoute,
@@ -112,6 +113,15 @@ export interface CampaignPlayLiveActorPossession {
   quantity: number;
 }
 
+export interface CampaignPlayLiveActorObligation {
+  obligationId: string;
+  debtorActorId: string;
+  creditorActorId: string;
+  unitKey: "copper";
+  principalAmount: number;
+  outstandingAmount: number;
+}
+
 export interface CampaignPlayHumanMechanicalIdentity {
   actorId: string;
   recordHash: string;
@@ -128,6 +138,7 @@ export interface CampaignPlayMechanicalProjectionInput {
   relations: readonly CampaignPlayLiveRelation[];
   goals: readonly CampaignPlayLiveGoal[];
   possessions: readonly CampaignPlayLiveActorPossession[];
+  obligations: readonly CampaignPlayLiveActorObligation[];
 }
 
 export interface CampaignPlayRuntimeProjectionInput {
@@ -173,6 +184,7 @@ export interface CampaignPlayPublicProjectionInput {
   visibleRoutes: readonly CampaignPlayVisibleRoute[];
   visiblePressures: readonly CampaignPlayVisiblePressure[];
   possessions: readonly CampaignPlayVisiblePossession[];
+  obligations: readonly CampaignPlayVisibleObligation[];
   consequences: readonly CampaignPlayConsequence[];
   journal: readonly CampaignPlayPublicJournalEntry[];
   narration: CampaignPlayProjectionRecord | null;
@@ -286,6 +298,29 @@ export function deriveCampaignPlayPossessionId(
     campaignId,
     actorId,
     possessionKey,
+  }).slice(0, 48)}`;
+}
+
+export function deriveCampaignPlayObligationId(
+  campaignId: string,
+  debtorActorId: string,
+  creditorActorId: string,
+  unitKey: "copper",
+): string {
+  if (
+    campaignId.length === 0
+    || debtorActorId.length === 0
+    || creditorActorId.length === 0
+    || debtorActorId === creditorActorId
+  ) {
+    throw new TypeError("Campaign Play obligation ID requires distinct campaign actors.");
+  }
+  return `obligation:${hashCampaignPlayProjection({
+    domain: "campaign_play_actor_obligation",
+    campaignId,
+    debtorActorId,
+    creditorActorId,
+    unitKey,
   }).slice(0, 48)}`;
 }
 
@@ -592,7 +627,8 @@ function isAcceptedMechanicalBase(input: CampaignPlayMechanicalProjectionInput):
     input.placements.length === 0 &&
     input.relations.length === 0 &&
     input.goals.length === 0 &&
-    input.possessions.length === 0;
+    input.possessions.length === 0 &&
+    input.obligations.length === 0;
 }
 
 export function projectCampaignPlayMechanicalTruth(
@@ -638,6 +674,10 @@ export function projectCampaignPlayMechanicalTruth(
     possessions: sortByText(
       input.possessions,
       (row) => `${row.actorId}\u0000${row.possessionKey}\u0000${row.possessionId}`,
+    ),
+    obligations: sortByText(
+      input.obligations,
+      (row) => `${row.debtorActorId}\u0000${row.creditorActorId}\u0000${row.unitKey}\u0000${row.obligationId}`,
     ),
   });
 }
@@ -780,6 +820,13 @@ export function projectCampaignPlayPublicState(
       handle: row.handle,
       name: row.name,
       quantity: row.quantity,
+    })), (row) => row.handle),
+    obligations: sortByText(input.obligations.map((row) => ({
+      handle: row.handle,
+      creditorHandle: row.creditorHandle,
+      creditorName: row.creditorName,
+      unitKey: row.unitKey,
+      outstandingAmount: row.outstandingAmount,
     })), (row) => row.handle),
     consequences: input.consequences.map(publicConsequence),
     journal: [...input.journal]

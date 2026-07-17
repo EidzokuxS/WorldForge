@@ -404,7 +404,7 @@ function settleRulebookCommand(
 }
 
 describe("Campaign Play core and Rulebook storage", () => {
-  it("migrates fresh campaign databases with the twenty-three Campaign Play tables", () => {
+  it("migrates fresh campaign databases with the twenty-four Campaign Play tables", () => {
     const databasePath = createMigratedCampaign(root, CAMPAIGN_A);
     const sqlite = new Database(databasePath);
     try {
@@ -418,6 +418,7 @@ describe("Campaign Play core and Rulebook storage", () => {
         { name: "campaign_play_actor_due_sets" },
         { name: "campaign_play_actor_jobs" },
         { name: "campaign_play_actor_knowledge" },
+        { name: "campaign_play_actor_obligations" },
         { name: "campaign_play_actor_plans" },
         { name: "campaign_play_actor_possessions" },
         { name: "campaign_play_actor_proposals" },
@@ -472,6 +473,24 @@ describe("Campaign Play core and Rulebook storage", () => {
         { name: "idx_campaign_play_actor_possessions_campaign_actor" },
         { name: "idx_campaign_play_actor_possessions_campaign_version" },
       ]);
+      const obligationIndexes = sqlite.prepare(`
+        SELECT name FROM sqlite_master
+        WHERE type = 'index' AND name IN (
+          'campaign_play_actor_obligations_debtor_creditor_unit_unique',
+          'campaign_play_actor_obligations_receipt_unique',
+          'idx_campaign_play_actor_obligations_campaign_debtor',
+          'idx_campaign_play_actor_obligations_campaign_creditor',
+          'idx_campaign_play_actor_obligations_campaign_version'
+        )
+        ORDER BY name
+      `).all();
+      expect(obligationIndexes).toEqual([
+        { name: "campaign_play_actor_obligations_debtor_creditor_unit_unique" },
+        { name: "campaign_play_actor_obligations_receipt_unique" },
+        { name: "idx_campaign_play_actor_obligations_campaign_creditor" },
+        { name: "idx_campaign_play_actor_obligations_campaign_debtor" },
+        { name: "idx_campaign_play_actor_obligations_campaign_version" },
+      ]);
       expect(sqlite.prepare(`
         SELECT name FROM sqlite_master
         WHERE type = 'trigger' AND name LIKE 'campaign_play_actor_possessions_%'
@@ -480,6 +499,15 @@ describe("Campaign Play core and Rulebook storage", () => {
         { name: "campaign_play_actor_possessions_delete_immutable" },
         { name: "campaign_play_actor_possessions_insert_guard" },
         { name: "campaign_play_actor_possessions_update_guard" },
+      ]);
+      expect(sqlite.prepare(`
+        SELECT name FROM sqlite_master
+        WHERE type = 'trigger' AND name LIKE 'campaign_play_actor_obligations_%'
+        ORDER BY name
+      `).all()).toEqual([
+        { name: "campaign_play_actor_obligations_delete_immutable" },
+        { name: "campaign_play_actor_obligations_insert_guard" },
+        { name: "campaign_play_actor_obligations_update_guard" },
       ]);
       const runtimeTriggers = sqlite.prepare(`SELECT name FROM sqlite_master
         WHERE type = 'trigger' AND (
@@ -514,6 +542,13 @@ describe("Campaign Play core and Rulebook storage", () => {
       ]);
       expect((sqlite.pragma("foreign_key_list('campaign_play_actor_possessions')") as Array<{ table: string }>)
         .map((foreignKey) => foreignKey.table).sort()).toEqual([
+        "actors",
+        "campaign_play_receipts",
+        "campaigns",
+      ]);
+      expect((sqlite.pragma("foreign_key_list('campaign_play_actor_obligations')") as Array<{ table: string }>)
+        .map((foreignKey) => foreignKey.table).sort()).toEqual([
+        "actors",
         "actors",
         "campaign_play_receipts",
         "campaigns",
@@ -654,7 +689,7 @@ describe("Campaign Play core and Rulebook storage", () => {
       .get() as { sql: string };
     expect(after.sql).toContain("job.defer_reason = 'actor_capacity'");
     expect(opened.sqlite.prepare(`SELECT max(created_at) AS latest
-      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_784_016_300_001 });
+      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_784_178_400_000 });
   });
 
   it("adds core play storage to an accepted Campaign World without changing provenance", () => {

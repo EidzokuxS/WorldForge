@@ -28,6 +28,7 @@ import {
   type RulebookCommandBatch,
 } from "./contracts.js";
 import {
+  deriveCampaignPlayObligationId,
   deriveCampaignPlayPossessionId,
   deriveCampaignPlayPossessionKey,
   hashCampaignPlayProjection,
@@ -104,6 +105,13 @@ function createEffectProposalSchema(
     operation: z.enum(["acquire", "spend", "transform"]), actorHandle: handleSchema,
     possessionHandle: handleSchema.nullable(), name: line(CAMPAIGN_PLAY_LIMITS.name).nullable(),
     quantity: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+    summary: text(CAMPAIGN_PLAY_LIMITS.text),
+    affectedHandles: z.array(handleSchema).max(CAMPAIGN_PLAY_LIMITS.affectedRefs)
+      .refine((values) => new Set(values).size === values.length) }).strict(),
+  z.object({ kind: z.literal("incur_actor_obligation"),
+    debtorActorHandle: handleSchema, creditorActorHandle: handleSchema,
+    unitKey: z.literal("copper"),
+    amount: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
     summary: text(CAMPAIGN_PLAY_LIMITS.text),
     affectedHandles: z.array(handleSchema).max(CAMPAIGN_PLAY_LIMITS.affectedRefs)
       .refine((values) => new Set(values).size === values.length) }).strict(),
@@ -736,6 +744,42 @@ function compileEffect(
         },
       };
     }
+    case "incur_actor_obligation": {
+      const debtor = requireRef(map, effect.debtorActorHandle, "actor");
+      const creditor = requireRef(map, effect.creditorActorHandle, "actor");
+      if (debtor.id !== frame.authority.actorId || debtor.id === creditor.id) {
+        throw new CampaignPlayGameMasterError("model_contract_failed", null);
+      }
+      const obligationId = deriveCampaignPlayObligationId(
+        frame.rulebookFrame.campaignId,
+        debtor.id,
+        creditor.id,
+        effect.unitKey,
+      );
+      const obligation = { kind: "obligation" as const, id: obligationId };
+      const affectedRefs = effect.affectedHandles.map((value) => requireRef(map, value));
+      for (const required of [debtor, creditor]) {
+        if (!affectedRefs.some((reference) => referenceKey(reference) === referenceKey(required))) {
+          affectedRefs.push(required);
+        }
+      }
+      return {
+        kind: effect.kind,
+        debtorActorId: debtor.id,
+        creditorActorId: creditor.id,
+        obligationId,
+        unitKey: effect.unitKey,
+        amount: effect.amount,
+        summary: effect.summary,
+        affectedRefs,
+        readScope: [debtor, creditor, obligation],
+        writeScope: [obligation],
+        exposure: {
+          mode: "projectable",
+          predicates: [{ channel: "direct_perception", locationId: perceptionLocationId }],
+        },
+      };
+    }
     case "record_world_event": {
       const affectedRefs = effect.affectedHandles.map((value) => requireRef(map, value));
       const performingActor = effect.performingActorHandle === null
@@ -830,6 +874,21 @@ function compile(
       && effect.operation === requiredPossessionEffect.operation
       && effect.possessionHandle === requiredPossessionEffect.possessionHandle
       && effect.quantity === requiredPossessionEffect.quantity);
+    if (matchingEffects.length !== 1) {
+      throw new CampaignPlayGameMasterError("model_contract_failed", null);
+    }
+  }
+  const requiredObligationEffect = ruling.requiredObligationEffect.kind === "incur_actor_obligation"
+    && CAMPAIGN_PLAY_RESULT_TIER_VALUES.indexOf(resolution.result)
+      >= CAMPAIGN_PLAY_RESULT_TIER_VALUES.indexOf(ruling.requiredObligationEffect.minimumResult)
+    ? ruling.requiredObligationEffect
+    : null;
+  if (requiredObligationEffect !== null) {
+    const matchingEffects = proposal.effects.filter((effect) =>
+      effect.kind === "incur_actor_obligation"
+      && effect.creditorActorHandle === requiredObligationEffect.creditorHandle
+      && effect.unitKey === requiredObligationEffect.unitKey
+      && effect.amount === requiredObligationEffect.amount);
     if (matchingEffects.length !== 1) {
       throw new CampaignPlayGameMasterError("model_contract_failed", null);
     }
@@ -983,9 +1042,9 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     "SOURCE_MOMENT is continuity context, not new mechanical authority. VISIBLE_FACTS, ACTOR_CONTINUITY, and ACTOR_DIRECTIVES supply typed authority. ACTOR_CONTINUITY outranks dialogue only for an actor's own authorship and knowledge. It never overrides the current visible placement or condition of an object in SOURCE_MOMENT. Only a later supplied visible fact may change that physical state; never make a visible object vanish or move without explicit evidence.",
     "When PLAYER_INTENT loads, unloads, fastens, joins, inserts, removes, or otherwise changes an object's relation to a container or fixed fixture, include the necessary physical handling and commit one unambiguous final relation in the summary. If SOURCE_MOMENT places the object outside a container and the result fastens it to a fixture inside that container, state whether it was first put inside. On a setback, choose the final position that actually remains. Never describe an object as attached to a fixture while silently leaving it in its prior place, and never defer that spatial decision to a later stage.",
     "Copy every handle-valued field character-for-character from ALLOWED_HANDLES. This includes performingActorHandle, affectedHandles, and every model-authored exposure predicate anchorHandle. affectedHandles must not repeat a handle. Never put a name, ID, description, or newly invented token in a handle field.",
-    "Match each handle to the field's required kind in HANDLES_BY_KIND. direct_perception and local_aftermath anchorHandle require location; route_state anchorHandle requires route; witness_report anchorHandle requires actor. actorHandle requires actor, routeHandle requires route, fromLocationHandle and toLocationHandle require location, relationHandle requires relation, goalHandle requires goal, and pressureHandle requires pressure.",
+    "Match each handle to the field's required kind in HANDLES_BY_KIND. direct_perception and local_aftermath anchorHandle require location; route_state anchorHandle requires route; witness_report anchorHandle requires actor. actorHandle, debtorActorHandle, and creditorActorHandle require actor; routeHandle requires route; fromLocationHandle and toLocationHandle require location; relationHandle requires relation; goalHandle requires goal; and pressureHandle requires pressure.",
     "Every exposure field is one object, never an array. It is exactly {\"mode\":\"protected\"} or {\"mode\":\"projectable\",\"predicates\":[...]}; predicates is the only array. Use the exact predicate fields for its channel: direct_perception has only channel and anchorHandle; local_aftermath has exactly channel, anchorHandle, and the required integer visibleForMinutes; route_state has exactly channel, anchorHandle, and the required non-empty triggers array; witness_report has only channel and anchorHandle. Never omit a required field or add one from another channel.",
-    "effects[].kind accepts exactly: move_actor, set_route_state, set_actor_condition, update_actor_relation, update_actor_goal, advance_pressure, adjust_actor_possession, or record_world_event. Never return inspect, observe, discover, discovery, reveal, describe, dialogue, interaction, scene, or any other token as an effect kind. Code owns IDs, scopes, versions, causal links, rolls, and Rulebook authority.",
+    "effects[].kind accepts exactly: move_actor, set_route_state, set_actor_condition, update_actor_relation, update_actor_goal, advance_pressure, adjust_actor_possession, incur_actor_obligation, or record_world_event. Never return inspect, observe, discover, discovery, reveal, describe, dialogue, interaction, scene, or any other token as an effect kind. Code owns IDs, scopes, versions, causal links, rolls, and Rulebook authority.",
     "set_actor_condition has exactly these fields: kind, exposure, actorHandle, condition, operation, and summary. condition must be exactly occupied, strained, or incapacitated; operation must be exactly set or clear. affectedHandles is forbidden. If none of those three conditions fits the resolved result, do not use set_actor_condition; commit the result through another authorized effect.",
     "Resolve only the exact PLAYER_INTENT. Result tiers change the degree of success inside that scope; they never create trust, permission, leverage, knowledge, or access. Do not volunteer protected assets, secret routes or caches, unrelated motives, or risky admissions unless VISIBLE_FACTS justify disclosure and PLAYER_INTENT specifically seeks that information. strong_success makes the scoped result more useful; it does not turn an unfamiliar actor into a fully cooperative informant.",
     "RULING defines feasibility, result bounds, and elapsed bounds; its model-authored reason, method, and stakes are not a new source of world facts. Ground every factual effect in SOURCE_MOMENT, VISIBLE_FACTS, ACTOR_CONTINUITY, or ACTOR_DIRECTIVES.",
@@ -1005,10 +1064,13 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     "A committed PLAYER_MOVEMENT places the player inside the destination's shared location scene. An arrival summary must not leave the player outside a door, gate, or other access boundary unless supplied route or location authority already represents that boundary. If an unnamed recipient does not answer, report only the lack of a reply; do not claim that the destination is empty or inaccessible.",
     "DESTINATION_SCENE is code-authoritative arrival context when PLAYER_MOVEMENT is non-null. Its description contains only player-visible surface facts, and every name in presentPeople is directly perceivable and identifiable in that exact scene. Ground the arrival in this context. Do not call the scene empty, move a listed person behind an unentered boundary, or contradict their presence. Do not make a listed person speak or act unless the accepted effects establish that action.",
     "record_world_event accepts exactly four eventClass values: dialogue, interaction, discovery, or scene. These are eventClass values only and must never appear in kind. Dialogue and interaction mean that a targeted nonplayer actor performs the event: set performingActorHandle to that actor and include the same handle in affectedHandles. Discovery and scene are actorless: set performingActorHandle to null, and do not use their summary to make a person speak, decide, transact, disclose information, or become a contact. When PLAYER_INTENT targets no actor, every record_world_event must be actorless: do not make a nearby person inspect, approve, reject, speak, or otherwise react; leave that response for a later contact action. A player's physical attempt that has no nonplayer performer must use its typed effect or an actorless discovery/scene result. For an observe result that changes no durable entity, return exactly one effect shaped as {\"kind\":\"record_world_event\",\"eventClass\":\"discovery\",\"performingActorHandle\":null,\"summary\":\"grounded observation\",\"affectedHandles\":[\"copied handle\"]}; do not add a second inspect, observe, discover, reveal, or describe effect. Use scene for an arrival or other directly perceived situation that is neither observation nor contact. Return a grounded summary and grounded affectedHandles. Omit exposure from record_world_event; code attaches direct perception at the player's current location at that effect's chronological position.",
+    "record_world_event may quote a price, warning, request, or possible charge, but it never creates, increases, reduces, pays, or settles a binding obligation. Use the typed obligation effect for authoritative debt changes.",
     "Use adjust_actor_possession whenever the resolved action gives the player a countable possession, consumes one, or durably changes what an existing possession is. This effect has exactly these fields: kind, operation, actorHandle, possessionHandle, name, quantity, summary, and affectedHandles. Put the player's copied handle in actorHandle. performingActorHandle is forbidden on adjust_actor_possession and exists only on record_world_event. For a new possession, return operation acquire, the player actor handle, null possessionHandle, its concrete name, positive quantity, a player-visible summary, and grounded affectedHandles. For more of an existing possession, use operation acquire with its visible possessionHandle and null name. To consume one, return operation spend, its visible possessionHandle, null name, and a positive quantity. When an action writes on, repairs, assembles, opens, fills, empties, or otherwise turns an existing possession into a materially different retained item, return operation transform with the source possessionHandle and the concrete resulting name. Transform consumes the requested source quantity and acquires the same quantity under the resulting name in one Rulebook batch. Do not add record_world_event for the same gain, spend, or transformation: the typed effect is the public consequence and Rulebook truth.",
     "requiredPossessionEffect in RULING is code-enforced Judge authority. When the resolved result meets its minimumResult, include exactly one adjust_actor_possession effect with the same operation, possessionHandle, and quantity. Choose the concrete resulting name and summary from the resolved outcome. Omitting or duplicating that matching effect invalidates the whole proposal before Rulebook execution.",
+    "Use incur_actor_obligation only when the resolved result creates a binding debt from the player to one visible nonplayer actor. This effect has exactly these fields: kind, debtorActorHandle, creditorActorHandle, unitKey, amount, summary, and affectedHandles. Copy the player handle into debtorActorHandle and the visible creditor handle into creditorActorHandle. unitKey must be copper and amount is the exact newly incurred amount, not the running total. The summary states the concrete committed debt in player-visible language. Do not add a record_world_event that creates or repeats the same debt; the typed effect is both the public consequence and Rulebook truth. A quoted price, warning, possible charge, or payment request is not a binding debt.",
+    "requiredObligationEffect in RULING is code-enforced Judge authority. When the resolved result meets its minimumResult, include exactly one incur_actor_obligation effect with the same creditorActorHandle, unitKey, and amount. Omitting, duplicating, or changing that effect invalidates the whole proposal before Rulebook execution. Prose never creates or settles an obligation.",
     `Every non-null adjust_actor_possession name must be at most ${CAMPAIGN_PLAY_LIMITS.name} characters. Keep the name short and put state, contents, provenance, and other details in summary.`,
-    `Every summary must fit its schema limit: at most ${CAMPAIGN_PLAY_LIMITS.text} characters for record_world_event and adjust_actor_possession, and at most ${CAMPAIGN_PLAY_LIMITS.shortText} characters for condition, relation, or goal updates. Include only the committed result. Do not include planning or reasoning, and do not repeat supporting facts.`,
+    `Every summary must fit its schema limit: at most ${CAMPAIGN_PLAY_LIMITS.text} characters for record_world_event, adjust_actor_possession, and incur_actor_obligation, and at most ${CAMPAIGN_PLAY_LIMITS.shortText} characters for condition, relation, or goal updates. Include only the committed result. Do not include planning or reasoning, and do not repeat supporting facts.`,
     "Return at least one effect. Never return an empty effects array.",
     "Return one strict schema object and no prose.",
     `SOURCE_MOMENT=${JSON.stringify(frame.sourceMoment)}`,

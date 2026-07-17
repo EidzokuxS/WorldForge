@@ -23,6 +23,7 @@ import {
   type CampaignPlayLiveActorCondition,
   type CampaignPlayLiveGoal,
   type CampaignPlayLivePlacement,
+  type CampaignPlayLiveActorObligation,
   type CampaignPlayLiveActorPossession,
   type CampaignPlayLivePressureState,
   type CampaignPlayLiveRelation,
@@ -438,6 +439,14 @@ function selectMechanicalProjection(
     WHERE campaign_id = ?
     ORDER BY actor_id, possession_key, possession_id
   `).all(campaignId) as CampaignPlayLiveActorPossession[];
+  const obligations = sqlite.prepare(`
+    SELECT obligation_id AS obligationId, debtor_actor_id AS debtorActorId,
+      creditor_actor_id AS creditorActorId, unit_key AS unitKey,
+      principal_amount AS principalAmount, outstanding_amount AS outstandingAmount
+    FROM campaign_play_actor_obligations
+    WHERE campaign_id = ?
+    ORDER BY debtor_actor_id, creditor_actor_id, unit_key, obligation_id
+  `).all(campaignId) as CampaignPlayLiveActorObligation[];
 
   const acceptedPlacements = review.placements.map((row) => ({
     placementId: row.id,
@@ -477,6 +486,7 @@ function selectMechanicalProjection(
     relations: baseRowsUnchanged ? [] : relations,
     goals: baseRowsUnchanged ? [] : goals,
     possessions,
+    obligations,
   });
 }
 
@@ -733,6 +743,26 @@ function selectPublicState(
     WHERE p.campaign_id = ? AND a.controller = 'human' AND p.quantity > 0
     ORDER BY p.name, p.possession_id
   `).all(campaignId) as Array<{ possessionId: string; name: string; quantity: number }>;
+  const obligations = sqlite.prepare(`
+    SELECT obligation.obligation_id AS obligationId,
+      obligation.creditor_actor_id AS creditorActorId,
+      creditor.name AS creditorName, obligation.unit_key AS unitKey,
+      obligation.outstanding_amount AS outstandingAmount
+    FROM campaign_play_actor_obligations obligation
+    JOIN actors debtor ON debtor.id = obligation.debtor_actor_id
+      AND debtor.campaign_id = obligation.campaign_id
+    JOIN actors creditor ON creditor.id = obligation.creditor_actor_id
+      AND creditor.campaign_id = obligation.campaign_id
+    WHERE obligation.campaign_id = ? AND debtor.controller = 'human'
+      AND obligation.outstanding_amount > 0
+    ORDER BY creditor.name, obligation.unit_key, obligation.obligation_id
+  `).all(campaignId) as Array<{
+    obligationId: string;
+    creditorActorId: string;
+    creditorName: string;
+    unitKey: "copper";
+    outstandingAmount: number;
+  }>;
   return projectCampaignPlayPublicState({
     campaignId,
     acceptedWorldVersion: state.acceptedWorldVersion,
@@ -748,6 +778,13 @@ function selectPublicState(
       handle: deriveCampaignPlayPublicHandle("possession", campaignId, possession.possessionId),
       name: possession.name,
       quantity: possession.quantity,
+    })),
+    obligations: obligations.map((obligation) => ({
+      handle: deriveCampaignPlayPublicHandle("obligation", campaignId, obligation.obligationId),
+      creditorHandle: deriveCampaignPlayPublicHandle("actor", campaignId, obligation.creditorActorId),
+      creditorName: obligation.creditorName,
+      unitKey: obligation.unitKey,
+      outstandingAmount: obligation.outstandingAmount,
     })),
     consequences: packet?.consequences ?? [],
     journal: journalRows.map((row) => ({
@@ -1123,6 +1160,15 @@ export function loadCampaignPlayRulebookFrame(
     WHERE campaign_id = ? ORDER BY actor_id, possession_key, possession_id`).all(
       campaignId,
     ) as CampaignPlayLiveActorPossession[];
+  const obligations = sqlite.prepare(`SELECT obligation_id AS obligationId,
+      debtor_actor_id AS debtorActorId, creditor_actor_id AS creditorActorId,
+      unit_key AS unitKey, principal_amount AS principalAmount,
+      outstanding_amount AS outstandingAmount
+    FROM campaign_play_actor_obligations
+    WHERE campaign_id = ?
+    ORDER BY debtor_actor_id, creditor_actor_id, unit_key, obligation_id`).all(
+      campaignId,
+    ) as CampaignPlayLiveActorObligation[];
   return {
     campaignId,
     acceptedWorldVersion: state.authority.acceptedWorldVersion,
@@ -1139,5 +1185,6 @@ export function loadCampaignPlayRulebookFrame(
     relations,
     goals,
     possessions,
+    obligations,
   };
 }

@@ -8,6 +8,7 @@ import {
   type CampaignPlayNarratorPacket,
   type CampaignPlayVisibleActor,
   type CampaignPlayVisibleLocation,
+  type CampaignPlayVisibleObligation,
   type CampaignPlayVisiblePossession,
   type CampaignPlayVisiblePressure,
   type CampaignPlayVisibleRoute,
@@ -671,7 +672,8 @@ function publicEntry(
     exposure.channel === "direct_perception" && playerParticipated &&
     eventSource.kind === "system" && eventSource.system === "game_master" &&
     (exposure.commandKind === "record_world_event"
-      || exposure.commandKind === "adjust_actor_possession")
+      || exposure.commandKind === "adjust_actor_possession"
+      || exposure.commandKind === "incur_actor_obligation")
     && typeof commandPayload.summary === "string"
   ) {
     title = "Your action";
@@ -776,6 +778,7 @@ function visibleScene(
   visibleRoutes: CampaignPlayVisibleRoute[];
   visiblePressures: CampaignPlayVisiblePressure[];
   possessions: CampaignPlayVisiblePossession[];
+  obligations: CampaignPlayVisibleObligation[];
 } {
   const location = handle.sqlite.prepare(`SELECT l.id, l.name, l.description
     FROM actor_placements placement JOIN locations l ON l.id = placement.location_id
@@ -856,6 +859,25 @@ function visibleScene(
       humanActorId,
       CAMPAIGN_PLAY_LIMITS.visiblePossessions,
     ) as Array<{ possessionId: string; name: string; quantity: number }>;
+  const obligations = handle.sqlite.prepare(`SELECT obligation.obligation_id AS obligationId,
+      obligation.creditor_actor_id AS creditorActorId, creditor.name AS creditorName,
+      obligation.unit_key AS unitKey, obligation.outstanding_amount AS outstandingAmount
+    FROM campaign_play_actor_obligations obligation
+    JOIN actors creditor ON creditor.id = obligation.creditor_actor_id
+      AND creditor.campaign_id = obligation.campaign_id
+    WHERE obligation.campaign_id = ? AND obligation.debtor_actor_id = ?
+      AND obligation.outstanding_amount > 0
+    ORDER BY creditor.name, obligation.unit_key, obligation.obligation_id LIMIT ?`).all(
+      handle.campaignId,
+      humanActorId,
+      CAMPAIGN_PLAY_LIMITS.visibleObligations,
+    ) as Array<{
+      obligationId: string;
+      creditorActorId: string;
+      creditorName: string;
+      unitKey: "copper";
+      outstandingAmount: number;
+    }>;
   return {
     currentLocation: {
       handle: publicHandle("location", handle.campaignId, location.id),
@@ -885,6 +907,13 @@ function visibleScene(
       handle: publicHandle("possession", handle.campaignId, possession.possessionId),
       name: possession.name,
       quantity: possession.quantity,
+    })),
+    obligations: obligations.map((obligation) => ({
+      handle: publicHandle("obligation", handle.campaignId, obligation.obligationId),
+      creditorHandle: publicHandle("actor", handle.campaignId, obligation.creditorActorId),
+      creditorName: obligation.creditorName,
+      unitKey: obligation.unitKey,
+      outstandingAmount: obligation.outstandingAmount,
     })),
   };
 }

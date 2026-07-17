@@ -21,6 +21,7 @@ function readyState(
     visibleRoutes: [],
     visiblePressures: [],
     possessions: [],
+    obligations: [],
     narration: {
       narrationId,
       turnId: `turn-${narrationId}`,

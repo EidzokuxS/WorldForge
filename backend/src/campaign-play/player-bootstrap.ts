@@ -64,6 +64,7 @@ function bootstrapFrame(state: LoadedCampaignPlayState): CampaignPlayRulebookFra
     routeStates: [],
     actorConditions: [],
     possessions: [],
+    obligations: [],
     pressureStates: [],
     placements: world.placements.map((row) => ({
       placementId: row.id,

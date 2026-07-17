@@ -97,6 +97,7 @@ function proposal(overrides: Record<string, unknown> = {}) {
     stakes: "Learn why the road is closed",
     movementRouteHandle: null,
     requiredPossessionEffect: { kind: "none" },
+    requiredObligationEffect: { kind: "none" },
     disposition: "deterministic",
     citedVisibleFactHandles: ["actor-guard", "route-reef"],
     resultBounds: { minimum: "success", maximum: "success" },
@@ -109,6 +110,60 @@ function proposal(overrides: Record<string, unknown> = {}) {
 }
 
 describe("Campaign Play Judge", () => {
+  it("binds a definite debt to one cited visible creditor", () => {
+    const judge = createCampaignPlayJudge();
+    const input = {
+      originalText: "I carry the glass through the arch and accept the eight-copper breakage charge.",
+      source: "freeform" as const,
+      choiceHandle: null,
+    };
+    const value = proposal({
+      kind: "attempt",
+      targets: [{ handle: "actor-guard", kind: "actor" }],
+      method: "Carry the glass through the arch",
+      stakes: "A breakage creates an eight-copper debt to the guard",
+      requiredObligationEffect: {
+        kind: "incur_actor_obligation",
+        creditorHandle: "actor-guard",
+        unitKey: "copper",
+        amount: 8,
+        minimumResult: "setback",
+      },
+      disposition: "uncertain",
+      resultBounds: { minimum: "setback", maximum: "success" },
+      uncertainty: {
+        kind: "check",
+        dieSides: 20,
+        difficulty: 12,
+        modifierMinimum: -2,
+        modifierMaximum: 2,
+      },
+    });
+
+    expect(judge.compile(frame(), input, value).requiredObligationEffect).toEqual({
+      kind: "incur_actor_obligation",
+      creditorHandle: "actor-guard",
+      unitKey: "copper",
+      amount: 8,
+      minimumResult: "setback",
+    });
+    expect(() => judge.compile(frame(), input, {
+      ...value,
+      citedVisibleFactHandles: ["route-reef"],
+    })).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+    expect(() => judge.compile(frame(), input, {
+      ...value,
+      requiredObligationEffect: {
+        kind: "incur_actor_obligation",
+        creditorHandle: "actor-you",
+        unitKey: "copper",
+        amount: 8,
+        minimumResult: "setback",
+      },
+      citedVisibleFactHandles: ["actor-you"],
+    })).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+  });
+
   it("binds a durable written record to one visible possession effect", () => {
     const judge = createCampaignPlayJudge();
     const input = {

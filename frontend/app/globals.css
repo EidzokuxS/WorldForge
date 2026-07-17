@@ -4633,6 +4633,7 @@
 .campaign-play-routes,
 .campaign-play-pressures,
 .campaign-play-possessions,
+.campaign-play-obligations,
 .campaign-play-consequences {
   display: grid;
   gap: 10px;
@@ -4641,7 +4642,8 @@
 .campaign-play-presence ul,
 .campaign-play-routes ul,
 .campaign-play-pressures ul,
-.campaign-play-possessions ul {
+.campaign-play-possessions ul,
+.campaign-play-obligations ul {
   display: flex;
   gap: 8px;
   padding: 0;
@@ -4690,7 +4692,8 @@
 
 .campaign-play-presence small,
 .campaign-play-routes small,
-.campaign-play-possessions small {
+.campaign-play-possessions small,
+.campaign-play-obligations small {
   color: var(--fg-2);
   font-family: var(--font-mono);
   font-size: 9px;
@@ -4758,11 +4761,13 @@
   line-height: 1.45;
 }
 
-.campaign-play-possessions ul {
+.campaign-play-possessions ul,
+.campaign-play-obligations ul {
   flex-wrap: wrap;
 }
 
-.campaign-play-possessions li {
+.campaign-play-possessions li,
+.campaign-play-obligations li {
   display: inline-flex;
   align-items: baseline;
   gap: 6px;
@@ -4774,6 +4779,17 @@
 }
 
 .campaign-play-possessions strong {
+  color: var(--fg);
+  font-family: var(--font-prose);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.campaign-play-obligations li {
+  border-left-color: var(--ember-1);
+}
+
+.campaign-play-obligations strong {
   color: var(--fg);
   font-family: var(--font-prose);
   font-size: 12px;

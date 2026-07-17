@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { calculateCampaignWorldContentHash } from "../campaign-world/world-snapshot.js";
 import {
   canonicalizeCampaignPlayProjection,
+  deriveCampaignPlayObligationId,
   deriveCampaignPlayPossessionId,
   deriveCampaignPlayPossessionKey,
   hashCampaignPlayProjection,
@@ -193,8 +194,9 @@ function initialMechanicalInput(review: CampaignWorldReview): CampaignPlayMechan
     pressureStates: [],
     placements: [],
     relations: [],
-    goals: [],
-    possessions: [],
+  goals: [],
+  possessions: [],
+  obligations: [],
   };
 }
 
@@ -205,6 +207,17 @@ describe("Campaign Play canonical projections", () => {
     expect(deriveCampaignPlayPossessionId(CAMPAIGN_ID, "actor:player", key)).toBe(
       deriveCampaignPlayPossessionId(CAMPAIGN_ID, "actor:player", "brass signal key"),
     );
+  });
+
+  it("derives stable obligation identity from the distinct debtor, creditor, and unit", () => {
+    expect(deriveCampaignPlayObligationId(
+      CAMPAIGN_ID, "actor:player", "actor:creditor", "copper",
+    )).toBe(deriveCampaignPlayObligationId(
+      CAMPAIGN_ID, "actor:player", "actor:creditor", "copper",
+    ));
+    expect(() => deriveCampaignPlayObligationId(
+      CAMPAIGN_ID, "actor:player", "actor:player", "copper",
+    )).toThrow("distinct");
   });
 
   it("produces stable bytes and SHA-256 values independent of object key order", () => {
@@ -400,6 +413,50 @@ describe("mechanical and runtime truth", () => {
     expect(left.canonicalBytes).toContain("possession:a");
   });
 
+  it("includes outstanding obligations in mechanical truth regardless read order", () => {
+    const review = acceptedReviewFixture();
+    const base = initialMechanicalInput(review);
+    const obligations = [
+      {
+        obligationId: deriveCampaignPlayObligationId(
+          CAMPAIGN_ID, "actor:player", "actor:z", "copper",
+        ),
+        debtorActorId: "actor:player",
+        creditorActorId: "actor:z",
+        unitKey: "copper" as const,
+        principalAmount: 16,
+        outstandingAmount: 16,
+      },
+      {
+        obligationId: deriveCampaignPlayObligationId(
+          CAMPAIGN_ID, "actor:player", "actor:a", "copper",
+        ),
+        debtorActorId: "actor:player",
+        creditorActorId: "actor:a",
+        unitKey: "copper" as const,
+        principalAmount: 8,
+        outstandingAmount: 8,
+      },
+    ];
+    const withoutObligations = projectCampaignPlayMechanicalTruth({
+      ...base,
+      worldTimeMinutes: 1,
+    });
+    const left = projectCampaignPlayMechanicalTruth({
+      ...base,
+      worldTimeMinutes: 1,
+      obligations,
+    });
+    const right = projectCampaignPlayMechanicalTruth({
+      ...base,
+      worldTimeMinutes: 1,
+      obligations: [...obligations].reverse(),
+    });
+    expect(left).toEqual(right);
+    expect(left.hash).not.toBe(withoutObligations.hash);
+    expect(left.canonicalBytes).toContain("actor:a");
+  });
+
   it("keeps runtime, protected-audit, and player-public hash domains separate", () => {
     const eligibility = projectAcceptedTopologyEligibility(acceptedReviewFixture());
     const common: CampaignPlayProjectionRecord = { id: "same", value: 1 };
@@ -447,6 +504,7 @@ describe("mechanical and runtime truth", () => {
         { handle: "possession-z", name: "Zinc token", quantity: 2 },
         { handle: "possession-a", name: "Brass key", quantity: 1 },
       ],
+      obligations: [],
       consequences: [],
       journal: [],
       narration: null,
@@ -619,6 +677,10 @@ describe("mechanical and runtime truth", () => {
         { handle: "possession-a", name: "Brass key", quantity: 1 },
         { handle: "possession-z", name: "Zinc token", quantity: 2 },
       ],
+      obligations: [
+        { handle: "obligation-z", creditorHandle: "actor-z", creditorName: "Zora", unitKey: "copper", outstandingAmount: 16 },
+        { handle: "obligation-a", creditorHandle: "actor-a", creditorName: "Arden", unitKey: "copper", outstandingAmount: 8 },
+      ],
       consequences: [],
       journal,
       narration: null,
@@ -638,6 +700,10 @@ describe("mechanical and runtime truth", () => {
         { handle: "possession-z", name: "Zinc token", quantity: 2 },
         { handle: "possession-a", name: "Brass key", quantity: 1 },
       ],
+      obligations: [
+        { handle: "obligation-a", creditorHandle: "actor-a", creditorName: "Arden", unitKey: "copper", outstandingAmount: 8 },
+        { handle: "obligation-z", creditorHandle: "actor-z", creditorName: "Zora", unitKey: "copper", outstandingAmount: 16 },
+      ],
       consequences: [],
       journal: [...journal].reverse(),
       narration: null,
@@ -645,6 +711,7 @@ describe("mechanical and runtime truth", () => {
     const publicProjection = publicState.projection as {
       journal: CampaignPlayProjectionRecord[];
       possessions: Array<{ handle: string }>;
+      obligations: Array<{ handle: string }>;
     };
 
     expect(publicProjection.journal.map((row) => row.observationHandle)).toEqual([
@@ -655,6 +722,10 @@ describe("mechanical and runtime truth", () => {
     expect(publicProjection.possessions.map((row) => row.handle)).toEqual([
       "possession-a",
       "possession-z",
+    ]);
+    expect(publicProjection.obligations.map((row) => row.handle)).toEqual([
+      "obligation-a",
+      "obligation-z",
     ]);
     expect(publicReordered.canonicalBytes).toBe(publicState.canonicalBytes);
     expect(publicReordered.hash).toBe(publicState.hash);
@@ -702,6 +773,7 @@ describe("mechanical and runtime truth", () => {
       visibleRoutes: [],
       visiblePressures: [],
       possessions: [],
+      obligations: [],
       consequences,
       journal: [],
       narration: null,
@@ -821,6 +893,7 @@ describe("mechanical and runtime truth", () => {
       visibleRoutes: [],
       visiblePressures: [],
       possessions: [],
+      obligations: [],
       consequences: [],
       journal: [{ observationId: "stored-observation", worldTimeMinutes: 1, entry }],
       narration: null,

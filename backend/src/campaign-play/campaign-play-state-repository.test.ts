@@ -34,8 +34,10 @@ import {
 import { createCampaignPlayTurnRepository } from "./campaign-play-turn-repository.js";
 import {
   canonicalizeCampaignPlayProjection,
+  deriveCampaignPlayObligationId,
   deriveCampaignPlayPossessionId,
   deriveCampaignPlayPossessionKey,
+  deriveCampaignPlayPublicHandle,
   type CampaignPlayProjectionRecord,
 } from "./campaign-play-projection.js";
 
@@ -217,6 +219,7 @@ function characterBootstrapFrame(
     routeStates: [],
     actorConditions: [],
     possessions: [],
+    obligations: [],
     pressureStates: [],
     placements: world.placements.map((row) => ({
       placementId: row.id,
@@ -1132,6 +1135,128 @@ describe("Campaign Play atomic Rulebook execution", () => {
         { kind: "possession", id: possessionId },
       ]),
     });
+
+    const obligationFrame = {
+      ...loadCampaignPlayRulebookFrame(handle),
+      setupPhase: "ready" as const,
+    };
+    const obligationId = deriveCampaignPlayObligationId(
+      obligationFrame.campaignId,
+      "actor-player",
+      obligationFrame.acceptedWorld.actors[0]!.id,
+      "copper",
+    );
+    const obligationBatchId = "batch-incur-obligation";
+    const obligationCommand = {
+      commandId: deriveCampaignPlayCommandId(
+        obligationFrame.campaignId, "turn-opening", obligationBatchId, 0,
+      ),
+      batchId: obligationBatchId,
+      order: 0,
+      kind: "incur_actor_obligation" as const,
+      causalParent: ordinaryRoot,
+      source: { kind: "actor" as const, actorId: "actor-player" },
+      expectedWorldVersion: obligationFrame.worldVersion,
+      readScope: [
+        { kind: "actor" as const, id: "actor-player" },
+        { kind: "actor" as const, id: obligationFrame.acceptedWorld.actors[0]!.id },
+        { kind: "obligation" as const, id: obligationId },
+      ],
+      writeScope: [{ kind: "obligation" as const, id: obligationId }],
+      exposure: { mode: "protected" as const },
+      debtorActorId: "actor-player",
+      creditorActorId: obligationFrame.acceptedWorld.actors[0]!.id,
+      obligationId,
+      unitKey: "copper" as const,
+      amount: 8,
+      summary: "The traveler owes eight copper for passage.",
+      affectedRefs: [
+        { kind: "actor" as const, id: "actor-player" },
+        { kind: "actor" as const, id: obligationFrame.acceptedWorld.actors[0]!.id },
+      ],
+    };
+    const obligationPreflight = preflightCampaignPlayRulebook({
+      frame: obligationFrame,
+      authority: {
+        purpose: "player_action",
+        turnId: "turn-opening",
+        actorId: "actor-player",
+        rootParent: ordinaryRoot,
+        authorizedRefs: [
+          { kind: "actor", id: "actor-player" },
+          { kind: "actor", id: obligationFrame.acceptedWorld.actors[0]!.id },
+        ],
+        witnessActorIds: [],
+        knownWorldEventIds: [],
+      },
+      batch: {
+        batchId: obligationBatchId,
+        baseWorldVersion: obligationFrame.worldVersion,
+        commands: [obligationCommand],
+      },
+    });
+    if (!obligationPreflight.accepted) {
+      throw new Error(`Obligation preflight failed: ${obligationPreflight.denial.code}`);
+    }
+    const priorObligationHash = repository.loadState()!.authority.worldHash;
+    const obligationState = repository.commitMechanicalAndRuntime({
+      worldVersionAdvance: 1,
+      event: {
+        eventId: "runtime-incur-obligation",
+        turnId: "turn-opening",
+        kind: "actor_job_transitioned",
+        workerEpoch: settlementToken.epoch,
+        protectedPayloadHash: HASH_C,
+        createdAt: 1_740,
+      },
+      mutate(context) {
+        executeCampaignPlayRulebookBatch({
+          frame: obligationFrame,
+          accepted: obligationPreflight,
+          context,
+          turnId: "turn-opening",
+          createdAt: 1_740,
+        });
+      },
+    });
+    expect(obligationState.authority.worldVersion).toBe(obligationFrame.worldVersion + 1);
+    expect(obligationState.authority.worldHash).not.toBe(priorObligationHash);
+    expect(handle.sqlite.prepare(`SELECT principal_amount AS principalAmount,
+      outstanding_amount AS outstandingAmount FROM campaign_play_actor_obligations
+      WHERE obligation_id = ? AND campaign_id = ?`).get(obligationId, CAMPAIGN_A))
+      .toEqual({ principalAmount: 8, outstandingAmount: 8 });
+    expect(loadCampaignPlayRulebookFrame(handle).obligations).toEqual([{
+      obligationId,
+      debtorActorId: "actor-player",
+      creditorActorId: obligationFrame.acceptedWorld.actors[0]!.id,
+      unitKey: "copper",
+      principalAmount: 8,
+      outstandingAmount: 8,
+    }]);
+    const reloadedPublicState = repository.loadState()!.publicState.projection as {
+      obligations: Array<{
+        handle: string;
+        creditorHandle: string;
+        creditorName: string;
+        unitKey: string;
+        outstandingAmount: number;
+      }>;
+    };
+    expect(reloadedPublicState.obligations).toEqual([{
+      handle: deriveCampaignPlayPublicHandle("obligation", CAMPAIGN_A, obligationId),
+      creditorHandle: deriveCampaignPlayPublicHandle(
+        "actor", CAMPAIGN_A, obligationFrame.acceptedWorld.actors[0]!.id,
+      ),
+      creditorName: obligationFrame.acceptedWorld.actors[0]!.name,
+      unitKey: "copper",
+      outstandingAmount: 8,
+    }]);
+    expect(handle.sqlite.prepare(`SELECT
+      (SELECT count(*) FROM campaign_play_receipts WHERE command_id = ?) AS receipts,
+      (SELECT count(*) FROM campaign_play_events
+        WHERE command_id = ? AND event_kind = 'actor_obligation_incurred') AS events`
+    ).get(obligationCommand.commandId, obligationCommand.commandId))
+      .toEqual({ receipts: 1, events: 1 });
   });
 
   it("rolls back every ledger and authority write at each injected transaction boundary", () => {
@@ -1505,6 +1630,7 @@ describe("Campaign Play state repository transactions", () => {
       visibleRoutes: [],
       visiblePressures: [],
       possessions: [],
+      obligations: [],
       newObservations: [],
       consequences: [],
       continuity: [],

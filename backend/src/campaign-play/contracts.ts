@@ -102,6 +102,7 @@ export const CAMPAIGN_PLAY_COMMAND_KIND_VALUES = [
   "update_actor_goal",
   "advance_pressure",
   "adjust_actor_possession",
+  "incur_actor_obligation",
   "record_world_event",
 ] as const;
 
@@ -124,6 +125,7 @@ export const CAMPAIGN_PLAY_WORLD_EVENT_KIND_VALUES = [
   "actor_relation_changed",
   "actor_goal_changed",
   "pressure_advanced",
+  "actor_obligation_incurred",
   "actor_possession_adjusted",
   "scene_recorded",
 ] as const;
@@ -162,6 +164,7 @@ export const CAMPAIGN_PLAY_ENTITY_REF_KIND_VALUES = [
   "goal",
   "pressure",
   "possession",
+  "obligation",
   "world_event",
 ] as const;
 
@@ -446,6 +449,14 @@ export const campaignPlayVisiblePossessionSchema = z.object({
   quantity: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
 }).strict();
 
+export const campaignPlayVisibleObligationSchema = z.object({
+  handle: handleSchema,
+  creditorHandle: handleSchema,
+  creditorName: nameSchema,
+  unitKey: z.literal("copper"),
+  outstandingAmount: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+}).strict();
+
 export const campaignPlayConsequenceSchema = z.object({
   observationHandle: handleSchema,
   performingActorHandle: handleSchema.nullable(),
@@ -543,6 +554,8 @@ const campaignPlayNarratorPacketBaseSchema =
       .max(CAMPAIGN_PLAY_LIMITS.visiblePressures),
     possessions: z.array(campaignPlayVisiblePossessionSchema)
       .max(CAMPAIGN_PLAY_LIMITS.visiblePossessions),
+    obligations: z.array(campaignPlayVisibleObligationSchema)
+      .max(CAMPAIGN_PLAY_LIMITS.visibleObligations),
     newObservations: z.array(campaignPlayJournalEntrySchema)
       .max(CAMPAIGN_PLAY_LIMITS.newObservations),
     consequences: z.array(campaignPlayConsequenceSchema)
@@ -604,6 +617,12 @@ export const campaignPlayNarratorPacketSchema:
       context,
       ["visiblePressures"],
       "Visible pressure handles",
+    );
+    addDuplicateIssue(
+      packet.obligations.map((obligation) => obligation.handle),
+      context,
+      ["obligations"],
+      "Visible obligation handles",
     );
     addDuplicateIssue(
       packet.newObservations.map((entry) => entry.observationHandle),
@@ -961,6 +980,8 @@ const campaignPlayStateBaseSchema = campaignPlayPublicVersionsBaseSchema.extend(
     .max(CAMPAIGN_PLAY_LIMITS.visiblePressures),
   possessions: z.array(campaignPlayVisiblePossessionSchema)
     .max(CAMPAIGN_PLAY_LIMITS.visiblePossessions),
+  obligations: z.array(campaignPlayVisibleObligationSchema)
+    .max(CAMPAIGN_PLAY_LIMITS.visibleObligations),
   narration: campaignPlayNarrationSchema.nullable(),
   consequences: z.array(campaignPlayConsequenceSchema)
     .max(CAMPAIGN_PLAY_LIMITS.newObservations),
@@ -983,6 +1004,12 @@ export const campaignPlayStateSchema: z.ZodType<CampaignPlayState> =
       context,
       ["openingOptions"],
       "Opening location handles",
+    );
+    addDuplicateIssue(
+      state.obligations.map((obligation) => obligation.handle),
+      context,
+      ["obligations"],
+      "Visible obligation handles",
     );
     if (
       (state.phase === "opening_required") !== (state.openingOptions.length > 0)
@@ -1018,11 +1045,11 @@ export const campaignPlayStateSchema: z.ZodType<CampaignPlayState> =
         });
       }
       requireNoLiveScene();
-      if (state.possessions.length > 0) {
+      if (state.possessions.length > 0 || state.obligations.length > 0) {
         context.addIssue({
           code: "custom",
           path: ["possessions"],
-          message: "Character setup begins before current possessions exist.",
+          message: "Character setup begins before current possessions or obligations exist.",
         });
       }
     } else if (state.phase === "opening_required") {
@@ -1703,11 +1730,23 @@ export const campaignPlayRequiredPossessionEffectSchema = z.discriminatedUnion("
   }),
 ]);
 
+export const campaignPlayRequiredObligationEffectSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("none") }).strict(),
+  z.object({
+    kind: z.literal("incur_actor_obligation"),
+    creditorHandle: handleSchema,
+    unitKey: z.literal("copper"),
+    amount: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+    minimumResult: z.enum(["setback", "limited", "success", "strong_success"]),
+  }).strict(),
+]);
+
 const campaignPlayJudgeRulingBaseSchema = z.object({
   disposition: campaignPlayJudgmentDispositionSchema,
   normalizedIntent: playerIntentSchema,
   movementRouteHandle: handleSchema.nullable(),
   requiredPossessionEffect: campaignPlayRequiredPossessionEffectSchema,
+  requiredObligationEffect: campaignPlayRequiredObligationEffectSchema,
   citedVisibleFactHandles: z.array(handleSchema)
     .max(CAMPAIGN_PLAY_LIMITS.citedFacts),
   resultBounds: campaignPlayResultBoundsSchema,
@@ -1806,12 +1845,15 @@ export const campaignPlayJudgeRulingSchema =
     }
     if (
       (ruling.disposition === "impossible" || asksClarification)
-      && ruling.requiredPossessionEffect.kind !== "none"
+      && (
+        ruling.requiredPossessionEffect.kind !== "none"
+        || ruling.requiredObligationEffect.kind !== "none"
+      )
     ) {
       context.addIssue({
         code: "custom",
         path: ["requiredPossessionEffect"],
-        message: "No-effect rulings cannot require a possession effect.",
+        message: "No-effect rulings cannot require a possession or obligation effect.",
       });
     }
     if (ruling.requiredPossessionEffect.kind === "adjust_actor_possession") {
@@ -1826,6 +1868,21 @@ export const campaignPlayJudgeRulingSchema =
           code: "custom",
           path: ["requiredPossessionEffect", "minimumResult"],
           message: "Required possession effect must be reachable inside the result bounds.",
+        });
+      }
+    }
+    if (ruling.requiredObligationEffect.kind === "incur_actor_obligation") {
+      const rank = new Map(
+        CAMPAIGN_PLAY_RESULT_TIER_VALUES.map((tier, index) => [tier, index]),
+      );
+      if (
+        (rank.get(ruling.requiredObligationEffect.minimumResult) ?? 0)
+        > (rank.get(ruling.resultBounds.maximum) ?? 0)
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["requiredObligationEffect", "minimumResult"],
+          message: "Required obligation effect must be reachable inside the result bounds.",
         });
       }
     }
@@ -1959,6 +2016,7 @@ export const campaignPlayEntityRefSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("goal"), id: idSchema }).strict(),
   z.object({ kind: z.literal("pressure"), id: idSchema }).strict(),
   z.object({ kind: z.literal("possession"), id: idSchema }).strict(),
+  z.object({ kind: z.literal("obligation"), id: idSchema }).strict(),
   z.object({ kind: z.literal("world_event"), id: idSchema }).strict(),
 ]);
 
@@ -2176,6 +2234,20 @@ export const adjustActorPossessionCommandSchema = z.object({
     .max(CAMPAIGN_PLAY_LIMITS.affectedRefs),
 }).strict();
 
+export const incurActorObligationCommandSchema = z.object({
+  ...campaignPlayCommandBaseShape,
+  kind: z.literal("incur_actor_obligation"),
+  debtorActorId: idSchema,
+  creditorActorId: idSchema,
+  obligationId: idSchema,
+  unitKey: z.literal("copper"),
+  amount: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  summary: textSchema,
+  affectedRefs: z.array(campaignPlayEntityRefSchema)
+    .min(1)
+    .max(CAMPAIGN_PLAY_LIMITS.affectedRefs),
+}).strict();
+
 export const recordWorldEventCommandSchema = z.object({
   ...campaignPlayCommandBaseShape,
   kind: z.literal("record_world_event"),
@@ -2249,6 +2321,7 @@ export const campaignPlayCommandSchema = z.discriminatedUnion("kind", [
   updateActorGoalCommandSchema,
   advancePressureCommandSchema,
   adjustActorPossessionCommandSchema,
+  incurActorObligationCommandSchema,
   recordWorldEventCommandSchema,
 ]);
 
@@ -2268,6 +2341,7 @@ export const rulebookBatchCommandSchema = z.discriminatedUnion("kind", [
   updateActorGoalCommandSchema,
   advancePressureCommandSchema,
   adjustActorPossessionCommandSchema,
+  incurActorObligationCommandSchema,
   recordWorldEventCommandSchema,
   createPlayerActorCommandSchema,
   initializePlayerPlacementCommandSchema,
@@ -2559,6 +2633,33 @@ export const actorPossessionAdjustedEventSchema = z.object({
   }
 });
 
+export const actorObligationIncurredEventSchema = z.object({
+  ...campaignPlayWorldEventBaseShape,
+  kind: z.literal("actor_obligation_incurred"),
+  debtorActorId: idSchema,
+  creditorActorId: idSchema,
+  obligationId: idSchema,
+  unitKey: z.literal("copper"),
+  amount: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  priorPrincipalAmount: nonnegativeIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  resultPrincipalAmount: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  priorOutstandingAmount: nonnegativeIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  resultOutstandingAmount: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  summary: textSchema,
+}).strict().superRefine((event, context) => {
+  if (
+    event.debtorActorId === event.creditorActorId
+    || event.resultPrincipalAmount !== event.priorPrincipalAmount + event.amount
+    || event.resultOutstandingAmount !== event.priorOutstandingAmount + event.amount
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["resultOutstandingAmount"],
+      message: "Obligation event must add its accepted amount for distinct debtor and creditor.",
+    });
+  }
+});
+
 export const sceneRecordedEventSchema = z.object({
   ...campaignPlayWorldEventBaseShape,
   kind: z.literal("scene_recorded"),
@@ -2600,6 +2701,7 @@ const campaignPlayWorldEventUnionSchema = z.union([
   actorGoalChangedEventSchema,
   pressureAdvancedEventSchema,
   actorPossessionAdjustedEventSchema,
+  actorObligationIncurredEventSchema,
   sceneRecordedEventSchema,
 ]);
 
@@ -3378,6 +3480,7 @@ export const CAMPAIGN_PLAY_WORLD_EVENT_METADATA = {
   actor_relation_changed: { commandKind: "update_actor_relation" },
   actor_goal_changed: { commandKind: "update_actor_goal" },
   pressure_advanced: { commandKind: "advance_pressure" },
+  actor_obligation_incurred: { commandKind: "incur_actor_obligation" },
   actor_possession_adjusted: { commandKind: "adjust_actor_possession" },
   scene_recorded: { commandKind: "record_world_event" },
 } as const satisfies Record<
@@ -3718,6 +3821,7 @@ export const CAMPAIGN_PLAY_COMMAND_METADATA = {
   update_actor_goal: { modelVisible: true, mechanicalMutation: true },
   advance_pressure: { modelVisible: true, mechanicalMutation: true },
   adjust_actor_possession: { modelVisible: true, mechanicalMutation: true },
+  incur_actor_obligation: { modelVisible: true, mechanicalMutation: true },
   record_world_event: { modelVisible: true, mechanicalMutation: false },
   create_player_actor: { modelVisible: false, mechanicalMutation: true },
   initialize_player_placement: { modelVisible: false, mechanicalMutation: true },
