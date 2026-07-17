@@ -39,8 +39,13 @@ describe("NarrationDock", () => {
     stubReducedMotion(false);
     const { container } = render(<NarrationDock narration={narration} />);
     const beats = within(container.querySelector(".campaign-play-narration-beats")!);
+    const liveRegion = container.querySelector(".campaign-play-narration-beats");
 
     expect(beats.getByText("The rain finds every rail.")).toBeInTheDocument();
+    expect(screen.getAllByText("The rain finds every rail.")).toHaveLength(1);
+    expect(liveRegion).toHaveAttribute("aria-live", "polite");
+    expect(liveRegion).toHaveAttribute("aria-relevant", "additions");
+    expect(liveRegion).toHaveAttribute("aria-atomic", "false");
     expect(beats.queryByText("A green signal wakes beyond the yard.")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(beats.getByText("A green signal wakes beyond the yard.")).toBeInTheDocument();

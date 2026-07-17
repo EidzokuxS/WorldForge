@@ -69,12 +69,14 @@ export const NarrationDock = forwardRef<HTMLElement, NarrationDockProps>(functio
         <p className="campaign-play-kicker" id="campaign-play-narration-heading">The moment</p>
         <span>{visibleBeatIndex + 1} of {narration.beats.length}</span>
       </header>
-      <div className="campaign-play-narration-beats">
+      <div
+        aria-atomic="false"
+        aria-live="polite"
+        aria-relevant="additions"
+        className="campaign-play-narration-beats"
+      >
         {visibleBeats.map((beat) => <p key={beat.beatId}>{beat.text}</p>)}
       </div>
-      <p className="sr-only" aria-atomic="true" aria-live="polite">
-        {narration.beats[visibleBeatIndex].text}
-      </p>
       {narration.beats.length > 1 ? (
         <div className="campaign-play-narration-controls">
           <button
