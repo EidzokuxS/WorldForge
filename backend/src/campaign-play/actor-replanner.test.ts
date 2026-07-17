@@ -149,6 +149,7 @@ function replanProposalFromPrompt(prompt: string) {
     steps: [{
       intent,
       observableTrace: "Fresh sealing wax flakes lie beside the open ledger case.",
+      possessionOutcome: { kind: "none" },
       elapsedBounds: { minimumMinutes: 2, maximumMinutes: 10 },
     }],
   };
@@ -192,6 +193,7 @@ function reverseMoveProposalFromPrompt(prompt: string) {
     steps: [{
       intent,
       observableTrace: "Fresh boot prints continue along the wet stones.",
+      possessionOutcome: { kind: "none" },
       elapsedBounds: { minimumMinutes: 2, maximumMinutes: 10 },
     }],
   };
@@ -230,6 +232,7 @@ function remoteNonMoveProposalFromPrompt(prompt: string) {
         method: "Inspect the remote location without moving there",
       },
       observableTrace: "Fresh boot prints mark the remote paving.",
+      possessionOutcome: { kind: "none" },
       elapsedBounds: { minimumMinutes: 2, maximumMinutes: 10 },
     }],
   };
@@ -307,6 +310,7 @@ function createReplanFixture(): {
             order: 0,
             intent,
             observableTrace: "A ledger case stands open with fresh wax flakes beside it.",
+            possessionOutcome: { kind: "none" },
             elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
           }]),
         );
@@ -608,7 +612,12 @@ describe("Campaign Play actor replanner", () => {
     });
     now += 1;
 
-    expect(outcome).toMatchObject({ kind: "replanned", jobId, workerEpoch: 1 });
+    expect(outcome).toMatchObject({
+      kind: "replanned",
+      jobId,
+      workerEpoch: 1,
+      plan: { steps: [{ possessionOutcome: { kind: "none" } }] },
+    });
     expect(generateObject).toHaveBeenCalledTimes(1);
     expect(generateObject.mock.calls[0]![0].prompt).toContain(knownScene);
     expect(generateObject.mock.calls[0]![0].prompt).toContain(

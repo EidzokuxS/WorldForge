@@ -19,6 +19,7 @@ import {
 import { createLogger } from "../lib/index.js";
 import {
   campaignPlayActorIntentSchema,
+  campaignPlayActorPossessionOutcomeSchema,
   campaignPlayActorPlanSchema,
   campaignPlayActorScheduleSchema,
   campaignPlayBootstrapCommandSchema,
@@ -75,8 +76,17 @@ const openingHiddenExposurePredicateSchema = z.discriminatedUnion("channel", [
 const openingPlanStepProposalSchema = z.object({
   intent: campaignPlayActorIntentSchema,
   observableTrace: boundedText(CAMPAIGN_PLAY_LIMITS.shortText),
+  possessionOutcome: campaignPlayActorPossessionOutcomeSchema,
   elapsedBounds: campaignPlayElapsedBoundsSchema,
-}).strict();
+}).strict().superRefine((step, context) => {
+  if (step.intent.kind === "move" && step.possessionOutcome.kind !== "none") {
+    context.addIssue({
+      code: "custom",
+      path: ["possessionOutcome"],
+      message: "Move steps cannot acquire possessions.",
+    });
+  }
+});
 
 const openingActorPlanProposalSchema = z.object({
   actorId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
@@ -769,6 +779,7 @@ function compilePlans(
         order,
         intent: step.intent,
         observableTrace: step.observableTrace,
+        possessionOutcome: structuredClone(step.possessionOutcome),
         elapsedBounds: step.elapsedBounds,
       })),
       status: "active",

@@ -341,6 +341,7 @@ function actorPlan(
     steps: [{
       intent: planIntent,
       observableTrace,
+      possessionOutcome: { kind: "none" as const },
       elapsedBounds: { minimumMinutes: 5, maximumMinutes: 30 },
     }],
   };
@@ -690,6 +691,28 @@ describe("Campaign Play opening planner", () => {
     );
   });
 
+  it("requires and preserves a typed opening possession outcome", () => {
+    const proposal = proposalFixture();
+    const openingPlan = proposal.actorPlans.find((plan) => plan.actorId === "actor-keeper")!;
+    openingPlan.steps[0]!.possessionOutcome = {
+      kind: "acquire",
+      name: "Brass tally",
+      quantity: 2,
+    };
+
+    const artifact = createCampaignPlayOpeningPlanner().compile(
+      frameFixture(), chosenConditions, proposal,
+    ).artifact;
+    expect(artifact.actorPlans.find((plan) => plan.actorId === "actor-keeper")?.steps[0])
+      .toMatchObject({ possessionOutcome: { kind: "acquire", name: "Brass tally", quantity: 2 } });
+    expect(campaignPlayOpeningProposalSchema.safeParse({
+      ...proposal,
+      actorPlans: proposal.actorPlans.map((plan) => plan.actorId === "actor-keeper"
+        ? { ...plan, steps: [{ ...plan.steps[0], possessionOutcome: undefined }] }
+        : plan),
+    }).success).toBe(false);
+  });
+
   it("rejects a precomputed second opening step", () => {
     const proposal = proposalFixture();
     proposal.actorPlans[0]!.steps.push(
@@ -987,6 +1010,8 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain("Every listed person receives a plan regardless of role");
     expect(prompt).toContain("exactly one concrete next step");
     expect(prompt).toContain("Actor replanning owns later steps after the world changes");
+    expect(prompt).toContain("Every step must include possessionOutcome");
+    expect(prompt).toContain("An acquire outcome is {\"kind\":\"acquire\",\"name\":\"...\",\"quantity\":1}");
     expect(prompt).toContain("observableTrace");
     expect(prompt).toContain("do not label the trace by an administrative meaning");
     expect(prompt).toContain("hidden category, or inferred function");

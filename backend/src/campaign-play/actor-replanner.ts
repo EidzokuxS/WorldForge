@@ -374,6 +374,7 @@ function compilePlan(
         }
         return step.observableTrace;
       })(),
+      possessionOutcome: structuredClone(step.possessionOutcome),
       elapsedBounds: { ...step.elapsedBounds },
     };
   });

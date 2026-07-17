@@ -21,6 +21,7 @@ import {
 import { createCampaignPlayActorScheduler } from "./actor-scheduler.js";
 import { openCampaignPlayDatabase, type CampaignPlayDatabaseHandle } from "./campaign-play-database.js";
 import { canonicalizeCampaignPlayProjection, hashCampaignPlayProjection,
+  deriveCampaignPlayPossessionId, deriveCampaignPlayPossessionKey,
   type CampaignPlayProjectionRecord } from "./campaign-play-projection.js";
 import type { CampaignPlayOpeningExposureSeed } from "./opening-planner.js";
 import { createCampaignPlayStateRepository } from "./campaign-play-state-repository.js";
@@ -126,6 +127,7 @@ function planJson(
   goalId: string,
   actorBRouteId = "route-a",
   actorBIntent: "move" | "wait" | "remote_wait" = "move",
+  actorAAcquire = false,
 ) {
   const move = actorId === "actor-b" && actorBIntent === "move";
   const wait = actorId === "actor-b" &&
@@ -166,12 +168,16 @@ function planJson(
           : wait
             ? "A fresh pacing track marks the stones outside the ledger office."
             : "Fresh work marks show that the objective advanced here.",
+        possessionOutcome: actorId === "actor-a" && actorAAcquire
+          ? { kind: "acquire", name: "Brass tally", quantity: 2 }
+          : { kind: "none" },
         elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 } },
       { stepId: `step-${actorId}-two`, order: 1,
         intent: { ...intent, method: move ? "Return with the route answer" : "Continue the active goal" },
         observableTrace: move
           ? "New wheel ruts turn back from the ledger office."
           : "A second set of fresh marks continues the same work.",
+        possessionOutcome: { kind: "none" },
         elapsedBounds: { minimumMinutes: 1, maximumMinutes: 8 } },
     ]),
   };
@@ -182,6 +188,7 @@ function createReadyFixture(
   actorBRouteId = "route-a",
   actorBPlanVersion = 1,
   actorBIntent: "move" | "wait" | "remote_wait" = "move",
+  actorAAcquire = false,
 ) {
   buildAcceptedCampaign();
   const handle = track(openCampaignPlayDatabase(CAMPAIGN_ID));
@@ -212,14 +219,26 @@ function createReadyFixture(
       ) VALUES ('live-player', ?, 'actor-player', ?, 'present')`)
         .run(context.campaignId, playerLocationId);
       const schedules = [
-        { actorId: "actor-a", goalId: "goal-a", nextAt: 0, priority: 3, cadence: 20 },
+        {
+          actorId: "actor-a",
+          goalId: "goal-a",
+          nextAt: 0,
+          priority: actorAAcquire ? 5 : 3,
+          cadence: 20,
+        },
         { actorId: "actor-b", goalId: "goal-b", nextAt: 0, priority: 5, cadence: 30 },
         { actorId: "actor-d", goalId: "goal-d", nextAt: 0, priority: 4, cadence: 40 },
         { actorId: "actor-c", goalId: "goal-c", nextAt: 1, priority: 5, cadence: 25 },
       ];
       for (const schedule of schedules) {
         const planId = `plan-${schedule.actorId}`;
-        const json = planJson(schedule.actorId, schedule.goalId, actorBRouteId, actorBIntent);
+        const json = planJson(
+          schedule.actorId,
+          schedule.goalId,
+          actorBRouteId,
+          actorBIntent,
+          actorAAcquire,
+        );
         const planVersion = schedule.actorId === "actor-b" ? actorBPlanVersion : 1;
         if (planVersion > 1) {
           const prior = planJson(schedule.actorId, schedule.goalId, actorBRouteId);
@@ -547,6 +566,51 @@ describe("Campaign Play actor proposal service", () => {
           locationId: "location-a",
           validUntilWorldTimeMinutes: 1_440,
         }],
+      },
+    });
+  });
+
+  it("compiles an actor acquisition as one possession command", () => {
+    const { handle, token } = createReadyFixture("location-a", "route-a", 1, "move", true);
+
+    let acquisitionCommand: Record<string, unknown> | null = null;
+    processDueActors(createCampaignPlayActorProposalService(handle, {
+      now: () => 1_700,
+    }), {
+      turnId: token.turnId,
+      token,
+      createdAt: 1_700,
+      openingExposureSeed: TEST_EXPOSURE_SEED,
+      beforeSettlement(proposal) {
+        if (proposal.actorId === "actor-a") {
+          acquisitionCommand = proposal.commands[0] as Record<string, unknown>;
+        }
+      },
+    });
+
+    const possessionKey = deriveCampaignPlayPossessionKey("Brass tally");
+    const possessionId = deriveCampaignPlayPossessionId(CAMPAIGN_ID, "actor-a", possessionKey);
+    expect(acquisitionCommand).toMatchObject({
+      kind: "adjust_actor_possession",
+      actorId: "actor-a",
+      possessionId,
+      possessionKey,
+      name: "Brass tally",
+      quantityDelta: 2,
+      summary: "Fresh work marks show that the objective advanced here.",
+      affectedRefs: [
+        { kind: "actor", id: "actor-a" },
+        { kind: "goal", id: "goal-a" },
+      ],
+      readScope: [
+        { kind: "actor", id: "actor-a" },
+        { kind: "possession", id: possessionId },
+        { kind: "goal", id: "goal-a" },
+      ],
+      writeScope: [{ kind: "possession", id: possessionId }],
+      exposure: {
+        mode: "projectable",
+        predicates: [{ channel: "direct_perception", locationId: "location-a" }],
       },
     });
   });

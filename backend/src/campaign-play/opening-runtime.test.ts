@@ -198,6 +198,7 @@ function openingProposal(): CampaignPlayOpeningProposal {
         observableTrace: suffix === "b"
           ? "Fresh sealing wax and torn binding thread mark a ledger removed in haste."
           : "Fresh work marks show that someone acted here recently.",
+        possessionOutcome: { kind: "none" as const },
         elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
       }],
     };

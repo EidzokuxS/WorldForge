@@ -641,6 +641,7 @@ function actorPlanFixture() {
         stakes: null,
       },
       observableTrace: "Fresh boot prints lead from the bridge toward the market.",
+      possessionOutcome: { kind: "none" as const },
       elapsedBounds: { minimumMinutes: 10, maximumMinutes: 30 },
     }],
     status: "active" as const,
@@ -2848,6 +2849,27 @@ describe("Campaign Play events, actors, visibility, and recovery contracts", () 
 
   it("rejects invalid actor collections and protected nested drift", () => {
     const plan = actorPlanFixture();
+    const acquiringStep = {
+      ...plan.steps[0],
+      intent: { ...plan.steps[0]!.intent, kind: "attempt" as const },
+      possessionOutcome: { kind: "acquire" as const, name: "Copper chits", quantity: 2 },
+    };
+    expect(campaignPlayActorPlanSchema.safeParse({
+      ...plan,
+      steps: [acquiringStep],
+    }).success).toBe(true);
+    expect(campaignPlayActorPlanSchema.safeParse({
+      ...plan,
+      steps: [{ ...acquiringStep, possessionOutcome: { kind: "acquire", name: "Copper chits", quantity: 0 } }],
+    }).success).toBe(false);
+    expect(campaignPlayActorPlanSchema.safeParse({
+      ...plan,
+      steps: [{ ...plan.steps[0], possessionOutcome: { kind: "acquire", name: "Copper chits", quantity: 2 } }],
+    }).success).toBe(false);
+    expect(campaignPlayActorPlanSchema.safeParse({
+      ...plan,
+      steps: [{ ...plan.steps[0], possessionOutcome: { kind: "unknown" } }],
+    }).success).toBe(false);
     expect(campaignPlayActorPlanSchema.safeParse({
       ...plan,
       preconditions: Array.from(

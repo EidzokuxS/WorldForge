@@ -118,6 +118,7 @@ describe("campaign play actor replan prompt", () => {
           stakes: "The safe passage may close",
         },
         observableTrace: "Fresh chalk marks interrupt the watch rota beside the gate.",
+        possessionOutcome: { kind: "none" },
         elapsedBounds: { minimumMinutes: 5, maximumMinutes: 15 },
       }],
     };
@@ -133,6 +134,20 @@ describe("campaign play actor replan prompt", () => {
         ...proposal.intent,
         targetHandles: ["location:gate", "location:gate"],
       },
+    }).success).toBe(false);
+    expect(campaignPlayActorReplanProposalSchema.safeParse({
+      ...proposal,
+      steps: [{
+        ...proposal.steps[0],
+        possessionOutcome: { kind: "acquire", name: "Two brass keys", quantity: 2 },
+      }],
+    }).success).toBe(true);
+    expect(campaignPlayActorReplanProposalSchema.safeParse({
+      ...proposal,
+      steps: [{
+        ...proposal.steps[0],
+        possessionOutcome: { kind: "acquire", name: "Two brass keys", quantity: 0 },
+      }],
     }).success).toBe(false);
     expect(campaignPlayActorReplanProposalSchema.safeParse({
       ...proposal,
@@ -166,6 +181,7 @@ describe("campaign play actor replan prompt", () => {
           stakes: null,
         },
         observableTrace: "Fresh chalk marks interrupt the watch rota beside the gate.",
+        possessionOutcome: { kind: "none" },
         elapsedBounds: { minimumMinutes: 5, maximumMinutes: 15 },
       }],
     };
@@ -217,6 +233,8 @@ describe("campaign play actor replan prompt", () => {
     expect(prompt).toContain("Every move step must use exactly one supplied route whose name starts at the actor's occupied location");
     expect(prompt).toContain("whose state is open");
     expect(prompt).toContain("Restricted and blocked routes do not support ordinary movement");
+    expect(prompt).toContain("Every step must include possessionOutcome");
+    expect(prompt).toContain("An acquire outcome is {\"kind\":\"acquire\",\"name\":\"...\",\"quantity\":1}");
     expect(prompt).toContain("Every non-move step that targets a location must target the actor's location established for that step");
     expect(prompt).toContain("The trace may contain only an after-state caused by handling or work stated in that step's method");
     expect(prompt).toContain("A raw, unfinished, tilted, open, damaged, displaced, or unpaid subject cannot become finished");

@@ -16,11 +16,19 @@ import {
 } from "../campaign-world/world-repository.test-support.js";
 import { calculateCampaignWorldContentHash } from "../campaign-world/world-snapshot.js";
 import {
+  createCampaignPlayActorProposalService,
+} from "./actor-proposal-service.js";
+import {
+  createCampaignPlayActorScheduler,
+} from "./actor-scheduler.js";
+import {
   openCampaignPlayDatabase,
   type CampaignPlayDatabaseHandle,
 } from "./campaign-play-database.js";
 import {
   canonicalizeCampaignPlayProjection,
+  deriveCampaignPlayPossessionId,
+  deriveCampaignPlayPossessionKey,
   deriveCampaignPlayPublicHandle,
   hashCampaignPlayProjection,
   type CampaignPlayProjectionRecord,
@@ -131,16 +139,21 @@ function modelEvidence() {
   };
 }
 
-function openingProposal(): CampaignPlayOpeningProposal {
+function openingProposal(actorBAcquiresPossession = false): CampaignPlayOpeningProposal {
   const actorPlans = ["a", "b", "c", "d", "e", "f"].map((suffix) => {
     const actorId = `actor-${suffix}`;
     const goalId = `goal-${suffix}`;
     const targets = suffix === "b"
-      ? [
-          { kind: "location" as const, id: "location-b" },
-          { kind: "location" as const, id: "location-a" },
-          { kind: "goal" as const, id: goalId },
-        ]
+      ? actorBAcquiresPossession
+        ? [
+            { kind: "location" as const, id: "location-a" },
+            { kind: "goal" as const, id: goalId },
+          ]
+        : [
+            { kind: "location" as const, id: "location-b" },
+            { kind: "location" as const, id: "location-a" },
+            { kind: "goal" as const, id: goalId },
+          ]
       : suffix === "c"
         ? [
             { kind: "location" as const, id: "location-c" },
@@ -162,6 +175,9 @@ function openingProposal(): CampaignPlayOpeningProposal {
         observableTrace: suffix === "b"
           ? "Fresh sealing wax and torn binding thread mark a ledger removed in haste."
           : "Fresh work marks show that someone acted here recently.",
+        possessionOutcome: suffix === "b" && actorBAcquiresPossession
+          ? { kind: "acquire" as const, name: "Brass tally", quantity: 2 }
+          : { kind: "none" as const },
         elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
       }],
     };
@@ -252,9 +268,13 @@ function rulebookFrame(handle: CampaignPlayDatabaseHandle): CampaignPlayRulebook
 
 function createVisibilityFixture(
   routeTriggers: Array<"inspect" | "attempt" | "traverse"> = ["inspect"],
+  actorBAcquiresPossession = false,
 ) {
   acceptPlayableWorld();
   const handle = track(openCampaignPlayDatabase(CAMPAIGN_ID));
+  const openingScheduler = actorBAcquiresPossession
+    ? createCampaignPlayActorScheduler(handle)
+    : null;
   const states = createCampaignPlayStateRepository(handle);
   states.createState({ eventId: "state-created", createdAt: 1_300 });
   states.commitMechanicalAndRuntime({
@@ -328,7 +348,7 @@ function createVisibilityFixture(
       motivations: ["Understand why the routes are failing"],
     },
     acceptedWorld: beforeOpening.acceptedReview,
-  }, { mode: "delegate" }, openingProposal());
+  }, { mode: "delegate" }, openingProposal(actorBAcquiresPossession));
   turns.acceptModelArtifact({
     token: plannerToken,
     artifact: openingCandidate.artifact,
@@ -391,6 +411,14 @@ function createVisibilityFixture(
         turnId: "turn-opening",
         createdAt: 1_550,
       });
+      if (openingScheduler) {
+        openingScheduler.initializeOpeningActors({
+          plans: openingCandidate.artifact.actorPlans,
+          schedules: openingCandidate.artifact.actorSchedules,
+          context,
+          createdAt: 1_550,
+        });
+      }
     },
   });
   // The bootstrap rulebook batch owns the zero-time initialization. This fixture's
@@ -798,6 +826,47 @@ function createVisibilityFixture(
     leaseExpiresAt: 3_000,
     mutationId: "actors-claimed",
   });
+  let actorAcquisition: { summary: string; exposure: unknown } | null = null;
+  if (actorBAcquiresPossession) {
+    if (!openingScheduler) throw new Error("Visibility fixture requires an actor scheduler.");
+    const scheduler = openingScheduler;
+    const state = states.loadState()!;
+    const dueSet = scheduler.freezeOpeningDueSet({
+      turnId: actorsToken.turnId,
+      expectedWorldVersion: state.authority.worldVersion,
+      expectedRuntimeRevision: state.authority.runtimeRevision,
+    });
+    turns.commitActorTransition({
+      token: actorsToken,
+      leaseMode: "live",
+      worldVersionAdvance: 0,
+      mutationId: "visible-possession-jobs-admitted",
+      protectedPayloadHash: hashCampaignPlayProjection(dueSet),
+      committedAt: 1_615,
+      mutate(context) {
+        scheduler.admitDueSet({ dueSet, context, createdAt: 1_615 });
+      },
+    });
+    const service = createCampaignPlayActorProposalService(handle, { now: () => 1_616 });
+    while (true) {
+      const outcome = service.processNext({
+        turnId: actorsToken.turnId,
+        token: actorsToken,
+        createdAt: 1_616,
+        openingExposureSeed: openingCandidate.artifact.exposureSeed,
+        beforeSettlement(proposal) {
+          const command = proposal.commands[0];
+          if (proposal.actorId === "actor-b" && command?.kind === "adjust_actor_possession") {
+            actorAcquisition = { summary: command.summary, exposure: command.exposure };
+          }
+        },
+      });
+      if (outcome === null || outcome.kind === "replan_required") break;
+    }
+    if (actorAcquisition === null) {
+      throw new Error("Visibility fixture did not settle the actor possession acquisition.");
+    }
+  }
   turns.commitDeterministic({
     token: actorsToken,
     transition: "actors_settled",
@@ -814,7 +883,13 @@ function createVisibilityFixture(
     leaseExpiresAt: 3_000,
     mutationId: "visibility-claimed",
   });
-  return { handle, states, turns, visibilityToken };
+  return {
+    handle,
+    states,
+    turns,
+    visibilityToken,
+    actorAcquisition: actorAcquisition as { summary: string; exposure: unknown } | null,
+  };
 }
 
 describe("Campaign Play visibility service", () => {
@@ -824,6 +899,72 @@ describe("Campaign Play visibility service", () => {
     })).toBe("Grease-pencil measurements cover the frozen coupling housing.");
     expect(() => renderCampaignPlayVisibleActorEvent({ observableTrace: null }))
       .toThrow("A directly perceived autonomous actor event requires its persisted observable trace.");
+  });
+
+  it("renders a visible actor acquisition from its persisted summary", () => {
+    const fixture = createVisibilityFixture(["inspect"], true);
+    expect(fixture.actorAcquisition).not.toBeNull();
+    if (fixture.actorAcquisition === null) return;
+    const { summary } = fixture.actorAcquisition;
+    expect(fixture.actorAcquisition.exposure).toEqual({
+      mode: "projectable",
+      predicates: [{ channel: "direct_perception", locationId: "location-a" }],
+    });
+    const storedAcquisition = fixture.handle.sqlite.prepare(`SELECT event.after_payload_json AS afterPayloadJson,
+        exposure.channel, exposure.location_id AS locationId
+      FROM campaign_play_commands command
+      JOIN campaign_play_events event ON event.command_id = command.command_id
+        AND event.campaign_id = command.campaign_id
+      JOIN campaign_play_event_exposures exposure ON exposure.event_id = event.event_id
+        AND exposure.campaign_id = event.campaign_id
+      WHERE command.campaign_id = ? AND command.command_kind = 'adjust_actor_possession'
+      ORDER BY event.rowid DESC LIMIT 1`).get(CAMPAIGN_ID) as {
+        afterPayloadJson: string;
+        channel: string;
+        locationId: string | null;
+      } | undefined;
+    expect(storedAcquisition).toMatchObject({ channel: "direct_perception", locationId: "location-a" });
+    expect(storedAcquisition?.afterPayloadJson).toContain('"actor-player"');
+    expect(storedAcquisition?.afterPayloadJson).toContain('"location-a"');
+    const possessionKey = deriveCampaignPlayPossessionKey("Brass tally");
+    const possessionId = deriveCampaignPlayPossessionId(CAMPAIGN_ID, "actor-b", possessionKey);
+    expect(fixture.handle.sqlite.prepare(`SELECT possession.actor_id AS actorId,
+        possession.possession_id AS possessionId, possession.possession_key AS possessionKey,
+        possession.name, possession.quantity, possession.causal_receipt_id AS causalReceiptId,
+        receipt.command_kind AS commandKind, receipt.outcome
+      FROM campaign_play_actor_possessions possession
+      JOIN campaign_play_receipts receipt
+        ON receipt.receipt_id = possession.causal_receipt_id
+        AND receipt.campaign_id = possession.campaign_id
+      WHERE possession.campaign_id = ? AND possession.actor_id = ?
+        AND possession.possession_key = ?`)
+      .get(CAMPAIGN_ID, "actor-b", possessionKey)).toEqual({
+        actorId: "actor-b",
+        possessionId,
+        possessionKey,
+        name: "Brass tally",
+        quantity: 2,
+        causalReceiptId: expect.stringMatching(/^receipt:/),
+        commandKind: "adjust_actor_possession",
+        outcome: "applied",
+      });
+
+    const result = createCampaignPlayVisibilityService(fixture.handle).projectTurn({
+      token: fixture.visibilityToken,
+      actionContext: null,
+      sourceMoment: null,
+      committedAt: 1_650,
+      mutationId: "visible-actor-possession-projected",
+    });
+    const observation = result.packet.newObservations.find((entry) => entry.text === summary);
+    expect(observation).toMatchObject({
+      title: "Seen nearby",
+      consequence: {
+        whatChanged: summary,
+        performingActorHandle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-b"),
+      },
+    });
+    expect(observation?.text).not.toBe("You witnessed a change nearby.");
   });
 
   it("earns valid channels while keeping sibling-scene perception and aftermath hidden", () => {

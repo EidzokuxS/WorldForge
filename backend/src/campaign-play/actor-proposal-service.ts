@@ -17,6 +17,8 @@ import type { CampaignPlayOpeningExposureSeed } from "./opening-planner.js";
 import type { CampaignPlayDatabaseHandle } from "./campaign-play-database.js";
 import {
   canonicalizeCampaignPlayProjection,
+  deriveCampaignPlayPossessionId,
+  deriveCampaignPlayPossessionKey,
   hashCampaignPlayProjection,
   type CampaignPlayHumanMechanicalIdentity,
   type CampaignPlayLiveActorCondition,
@@ -305,34 +307,68 @@ function compileProposal(
     };
   } else {
     const affectedRefs = uniqueRefs([{ kind: "actor", id: frame.actorId }, ...intent.targets]);
-    const readScope = affectedRefs;
-    const ownsOpeningConsequence = frame.plan.planVersion === 1
-      && seed.sourceActorId === frame.actorId
-      && seed.sourceGoalId === frame.plan.goalId
-      && frame.selection.settledStepCount === 0;
-    const summary = ownsOpeningConsequence && exposure.mode === "projectable"
-      ? seed.summary
-      : `${frame.actor.name}: ${intent.method ?? intent.kind}${intent.stakes ? `. ${intent.stakes}` : ""}`;
-    const recordedEventClass = eventClass(intent);
-    command = {
-      commandId: deriveCampaignPlayCommandId(frame.campaignId, frame.turnId, batchId, 0),
-      batchId,
-      order: 0,
-      causalParent,
-      source,
-      expectedWorldVersion: frame.baseWorldVersion,
-      readScope,
-      writeScope: [],
-      exposure,
-      kind: "record_world_event",
-      eventClass: recordedEventClass,
-      performingActorId: recordedEventClass === "dialogue" || recordedEventClass === "interaction"
-        ? frame.actorId
-        : null,
-      summary,
-      observableTrace: frame.selection.step.observableTrace,
-      affectedRefs,
-    };
+    if (frame.selection.step.possessionOutcome.kind === "acquire") {
+      const possessionKey = deriveCampaignPlayPossessionKey(
+        frame.selection.step.possessionOutcome.name,
+      );
+      const possessionId = deriveCampaignPlayPossessionId(
+        frame.campaignId,
+        frame.actorId,
+        possessionKey,
+      );
+      const possessionRef = { kind: "possession" as const, id: possessionId };
+      command = {
+        commandId: deriveCampaignPlayCommandId(frame.campaignId, frame.turnId, batchId, 0),
+        batchId,
+        order: 0,
+        causalParent,
+        source,
+        expectedWorldVersion: frame.baseWorldVersion,
+        readScope: uniqueRefs([
+          { kind: "actor", id: frame.actorId },
+          possessionRef,
+          ...intent.targets,
+        ]),
+        writeScope: [possessionRef],
+        exposure,
+        kind: "adjust_actor_possession",
+        actorId: frame.actorId,
+        possessionId,
+        possessionKey,
+        name: frame.selection.step.possessionOutcome.name,
+        quantityDelta: frame.selection.step.possessionOutcome.quantity,
+        summary: frame.selection.step.observableTrace,
+        affectedRefs,
+      };
+    } else {
+      const ownsOpeningConsequence = frame.plan.planVersion === 1
+        && seed.sourceActorId === frame.actorId
+        && seed.sourceGoalId === frame.plan.goalId
+        && frame.selection.settledStepCount === 0;
+      const summary = ownsOpeningConsequence && exposure.mode === "projectable"
+        ? seed.summary
+        : `${frame.actor.name}: ${intent.method ?? intent.kind}${intent.stakes ? `. ${intent.stakes}` : ""}`;
+      const recordedEventClass = eventClass(intent);
+      command = {
+        commandId: deriveCampaignPlayCommandId(frame.campaignId, frame.turnId, batchId, 0),
+        batchId,
+        order: 0,
+        causalParent,
+        source,
+        expectedWorldVersion: frame.baseWorldVersion,
+        readScope: affectedRefs,
+        writeScope: [],
+        exposure,
+        kind: "record_world_event",
+        eventClass: recordedEventClass,
+        performingActorId: recordedEventClass === "dialogue" || recordedEventClass === "interaction"
+          ? frame.actorId
+          : null,
+        summary,
+        observableTrace: frame.selection.step.observableTrace,
+        affectedRefs,
+      };
+    }
   }
   const expiryDelta = Math.max(1, frame.selection.step.elapsedBounds.maximumMinutes);
   const proposal = {

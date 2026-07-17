@@ -639,12 +639,16 @@ function publicEntry(
   );
   const eventSource = parseRecord(exposure.eventSourceJson, "Event source");
   const commandPayload = parseRecord(exposure.commandPayloadJson, "Command payload");
+  const performingActorId = exposure.commandKind === "record_world_event"
+    ? commandPayload.performingActorId
+    : exposure.commandKind === "adjust_actor_possession"
+      ? commandPayload.actorId
+      : undefined;
   const performingActor = exposure.channel === "direct_perception"
-    && exposure.commandKind === "record_world_event"
-    && typeof commandPayload.performingActorId === "string"
+    && typeof performingActorId === "string"
     ? handle.sqlite.prepare(`SELECT id, name FROM actors
         WHERE id = ? AND campaign_id = ? AND kind = 'person'`)
-      .get(commandPayload.performingActorId, handle.campaignId) as { id: string; name: string } | undefined
+      .get(performingActorId, handle.campaignId) as { id: string; name: string } | undefined
     : undefined;
   const openingTrace = resolveCampaignPlayOpeningObservableTrace(openingExposureSeed, {
     openingTurnId,
@@ -698,14 +702,16 @@ function publicEntry(
       title = `${movingActor.name} moved`;
       text = `${movingActor.name} left for ${destination.name}.`;
     }
-  } else if (
-    exposure.channel === "direct_perception" && exposure.commandKind === "record_world_event" &&
-    eventSource.kind === "actor" && typeof eventSource.actorId === "string" &&
-    eventSource.actorId !== humanActorId
-  ) {
+  } else if (exposure.channel === "direct_perception"
+    && (exposure.commandKind === "record_world_event"
+      || exposure.commandKind === "adjust_actor_possession")
+    && eventSource.kind === "actor" && typeof eventSource.actorId === "string"
+    && eventSource.actorId !== humanActorId) {
     title = "Seen nearby";
     text = renderCampaignPlayVisibleActorEvent({
-      observableTrace: commandPayload.observableTrace,
+      observableTrace: exposure.commandKind === "adjust_actor_possession"
+        ? commandPayload.summary
+        : commandPayload.observableTrace,
     });
   } else if (exposure.channel === "local_aftermath") {
     title = "Signs of change";
@@ -713,15 +719,20 @@ function publicEntry(
       text = openingTrace;
     } else if (
       eventSource.kind === "actor"
-      && (exposure.commandKind === "record_world_event" || exposure.commandKind === "move_actor")
+      && (exposure.commandKind === "record_world_event"
+        || exposure.commandKind === "move_actor"
+        || exposure.commandKind === "adjust_actor_possession")
     ) {
-      if (typeof commandPayload.observableTrace !== "string") {
+      const actorTrace = exposure.commandKind === "adjust_actor_possession"
+        ? commandPayload.summary
+        : commandPayload.observableTrace;
+      if (typeof actorTrace !== "string") {
         throw new CampaignPlayVisibilityError(
           "visibility_projection_invalid",
           "An autonomous actor aftermath requires its persisted observable trace.",
         );
       }
-      text = commandPayload.observableTrace;
+      text = actorTrace;
     } else {
       text = "Something changed here before you arrived.";
     }

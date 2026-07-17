@@ -2735,13 +2735,31 @@ export const campaignPlayActorIntentSchema = z.object({
   stakes: shortTextSchema.nullable(),
 }).strict();
 
+export const campaignPlayActorPossessionOutcomeSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("none") }).strict(),
+  z.object({
+    kind: z.literal("acquire"),
+    name: nameSchema,
+    quantity: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  }).strict(),
+]);
+
 export const campaignPlayActorPlanStepSchema = z.object({
   stepId: idSchema,
   order: nonnegativeIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.planSteps - 1),
   intent: campaignPlayActorIntentSchema,
   observableTrace: shortTextSchema,
+  possessionOutcome: campaignPlayActorPossessionOutcomeSchema,
   elapsedBounds: campaignPlayElapsedBoundsSchema,
-}).strict();
+}).strict().superRefine((step, context) => {
+  if (step.intent.kind === "move" && step.possessionOutcome.kind !== "none") {
+    context.addIssue({
+      code: "custom",
+      path: ["possessionOutcome"],
+      message: "Move steps cannot acquire possessions.",
+    });
+  }
+});
 
 export const campaignPlayActorPlanSchema = z.object({
   planId: idSchema,
@@ -3521,6 +3539,8 @@ export type CampaignPlayPlanPrecondition =
   z.infer<typeof campaignPlayPlanPreconditionSchema>;
 export type CampaignPlayActorIntent =
   z.infer<typeof campaignPlayActorIntentSchema>;
+export type CampaignPlayActorPossessionOutcome =
+  z.infer<typeof campaignPlayActorPossessionOutcomeSchema>;
 export type CampaignPlayActorPlanStep =
   z.infer<typeof campaignPlayActorPlanStepSchema>;
 export type CampaignPlayActorPlan =

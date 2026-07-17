@@ -1175,6 +1175,52 @@ describe("Campaign Play Rulebook preflight", () => {
     expect(result).toMatchObject({ accepted: false, denial: { code: "command_unavailable" } });
   });
 
+  it("allows an actor job to acquire a fresh possession for its own actor", () => {
+    const frame = frameFixture();
+    const possessionKey = deriveCampaignPlayPossessionKey("Brass tally");
+    const possessionId = deriveCampaignPlayPossessionId(CAMPAIGN_ID, "actor-key", possessionKey);
+    const authority: CampaignPlayRulebookAuthority = {
+      purpose: "actor_job",
+      turnId: TURN_ID,
+      actorId: "actor-key",
+      rootParent: { kind: "actor_job", jobId: "job-key" },
+      authorizedRefs: allRefs(),
+      witnessActorIds: ["actor-support"],
+      knownWorldEventIds: [],
+    };
+    const command = {
+      ...commandBase(0, READY_VERSION, authority.rootParent),
+      source: { kind: "actor" as const, actorId: "actor-key" },
+      kind: "adjust_actor_possession" as const,
+      readScope: [
+        { kind: "actor" as const, id: "actor-key" },
+        { kind: "possession" as const, id: possessionId },
+      ],
+      writeScope: [{ kind: "possession" as const, id: possessionId }],
+      actorId: "actor-key",
+      possessionId,
+      possessionKey,
+      name: "Brass tally",
+      quantityDelta: 2,
+      summary: "Two brass tallies are set beside the route board.",
+      affectedRefs: [{ kind: "actor" as const, id: "actor-key" }],
+    };
+    const result = preflightCampaignPlayRulebook({
+      frame,
+      authority,
+      batch: { batchId: BATCH_ID, baseWorldVersion: READY_VERSION, commands: [command] },
+    });
+    expect(result).toMatchObject({ accepted: true });
+    if (!result.accepted) return;
+    expect(result.simulation.possessions).toContainEqual({
+      possessionId,
+      actorId: "actor-key",
+      possessionKey,
+      name: "Brass tally",
+      quantity: 2,
+    });
+  });
+
   it("requires actor-job commands to retain the job root and actor source", () => {
     const authority: CampaignPlayRulebookAuthority = {
       purpose: "actor_job",
