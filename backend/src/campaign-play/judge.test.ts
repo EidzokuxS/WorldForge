@@ -370,6 +370,9 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("clarificationQuestion must be non-null only");
     expect(sentPrompt).toContain("modifier range must contain zero");
     expect(sentPrompt).toContain("uncertainty.kind must be check");
+    expect(sentPrompt).toContain("Every one of those four values must be an unquoted JSON integer");
+    expect(sentPrompt).toContain('"difficulty":12');
+    expect(sentPrompt).toContain("never return a difficulty word or quoted number");
     expect(sentPrompt).toContain("Outcome tiers never create trust");
     expect(sentPrompt).toContain("cap resultBounds.maximum at limited");
     expect(sentPrompt).toContain("A contact action that only speaks, asks, listens, greets");
