@@ -502,7 +502,7 @@ describe("Campaign Play Game Master", () => {
       "Do not repeat, qualify, defend, or preserve the conflicting toll",
     );
     expect(String(options.prompt)).toContain(
-      "routeAccessClaims is required on every record_world_event",
+      "whose PLAYER_INTENT targets or RULING cites a route, routeAccessClaims is required",
     );
     expect(String(options.prompt)).toContain(
       "Every route topology or access statement in summary must agree with these claims",
@@ -584,6 +584,44 @@ describe("Campaign Play Game Master", () => {
     expect(JSON.parse(allowedLine!.slice("ALLOWED_HANDLES=".length))).toEqual(
       requestFrame.handleBindings.map((binding) => binding.handle),
     );
+  });
+
+  it("omits route claims from an observation that neither targets nor cites a route", async () => {
+    const observationRuling = ruling({
+      normalizedIntent: {
+        originalText: "I inspect the marks beside the gate.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "observe",
+        targets: [{ handle: "here", kind: "location" }],
+        method: "Inspect the visible surface",
+        stakes: "Learn what left the marks",
+      },
+      citedVisibleFactHandles: ["here"],
+    });
+    const observationProposal = {
+      elapsedMinutes: 1,
+      effects: [{
+        kind: "record_world_event" as const,
+        eventClass: "discovery" as const,
+        performingActorHandle: null,
+        summary: "The marks are fresh, but their cause is not visible.",
+        affectedHandles: ["you", "here"],
+      }],
+    };
+    const generateObject = vi.fn(async (options: Parameters<typeof safeGenerateObject>[0]) => {
+      const schema = options.schema as typeof campaignPlayGameMasterProposalSchema;
+      expect(schema.safeParse(observationProposal).success).toBe(true);
+      return { object: observationProposal, trace: trace() };
+    });
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: observationRuling, resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget,
+    });
+    expect(candidate.preflight.accepted).toBe(true);
+    expect(generateObject).toHaveBeenCalledTimes(1);
   });
 
   it("binds every recorded player-action event to the player actor", () => {

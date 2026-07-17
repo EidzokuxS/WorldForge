@@ -85,8 +85,15 @@ function createExposureProposalSchema(handleSchema: z.ZodType<string>) {
 function createEffectProposalSchema(
   handleSchema: z.ZodType<string>,
   exposureSchema: ReturnType<typeof createExposureProposalSchema>,
+  requireRouteAccessClaims = false,
 ) {
   const effectBase = { exposure: exposureSchema };
+  const routeAccessClaimsSchema = z.array(z.object({
+    routeHandle: handleSchema,
+    state: z.enum(CAMPAIGN_PLAY_ROUTE_STATE_VALUES),
+    accessRequirement: z.enum(["none", "required"]),
+    viaLocationHandle: handleSchema.nullable(),
+  }).strict()).max(CAMPAIGN_PLAY_LIMITS.suggestedActions);
   return z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("move_actor"), actorHandle: handleSchema.nullable() }).strict(),
   z.object({ ...effectBase, kind: z.literal("set_route_state"), routeHandle: handleSchema,
@@ -126,12 +133,9 @@ function createEffectProposalSchema(
   z.object({ kind: z.literal("record_world_event"),
     eventClass: z.enum(["dialogue", "interaction", "discovery", "scene"]),
     performingActorHandle: handleSchema.nullable(),
-    routeAccessClaims: z.array(z.object({
-      routeHandle: handleSchema,
-      state: z.enum(CAMPAIGN_PLAY_ROUTE_STATE_VALUES),
-      accessRequirement: z.enum(["none", "required"]),
-      viaLocationHandle: handleSchema.nullable(),
-    }).strict()).max(CAMPAIGN_PLAY_LIMITS.suggestedActions),
+    routeAccessClaims: requireRouteAccessClaims
+      ? routeAccessClaimsSchema
+      : routeAccessClaimsSchema.optional(),
     summary: text(CAMPAIGN_PLAY_LIMITS.text),
     affectedHandles: z.array(handleSchema).min(1).max(CAMPAIGN_PLAY_LIMITS.affectedRefs)
       .refine((values) => new Set(values).size === values.length) }).strict()
@@ -148,9 +152,16 @@ function createEffectProposalSchema(
   ]);
 }
 
-function createProposalSchema(handleSchema: z.ZodType<string>) {
+function createProposalSchema(
+  handleSchema: z.ZodType<string>,
+  requireRouteAccessClaims = false,
+) {
   const exposureSchema = createExposureProposalSchema(handleSchema);
-  const effectSchema = createEffectProposalSchema(handleSchema, exposureSchema);
+  const effectSchema = createEffectProposalSchema(
+    handleSchema,
+    exposureSchema,
+    requireRouteAccessClaims,
+  );
   return z.object({
     elapsedMinutes: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes),
     effects: z.array(effectSchema).min(1).max(CAMPAIGN_PLAY_LIMITS.commandsPerBatch - 1),
@@ -168,10 +179,10 @@ const routeAuthorityReviewSchema = z.object({
 function routeAuthorityReviewInput(rawProposal: unknown) {
   const proposal = campaignPlayGameMasterProposalSchema.parse(rawProposal);
   const events = proposal.effects.flatMap((effect) =>
-    effect.kind === "record_world_event" && effect.routeAccessClaims.length > 0
+    effect.kind === "record_world_event" && (effect.routeAccessClaims?.length ?? 0) > 0
       ? [{
           summary: effect.summary,
-          claims: effect.routeAccessClaims,
+          claims: effect.routeAccessClaims!,
         }]
       : []);
   return events.length === 0 ? null : { events };
@@ -394,12 +405,18 @@ function requireRef(
   return reference;
 }
 
-function constrainedProposalSchema(map: ReadonlyMap<string, CampaignPlayEntityRef>) {
+function constrainedProposalSchema(
+  map: ReadonlyMap<string, CampaignPlayEntityRef>,
+  requireRouteAccessClaims = false,
+) {
   const allowedHandles = [...map.keys()];
   if (allowedHandles.length === 0) {
     throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
   }
-  return createProposalSchema(z.enum(allowedHandles as [string, ...string[]]));
+  return createProposalSchema(
+    z.enum(allowedHandles as [string, ...string[]]),
+    requireRouteAccessClaims,
+  );
 }
 
 function exposure(
@@ -994,13 +1011,13 @@ function compile(
   const routeAccessClaims = proposal.effects.flatMap((effect) =>
     effect.kind === "record_world_event"
       && (effect.eventClass === "dialogue" || effect.eventClass === "interaction")
-      ? effect.routeAccessClaims
+      ? effect.routeAccessClaims ?? []
       : []);
   const misplacedRouteAccessClaim = proposal.effects.some((effect) =>
     effect.kind === "record_world_event"
       && effect.eventClass !== "dialogue"
       && effect.eventClass !== "interaction"
-      && effect.routeAccessClaims.length > 0);
+      && (effect.routeAccessClaims?.length ?? 0) > 0);
   if (
     misplacedRouteAccessClaim
     || (ruling.normalizedIntent.kind === "contact"
@@ -1279,7 +1296,7 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     "For an attempt with nonplayer actor targets, their response is part of the outcome. Use ACTOR_DIRECTIVES and a dialogue or interaction effect before any actorless physical result. A successful roll resolves the player's effort; it does not create permission or cooperation.",
     "CANONICAL_PEOPLE is the complete person roster for this call, not permission to disclose anyone. Mention a listed person only when VISIBLE_FACTS, ACTOR_CONTINUITY, or ACTOR_DIRECTIVES supports the reference. A person name outside this list does not identify an actor, even when SOURCE_MOMENT or prior prose mentions it. Do not repeat or introduce that name; treat any prior mention as unverified hearsay about an unnamed resident. An unlisted resident cannot own a job, payment, permission, appointment, access, or future reply. Do not offer knocking, calling, or waiting for one as the next playable step. Keep a concrete offer or transaction with the targeted actor. If no listed actor can own the requested transaction from supplied facts, have the targeted actor state that no actionable offer exists.",
     "For contact, write the targeted person's actual spoken reply, silence, gesture, or action in the record_world_event summary and copy that person's handle into performingActorHandle. The performer must be one of PLAYER_INTENT's actor targets. Do not replace the exchange with audit labels such as common knowledge, offers no interpretation, nothing further, or has nothing to share. If the person withholds something, show the words or action used to withhold it. A concrete deflection, counterquestion, or condition is useful when ACTOR_DIRECTIVES support one.",
-    "routeAccessClaims is required on every record_world_event. Use an empty array unless a dialogue or interaction targets a route while PLAYER_MOVEMENT is null. For that route-targeted contact, include exactly one claim per targeted route with only routeHandle, state, accessRequirement, and viaLocationHandle. Copy routeHandle from the target. Match state to VISIBLE_FACTS, use accessRequirement none for open and required for restricted or blocked, and use viaLocationHandle null for a direct route. Every route topology or access statement in summary must agree with these claims. Code rejects a missing, extra, duplicated, or mechanically false claim before Rulebook execution.",
+    "For a no-travel contact whose PLAYER_INTENT targets or RULING cites a route, routeAccessClaims is required on every record_world_event and must include exactly one claim per relevant route on the dialogue or interaction; use an empty array on its other events. Otherwise omit routeAccessClaims. Each claim has only routeHandle, state, accessRequirement, and viaLocationHandle. Copy routeHandle from the target or cited visible fact. Match state to VISIBLE_FACTS, use accessRequirement none for open and required for restricted or blocked, and use viaLocationHandle null for a direct route. Every route topology or access statement in summary must agree with these claims. Code rejects a missing, extra, duplicated, misplaced, or mechanically false claim before Rulebook execution.",
     "PLAYER_MOVEMENT is code-authoritative. When it is non-null, return exactly one {\"kind\":\"move_actor\",\"actorHandle\":null} effect for the player at the chronological point where travel occurs. Code binds the player actor, route, endpoints, and direct perception from this order. When PLAYER_MOVEMENT is null, never return move_actor. Do not copy PLAYER_MOVEMENT fields or exposure into an effect.",
     "PLAYER_MOVEMENT also carries the route's code-authoritative travelCost ticks. For a pure move, elapsedMinutes must equal travelCost exactly. For a compound action that includes travel, elapsedMinutes must be at least travelCost and remain within RULING.elapsedBounds. Never estimate a different route duration.",
     "WORLD_TIME_AUTHORITY is code-owned. The result occurs at actionStart.totalMinutes plus your elapsedMinutes, inside resultRange. Any clock time, part of day, date, deadline, duration, or relative phrase in a summary must agree with that result time and with every other time claim. When supplied facts do not fix a schedule, you may materialize concrete schedule values for an observation, but keep them internally consistent and omit a relation you cannot support.",
@@ -1360,11 +1377,18 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
       }
       const started = Date.now();
       const promptText = prompt(request.frame, request.ruling, request.resolution);
+      const requireRouteAccessClaims = admittedRuling.data.normalizedIntent.kind === "contact"
+        && admittedRuling.data.movementRouteHandle === null
+        && (
+          admittedRuling.data.normalizedIntent.targets.some((target) => target.kind === "route")
+          || admittedRuling.data.citedVisibleFactHandles.some((citedHandle) =>
+            handleMap.get(citedHandle)?.kind === "route")
+        );
       let generated;
       try {
         generated = await dependencies.generateObject({
           model: request.model,
-          schema: constrainedProposalSchema(handleMap),
+          schema: constrainedProposalSchema(handleMap, requireRouteAccessClaims),
           prompt: promptText,
           temperature: request.temperature,
           maxOutputTokens: request.budget.maximumOutputTokens,

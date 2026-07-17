@@ -662,6 +662,8 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("never transplant its dust, residue, objects, actors, sound, weather, temperature, or lighting");
     expect(prompt).toContain("If the packet supplies no current lighting or time-of-day detail, omit lighting entirely");
     expect(prompt).toContain("Preserve epistemic modality and scope exactly");
+    expect(prompt).toContain('"Consistent with a single event" must remain a possibility');
+    expect(prompt).toContain('must not become "from one event" or "all caused together."');
     expect(prompt).toContain("must not become an unqualified fact");
     expect(prompt).toContain("Never increase certainty, precision, comparison scope, or causal strength");
     expect(prompt).toContain("natural scene prose rather than copying audit-like qualifications");
