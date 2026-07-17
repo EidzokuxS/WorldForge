@@ -1712,10 +1712,11 @@ export const campaignPlayUncertaintySpecSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
-export const campaignPlayRequiredPossessionEffectSchema = z.discriminatedUnion("kind", [
+export const campaignPlayPossessionEffectAuthoritySchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("none") }).strict(),
   z.object({
     kind: z.literal("adjust_actor_possession"),
+    enforcement: z.enum(["required", "permitted"]),
     operation: z.enum(["acquire", "spend", "transform"]),
     possessionHandle: handleSchema.nullable(),
     quantity: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
@@ -1727,6 +1728,13 @@ export const campaignPlayRequiredPossessionEffectSchema = z.discriminatedUnion("
         code: "custom",
         path: ["possessionHandle"],
         message: "Spend and transform require one existing possession; acquire requires none.",
+      });
+    }
+    if (effect.enforcement === "permitted" && effect.operation !== "acquire") {
+      context.addIssue({
+        code: "custom",
+        path: ["enforcement"],
+        message: "Permitted authority is reserved for a targeted actor's optional acquisition transfer.",
       });
     }
   }),
@@ -1759,7 +1767,7 @@ const campaignPlayJudgeRulingBaseSchema = z.object({
   disposition: campaignPlayJudgmentDispositionSchema,
   normalizedIntent: playerIntentSchema,
   movementRouteHandle: handleSchema.nullable(),
-  requiredPossessionEffect: campaignPlayRequiredPossessionEffectSchema,
+  possessionEffectAuthority: campaignPlayPossessionEffectAuthoritySchema,
   requiredObligationEffect: campaignPlayRequiredObligationEffectSchema,
   citedVisibleFactHandles: z.array(handleSchema)
     .max(CAMPAIGN_PLAY_LIMITS.citedFacts),
@@ -1864,27 +1872,27 @@ export const campaignPlayJudgeRulingSchema =
     if (
       (ruling.disposition === "impossible" || asksClarification)
       && (
-        ruling.requiredPossessionEffect.kind !== "none"
+        ruling.possessionEffectAuthority.kind !== "none"
         || ruling.requiredObligationEffect.kind !== "none"
       )
     ) {
       context.addIssue({
         code: "custom",
-        path: ["requiredPossessionEffect"],
+        path: ["possessionEffectAuthority"],
         message: "No-effect rulings cannot require a possession or obligation effect.",
       });
     }
-    if (ruling.requiredPossessionEffect.kind === "adjust_actor_possession") {
+    if (ruling.possessionEffectAuthority.kind === "adjust_actor_possession") {
       const rank = new Map(
         CAMPAIGN_PLAY_RESULT_TIER_VALUES.map((tier, index) => [tier, index]),
       );
       if (
-        (rank.get(ruling.requiredPossessionEffect.minimumResult) ?? 0)
+        (rank.get(ruling.possessionEffectAuthority.minimumResult) ?? 0)
         > (rank.get(ruling.resultBounds.maximum) ?? 0)
       ) {
         context.addIssue({
           code: "custom",
-          path: ["requiredPossessionEffect", "minimumResult"],
+          path: ["possessionEffectAuthority", "minimumResult"],
           message: "Required possession effect must be reachable inside the result bounds.",
         });
       }

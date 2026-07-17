@@ -137,7 +137,7 @@ function ruling(overrides: Partial<CampaignPlayJudgeRuling> = {}): CampaignPlayJ
       kind: "contact", targets: [{ handle: "guard", kind: "actor" }], method: "Ask calmly", stakes: "Learn the reason",
     },
     movementRouteHandle: null,
-    requiredPossessionEffect: { kind: "none" },
+    possessionEffectAuthority: { kind: "none" },
     requiredObligationEffect: { kind: "none" },
     citedVisibleFactHandles: ["guard", "passage"],
     resultBounds: { minimum: "success", maximum: "success" },
@@ -519,6 +519,13 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("Put the player's copied handle in actorHandle. performingActorHandle is forbidden on adjust_actor_possession and exists only on record_world_event");
     expect(String(options.prompt)).toContain("return operation transform with the source possessionHandle and the concrete resulting name");
     expect(String(options.prompt)).toContain("Do not add record_world_event for the same gain, spend, or transformation");
+    expect(String(options.prompt)).toContain("Player possession is code-owned authority");
+    expect(String(options.prompt)).toContain("A general tool possession never supplies raw material, fasteners, or another consumable");
+    expect(String(options.prompt)).toContain("A work assignment, supply list, visible stock");
+    expect(String(options.prompt)).toContain("record_world_event cannot substitute for a possession transition");
+    expect(String(options.prompt)).toContain("required means include exactly one matching adjust_actor_possession effect");
+    expect(String(options.prompt)).toContain("permitted means include zero or one");
+    expect(String(options.prompt)).toContain("When no authority applies, every adjust_actor_possession effect is forbidden");
     expect(String(options.prompt)).toContain("Every non-null adjust_actor_possession name must be at most 120 characters");
     expect(String(options.prompt)).toContain("put state, contents, provenance, and other details in summary");
     expect(String(options.prompt)).toContain("Every summary must fit its schema limit: at most 1200 characters");
@@ -596,7 +603,16 @@ describe("Campaign Play Game Master", () => {
   it("compiles acquisition, spending, and transformation into typed Rulebook possession effects", () => {
     const acquisition = createCampaignPlayGameMaster().compile(
       frame(),
-      ruling(),
+      ruling({
+        possessionEffectAuthority: {
+          kind: "adjust_actor_possession",
+          enforcement: "required",
+          operation: "acquire",
+          possessionHandle: null,
+          quantity: 2,
+          minimumResult: "success",
+        },
+      }),
       resolution,
       null,
       {
@@ -634,6 +650,49 @@ describe("Campaign Play Game Master", () => {
     });
     expect(acquisition.preflight.accepted).toBe(true);
 
+    const permittedAcquisition = ruling({
+      possessionEffectAuthority: {
+        kind: "adjust_actor_possession",
+        enforcement: "permitted",
+        operation: "acquire",
+        possessionHandle: null,
+        quantity: 2,
+        minimumResult: "success",
+      },
+    });
+    const declinedAcquisition = createCampaignPlayGameMaster().compile(
+      frame(),
+      permittedAcquisition,
+      resolution,
+      null,
+      proposal,
+    );
+    expect(declinedAcquisition.preflight.accepted).toBe(true);
+    expect(declinedAcquisition.batch.commands.some((command) =>
+      command.kind === "adjust_actor_possession")).toBe(false);
+    const grantedAcquisition = createCampaignPlayGameMaster().compile(
+      frame(),
+      permittedAcquisition,
+      resolution,
+      null,
+      {
+        elapsedMinutes: 1,
+        effects: [{
+          kind: "adjust_actor_possession",
+          operation: "acquire",
+          actorHandle: "you",
+          possessionHandle: null,
+          name: "Copper chit",
+          quantity: 2,
+          summary: "The clerk pays you two copper chits for the copied manifests.",
+          affectedHandles: ["guard"],
+        }],
+      },
+    );
+    expect(grantedAcquisition.preflight.accepted).toBe(true);
+    expect(grantedAcquisition.batch.commands.some((command) =>
+      command.kind === "adjust_actor_possession")).toBe(true);
+
     const spendingFrame = frame();
     spendingFrame.visibleFacts.push({
       handle: "copper-chit",
@@ -654,7 +713,17 @@ describe("Campaign Play Game Master", () => {
     });
     const spending = createCampaignPlayGameMaster().compile(
       spendingFrame,
-      ruling(),
+      ruling({
+        possessionEffectAuthority: {
+          kind: "adjust_actor_possession",
+          enforcement: "required",
+          operation: "spend",
+          possessionHandle: "copper-chit",
+          quantity: 1,
+          minimumResult: "success",
+        },
+        citedVisibleFactHandles: ["guard", "passage", "copper-chit"],
+      }),
       resolution,
       null,
       {
@@ -678,11 +747,32 @@ describe("Campaign Play Game Master", () => {
     });
     expect(spending.preflight.accepted).toBe(true);
 
+    expect(() => createCampaignPlayGameMaster().compile(
+      spendingFrame,
+      ruling({ citedVisibleFactHandles: ["guard", "passage", "copper-chit"] }),
+      resolution,
+      null,
+      {
+        elapsedMinutes: 1,
+        effects: [{
+          kind: "adjust_actor_possession",
+          operation: "spend",
+          actorHandle: "you",
+          possessionHandle: "copper-chit",
+          name: null,
+          quantity: 1,
+          summary: "You spend one copper chit without Judge authority.",
+          affectedHandles: [],
+        }],
+      },
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+
     const transformation = createCampaignPlayGameMaster().compile(
       spendingFrame,
       ruling({
-        requiredPossessionEffect: {
+        possessionEffectAuthority: {
           kind: "adjust_actor_possession",
+          enforcement: "required",
           operation: "transform",
           possessionHandle: "copper-chit",
           quantity: 1,
@@ -725,8 +815,9 @@ describe("Campaign Play Game Master", () => {
     expect(() => createCampaignPlayGameMaster().compile(
       spendingFrame,
       ruling({
-        requiredPossessionEffect: {
+        possessionEffectAuthority: {
           kind: "adjust_actor_possession",
+          enforcement: "required",
           operation: "transform",
           possessionHandle: "copper-chit",
           quantity: 1,

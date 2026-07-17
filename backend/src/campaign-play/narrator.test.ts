@@ -620,6 +620,10 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("actionContext and continuity as a record of what the player has already tried and learned");
     expect(prompt).toContain("possessions is current player custody");
     expect(prompt).toContain("An item with positive quantity there is already acquired");
+    expect(prompt).toContain("A detail may require a tool or consumable only when possessions contains it with positive quantity");
+    expect(prompt).toContain("A general tool possession never includes raw material, fasteners, or another consumable");
+    expect(prompt).toContain("prior narration does not put supplies in player custody");
+    expect(prompt).toContain("Never suggest using, installing, spending, or transforming absent material");
     expect(prompt).toContain("choose another unresolved step");
     expect(prompt).toContain("Treat the latest explicit object relation in newObservations or consequences as final");
     expect(prompt).toContain("already at that fixture or inside that container");

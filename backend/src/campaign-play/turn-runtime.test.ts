@@ -559,7 +559,7 @@ function judgeFixture(disposition: Disposition, compoundDestinationName: string 
           : target ? "Ask calmly" : "Wait and watch",
         stakes: "Learn what changes at the signal gate",
         movementRouteHandle,
-        requiredPossessionEffect: { kind: "none" },
+        possessionEffectAuthority: { kind: "none" },
         requiredObligationEffect: { kind: "none" },
         disposition,
         citedVisibleFactHandles: [request.frame.locationHandle],

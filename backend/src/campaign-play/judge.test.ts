@@ -98,7 +98,7 @@ function proposal(overrides: Record<string, unknown> = {}) {
     method: "Ask calmly",
     stakes: "Learn why the road is closed",
     movementRouteHandle: null,
-    requiredPossessionEffect: { kind: "none" },
+    possessionEffectAuthority: { kind: "none" },
     requiredObligationEffect: { kind: "none" },
     disposition: "deterministic",
     citedVisibleFactHandles: ["actor-guard", "route-reef"],
@@ -221,8 +221,9 @@ describe("Campaign Play Judge", () => {
       targets: [{ handle: "location-harbor", kind: "location" }],
       method: "Measure the seepage and record a condition list in the visible notebook",
       stakes: "Produce a retained condition list",
-      requiredPossessionEffect: {
+      possessionEffectAuthority: {
         kind: "adjust_actor_possession",
+        enforcement: "required",
         operation: "transform",
         possessionHandle: "notebook",
         quantity: 1,
@@ -240,8 +241,9 @@ describe("Campaign Play Judge", () => {
       },
     });
 
-    expect(judge.compile(frame(), input, value).requiredPossessionEffect).toEqual({
+    expect(judge.compile(frame(), input, value).possessionEffectAuthority).toEqual({
       kind: "adjust_actor_possession",
+      enforcement: "required",
       operation: "transform",
       possessionHandle: "notebook",
       quantity: 1,
@@ -495,8 +497,14 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("including a route-bound attempt");
     expect(sentPrompt).toContain("Never add, remove, or change travel");
     expect(sentPrompt).toContain("For a pure move, elapsedBounds.minimumMinutes and elapsedBounds.maximumMinutes must both equal the selected route's travelCost");
-    expect(sentPrompt).toContain('{"kind":"adjust_actor_possession","operation":"transform","possessionHandle":"copied visible handle","quantity":1,"minimumResult":"lowest applicable tier"}');
+    expect(sentPrompt).toContain('{"kind":"adjust_actor_possession","enforcement":"required","operation":"transform","possessionHandle":"copied visible handle","quantity":1,"minimumResult":"lowest applicable tier"}');
     expect(sentPrompt).toContain("there is no adjustment field");
+    expect(sentPrompt).toContain("A positive possession entry in VISIBLE_FRAME is the only authority");
+    expect(sentPrompt).toContain("A general tool possession authorizes only the tools it names");
+    expect(sentPrompt).toContain("A work assignment, posted supply list, visible stock");
+    expect(sentPrompt).toContain("directly uses a tool or consumable that has no visible possession handle, classify it as impossible");
+    expect(sentPrompt).toContain("A plain request for an item uses permitted acquire");
+    expect(sentPrompt).toContain("authorize a permitted acquire instead of assuming either transfer or refusal");
     expect(sentPrompt).toContain('Its exact shape is {"kind":"pay_actor_obligation"');
     expect(sentPrompt).toContain('"paymentPossessionHandle":"copied visible possession handle"');
     expect(sentPrompt).toContain("displayed cargo movement, or narration without that transfer does not pay debt");

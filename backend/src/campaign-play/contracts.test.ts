@@ -1836,7 +1836,7 @@ describe("Campaign Play Judge and Rulebook contracts", () => {
       disposition: "deterministic" as const,
       normalizedIntent: intentFixture("wait"),
       movementRouteHandle: null,
-      requiredPossessionEffect: { kind: "none" as const },
+      possessionEffectAuthority: { kind: "none" as const },
       requiredObligationEffect: { kind: "none" as const },
       citedVisibleFactHandles: [],
       resultBounds: { minimum: "success" as const, maximum: "success" as const },
@@ -1857,8 +1857,9 @@ describe("Campaign Play Judge and Rulebook contracts", () => {
       disposition: "uncertain" as const,
       normalizedIntent: intentFixture(),
       movementRouteHandle: null,
-      requiredPossessionEffect: {
+      possessionEffectAuthority: {
         kind: "adjust_actor_possession" as const,
+        enforcement: "required" as const,
         operation: "transform" as const,
         possessionHandle: "possession_notebook",
         quantity: 1,
@@ -1881,15 +1882,32 @@ describe("Campaign Play Judge and Rulebook contracts", () => {
     expect(campaignPlayJudgeRulingSchema.safeParse(ruling).success).toBe(true);
     expect(campaignPlayJudgeRulingSchema.safeParse({
       ...ruling,
-      requiredPossessionEffect: {
-        ...ruling.requiredPossessionEffect,
+      possessionEffectAuthority: {
+        ...ruling.possessionEffectAuthority,
+        enforcement: "permitted",
+        operation: "acquire",
+        possessionHandle: null,
+      },
+    }).success).toBe(true);
+    expect(campaignPlayJudgeRulingSchema.safeParse({
+      ...ruling,
+      possessionEffectAuthority: {
+        ...ruling.possessionEffectAuthority,
+        enforcement: "permitted",
+        operation: "spend",
+      },
+    }).success).toBe(false);
+    expect(campaignPlayJudgeRulingSchema.safeParse({
+      ...ruling,
+      possessionEffectAuthority: {
+        ...ruling.possessionEffectAuthority,
         possessionHandle: null,
       },
     }).success).toBe(false);
     expect(campaignPlayJudgeRulingSchema.safeParse({
       ...ruling,
-      requiredPossessionEffect: {
-        ...ruling.requiredPossessionEffect,
+      possessionEffectAuthority: {
+        ...ruling.possessionEffectAuthority,
         minimumResult: "strong_success",
       },
     }).success).toBe(false);
@@ -1901,7 +1919,7 @@ describe("Campaign Play Judge and Rulebook contracts", () => {
         disposition,
         normalizedIntent: intentFixture(),
         movementRouteHandle: null,
-        requiredPossessionEffect: { kind: "none" as const },
+        possessionEffectAuthority: { kind: "none" as const },
         requiredObligationEffect: { kind: "none" as const },
         citedVisibleFactHandles: ["fact_bridge"],
         resultBounds: disposition === "impossible" || disposition === "clarification_required"
@@ -1965,7 +1983,7 @@ describe("Campaign Play Judge and Rulebook contracts", () => {
       disposition: "deterministic" as const,
       normalizedIntent: intentFixture(),
       movementRouteHandle: null,
-      requiredPossessionEffect: { kind: "none" as const },
+      possessionEffectAuthority: { kind: "none" as const },
       requiredObligationEffect: { kind: "none" as const },
       citedVisibleFactHandles: [],
       resultBounds: { minimum: "limited" as const, maximum: "success" as const },
@@ -2009,7 +2027,7 @@ describe("Campaign Play Judge and Rulebook contracts", () => {
       disposition: "deterministic" as const,
       normalizedIntent: intentFixture(),
       movementRouteHandle: null,
-      requiredPossessionEffect: { kind: "none" as const },
+      possessionEffectAuthority: { kind: "none" as const },
       requiredObligationEffect: { kind: "none" as const },
       citedVisibleFactHandles: [],
       resultBounds: { minimum: "success" as const, maximum: "success" as const },
@@ -2063,7 +2081,7 @@ describe("Campaign Play Judge and Rulebook contracts", () => {
         disposition: "deterministic" as const,
         normalizedIntent: intentFixture(),
         movementRouteHandle: null,
-        requiredPossessionEffect: { kind: "none" as const },
+        possessionEffectAuthority: { kind: "none" as const },
         requiredObligationEffect: { kind: "none" as const },
         citedVisibleFactHandles: [],
         resultBounds: { minimum: "limited" as const, maximum: "success" as const },
@@ -2273,7 +2291,7 @@ describe("Campaign Play Judge and Rulebook contracts", () => {
       disposition: "deterministic",
       normalizedIntent: intentFixture(),
       movementRouteHandle: null,
-      requiredPossessionEffect: { kind: "none" as const },
+      possessionEffectAuthority: { kind: "none" as const },
       requiredObligationEffect: { kind: "none" as const },
       citedVisibleFactHandles: Array.from(
         { length: CAMPAIGN_PLAY_LIMITS.citedFacts },

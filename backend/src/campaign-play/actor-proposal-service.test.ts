@@ -324,7 +324,7 @@ function createReadyFixture(
           stakes: null,
         },
         movementRouteHandle: null,
-        requiredPossessionEffect: { kind: "none" },
+        possessionEffectAuthority: { kind: "none" },
         requiredObligationEffect: { kind: "none" },
         citedVisibleFactHandles: [],
         resultBounds: { minimum: "no_effect", maximum: "no_effect" },

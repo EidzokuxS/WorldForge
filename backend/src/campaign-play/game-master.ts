@@ -923,18 +923,29 @@ function compile(
   ) {
     throw new CampaignPlayGameMasterError("model_contract_failed", null);
   }
-  const requiredPossessionEffect = ruling.requiredPossessionEffect.kind === "adjust_actor_possession"
+  const possessionEffectAuthority = ruling.possessionEffectAuthority.kind === "adjust_actor_possession"
     && CAMPAIGN_PLAY_RESULT_TIER_VALUES.indexOf(resolution.result)
-      >= CAMPAIGN_PLAY_RESULT_TIER_VALUES.indexOf(ruling.requiredPossessionEffect.minimumResult)
-    ? ruling.requiredPossessionEffect
+      >= CAMPAIGN_PLAY_RESULT_TIER_VALUES.indexOf(ruling.possessionEffectAuthority.minimumResult)
+    ? ruling.possessionEffectAuthority
     : null;
-  if (requiredPossessionEffect !== null) {
+  const proposedPossessionEffects = proposal.effects.filter((effect) =>
+    effect.kind === "adjust_actor_possession");
+  if (possessionEffectAuthority === null) {
+    if (proposedPossessionEffects.length !== 0) {
+      throw new CampaignPlayGameMasterError("model_contract_failed", null);
+    }
+  } else {
     const matchingEffects = proposal.effects.filter((effect) =>
       effect.kind === "adjust_actor_possession"
-      && effect.operation === requiredPossessionEffect.operation
-      && effect.possessionHandle === requiredPossessionEffect.possessionHandle
-      && effect.quantity === requiredPossessionEffect.quantity);
-    if (matchingEffects.length !== 1) {
+      && effect.operation === possessionEffectAuthority.operation
+      && effect.possessionHandle === possessionEffectAuthority.possessionHandle
+      && effect.quantity === possessionEffectAuthority.quantity);
+    const requiredCount = possessionEffectAuthority.enforcement === "required" ? 1 : 0;
+    if (
+      matchingEffects.length < requiredCount
+      || matchingEffects.length > 1
+      || proposedPossessionEffects.length !== matchingEffects.length
+    ) {
       throw new CampaignPlayGameMasterError("model_contract_failed", null);
     }
   }
@@ -1143,7 +1154,8 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     "record_world_event accepts exactly four eventClass values: dialogue, interaction, discovery, or scene. These are eventClass values only and must never appear in kind. Dialogue and interaction mean that a targeted nonplayer actor performs the event: set performingActorHandle to that actor and include the same handle in affectedHandles. Discovery and scene are actorless: set performingActorHandle to null, and do not use their summary to make a person speak, decide, transact, disclose information, or become a contact. When PLAYER_INTENT targets no actor, every record_world_event must be actorless: do not make a nearby person inspect, approve, reject, speak, or otherwise react; leave that response for a later contact action. A player's physical attempt that has no nonplayer performer must use its typed effect or an actorless discovery/scene result. For an observe result that changes no durable entity, return exactly one effect shaped as {\"kind\":\"record_world_event\",\"eventClass\":\"discovery\",\"performingActorHandle\":null,\"summary\":\"grounded observation\",\"affectedHandles\":[\"copied handle\"]}; do not add a second inspect, observe, discover, reveal, or describe effect. Use scene for an arrival or other directly perceived situation that is neither observation nor contact. Return a grounded summary and grounded affectedHandles. Omit exposure from record_world_event; code attaches direct perception at the player's current location at that effect's chronological position.",
     "record_world_event may quote a price, warning, request, or possible charge, but it never creates, increases, reduces, pays, or settles a binding obligation. Use the matching typed obligation effect for authoritative debt changes.",
     "Use adjust_actor_possession whenever the resolved action gives the player a countable possession, consumes one, or durably changes what an existing possession is. This effect has exactly these fields: kind, operation, actorHandle, possessionHandle, name, quantity, summary, and affectedHandles. Put the player's copied handle in actorHandle. performingActorHandle is forbidden on adjust_actor_possession and exists only on record_world_event. For a new possession, return operation acquire, the player actor handle, null possessionHandle, its concrete name, positive quantity, a player-visible summary, and grounded affectedHandles. For more of an existing possession, use operation acquire with its visible possessionHandle and null name. To consume one, return operation spend, its visible possessionHandle, null name, and a positive quantity. When an action writes on, repairs, assembles, opens, fills, empties, or otherwise turns an existing possession into a materially different retained item, return operation transform with the source possessionHandle and the concrete resulting name. Transform consumes the requested source quantity and acquires the same quantity under the resulting name in one Rulebook batch. Do not add record_world_event for the same gain, spend, or transformation: the typed effect is the public consequence and Rulebook truth.",
-    "requiredPossessionEffect in RULING is code-enforced Judge authority. When the resolved result meets its minimumResult, include exactly one adjust_actor_possession effect with the same operation, possessionHandle, and quantity. Choose the concrete resulting name and summary from the resolved outcome. Omitting or duplicating that matching effect invalidates the whole proposal before Rulebook execution.",
+    "Player possession is code-owned authority. Never claim that the player uses, carries, installs, spends, or transforms a tool or material unless VISIBLE_FACTS contains its positive player possession handle or this proposal first transfers it through the one Judge-required acquire effect. A general tool possession never supplies raw material, fasteners, or another consumable. A work assignment, supply list, visible stock, offer, request, dialogue, handling, transport, RULING method or stakes, and SOURCE_MOMENT prose do not establish custody. record_world_event cannot substitute for a possession transition.",
+    "possessionEffectAuthority in RULING is code-enforced Judge authority. When the resolved result meets minimumResult, match its operation, possessionHandle, and quantity. required means include exactly one matching adjust_actor_possession effect. permitted means include zero or one: use one only when the targeted person's grounded response actually transfers the item. Choose the concrete resulting name and summary from that committed outcome. When no authority applies, every adjust_actor_possession effect is forbidden. Omitting a required effect, duplicating one, or adding any unmatched possession effect invalidates the whole proposal before Rulebook execution.",
     "Use incur_actor_obligation only when the resolved result creates a binding debt from the player to one visible nonplayer actor. This effect has exactly these fields: kind, debtorActorHandle, creditorActorHandle, unitKey, amount, summary, and affectedHandles. Copy the player handle into debtorActorHandle and the visible creditor handle into creditorActorHandle. unitKey must be copper and amount is the exact newly incurred amount, not the running total. The summary states the concrete committed debt in player-visible language. Do not add a record_world_event that creates or repeats the same debt; the typed effect is both the public consequence and Rulebook truth. A quoted price, warning, possible charge, or payment request is not a binding debt.",
     "Use pay_actor_obligation only when the resolved result transfers the player's visible copper possession to settle the player's visible obligation. This effect has exactly these fields: kind, debtorActorHandle, creditorActorHandle, obligationHandle, paymentPossessionHandle, unitKey, amount, summary, and affectedHandles. Copy the player, creditor, obligation, and payment-possession handles exactly. affectedHandles may contain only those same copied handles and must not repeat one. unitKey must be copper and amount is the exact payment, not the remaining balance. The summary states what was transferred and the resulting outstanding debt in concrete player-visible language. Do not add record_world_event or adjust_actor_possession for the same payment: this one typed effect atomically transfers the possession and reduces the obligation. Handling cargo, handing over an unrelated object, offering, promising, or narrating payment does not settle debt.",
     "requiredObligationEffect in RULING is code-enforced Judge authority. When the resolved result meets its minimumResult, include exactly one matching obligation effect and no other obligation effect. For incur_actor_obligation, match creditorActorHandle, unitKey, and amount. For pay_actor_obligation, match obligationHandle, paymentPossessionHandle, unitKey, and amount. Omitting, duplicating, or changing that effect invalidates the whole proposal before Rulebook execution. Prose never creates or settles an obligation.",
