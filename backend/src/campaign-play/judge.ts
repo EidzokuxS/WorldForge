@@ -157,21 +157,29 @@ function judgeProposalSchemaForFrame(
   });
   if (input?.source !== "suggested" || !input.frozenChoice) return frameSchema;
 
-  const frozenTargetSchemas = input.frozenChoice.targets.map((target) =>
+  const allowedSuggestedTargets = [
+    ...input.frozenChoice.targets,
+    ...frame.visibleFacts
+      .filter((fact) => fact.kind === "actor" && fact.handle !== frame.playerActorHandle)
+      .map((fact) => ({ handle: fact.handle, kind: "actor" as const })),
+  ].filter((target, index, targets) => targets.findIndex((candidate) =>
+    candidate.handle === target.handle && candidate.kind === target.kind) === index);
+  const allowedSuggestedTargetSchemas = allowedSuggestedTargets.map((target) =>
     campaignPlayVisibleTargetSchema.extend({
       handle: z.literal(target.handle),
       kind: z.literal(target.kind),
     }));
-  const frozenTargetsSchema = frozenTargetSchemas.length === 0
+  const suggestedTargetsSchema = allowedSuggestedTargetSchemas.length === 0
     ? z.array(campaignPlayVisibleTargetSchema).length(0)
-    : z.array(frozenTargetSchemas.length === 1
-      ? frozenTargetSchemas[0]!
-      : z.union(frozenTargetSchemas as [
-        (typeof frozenTargetSchemas)[number],
-        (typeof frozenTargetSchemas)[number],
-        ...(typeof frozenTargetSchemas)[number][],
+    : z.array(allowedSuggestedTargetSchemas.length === 1
+      ? allowedSuggestedTargetSchemas[0]!
+      : z.union(allowedSuggestedTargetSchemas as [
+        (typeof allowedSuggestedTargetSchemas)[number],
+        (typeof allowedSuggestedTargetSchemas)[number],
+        ...(typeof allowedSuggestedTargetSchemas)[number][],
       ]))
-      .length(frozenTargetSchemas.length);
+      .min(input.frozenChoice.targets.length)
+      .max(Math.min(CAMPAIGN_PLAY_LIMITS.targets, allowedSuggestedTargets.length));
   const frozenRouteHandle = input.frozenChoice.kind === "move"
     && input.frozenChoice.targets.length === 1
     && input.frozenChoice.targets[0]?.kind === "route"
@@ -179,7 +187,7 @@ function judgeProposalSchemaForFrame(
     : null;
   return frameSchema.extend({
     kind: z.literal(input.frozenChoice.kind),
-    targets: frozenTargetsSchema,
+    targets: suggestedTargetsSchema,
     movementRouteHandle: frozenRouteHandle === null
       ? z.null()
       : z.literal(frozenRouteHandle),
@@ -344,7 +352,7 @@ function prompt(frame: CampaignPlayJudgeFrame, input: CampaignPlayJudgeInput): s
     "For deterministic or uncertain rulings, resultBounds must not contain no_effect. Impossible and clarification_required use no_effect for both bounds.",
     "clarificationQuestion must be non-null only for clarification_required and null for every other disposition.",
     "For uncertain rulings, uncertainty.kind must be check and must include dieSides=20, difficulty, modifierMinimum, and modifierMaximum. The modifier range must contain zero. Code performs the roll; never claim a roll result.",
-    "For suggested input, copy FROZEN_CHOICE kind and targets exactly. targets must always be a JSON array. When FROZEN_CHOICE contains one target, return that object inside a one-element array. Judge feasibility and outcome without reinterpreting the selected action.",
+    "For suggested input, copy FROZEN_CHOICE kind and every frozen target. targets must always be a JSON array. You may add only visible nonplayer actors whose participation, consent, or reaction is material to the rendered action. Add each such actor from TARGET_CATALOG. Never add another location, route, pressure, possession, or the player actor. Judge feasibility and outcome without changing the selected action.",
     "movementRouteHandle is a separate mechanical decision from the primary kind. Set it to the exact visible route when the action includes travel before or during its primary action, including compound requests such as travel then contact. Otherwise set it to null. A move kind always requires a non-null movementRouteHandle. Never infer travel from a cited route alone. The route does not need to be repeated in targets; targets describe the action's semantic subjects or destination.",
     "For suggested input, a move choice must use its exact frozen route target as movementRouteHandle. Every suggested non-move choice must set movementRouteHandle to null; never add travel that the frozen choice did not authorize.",
     "VISIBLE_ROUTES carries code-authoritative travelCost ticks. For a pure move, elapsedBounds.minimumMinutes and elapsedBounds.maximumMinutes must both equal the selected route's travelCost. For a compound action that includes travel, elapsedBounds.minimumMinutes must be at least that travelCost. Never estimate a different route duration.",
@@ -366,6 +374,28 @@ function prompt(frame: CampaignPlayJudgeFrame, input: CampaignPlayJudgeInput): s
     `FROZEN_CHOICE=${JSON.stringify(input.frozenChoice ?? null)}`,
     `PLAYER_INPUT=${JSON.stringify(input.originalText)}`,
   ].join("\n");
+}
+
+export function campaignPlaySuggestedTargetsAreAuthorized(input: {
+  frozenTargets: PlayerIntent["targets"];
+  proposedTargets: PlayerIntent["targets"];
+  visibleFacts: CampaignPlayJudgeFrame["visibleFacts"];
+  playerActorHandle: string;
+}): boolean {
+  const key = (target: PlayerIntent["targets"][number]): string =>
+    `${target.kind}:${target.handle}`;
+  const frozenKeys = new Set(input.frozenTargets.map(key));
+  const proposedKeys = input.proposedTargets.map(key);
+  if (
+    new Set(proposedKeys).size !== proposedKeys.length
+    || input.frozenTargets.some((target) => !proposedKeys.includes(key(target)))
+  ) return false;
+  const visibleNonplayerActors = new Set(input.visibleFacts
+    .filter((fact) => fact.kind === "actor" && fact.handle !== input.playerActorHandle)
+    .map((fact) => fact.handle));
+  return input.proposedTargets.every((target) =>
+    frozenKeys.has(key(target))
+    || (target.kind === "actor" && visibleNonplayerActors.has(target.handle)));
 }
 
 function compile(
@@ -462,10 +492,11 @@ function compile(
   if (inputResult.data.source === "suggested") {
     const frozenChoice = inputResult.data.frozenChoice!;
     const proposalMatchesFrozenChoice = proposal.kind === frozenChoice.kind
-      && proposal.targets.length === frozenChoice.targets.length
-      && proposal.targets.every((target, index) => {
-        const frozenTarget = frozenChoice.targets[index];
-        return target.handle === frozenTarget?.handle && target.kind === frozenTarget.kind;
+      && campaignPlaySuggestedTargetsAreAuthorized({
+        frozenTargets: frozenChoice.targets,
+        proposedTargets: proposal.targets,
+        visibleFacts: frameResult.data.visibleFacts,
+        playerActorHandle: frameResult.data.playerActorHandle,
       });
     if (!proposalMatchesFrozenChoice) {
       throw new CampaignPlayJudgeError("model_contract_failed", null);

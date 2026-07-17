@@ -378,7 +378,9 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("target the exact current location from TARGET_CATALOG");
     expect(sentPrompt).toContain("A plain question claims only that the question is delivered");
     expect(sentPrompt).toContain("targets must always be a JSON array");
-    expect(sentPrompt).toContain("return that object inside a one-element array");
+    expect(sentPrompt).toContain("copy FROZEN_CHOICE kind and every frozen target");
+    expect(sentPrompt).toContain("visible nonplayer actors whose participation, consent, or reaction is material");
+    expect(sentPrompt).toContain("Never add another location, route, pressure, possession, or the player actor");
     expect(sentPrompt).toContain("ACTOR_CONTINUITY outranks any conflicting earlier dialogue");
     expect(sentPrompt).toContain("movementRouteHandle is a separate mechanical decision");
     expect(sentPrompt).toContain("compound requests such as travel then contact");
@@ -477,6 +479,74 @@ describe("Campaign Play Judge", () => {
     }))).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
   });
 
+  it("adds only visible nonplayer participants to a frozen suggested attempt", async () => {
+    const suggestedInput = {
+      originalText: "Try to help raise the gate bar.",
+      source: "suggested" as const,
+      choiceHandle: "choice-ask",
+      frozenChoice: {
+        kind: "attempt" as const,
+        targets: [{ handle: "location-harbor", kind: "location" as const }],
+      },
+    };
+    const validProposal = proposal({
+      kind: "attempt",
+      targets: [
+        ...suggestedInput.frozenChoice.targets,
+        { handle: "actor-guard", kind: "actor" },
+      ],
+      method: "Raise the gate bar with the guard",
+      stakes: "Open the guarded passage",
+      disposition: "uncertain",
+      resultBounds: { minimum: "setback", maximum: "success" },
+      uncertainty: {
+        kind: "check",
+        dieSides: 20,
+        difficulty: 12,
+        modifierMinimum: -1,
+        modifierMaximum: 1,
+      },
+    });
+    const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
+      object: validProposal,
+      trace: trace(),
+    }));
+    const judge = createCampaignPlayJudge({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const result = await judge.judge({
+      frame: frame(),
+      input: suggestedInput,
+      model: model(),
+      temperature: 0.2,
+      budget,
+    });
+    expect(result.ruling.normalizedIntent.targets).toEqual(validProposal.targets);
+    const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    expect(z.toJSONSchema((options.schema as unknown as {
+      shape: { targets: z.ZodType };
+    }).shape.targets)).toMatchObject({
+      type: "array",
+      minItems: 1,
+      maxItems: 2,
+    });
+    expect(() => judge.compile(frame(), suggestedInput, {
+      ...validProposal,
+      targets: [
+        ...suggestedInput.frozenChoice.targets,
+        { handle: "route-reef", kind: "route" },
+      ],
+    })).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
+    expect(() => judge.compile(frame(), suggestedInput, {
+      ...validProposal,
+      targets: [
+        ...suggestedInput.frozenChoice.targets,
+        { handle: "actor-you", kind: "actor" },
+      ],
+    })).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
+  });
+
   it("presents a one-target suggested action as a standard JSON array schema", async () => {
     const validProposal = proposal();
     const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
@@ -518,7 +588,7 @@ describe("Campaign Play Judge", () => {
     expect(options.schema.safeParse({ ...validProposal, targets: "actor-guard" }).success).toBe(false);
   });
 
-  it("binds a suggested wait to its frozen kind and empty target list before compilation", async () => {
+  it("binds a suggested wait to its frozen kind while admitting only visible actor participants", async () => {
     const suggestedWaitFrame = frame();
     suggestedWaitFrame.visibleFacts.push({
       handle: "choice-wait", kind: "choice", summary: "Wait and watch the patrol rounds.",
@@ -556,6 +626,10 @@ describe("Campaign Play Judge", () => {
     expect(options.schema.safeParse({
       ...validProposal,
       targets: [{ handle: "actor-guard", kind: "actor" }],
+    }).success).toBe(true);
+    expect(options.schema.safeParse({
+      ...validProposal,
+      targets: [{ handle: "location-harbor", kind: "location" }],
     }).success).toBe(false);
     expect(options.schema.safeParse({
       ...validProposal,

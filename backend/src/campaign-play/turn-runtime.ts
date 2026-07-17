@@ -37,6 +37,7 @@ import {
 } from "./campaign-play-projection.js";
 import {
   CampaignPlayJudgeError,
+  campaignPlaySuggestedTargetsAreAuthorized,
   campaignPlayJudgeFrameSchema,
   campaignPlayJudgeVisibleFactSchema,
   createCampaignPlayJudge,
@@ -912,8 +913,12 @@ function assertSuggestedRuling(
     choice.handle === admission.judgeInput.choiceHandle);
   if (
     !binding || ruling.normalizedIntent.kind !== binding.kind ||
-    canonicalizeCampaignPlayProjection(ruling.normalizedIntent.targets) !==
-      canonicalizeCampaignPlayProjection(binding.targets)
+    !campaignPlaySuggestedTargetsAreAuthorized({
+      frozenTargets: binding.targets,
+      proposedTargets: ruling.normalizedIntent.targets,
+      visibleFacts: admission.visibleFacts,
+      playerActorHandle: admission.player.actorHandle,
+    })
   ) {
     throw new CampaignPlayTurnRuntimeError(
       "turn_judge_invalid",

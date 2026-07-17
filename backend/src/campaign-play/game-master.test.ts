@@ -263,6 +263,12 @@ describe("Campaign Play Game Master", () => {
       'ACTOR_CONTINUITY=[{"actorHandle":"guard","recentOwnActions":[{"summary":"Oren Tide inspected the passage latch before the traveler arrived.","observableTrace":"Fresh oil marks the passage latch."}]}]',
     );
     expect(String(options.prompt)).toContain("ACTOR_DIRECTIVES is protected roleplay authority");
+    expect(String(options.prompt)).toContain(
+      "For an attempt with nonplayer actor targets, their response is part of the outcome",
+    );
+    expect(String(options.prompt)).toContain(
+      "A successful roll resolves the player's effort; it does not create permission or cooperation",
+    );
     expect(String(options.prompt)).toContain("CANONICAL_PEOPLE is the complete person roster for this call");
     expect(String(options.prompt)).toContain("A person name outside this list does not identify an actor, even when SOURCE_MOMENT or prior prose mentions it");
     expect(String(options.prompt)).toContain("treat any prior mention as unverified hearsay about an unnamed resident");

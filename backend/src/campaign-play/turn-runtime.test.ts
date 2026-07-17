@@ -1064,6 +1064,48 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(gameMaster.plan.mock.calls[0]![0].frame.sourceMoment).toBe(frame.sourceNarration.displayText);
   });
 
+  it("admits a visible nonplayer participant added to a frozen suggested action", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening();
+    const time = fixedClock(2_325);
+    const judge = judgeFixture("deterministic");
+    const runtime = turnRuntime(handle, time, judge, gameMasterFixture());
+    const openingNarration = handle.sqlite.prepare(`SELECT suggested_actions_json AS suggestedActionsJson
+      FROM campaign_play_narrations WHERE campaign_id = ? AND status = 'complete'
+      ORDER BY completed_at DESC LIMIT 1`).get(CAMPAIGN_ID) as { suggestedActionsJson: string };
+    const suggestions = JSON.parse(openingNarration.suggestedActionsJson) as Array<{
+      choiceHandle: string;
+    }>;
+    const admission = runtime.admitAction({
+      request: {
+        idempotencyKey: "suggested-action-visible-participant",
+        expectedWorldVersion: state.authority.worldVersion,
+        expectedRuntimeRevision: state.authority.runtimeRevision,
+        source: "suggested",
+        choiceHandle: suggestions[0]!.choiceHandle,
+      },
+      submittedAt: 2_325,
+    });
+    const frame = loadCampaignPlayPlayerActionAdmissionFrame(runtime.loadTurn(admission.turnId)!);
+    const binding = frame.choiceBindings.find((choice) =>
+      choice.handle === suggestions[0]!.choiceHandle)!;
+    const participant = frame.visibleFacts.find((fact) =>
+      fact.kind === "actor" && fact.handle !== frame.player.actorHandle);
+    expect(participant).toBeDefined();
+    judge.selectChoice({
+      kind: binding.kind,
+      targets: [...binding.targets, { handle: participant!.handle, kind: "actor" }],
+    });
+
+    time.advance();
+    const result = await runtime.runNextStage(admission.turnId);
+    expect(result.turn).toMatchObject({
+      stage: "judged",
+      interruptedStage: null,
+      errorCode: null,
+    });
+    expect(judge.judge).toHaveBeenCalledTimes(1);
+  });
+
   it("interrupts a current suggestion when Judge changes its frozen kind or targets", async () => {
     const { handle, state } = await createReadyCampaignWithOpening();
     const time = fixedClock(2_350);
