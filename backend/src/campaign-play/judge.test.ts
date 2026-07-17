@@ -518,6 +518,8 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("Treat that as placement authority");
     expect(sentPrompt).toContain("never make a visible object vanish or move without explicit evidence");
     expect(sentPrompt).toContain("Every targets entry must copy one exact {handle, kind} pair from TARGET_CATALOG");
+    expect(sentPrompt).toContain("When a no-travel PLAYER_INPUT asks about the topology");
+    expect(sentPrompt).toContain("Citing the route does not replace the route target");
     expect(sentPrompt).toContain(
       "For freeform movement with a named willing companion, include the movement destination and the companion actor in targets",
     );

@@ -156,6 +156,7 @@ const proposal = {
     kind: "record_world_event" as const,
     eventClass: "dialogue" as const,
     performingActorHandle: "guard",
+    routeAccessClaims: [],
     summary: "The player asks the guard about the passage.",
     affectedHandles: ["you", "guard"],
   }],
@@ -489,6 +490,24 @@ describe("Campaign Play Game Master", () => {
       "Actor placement changes only through an accepted move_actor effect",
     );
     expect(String(options.prompt)).toContain(
+      "VISIBLE_FACTS route handles are code-authoritative topology and access state",
+    );
+    expect(String(options.prompt)).toContain(
+      "Dialogue and SOURCE_MOMENT do not create route access rules",
+    );
+    expect(String(options.prompt)).toContain(
+      "treat that dialogue as a continuity error rather than protected character belief",
+    );
+    expect(String(options.prompt)).toContain(
+      "Do not repeat, qualify, defend, or preserve the conflicting toll",
+    );
+    expect(String(options.prompt)).toContain(
+      "routeAccessClaims is required on every record_world_event",
+    );
+    expect(String(options.prompt)).toContain(
+      "Every route topology or access statement in summary must agree with these claims",
+    );
+    expect(String(options.prompt)).toContain(
       "leave that response for a later contact action",
     );
     expect(String(options.prompt)).toContain('"eventClass":"discovery"');
@@ -604,6 +623,161 @@ describe("Campaign Play Game Master", () => {
       ...proposal,
       effects: [{ ...proposal.effects[0], performingActorHandle: "you" }],
     })).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+  });
+
+  it("binds route-targeted dialogue to the code-owned direct access state", () => {
+    const routeRuling = ruling({
+      normalizedIntent: {
+        originalText: "I ask whether this direct route needs a permit.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "contact",
+        targets: [{ handle: "guard", kind: "actor" }, { handle: "passage", kind: "route" }],
+        method: "Ask about the visible route",
+        stakes: "Learn its access rule",
+      },
+    });
+    const grounded = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        routeAccessClaims: [{
+          routeHandle: "passage",
+          state: "open" as const,
+          accessRequirement: "none" as const,
+          viaLocationHandle: null,
+        }],
+      }],
+    };
+    expect(createCampaignPlayGameMaster().compile(
+      frame(), routeRuling, resolution, null, grounded,
+    ).preflight.accepted).toBe(true);
+    expect(createCampaignPlayGameMaster().compile(
+      frame(), ruling(), resolution, null, grounded,
+    ).preflight.accepted).toBe(true);
+    expect(() => createCampaignPlayGameMaster().compile(
+      frame(), routeRuling, resolution, null, proposal,
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+    expect(() => createCampaignPlayGameMaster().compile(
+      frame(), routeRuling, resolution, null, {
+        ...grounded,
+        effects: [{
+          ...grounded.effects[0],
+          eventClass: "scene",
+          performingActorHandle: null,
+        }],
+      },
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+    expect(() => createCampaignPlayGameMaster().compile(
+      frame(), routeRuling, resolution, null, {
+        ...grounded,
+        effects: [{
+          ...grounded.effects[0],
+          routeAccessClaims: [{
+            routeHandle: "passage",
+            state: "restricted",
+            accessRequirement: "required",
+            viaLocationHandle: "south",
+          }],
+        }],
+      },
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+  });
+
+  it("rejects route prose that contradicts its mechanically valid route claim", async () => {
+    const routeRuling = ruling({
+      normalizedIntent: {
+        originalText: "I ask whether this direct route needs a permit.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "contact",
+        targets: [{ handle: "guard", kind: "actor" }, { handle: "passage", kind: "route" }],
+        method: "Ask about the visible route",
+        stakes: "Learn its access rule",
+      },
+    });
+    const contradictory = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        summary: "Oren says every crossing reaches a toll bridge before the south harbor.",
+        routeAccessClaims: [{
+          routeHandle: "passage",
+          state: "open" as const,
+          accessRequirement: "none" as const,
+          viaLocationHandle: null,
+        }],
+      }],
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: contradictory, trace: trace() })
+      .mockResolvedValueOnce({
+        object: { verdict: "rejected", reason: "The summary invents a toll bridge." },
+        trace: trace(),
+      });
+    await expect(createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: routeRuling, resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget,
+    })).rejects.toMatchObject({
+      code: "model_contract_failed",
+      modelEvidence: expect.objectContaining({ errorCode: "route_authority_rejected" }),
+    });
+    expect(generateObject).toHaveBeenCalledTimes(2);
+    expect(String(generateObject.mock.calls[1]![0].prompt)).toContain(
+      "Do not rewrite, repair, or continue the story",
+    );
+  });
+
+  it("persists an independent review hash for route prose accepted against typed authority", async () => {
+    const routeRuling = ruling({
+      normalizedIntent: {
+        originalText: "I ask whether this direct route needs a permit.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "contact",
+        targets: [{ handle: "guard", kind: "actor" }, { handle: "passage", kind: "route" }],
+        method: "Ask about the visible route",
+        stakes: "Learn its access rule",
+      },
+    });
+    const grounded = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        summary: "Oren says the passage runs directly south and needs no permit.",
+        routeAccessClaims: [{
+          routeHandle: "passage",
+          state: "open" as const,
+          accessRequirement: "none" as const,
+          viaLocationHandle: null,
+        }],
+      }],
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: grounded, trace: trace() })
+      .mockResolvedValueOnce({
+        object: { verdict: "accepted", reason: "The summary matches the direct open route." },
+        trace: trace(),
+      });
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: routeRuling, resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget,
+    });
+    expect(candidate.semanticReview).toEqual({
+      kind: "route_authority",
+      reviewHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(candidate.modelEvidence).toMatchObject({
+      totalAttempts: 1,
+      inputTokens: 200,
+      outputTokens: 160,
+      totalTokens: 360,
+    });
+    expect(generateObject).toHaveBeenCalledTimes(2);
   });
 
   it("compiles acquisition, spending, and transformation into typed Rulebook possession effects", () => {
@@ -1148,6 +1322,7 @@ describe("Campaign Play Game Master", () => {
           kind: "record_world_event",
           eventClass: "scene",
           performingActorHandle: null,
+          routeAccessClaims: [],
           summary: "The guard closes the gap before the traveler reaches the passage.",
           affectedHandles: ["you", "passage"],
         }],
@@ -1198,6 +1373,7 @@ describe("Campaign Play Game Master", () => {
           kind: "record_world_event",
           eventClass: "scene",
           performingActorHandle: null,
+          routeAccessClaims: [],
           summary: "The player reaches South Harbor.",
           affectedHandles: ["you", "south"],
         },
@@ -1238,6 +1414,7 @@ describe("Campaign Play Game Master", () => {
           kind: "record_world_event",
           eventClass: "dialogue",
           performingActorHandle: "guard",
+          routeAccessClaims: [],
           summary: "The guard points the player toward South Harbor.",
           affectedHandles: ["you", "guard", "here"],
         },
@@ -1246,6 +1423,7 @@ describe("Campaign Play Game Master", () => {
           kind: "record_world_event",
           eventClass: "scene",
           performingActorHandle: null,
+          routeAccessClaims: [],
           summary: "At South Harbor, the player's call receives no reply.",
           affectedHandles: ["you", "south"],
         },
@@ -1298,6 +1476,7 @@ describe("Campaign Play Game Master", () => {
           kind: "record_world_event",
           eventClass: "dialogue",
           performingActorHandle: "guard",
+          routeAccessClaims: [],
           summary: "Oren agrees to walk beside the player and steps toward the passage.",
           affectedHandles: ["you", "guard", "here"],
         },
@@ -1307,6 +1486,7 @@ describe("Campaign Play Game Master", () => {
           kind: "record_world_event",
           eventClass: "scene",
           performingActorHandle: null,
+          routeAccessClaims: [],
           summary: "The player and Oren enter South Harbor together.",
           affectedHandles: ["you", "guard", "south"],
         },
@@ -1376,6 +1556,7 @@ describe("Campaign Play Game Master", () => {
       kind: "record_world_event" as const,
       eventClass: "scene" as const,
       performingActorHandle: null,
+      routeAccessClaims: [],
       summary: "The player and Oren enter South Harbor together.",
       affectedHandles: ["you", "guard", "south"],
     };
@@ -1394,6 +1575,7 @@ describe("Campaign Play Game Master", () => {
           kind: "record_world_event",
           eventClass: "dialogue",
           performingActorHandle: "guard",
+          routeAccessClaims: [],
           summary: "Oren agrees to walk beside the player.",
           affectedHandles: ["you", "guard", "here"],
         },
@@ -1430,6 +1612,7 @@ describe("Campaign Play Game Master", () => {
           kind: "record_world_event",
           eventClass: "dialogue",
           performingActorHandle: "guard",
+          routeAccessClaims: [],
           summary: "At South Harbor, the player asks the guard about passage delays.",
           affectedHandles: ["you", "guard", "south"],
         },

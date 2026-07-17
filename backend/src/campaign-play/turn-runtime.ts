@@ -1555,6 +1555,7 @@ export function createCampaignPlayTurnRuntime(
                 judgeArtifactHash: storedJudge.artifactHash,
                 batch: candidate.batch,
                 batchHash: candidate.batchHash,
+                semanticReview: candidate.semanticReview,
               });
               if (hashCampaignPlayProjection(artifact.batch) !== artifact.batchHash) {
                 throw new CampaignPlayTurnRuntimeError(

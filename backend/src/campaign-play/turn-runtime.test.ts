@@ -621,6 +621,7 @@ function gameMasterFixture(
                 kind: "record_world_event" as const,
                 eventClass: performingActorHandle === null ? "scene" as const : "dialogue" as const,
                 performingActorHandle,
+                routeAccessClaims: [],
                 summary: includeSubmittedText
                   ? `${request.ruling.normalizedIntent.originalText} (trace ${index + 1}).`
                   : worldEventCount === 1
@@ -633,6 +634,7 @@ function gameMasterFixture(
             ],
           },
         ),
+        semanticReview: { kind: "not_required" as const },
         modelEvidence: acceptedEvidence("test-game-master"),
       };
     }),

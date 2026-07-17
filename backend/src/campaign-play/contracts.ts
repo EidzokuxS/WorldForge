@@ -2465,6 +2465,10 @@ export const campaignPlayGameMasterArtifactSchema = z.object({
   judgeArtifactHash: hashSchema,
   batch: rulebookCommandBatchSchema,
   batchHash: hashSchema,
+  semanticReview: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("not_required") }).strict(),
+    z.object({ kind: z.literal("route_authority"), reviewHash: hashSchema }).strict(),
+  ]),
 }).strict();
 
 function entityRefKey(reference: z.infer<typeof campaignPlayEntityRefSchema>): string {

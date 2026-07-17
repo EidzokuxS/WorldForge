@@ -446,11 +446,13 @@ function gameMasterFixture() {
             effects: [{
               kind: "record_world_event",
               eventClass: "dialogue",
+              routeAccessClaims: [],
               summary: "Mara tests the signal keepers' account against the ringing tower.",
               affectedHandles: [playerHandle, locationHandle],
             }],
           },
         ),
+        semanticReview: { kind: "not_required" as const },
         modelEvidence: modelEvidence("playtest-game-master"),
       };
     },
