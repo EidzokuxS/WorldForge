@@ -186,7 +186,6 @@ function openingProposal(actorCadenceMinutes = 1): CampaignPlayOpeningProposal {
     const goalId = `goal-${suffix}`;
     const targets = suffix === "b"
       ? [
-          { kind: "location" as const, id: "location-b" },
           { kind: "location" as const, id: "location-a" },
           { kind: "goal" as const, id: goalId },
         ]
@@ -344,6 +343,25 @@ function openingPlannerFixture(actorCadenceMinutes = 1) {
   };
 }
 
+function narratorActionSelections(packet: CampaignPlayNarratorPacket) {
+  const latestVisiblePerformer = [...packet.consequences].reverse().find((consequence) =>
+    consequence.performingActorHandle !== null && packet.visibleActors.some((actor) =>
+      actor.handle === consequence.performingActorHandle))?.performingActorHandle ?? null;
+  const requiredReplyIndex = latestVisiblePerformer === null
+    ? -1
+    : packet.availableIntents.findIndex((intent) => intent.kind === "contact"
+      && intent.targets.some((target) => target.kind === "actor"
+        && target.handle === latestVisiblePerformer));
+  const indexes = packet.availableIntents.map((_intent, intentIndex) => intentIndex);
+  const orderedIndexes = requiredReplyIndex < 0
+    ? indexes
+    : [requiredReplyIndex, ...indexes.filter((intentIndex) => intentIndex !== requiredReplyIndex)];
+  return orderedIndexes.slice(0, CAMPAIGN_PLAY_LIMITS.suggestedActions).map((intentIndex) => ({
+    intentIndex,
+    detail: "the immediate situation",
+  }));
+}
+
 function openingNarratorFixture() {
   const compiler = createCampaignPlayNarrator();
   return {
@@ -354,12 +372,7 @@ function openingNarratorFixture() {
         narrationId: request.narrationId,
         packet,
         proposal: {
-          actionSelections: packet.availableIntents
-            .slice(0, CAMPAIGN_PLAY_LIMITS.suggestedActions)
-            .map((_intent, intentIndex) => ({
-              intentIndex,
-              detail: "the immediate situation",
-            })),
+          actionSelections: narratorActionSelections(packet),
           beats: [
             { purpose: "orientation", text: "Rain rings against the signal tower as Mara reaches Bell Island." },
             { purpose: "consequence", text: "Signal keepers brace the route gate while warning bells gather pace." },
@@ -401,12 +414,7 @@ function playerNarratorFixture() {
         narrationId: request.narrationId,
         packet,
         proposal: {
-          actionSelections: packet.availableIntents
-            .slice(0, CAMPAIGN_PLAY_LIMITS.suggestedActions)
-            .map((_intent, intentIndex) => ({
-              intentIndex,
-              detail: "the immediate situation",
-            })),
+          actionSelections: narratorActionSelections(packet),
           beats,
         },
         createdAt: request.createdAt,
@@ -524,6 +532,9 @@ function judgeFixture(disposition: Disposition, compoundDestinationName: string 
       const movementRouteHandle = useChoice && selectedChoice!.kind === "move"
         ? selectedChoice!.targets.find((candidate) => candidate.kind === "route")?.handle ?? null
         : useCompoundMovement ? route.handle : null;
+      const movementRoute = movementRouteHandle === null
+        ? null
+        : request.frame.visibleRoutes.find((candidate) => candidate.handle === movementRouteHandle) ?? null;
       const ruling = compiler.compile(request.frame, request.input, {
         kind: useChoice ? selectedChoice!.kind : useCompoundMovement || target ? "contact" : "wait",
         targets: useChoice
@@ -540,6 +551,7 @@ function judgeFixture(disposition: Disposition, compoundDestinationName: string 
           : target ? "Ask calmly" : "Wait and watch",
         stakes: "Learn what changes at the signal gate",
         movementRouteHandle,
+        requiredPossessionEffect: { kind: "none" },
         disposition,
         citedVisibleFactHandles: [request.frame.locationHandle],
         resultBounds: noEffect
@@ -547,7 +559,11 @@ function judgeFixture(disposition: Disposition, compoundDestinationName: string 
           : disposition === "uncertain"
             ? { minimum: "setback", maximum: "success" }
             : { minimum: "success", maximum: "success" },
-        elapsedBounds: { minimumMinutes: 1, maximumMinutes: 2 },
+        elapsedBounds: movementRoute === null
+          ? { minimumMinutes: 1, maximumMinutes: 2 }
+          : useChoice && selectedChoice!.kind === "move"
+            ? { minimumMinutes: movementRoute.travelCost, maximumMinutes: movementRoute.travelCost }
+            : { minimumMinutes: movementRoute.travelCost, maximumMinutes: movementRoute.travelCost + 1 },
         uncertainty: disposition === "uncertain"
           ? { kind: "check", dieSides: 20, difficulty: 10, modifierMinimum: -1, modifierMaximum: 1 }
           : { kind: "none" },
@@ -1492,11 +1508,6 @@ describe("Campaign Play player-action turn runtime", () => {
             locationId: "location-a",
             validUntilWorldTimeMinutes: 1_441,
           },
-          {
-            channel: "local_aftermath",
-            locationId: "location-a",
-            validUntilWorldTimeMinutes: 4,
-          },
         ]);
   });
 
@@ -1550,7 +1561,9 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(JSON.parse(narrationRow.beatsJson)).toContainEqual(expect.objectContaining({
       text: expect.stringContaining(request.text),
     }));
-    expect(JSON.parse(narrationRow.suggestedActionsJson)).toHaveLength(packet.availableIntents.length);
+    expect(JSON.parse(narrationRow.suggestedActionsJson)).toHaveLength(
+      Math.min(packet.availableIntents.length, CAMPAIGN_PLAY_LIMITS.suggestedActions),
+    );
     expect(JSON.parse(narrationRow.effectsJson)).toEqual([
       { kind: "flash", beatId: expect.any(String) },
     ]);

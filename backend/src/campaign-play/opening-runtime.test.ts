@@ -174,7 +174,6 @@ function openingProposal(): CampaignPlayOpeningProposal {
     const goalId = `goal-${suffix}`;
     const targets = suffix === "b"
       ? [
-          { kind: "location" as const, id: "location-b" },
           { kind: "location" as const, id: "location-a" },
           { kind: "goal" as const, id: goalId },
         ]
@@ -350,6 +349,25 @@ function plannerFixture() {
   };
 }
 
+function narratorActionSelections(packet: CampaignPlayNarratorPacket) {
+  const latestVisiblePerformer = [...packet.consequences].reverse().find((consequence) =>
+    consequence.performingActorHandle !== null && packet.visibleActors.some((actor) =>
+      actor.handle === consequence.performingActorHandle))?.performingActorHandle ?? null;
+  const requiredReplyIndex = latestVisiblePerformer === null
+    ? -1
+    : packet.availableIntents.findIndex((intent) => intent.kind === "contact"
+      && intent.targets.some((target) => target.kind === "actor"
+        && target.handle === latestVisiblePerformer));
+  const indexes = packet.availableIntents.map((_intent, intentIndex) => intentIndex);
+  const orderedIndexes = requiredReplyIndex < 0
+    ? indexes
+    : [requiredReplyIndex, ...indexes.filter((intentIndex) => intentIndex !== requiredReplyIndex)];
+  return orderedIndexes.slice(0, CAMPAIGN_PLAY_LIMITS.suggestedActions).map((intentIndex) => ({
+    intentIndex,
+    detail: "the immediate situation",
+  }));
+}
+
 function narratorFixture(modelEvidence: CampaignPlayNarratorModelEvidence = narratorEvidence) {
   const compiler = createCampaignPlayNarrator();
   return {
@@ -360,12 +378,7 @@ function narratorFixture(modelEvidence: CampaignPlayNarratorModelEvidence = narr
         narrationId: request.narrationId,
         packet,
         proposal: {
-          actionSelections: packet.availableIntents
-            .slice(0, CAMPAIGN_PLAY_LIMITS.suggestedActions)
-            .map((_intent, intentIndex) => ({
-              intentIndex,
-              detail: "the immediate situation",
-            })),
+          actionSelections: narratorActionSelections(packet),
           beats: [
             { purpose: "orientation", text: "Rain rings against the signal tower as Mara reaches Bell Island." },
             { purpose: "consequence", text: "Ahead, signal keepers brace the route gate while warning bells gather pace." },
