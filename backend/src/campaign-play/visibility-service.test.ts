@@ -1139,6 +1139,8 @@ describe("Campaign Play visibility service", () => {
       "observe",
       "attempt",
       "move",
+      "move",
+      "move",
       "wait",
     ]);
     expect(continuation.find((intent) => intent.kind === "attempt")?.targets).toEqual([{
@@ -1152,25 +1154,43 @@ describe("Campaign Play visibility service", () => {
       actionContext,
       {
         ...scene,
-        visibleActors: [{
-          handle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-c"),
-          name: "Mara Venn",
-          monogram: "MV",
-          descriptor: "Person nearby",
-          accent: "slate",
-        }],
+        visibleActors: [
+          {
+            handle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-c"),
+            name: "Pietr Grenn",
+            monogram: "PG",
+            descriptor: "Person nearby",
+            accent: "slate",
+          },
+          {
+            handle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-d"),
+            name: "Warden Vohn",
+            monogram: "WV",
+            descriptor: "Person nearby",
+            accent: "slate",
+          },
+        ],
       },
       "actor-player",
       syntheticOpeningSeed,
       1,
     );
-    expect(withActor).toHaveLength(4);
+    expect(withActor).toHaveLength(8);
     expect(withActor.map((intent) => intent.kind)).toEqual([
       "observe",
       "attempt",
       "move",
+      "move",
+      "move",
       "contact",
+      "contact",
+      "wait",
     ]);
+    expect(withActor.filter((intent) => intent.kind === "contact").map((intent) =>
+      intent.targets[0]?.handle)).toEqual([
+        deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-c"),
+        deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-d"),
+      ]);
 
     const clarification = availableIntents(
       fixture.handle,

@@ -1546,7 +1546,7 @@ describe("Campaign Play shared public contracts", () => {
         (_, index) => entry(`old_${index}`),
       ),
       availableIntents: Array.from(
-        { length: CAMPAIGN_PLAY_LIMITS.suggestedActions },
+        { length: CAMPAIGN_PLAY_LIMITS.availableIntents },
         (_, index) => ({
           ...packet.availableIntents[0]!,
           handle: `choice_${index}`,
@@ -1692,6 +1692,35 @@ describe("Campaign Play shared public contracts", () => {
     expect(() => validateNarrationAgainstPacket(
       { ...narrationFixture(), suggestedActions: [] },
       narratorPacketFixture(),
+    )).toThrow(CampaignPlayContractError);
+    const catalogPacket = {
+      ...narratorPacketFixture(),
+      availableIntents: Array.from({ length: 5 }, (_value, index) => ({
+        ...narratorPacketFixture().availableIntents[0]!,
+        handle: `choice_catalog_${index}`,
+      })),
+    };
+    const selectedNarration = {
+      ...narrationFixture(),
+      suggestedActions: [4, 1, 3, 0].map((index) => ({
+        choiceHandle: `choice_catalog_${index}`,
+        label: `Examine option ${index}`,
+      })),
+    };
+    expect(() => validateNarrationAgainstPacket(
+      selectedNarration,
+      catalogPacket,
+    )).not.toThrow();
+    expect(() => validateNarrationAgainstPacket(
+      {
+        ...selectedNarration,
+        suggestedActions: [
+          selectedNarration.suggestedActions[0]!,
+          selectedNarration.suggestedActions[0]!,
+          ...selectedNarration.suggestedActions.slice(2),
+        ],
+      },
+      catalogPacket,
     )).toThrow(CampaignPlayContractError);
     expect(() => validateNarrationAgainstPacket(
       {

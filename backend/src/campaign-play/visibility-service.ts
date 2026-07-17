@@ -901,33 +901,39 @@ export function availableIntents(
       targets: [{ handle: scene.currentLocation.handle, kind: "location" }],
     });
   }
-  const route = preferredOpeningExposureRoute(
+  const preferredRoute = preferredOpeningExposureRoute(
     handle,
     scene,
     humanActorId,
     openingExposureSeed,
     worldTimeMinutes,
-  ) ?? scene.visibleRoutes.find((candidate) => candidate.state !== "blocked");
-  if (route) intents.push({
+  );
+  const routes = scene.visibleRoutes
+    .filter((route) => route.state !== "blocked")
+    .sort((left, right) => {
+      if (left.handle === preferredRoute?.handle) return -1;
+      if (right.handle === preferredRoute?.handle) return 1;
+      return 0;
+    });
+  routes.forEach((route) => intents.push({
     handle: publicHandle("choice", campaignId, `${turnId}:move:${route.handle}`),
     label: `Go to ${route.destinationName}`,
     kind: "move",
     targets: [{ handle: route.handle, kind: "route" }],
-  });
-  const actor = scene.visibleActors[0];
-  if (actor) intents.push({
+  }));
+  scene.visibleActors.forEach((actor) => intents.push({
     handle: publicHandle("choice", campaignId, `${turnId}:contact:${actor.handle}`),
     label: `Talk to ${actor.name}`,
     kind: "contact",
     targets: [{ handle: actor.handle, kind: "actor" }],
-  });
+  }));
   intents.push({
     handle: publicHandle("choice", campaignId, `${turnId}:wait`),
     label: "Wait",
     kind: "wait",
     targets: [],
   });
-  return intents.slice(0, 4);
+  return intents;
 }
 
 function preferredOpeningExposureRoute(

@@ -552,7 +552,7 @@ const campaignPlayNarratorPacketBaseSchema =
       CAMPAIGN_PLAY_LIMITS.elapsedMinutes,
     ),
     availableIntents: z.array(campaignPlayAvailableIntentSchema)
-      .max(CAMPAIGN_PLAY_LIMITS.suggestedActions),
+      .max(CAMPAIGN_PLAY_LIMITS.availableIntents),
   }).strict();
 
 export const campaignPlayNarratorPacketSchema:
@@ -764,14 +764,26 @@ export function validateNarrationAgainstPacket(
   narration: CampaignPlayNarration,
   packet: CampaignPlayNarratorPacket,
 ): void {
-  if (narration.suggestedActions.length !== packet.availableIntents.length) {
+  const expectedCount = Math.min(
+    CAMPAIGN_PLAY_LIMITS.suggestedActions,
+    packet.availableIntents.length,
+  );
+  if (narration.suggestedActions.length !== expectedCount) {
     throw new CampaignPlayContractError(
       "narration_invalid",
-      "Narration must publish the complete frozen available-intent set.",
+      "Narration must publish the required number of frozen available intents.",
     );
   }
-  narration.suggestedActions.forEach((action, index) => {
-    const available = packet.availableIntents[index];
+  if (new Set(narration.suggestedActions.map((action) => action.choiceHandle)).size !==
+      narration.suggestedActions.length) {
+    throw new CampaignPlayContractError(
+      "narration_invalid",
+      "Narration cannot publish the same frozen available intent twice.",
+    );
+  }
+  narration.suggestedActions.forEach((action) => {
+    const available = packet.availableIntents.find((intent) =>
+      intent.handle === action.choiceHandle);
     const prefix = available
       ? campaignPlaySuggestedActionLabelPrefix(packet, available)
       : null;

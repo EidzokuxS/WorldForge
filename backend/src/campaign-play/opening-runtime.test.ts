@@ -3,7 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import type { LanguageModel } from "ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CampaignPlayCharacterDraft, CampaignPlayNarratorPacket } from "@worldforge/shared";
+import {
+  CAMPAIGN_PLAY_LIMITS,
+  type CampaignPlayCharacterDraft,
+  type CampaignPlayNarratorPacket,
+} from "@worldforge/shared";
 import { closeDb } from "../db/index.js";
 import {
   openCampaignWorldDatabase,
@@ -356,7 +360,12 @@ function narratorFixture(modelEvidence: CampaignPlayNarratorModelEvidence = narr
         narrationId: request.narrationId,
         packet,
         proposal: {
-          actionDetails: packet.availableIntents.map(() => "the immediate situation"),
+          actionSelections: packet.availableIntents
+            .slice(0, CAMPAIGN_PLAY_LIMITS.suggestedActions)
+            .map((_intent, intentIndex) => ({
+              intentIndex,
+              detail: "the immediate situation",
+            })),
           beats: [
             { purpose: "orientation", text: "Rain rings against the signal tower as Mara reaches Bell Island." },
             { purpose: "consequence", text: "Ahead, signal keepers brace the route gate while warning bells gather pace." },
