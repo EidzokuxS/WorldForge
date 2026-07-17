@@ -47,11 +47,18 @@ const campaignPlayNarratorActionSelectionSchema = z.object({
   detail: line(80),
 }).strict();
 
+const campaignPlayNarratorBeatSchema = z.object({
+  purpose: narrationPurposeSchema,
+  text: text(CAMPAIGN_PLAY_LIMITS.narrationBeat),
+  observationIndexes: z.array(z.number().int().min(0)
+    .max(CAMPAIGN_PLAY_LIMITS.newObservations - 1))
+    .max(CAMPAIGN_PLAY_LIMITS.newObservations)
+    .refine((indexes) => new Set(indexes).size === indexes.length),
+}).strict();
+
 export const campaignPlayNarratorProposalSchema = z.object({
-  beats: z.array(z.object({
-    purpose: narrationPurposeSchema,
-    text: text(CAMPAIGN_PLAY_LIMITS.narrationBeat),
-  }).strict()).min(1).max(CAMPAIGN_PLAY_LIMITS.narrationBeats),
+  beats: z.array(campaignPlayNarratorBeatSchema)
+    .min(1).max(CAMPAIGN_PLAY_LIMITS.narrationBeats),
   actionSelections: z.array(campaignPlayNarratorActionSelectionSchema)
     .min(1).max(CAMPAIGN_PLAY_LIMITS.suggestedActions),
 }).strict();
@@ -254,8 +261,17 @@ function narratorProposalSchemaForPacket(packet: CampaignPlayNarratorPacket) {
     packet.availableIntents.length,
   );
   const requiredIntentIndex = requiredReplyIntentIndex(packet);
+  const observationIndexSchema = packet.newObservations.length === 0
+    ? z.array(z.number().int()).length(0)
+    : z.array(z.number().int().min(0).max(packet.newObservations.length - 1))
+        .max(packet.newObservations.length)
+        .refine((indexes) => new Set(indexes).size === indexes.length);
+  const beats = z.array(campaignPlayNarratorBeatSchema.extend({
+    observationIndexes: observationIndexSchema,
+  })).min(1).max(CAMPAIGN_PLAY_LIMITS.narrationBeats);
   if (requiredIntentIndex === null) {
     return campaignPlayNarratorProposalSchema.extend({
+      beats,
       actionSelections: z.array(campaignPlayNarratorActionSelectionSchema)
         .length(expectedActionCount),
     });
@@ -271,6 +287,7 @@ function narratorProposalSchemaForPacket(packet: CampaignPlayNarratorPacket) {
     ),
   ] as [typeof requiredSelection, ...typeof campaignPlayNarratorActionSelectionSchema[]];
   return campaignPlayNarratorProposalSchema.extend({
+    beats,
     actionSelections: z.tuple(tupleItems),
   });
 }
@@ -301,7 +318,9 @@ REQUIRED_REPLY_INTENT_INDEX=${JSON.stringify(requiredIntentIndex)}
 
 Return exactly one object matching the supplied schema. Output only that object.
 
-Propose beats and actionSelections only. Each beat carries a purpose and text. Each actionSelection contains exactly intentIndex and detail. includesTravel belongs only to the input catalog and must never appear in an actionSelection. Choose purpose only from orientation, moment, consequence, and action_handoff. Purposes label a beat's work. Do not emit one beat for every purpose. Default to one or two beats. Add a beat only when it advances the immediate action, reveals a separate supported detail, or sharpens an unresolved choice. Never add a moment beat to repeat sourceMoment, currentLocation, visible actors, or visible routes.
+Propose beats and actionSelections only. Each beat carries purpose, text, and observationIndexes. Each actionSelection contains exactly intentIndex and detail. includesTravel belongs only to the input catalog and must never appear in an actionSelection. Choose purpose only from orientation, moment, consequence, and action_handoff. Purposes label a beat's work. Do not emit one beat for every purpose. Default to one or two beats. Add a beat only when it advances the immediate action, reveals a separate supported detail, or sharpens an unresolved choice. Never add a moment beat to repeat sourceMoment, currentLocation, visible actors, or visible routes.
+
+newObservations contains accepted consequences visible to the player in chronological packet order. Index its entries from zero. Assign each index to observationIndexes of exactly one beat whose text incorporates that observation; use [] when a beat incorporates none. When observations describe successive states of the same actor, object, or place, preserve their causal order. The latest observation defines the narrated current state.
 
 Return exactly ${Math.min(CAMPAIGN_PLAY_LIMITS.suggestedActions, packet.availableIntents.length)} actionSelections. Every selection must copy one exact, unique intentIndex from availableIntents and add its detail. Select the actions that make the strongest immediate follow-through from the visible scene, the player's submitted action, and its consequences. Prefer an unresolved person, object, pressure, or change that the prose makes salient now. When REQUIRED_REPLY_INTENT_INDEX is a number, the actor bound to that contact intent just performed a visible consequence. Put that exact index in actionSelections[0] so the player can answer, accept, refuse, or continue the exchange. Preserve meaningful contrast between options instead of following packet order: do not spend a slot on wait when a more consequential supported interaction exists, and do not select several moves unless travel is the scene's central decision. The application owns every available intent, kind, target, and identifier. Never invent or alter an intentIndex.
 
@@ -347,11 +366,18 @@ function assertProposalForPacket(
   );
   const requiredIntentIndex = requiredReplyIntentIndex(packet);
   const selectedIndexes = proposal.actionSelections.map((selection) => selection.intentIndex);
+  const coveredObservationIndexes = proposal.beats
+    .flatMap((beat) => beat.observationIndexes);
+  const expectedObservationIndexes = packet.newObservations.map((_entry, index) => index);
   if (
     proposal.actionSelections.length !== expectedActionCount ||
     new Set(selectedIndexes).size !== selectedIndexes.length ||
     selectedIndexes.some((index) => packet.availableIntents[index] === undefined) ||
     (requiredIntentIndex !== null && selectedIndexes[0] !== requiredIntentIndex) ||
+    coveredObservationIndexes.length !== expectedObservationIndexes.length ||
+    new Set(coveredObservationIndexes).size !== coveredObservationIndexes.length ||
+    coveredObservationIndexes.some((index) => packet.newObservations[index] === undefined) ||
+    expectedObservationIndexes.some((index) => !coveredObservationIndexes.includes(index)) ||
     (packet.turnKind === "opening" && proposal.beats[0]?.purpose !== "orientation") ||
     (packet.actionContext !== null &&
       packet.actionContext.disposition !== "clarification_required" &&

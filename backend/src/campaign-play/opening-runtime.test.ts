@@ -381,9 +381,9 @@ function narratorFixture(modelEvidence: CampaignPlayNarratorModelEvidence = narr
         proposal: {
           actionSelections: narratorActionSelections(packet),
           beats: [
-            { purpose: "orientation", text: "Rain rings against the signal tower as Mara reaches Bell Island." },
-            { purpose: "consequence", text: "Ahead, signal keepers brace the route gate while warning bells gather pace." },
-            { purpose: "action_handoff", text: "The open path and the waiting keeper leave a clear choice." },
+            { purpose: "orientation", observationIndexes: [], text: "Rain rings against the signal tower as Mara reaches Bell Island." },
+            { purpose: "consequence", observationIndexes: packet.newObservations.map((_entry, index) => index), text: "Ahead, signal keepers brace the route gate while warning bells gather pace." },
+            { purpose: "action_handoff", observationIndexes: [], text: "The open path and the waiting keeper leave a clear choice." },
           ],
         },
         createdAt: request.createdAt,

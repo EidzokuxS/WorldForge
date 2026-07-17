@@ -370,7 +370,7 @@ The cue describes the player's earned evidence and never names a hidden cause. T
 
 Protected events, distant actors, private goals, raw CharacterRecord fields outside the player projection, model reasoning, provider traces, internal entity IDs, rejected proposals, and global state collections remain in protected storage.
 
-The narrator returns structured beats, display text, zero to four suggested actions, and restrained effects from `fade`, `flash`, `shake`, `danger`, and `pause`. Backend validation binds each suggestion to a currently available intent or discards the narration stage as invalid. Reduced-motion settings suppress nonessential motion.
+The narrator returns structured beats, display text, zero to four suggested actions, and restrained effects from `fade`, `flash`, `shake`, `danger`, and `pause`. Each proposed beat identifies the zero-based `newObservations` entries it synthesizes. Backend validation requires every newly visible accepted observation to be covered exactly once, binds each suggestion to a currently available intent, and discards the narration stage as invalid when either contract fails. Successive observations of the same actor, object, or place remain causally ordered and the latest accepted observation owns the narrated current state. Reduced-motion settings suppress nonessential motion.
 
 ## API
 

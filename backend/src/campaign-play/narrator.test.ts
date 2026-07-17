@@ -13,6 +13,7 @@ import {
   canonicalizeCampaignPlayProjection,
 } from "./campaign-play-projection.js";
 import {
+  CampaignPlayNarratorError,
   createCampaignPlayNarrator,
   type CampaignPlayNarratorProposal,
 } from "./narrator.js";
@@ -76,14 +77,17 @@ function proposalFixture(): CampaignPlayNarratorProposal {
     beats: [
       {
         purpose: "orientation",
+        observationIndexes: [],
         text: "The last ferry nudges the Salt Harbor steps beneath a sheet of cold rain.",
       },
       {
         purpose: "consequence",
+        observationIndexes: [],
         text: "Ahead, wardens drag the inland gate shut while an impossible bell pattern rolls over the water.",
       },
       {
         purpose: "action_handoff",
+        observationIndexes: [],
         text: "Mara Venn braces her signal ledger against the wind, close enough for you to study it.",
       },
     ],
@@ -269,6 +273,7 @@ describe("Campaign Play narrator", () => {
     };
     const beats = [{
       purpose: "consequence" as const,
+      observationIndexes: [0],
       text: "Mara offers you an uncertain share and waits for your answer.",
     }];
     const replyProposal = {
@@ -327,6 +332,89 @@ describe("Campaign Play narrator", () => {
       ],
     }).success).toBe(false);
     expect(String(options.prompt)).toContain("REQUIRED_REPLY_INTENT_INDEX=1");
+  });
+
+  it("rejects narration that omits a later visible consequence", () => {
+    const firstConsequence = {
+      observationHandle: "observation_five_crates",
+      performingActorHandle: null,
+      performingActorName: null,
+      whatChanged: "Five crates are lashed down and one remains on the quay.",
+      whereOrRoute: "Salt Harbor",
+      worldTimeLabel: "Day 1, 00:23",
+      causalCue: "your_action" as const,
+    };
+    const laterConsequence = {
+      observationHandle: "observation_barge_departed",
+      performingActorHandle: null,
+      performingActorName: null,
+      whatChanged: "The sixth crate is aboard and the barge is drawing away.",
+      whereOrRoute: "Salt Harbor",
+      worldTimeLabel: "Day 1, 00:23",
+      causalCue: "direct_perception" as const,
+    };
+    const packet: CampaignPlayNarratorPacket = {
+      ...packetFixture(),
+      turnKind: "player_action",
+      openingContext: null,
+      sourceMoment: "Three crates sit aboard while three remain on the quay.",
+      actionContext: {
+        submittedText: "Load two more crates.",
+        intentKind: "attempt",
+        disposition: "uncertain",
+        result: "limited",
+        clarificationQuestion: null,
+      },
+      newObservations: [
+        {
+          observationHandle: firstConsequence.observationHandle,
+          title: "Your action",
+          text: firstConsequence.whatChanged,
+          whereOrRoute: firstConsequence.whereOrRoute,
+          worldTimeLabel: firstConsequence.worldTimeLabel,
+          consequence: firstConsequence,
+        },
+        {
+          observationHandle: laterConsequence.observationHandle,
+          title: "Seen nearby",
+          text: laterConsequence.whatChanged,
+          whereOrRoute: laterConsequence.whereOrRoute,
+          worldTimeLabel: laterConsequence.worldTimeLabel,
+          consequence: laterConsequence,
+        },
+      ],
+      consequences: [firstConsequence, laterConsequence],
+    };
+    const narrator = createCampaignPlayNarrator();
+    const proposal = {
+      actionSelections: [{ intentIndex: 0, detail: "the departing barge" }],
+      beats: [{
+        purpose: "consequence" as const,
+        observationIndexes: [0],
+        text: "Five crates are secure, with the sixth still on the quay.",
+      }],
+    };
+
+    expect(() => narrator.compile({
+      narrationId: "narration-missing-later-consequence",
+      packet,
+      proposal,
+      createdAt: 1_000,
+    })).toThrowError(CampaignPlayNarratorError);
+
+    expect(() => narrator.compile({
+      narrationId: "narration-covers-later-consequence",
+      packet,
+      proposal: {
+        ...proposal,
+        beats: [{
+          purpose: "consequence",
+          observationIndexes: [0, 1],
+          text: "You secure two crates; then the last comes aboard and the loaded barge draws away.",
+        }],
+      },
+      createdAt: 1_000,
+    })).not.toThrow();
   });
 
   it("allows opening pressure to remain part of orientation without a consequence beat", () => {
@@ -392,6 +480,7 @@ describe("Campaign Play narrator", () => {
       actionSelections: [{ intentIndex: 0, detail: "the watered garden bed" }],
       beats: [{
         purpose: "action_handoff",
+        observationIndexes: [],
         text: "Which garden bed did you water earlier?",
       }],
     };
@@ -426,6 +515,7 @@ describe("Campaign Play narrator", () => {
         actionSelections: [{ intentIndex: 0, detail: "the next door down" }],
         beats: [{
           purpose: "consequence",
+          observationIndexes: [],
           text: "You knock once. No voice answers and the latch does not move.",
         }],
       },
@@ -582,10 +672,12 @@ describe("Campaign Play narrator", () => {
       beats: [
         {
           purpose: "consequence",
+          observationIndexes: [],
           text: "Mara Venn pulls away and keeps walking toward the shuttered gate.",
         },
         {
           purpose: "action_handoff",
+          observationIndexes: [],
           text: "You are left standing alone at the empty bend.",
         },
       ],
