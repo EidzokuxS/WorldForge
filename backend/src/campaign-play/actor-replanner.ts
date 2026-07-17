@@ -25,7 +25,9 @@ import {
   type CampaignPlayWorkerLeaseToken,
 } from "./campaign-play-turn-repository.js";
 import {
+  buildCampaignPlayActorPlanGroundingReviewPrompt,
   buildCampaignPlayActorReplanPrompt,
+  campaignPlayActorPlanGroundingReviewSchema,
   campaignPlayActorReplanProposalSchema,
   campaignPlayActorReplanProposalSchemaForFrame,
   type CampaignPlayActorReplanPromptEntity,
@@ -427,6 +429,52 @@ function acceptedTrace(trace: Readonly<SafeGenerateTrace>, providerId: string, m
   };
 }
 
+function combineAcceptedEvidence(
+  proposer: ReturnType<typeof acceptedTrace>,
+  reviewer: ReturnType<typeof acceptedTrace>,
+): ReturnType<typeof acceptedTrace> {
+  if (
+    proposer.actualProviderId !== reviewer.actualProviderId ||
+    proposer.actualModel !== reviewer.actualModel
+  ) {
+    throw new CampaignPlayActorReplannerError("replan_state_invalid");
+  }
+  return {
+    actualProviderId: proposer.actualProviderId,
+    actualModel: proposer.actualModel,
+    inputTokens: proposer.inputTokens + reviewer.inputTokens,
+    outputTokens: proposer.outputTokens + reviewer.outputTokens,
+    reasoningTokens: proposer.reasoningTokens + reviewer.reasoningTokens,
+    finishReason: reviewer.finishReason,
+  };
+}
+
+function evidenceExceedsBudget(
+  evidence: ReturnType<typeof acceptedTrace>,
+  request: Pick<CampaignPlayActorReplanRequest,
+    | "maximumInputTokens"
+    | "maximumOutputTokens"
+    | "maximumTotalTokens"
+    | "maximumCostMicros">,
+  requestedModel: {
+    pricing: {
+      tokenUnit: number;
+      inputCostMicros: number;
+      outputCostMicros: number;
+    };
+  },
+): boolean {
+  const contentOutputTokens = Math.max(
+    0,
+    evidence.outputTokens - evidence.reasoningTokens,
+  );
+  return evidence.inputTokens > request.maximumInputTokens ||
+    contentOutputTokens > request.maximumOutputTokens ||
+    evidence.inputTokens + contentOutputTokens > request.maximumTotalTokens ||
+    estimatedCostMicros(evidence.inputTokens, evidence.outputTokens, requestedModel) >
+      request.maximumCostMicros;
+}
+
 export function createCampaignPlayActorReplanner(
   handle: CampaignPlayDatabaseHandle,
   overrides: Partial<CampaignPlayActorReplannerDependencies> = {},
@@ -620,6 +668,7 @@ export function createCampaignPlayActorReplanner(
       const startedAt = dependencies.now();
       requireTurnLease(handle, request.token, startedAt);
       let observedTrace: Readonly<SafeGenerateTrace> | undefined;
+      let stageEvidence: ReturnType<typeof acceptedTrace> | undefined;
       let processStoppedAfterProviderReturn = false;
       try {
         const generated = await dependencies.generateObject({
@@ -642,28 +691,57 @@ export function createCampaignPlayActorReplanner(
           processStoppedAfterProviderReturn = true;
           throw cause;
         }
-        const providerCompletedAt = dependencies.now();
-        if (providerCompletedAt >= request.token.expiresAt) {
+        const proposerCompletedAt = dependencies.now();
+        if (proposerCompletedAt >= request.token.expiresAt) {
           throw new CampaignPlayActorReplannerError("replan_epoch_lost");
         }
-        const evidence = acceptedTrace(
+        const proposerEvidence = acceptedTrace(
           generated.trace,
           requestedModel.providerId,
           requestedModel.model,
         );
-        const contentOutputTokens = Math.max(0, evidence.outputTokens - evidence.reasoningTokens);
-        if (
-          evidence.inputTokens > request.maximumInputTokens ||
-          contentOutputTokens > request.maximumOutputTokens ||
-          evidence.inputTokens + contentOutputTokens > request.maximumTotalTokens ||
-          estimatedCostMicros(evidence.inputTokens, evidence.outputTokens, requestedModel) >
-            request.maximumCostMicros
-        ) {
+        stageEvidence = proposerEvidence;
+        if (evidenceExceedsBudget(proposerEvidence, request, requestedModel)) {
           throw new CampaignPlayActorReplannerError("replan_budget_exceeded");
         }
         const proposal = campaignPlayActorReplanProposalSchema.parse(generated.object);
         const latestFrame = scheduler.buildActorFrame(request.jobId);
         const plan = compilePlan(handle, latestFrame, compilation, proposal);
+        stageEvidence = undefined;
+        const reviewed = await dependencies.generateObject({
+          model: request.model,
+          schema: campaignPlayActorPlanGroundingReviewSchema,
+          prompt: buildCampaignPlayActorPlanGroundingReviewPrompt(
+            compilation.promptFrame,
+            proposal,
+          ),
+          temperature: 0,
+          maxOutputTokens: request.maxOutputTokens,
+          mode: "auto",
+          strictSchema: true,
+          allowRepair: false,
+          allowTextFallback: false,
+          retries: 1,
+          abortSignal: request.signal,
+        });
+        observedTrace = reviewed.trace;
+        const reviewerCompletedAt = dependencies.now();
+        if (reviewerCompletedAt >= request.token.expiresAt) {
+          throw new CampaignPlayActorReplannerError("replan_epoch_lost");
+        }
+        const reviewerEvidence = acceptedTrace(
+          reviewed.trace,
+          requestedModel.providerId,
+          requestedModel.model,
+        );
+        const evidence = combineAcceptedEvidence(proposerEvidence, reviewerEvidence);
+        stageEvidence = evidence;
+        if (evidenceExceedsBudget(evidence, request, requestedModel)) {
+          throw new CampaignPlayActorReplannerError("replan_budget_exceeded");
+        }
+        if (reviewed.object.verdict !== "accepted") {
+          throw new CampaignPlayActorReplannerError("replan_state_invalid");
+        }
         const artifactJson = canonicalizeCampaignPlayProjection(plan);
         const artifactHash = hashCampaignPlayProjection({
           domain: "campaign_play_model_artifact",
@@ -671,7 +749,7 @@ export function createCampaignPlayActorReplanner(
           kind: "actor_replanner",
           artifact: plan,
         });
-        const durationMs = Math.max(0, providerCompletedAt - startedAt);
+        const durationMs = Math.max(0, reviewerCompletedAt - startedAt);
         const schedule = handle.sqlite.prepare(`SELECT schedule_id AS scheduleId,
           next_act_at_world_time_minutes AS nextActAtWorldTimeMinutes,
           last_act_at_world_time_minutes AS lastActAtWorldTimeMinutes, agency_debt AS agencyDebt
@@ -787,7 +865,7 @@ export function createCampaignPlayActorReplanner(
         if (processStoppedAfterProviderReturn) throw error;
         const interruptedAt = dependencies.now();
         const durationMs = Math.max(0, interruptedAt - startedAt);
-        const trace = observedTrace ?? getSafeGenerateObjectTrace(error) ?? undefined;
+        const trace = getSafeGenerateObjectTrace(error) ?? observedTrace ?? undefined;
         const epochLost = (error instanceof CampaignPlayActorReplannerError
           && error.code === "replan_epoch_lost") || request.signal?.aborted === true;
         const budgetExceeded = error instanceof CampaignPlayActorReplannerError
@@ -819,19 +897,21 @@ export function createCampaignPlayActorReplanner(
             const stage = context.sqlite.prepare(`SELECT status FROM campaign_play_model_stages
               WHERE stage_id = ? AND worker_epoch = ?`).get(stageId, workerEpoch) as { status: string } | undefined;
             if (stage?.status !== "started") throw new CampaignPlayActorReplannerError("replan_epoch_lost");
-            const hasActual = !!trace?.capability?.providerId
-              && !!(trace.response?.modelId ?? trace.capability.model);
+            const hasActual = stageEvidence !== undefined || (
+              !!trace?.capability?.providerId &&
+              !!(trace.response?.modelId ?? trace.capability.model)
+            );
             const modelUpdate = context.sqlite.prepare(`UPDATE campaign_play_model_stages SET status = 'interrupted',
               actual_provider_id = ?, actual_model = ?, actual_strategy = ?,
               input_tokens = ?, output_tokens = ?, finish_reason = ?,
               duration_ms = ?, schema_outcome = ?, error_code = ?,
               completed_at = ? WHERE stage_id = ? AND worker_epoch = ? AND status = 'started'`).run(
-              hasActual ? trace!.capability!.providerId : null,
-              hasActual ? (trace!.response?.modelId ?? trace!.capability!.model) : null,
+              stageEvidence?.actualProviderId ?? (hasActual ? trace!.capability!.providerId : null),
+              stageEvidence?.actualModel ?? (hasActual ? (trace!.response?.modelId ?? trace!.capability!.model) : null),
               hasActual ? "strict_object" : null,
-              trace?.usage?.inputTokens ?? null,
-              trace?.usage?.outputTokens ?? null,
-              trace?.finishReason ?? null,
+              stageEvidence?.inputTokens ?? trace?.usage?.inputTokens ?? null,
+              stageEvidence?.outputTokens ?? trace?.usage?.outputTokens ?? null,
+              stageEvidence?.finishReason ?? trace?.finishReason ?? null,
               durationMs,
               schemaOutcome,
               errorCode,

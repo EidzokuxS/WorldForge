@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildCampaignPlayActorPlanGroundingReviewPrompt,
   buildCampaignPlayActorReplanPrompt,
+  campaignPlayActorPlanGroundingReviewSchema,
   campaignPlayActorReplanProposalSchema,
   campaignPlayActorReplanProposalSchemaForFrame,
   type CampaignPlayActorReplanPromptFrame,
@@ -76,7 +78,58 @@ describe("campaign play actor replan prompt", () => {
     expect(prompt).toContain("Do not silently contradict or forget it");
     expect(prompt).toContain("not evidence that promised work has been completed");
     expect(prompt).toContain("Only an accepted world_event can establish an outcome");
+    expect(prompt).toContain("Each step's method is an action by this actor alone");
+    expect(prompt).toContain("cannot require, narrate, or settle that actor's response");
+    expect(prompt).toContain("an offer, permission, promise, request, intention, or readiness does not");
     expect(prompt).toContain("another person's tools or materials");
+  });
+
+  it("reviews another actor's unaccepted work without rewriting the proposed plan", () => {
+    const proposal = {
+      goalHandle: "goal:keep-gate-open",
+      cadenceMinutes: 20,
+      priority: 4,
+      intent: {
+        kind: "attempt" as const,
+        targetHandles: ["location:gate"],
+        method: "Watch the visitor reseat the gate lantern wick",
+        stakes: "The visitor is already repairing the lantern",
+      },
+      steps: [{
+        intent: {
+          kind: "attempt" as const,
+          targetHandles: ["location:gate"],
+          method: "Watch the visitor reseat the gate lantern wick",
+          stakes: "The visitor is already repairing the lantern",
+        },
+        observableTrace: "The wick sits square after the visitor's repair.",
+        possessionOutcome: { kind: "none" as const },
+        elapsedBounds: { minimumMinutes: 5, maximumMinutes: 15 },
+      }],
+    };
+    const prompt = buildCampaignPlayActorPlanGroundingReviewPrompt(frame, proposal);
+
+    expect(prompt).toContain("Do not rewrite or repair the plan");
+    expect(prompt).toContain("cannot state or require that another actor responds");
+    expect(prompt).toContain("does not establish that work started or finished");
+    expect(prompt).toContain("It does not prove participation or agreement");
+    expect(prompt).toContain("Watch the visitor reseat the gate lantern wick");
+    expect(campaignPlayActorPlanGroundingReviewSchema.safeParse({
+      verdict: "accepted",
+      violations: [],
+    }).success).toBe(true);
+    expect(campaignPlayActorPlanGroundingReviewSchema.safeParse({
+      verdict: "rejected",
+      violations: [{ stepIndex: 0, kind: "other_actor_action_not_established" }],
+    }).success).toBe(true);
+    expect(campaignPlayActorPlanGroundingReviewSchema.safeParse({
+      verdict: "accepted",
+      violations: [{ stepIndex: 0, kind: "other_actor_action_not_established" }],
+    }).success).toBe(false);
+    expect(campaignPlayActorPlanGroundingReviewSchema.safeParse({
+      verdict: "rejected",
+      violations: [],
+    }).success).toBe(false);
   });
 
   it("keeps scene objects behind when movement changes only the actor placement", () => {

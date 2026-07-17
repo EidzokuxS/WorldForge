@@ -588,10 +588,15 @@ describe("Campaign Play actor replanner", () => {
       prompt: string;
       abortSignal?: AbortSignal;
       schema: { safeParse(value: unknown): { success: boolean } };
-    }) => ({
-      object: replanProposalFromPrompt(request.prompt),
-      trace: acceptedTrace(1_025, 1_000),
-    }));
+    }) => request.prompt.includes("ACTOR_PLAN_REVIEW\n")
+      ? {
+          object: { verdict: "accepted", violations: [] },
+          trace: acceptedTrace(),
+        }
+      : {
+          object: replanProposalFromPrompt(request.prompt),
+          trace: acceptedTrace(1_025, 1_000),
+        });
     const replanner = createCampaignPlayActorReplanner(handle, {
       now: () => now,
       generateObject: generateObject as unknown as typeof safeGenerateObject,
@@ -619,7 +624,7 @@ describe("Campaign Play actor replanner", () => {
       workerEpoch: 1,
       plan: { steps: [{ possessionOutcome: { kind: "none" } }] },
     });
-    expect(generateObject).toHaveBeenCalledTimes(1);
+    expect(generateObject).toHaveBeenCalledTimes(2);
     expect(generateObject.mock.calls[0]![0].prompt).toContain(knownScene);
     expect(generateObject.mock.calls[0]![0].prompt).toContain(
       "occurred at world time 0; learned at world time 0",
@@ -650,6 +655,16 @@ describe("Campaign Play actor replanner", () => {
     });
     expect("timeout" in generateObject.mock.calls[0]![0]).toBe(false);
     expect(generateObject.mock.calls[0]![0].abortSignal).toBe(controller.signal);
+    expect(generateObject.mock.calls[1]![0]).toMatchObject({
+      allowRepair: false,
+      allowTextFallback: false,
+      retries: 1,
+      strictSchema: true,
+      temperature: 0,
+      abortSignal: controller.signal,
+    });
+    expect(generateObject.mock.calls[1]![0].prompt).toContain("ACTOR_PLAN_REVIEW");
+    expect(generateObject.mock.calls[1]![0].prompt).toContain("Fresh sealing wax flakes");
     expect(createCampaignPlayActorScheduler(handle).listTurnJobs("turn-player")[0])
       .toMatchObject({
         stage: "claimed",
@@ -678,6 +693,89 @@ describe("Campaign Play actor replanner", () => {
     expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_plans
       WHERE campaign_id = ? AND actor_id = 'actor-b' AND status = 'active'`).get(CAMPAIGN_ID))
       .toEqual({ count: 1 });
+  });
+
+  it("rejects a plan that turns an offer into another actor's completed work", async () => {
+    const { handle, token, jobId } = createReplanFixture();
+    const generateObject = vi.fn(async (request: { prompt: string }) => {
+      if (request.prompt.includes("ACTOR_PLAN_REVIEW\n")) {
+        return {
+          object: {
+            verdict: "rejected",
+            violations: [{
+              stepIndex: 0,
+              kind: "other_actor_action_not_established",
+            }],
+          },
+          trace: acceptedTrace(),
+        };
+      }
+      const proposal = replanProposalFromPrompt(request.prompt);
+      return {
+        object: {
+          ...proposal,
+          intent: {
+            ...proposal.intent,
+            method: "Clear scale while the visitor reseats the wick",
+            stakes: "The visitor is already working inside the housing",
+          },
+          steps: [{
+            ...proposal.steps[0],
+            intent: {
+              ...proposal.steps[0]!.intent,
+              method: "Watch the visitor finish reseating the wick",
+              stakes: "The visitor is already working inside the housing",
+            },
+            observableTrace: "The wick assembly sits square after the visitor's repair.",
+          }],
+        },
+        trace: acceptedTrace(),
+      };
+    });
+    const replanner = createCampaignPlayActorReplanner(handle, {
+      now: () => 1_600,
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const outcome = await replanner.replan({
+      jobId,
+      token,
+      model: {} as LanguageModel,
+      temperature: 0.2,
+      maxOutputTokens: 100,
+      maximumInputTokens: 1_000,
+      maximumOutputTokens: 100,
+      maximumTotalTokens: 2_000,
+      maximumCostMicros: 10_000,
+      createdAt: 1_590,
+    });
+
+    expect(outcome).toEqual({
+      kind: "interrupted",
+      jobId,
+      errorCode: "model_contract_invalid",
+      workerEpoch: 1,
+    });
+    expect(generateObject).toHaveBeenCalledTimes(2);
+    expect(generateObject.mock.calls[1]![0].prompt).toContain(
+      "Watch the visitor finish reseating the wick",
+    );
+    expect(handle.sqlite.prepare(`SELECT status, input_tokens AS inputTokens,
+        output_tokens AS outputTokens, schema_outcome AS schemaOutcome,
+        error_code AS errorCode FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = 'turn-player' AND kind = 'actor_replanner'`).get(
+        CAMPAIGN_ID,
+      )).toEqual({
+        status: "interrupted",
+        inputTokens: 80,
+        outputTokens: 50,
+        schemaOutcome: "invalid",
+        errorCode: "model_contract_invalid",
+      });
+    expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_plans
+      WHERE campaign_id = ? AND actor_id = 'actor-b' AND plan_id <> 'actor-replanner-plan'`).get(
+        CAMPAIGN_ID,
+      )).toEqual({ count: 0 });
   });
 
   it("interrupts a reverse-route move before replacing the active schedule plan", async () => {

@@ -232,7 +232,7 @@ The initial critical path contains:
 2. GM planner: produce the ordered command plan from the ruling.
 3. Narrator: render the frozen public packet.
 
-The opening path contains opening planner and narrator calls. Routine actor actions execute persisted typed plans. Actor replanning invokes a strict planner only when a plan completes or its preconditions fail, and records that job separately from the player critical path.
+The opening path contains opening planner and narrator calls. Routine actor actions execute persisted typed plans. Actor replanning invokes a strict planner only when a plan completes or its preconditions fail, then an independent strict grounding reviewer checks the proposed plan against the same accepted actor frame before persistence or execution. The reviewer returns only an accept/reject verdict: it cannot rewrite the plan, supply an outcome, retry the proposer, or fall back to backend prose. A rejected plan interrupts as `model_contract_invalid`. The proposer and reviewer remain one durable actor-replanner stage with combined model telemetry and a single worker epoch.
 
 Every stage stores requested/actual model, strategy, token counts, duration, finish reason, schema outcome, and error code. Prompts contain bounded frames and opaque IDs. Model output has proposal authority only. Route travel cost is code-owned: Judge binds a pure move to the exact visible route cost and raises a compound traversal's elapsed bounds to at least that cost before Rulebook planning.
 
@@ -994,6 +994,7 @@ npm --prefix backend test -- src/campaign-play/actor-scheduler.test.ts
 6. Compile every move from exactly one supplied directed route whose origin is the actor's current or preceding-step location; an optional location target must equal the route destination. Every executable non-move step that targets a location must target the actor's location established for that step, never an earlier or remote scene. A semantically invalid replan interrupts as `model_contract_invalid` before plan persistence.
 7. If a persisted active step cannot compile against current typed state, commit one proposal-less `rejected` job, block the invalid plan, add agency debt, and schedule a bounded retry in one zero-world-version actor transition. Do not create a proposal, command, receipt, event prose, or mechanical mutation for that step.
 8. Require every newly authored actor step to declare `possessionOutcome`. Compile a positive named acquisition into exactly one own-actor `adjust_actor_possession` command with a durable receipt and public authored summary; compile `none` through the existing world-event lane. Add no persisted-plan default or compatibility adapter.
+9. Review every newly authored actor plan against its frozen accepted frame before persistence. A step may describe only the acting actor's behavior; another actor's response, work, movement, consent, or completed outcome requires an explicit accepted event. The reviewer emits no replacement plan or prose, and its rejection interrupts the stage before the proposal can become a durable event.
 
 **Verification:**
 
@@ -1001,7 +1002,7 @@ npm --prefix backend test -- src/campaign-play/actor-scheduler.test.ts
 npm --prefix backend test -- src/campaign-play/actor-proposal-service.test.ts src/campaign-play/actor-scheduler.test.ts src/campaign-play/rulebook.test.ts
 ```
 
-**Acceptance evidence:** multi-actor fixtures prove every due actor receives a latest-version opportunity, earlier actor commits do not stale later actors, true stale work is rejected/rescheduled once, the near-term off-screen consequence follows its typed exposure path, and a visible actor acquisition correlates one typed proposal with one possession transition, receipt, persisted quantity, and non-generic presentation. A clean rendered campaign separately proves model-authored `none` outcomes do not create possessions and that a visible actor replan survives reload.
+**Acceptance evidence:** multi-actor fixtures prove every due actor receives a latest-version opportunity, earlier actor commits do not stale later actors, true stale work is rejected/rescheduled once, the near-term off-screen consequence follows its typed exposure path, and a visible actor acquisition correlates one typed proposal with one possession transition, receipt, persisted quantity, and non-generic presentation. A clean rendered campaign separately proves model-authored `none` outcomes do not create possessions and that a visible actor replan survives reload. A retained Black Rain negative turn proves that an offer and permission do not authorize an actor plan to settle the player's unperformed repair; the repaired replay must keep the actor's plan and visible trace within Pia's own action unless a later accepted player event establishes the repair.
 
 **Parallel:** follows Task 8A and owns proposal-service plus scheduler integration edits exclusively.
 

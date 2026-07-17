@@ -651,7 +651,7 @@ function turnRuntime(
   const actorReplanner = createCampaignPlayActorReplanner(handle, {
     now: time.clock.now,
     generateObject: (async (request: { prompt: string }) => ({
-      object: actorReplanProposalFromPrompt(request.prompt),
+      object: actorReplanModelObjectFromPrompt(request.prompt),
       trace: actorReplanTrace(),
     })) as unknown as typeof safeGenerateObject,
   });
@@ -771,6 +771,12 @@ function actorReplanProposalFromPrompt(prompt: string) {
       elapsedBounds: { minimumMinutes: 2, maximumMinutes: 10 },
     }],
   };
+}
+
+function actorReplanModelObjectFromPrompt(prompt: string) {
+  return prompt.includes("ACTOR_PLAN_REVIEW\n")
+    ? { verdict: "accepted" as const, violations: [] }
+    : actorReplanProposalFromPrompt(prompt);
 }
 
 function actorReplanTrace(): SafeGenerateTrace {
@@ -1602,9 +1608,9 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(telemetry).toMatchObject({
       terminalReason: "action_resolved",
       costComplete: true,
-      inputTokens: 95,
-      outputTokens: 110,
-      totalTokens: 205,
+      inputTokens: 135,
+      outputTokens: 135,
+      totalTokens: 270,
       estimatedCostMicros: 8,
     });
     expect(telemetry.modelAttempts.map((attempt) => attempt.kind).sort()).toEqual([
@@ -1952,7 +1958,7 @@ describe("Campaign Play player-action turn runtime", () => {
         providerCalls += 1;
         if (providerCalls === 1) throw new Error("provider transport interrupted");
         return {
-          object: actorReplanProposalFromPrompt(request.prompt),
+          object: actorReplanModelObjectFromPrompt(request.prompt),
           trace: actorReplanTrace(),
         };
       }) as unknown as typeof safeGenerateObject,
@@ -2015,7 +2021,7 @@ describe("Campaign Play player-action turn runtime", () => {
       interruptedStage: "primary_settled",
       observedEpoch: interruptedTurn.workerEpoch,
     });
-    expect(providerCalls).toBe(2);
+    expect(providerCalls).toBe(3);
     expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
       .find((job) => job.jobId === jobId)).toMatchObject({
         stage: "claimed",
@@ -2062,7 +2068,7 @@ describe("Campaign Play player-action turn runtime", () => {
           return {
             object: providerCalls === 1 && failure === "schema"
               ? { unexpected: true }
-              : actorReplanProposalFromPrompt(request.prompt),
+              : actorReplanModelObjectFromPrompt(request.prompt),
             trace,
           };
         }) as unknown as typeof safeGenerateObject,
@@ -2110,7 +2116,8 @@ describe("Campaign Play player-action turn runtime", () => {
         stage: "primary_settled",
         workerLeaseOwner: null,
       });
-      expect(providerCalls).toBe(1);
+      const firstAttemptCalls = failure === "persistence" ? 2 : 1;
+      expect(providerCalls).toBe(firstAttemptCalls);
       expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
         .filter((job) => job.workerEpoch > 0).map((job) => job.jobId)).toEqual([jobId]);
 
@@ -2120,7 +2127,7 @@ describe("Campaign Play player-action turn runtime", () => {
 
       time.advance();
       await runtime.runNextStage(admission.turnId);
-      expect(providerCalls).toBe(1);
+      expect(providerCalls).toBe(firstAttemptCalls);
       const interruptedTurn = runtime.loadTurn(admission.turnId)!;
       time.advance();
       await runtime.resumeInterruptedStage({
@@ -2128,7 +2135,7 @@ describe("Campaign Play player-action turn runtime", () => {
         interruptedStage: "primary_settled",
         observedEpoch: interruptedTurn.workerEpoch,
       });
-      expect(providerCalls).toBe(2);
+      expect(providerCalls).toBe(firstAttemptCalls + 2);
       expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
         .find((job) => job.jobId === jobId)).toMatchObject({
           stage: "claimed",
@@ -2154,7 +2161,7 @@ describe("Campaign Play player-action turn runtime", () => {
       generateObject: (async (request: { prompt: string }) => {
         providerCalls += 1;
         return {
-          object: actorReplanProposalFromPrompt(request.prompt),
+          object: actorReplanModelObjectFromPrompt(request.prompt),
           trace: actorReplanTrace(),
         };
       }) as unknown as typeof safeGenerateObject,
@@ -2209,7 +2216,7 @@ describe("Campaign Play player-action turn runtime", () => {
       generateObject: (async (request: { prompt: string }) => {
         providerCalls += 1;
         return {
-          object: actorReplanProposalFromPrompt(request.prompt),
+          object: actorReplanModelObjectFromPrompt(request.prompt),
           trace: actorReplanTrace(),
         };
       }) as unknown as typeof safeGenerateObject,
@@ -2235,7 +2242,7 @@ describe("Campaign Play player-action turn runtime", () => {
       interruptedStage: "primary_settled",
       observedEpoch: stoppedTurn.workerEpoch,
     });
-    expect(providerCalls).toBe(2);
+    expect(providerCalls).toBe(3);
     expect(createCampaignPlayActorScheduler(reopened).listTurnJobs(admission.turnId)
       .find((job) => job.jobId === jobId)).toMatchObject({ stage: "claimed", workerEpoch: 2 });
   });
@@ -2250,7 +2257,7 @@ describe("Campaign Play player-action turn runtime", () => {
       generateObject: (async (request: { prompt: string }) => {
         providerCalls += 1;
         return {
-          object: actorReplanProposalFromPrompt(request.prompt),
+          object: actorReplanModelObjectFromPrompt(request.prompt),
           trace: actorReplanTrace(),
         };
       }) as unknown as typeof safeGenerateObject,
@@ -2285,7 +2292,7 @@ describe("Campaign Play player-action turn runtime", () => {
 
     time.advance();
     await runtime.runNextStage(admission.turnId);
-    expect(providerCalls).toBe(1);
+    expect(providerCalls).toBe(2);
     expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
       .find((job) => job.jobId === jobId)).toMatchObject({ stage: "interrupted", workerEpoch: 1 });
     expect(handle.sqlite.prepare(`SELECT status FROM campaign_play_model_stages
@@ -2315,7 +2322,7 @@ describe("Campaign Play player-action turn runtime", () => {
       interruptedStage: "primary_settled",
       observedEpoch: interruptedTurn.workerEpoch,
     });
-    expect(providerCalls).toBe(2);
+    expect(providerCalls).toBe(4);
     expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
       .find((job) => job.jobId === jobId)).toMatchObject({ stage: "claimed", workerEpoch: 2 });
   });
@@ -2329,7 +2336,7 @@ describe("Campaign Play player-action turn runtime", () => {
       generateObject: (async (request: { prompt: string }) => {
         providerCalls += 1;
         return {
-          object: actorReplanProposalFromPrompt(request.prompt),
+          object: actorReplanModelObjectFromPrompt(request.prompt),
           trace: actorReplanTrace(),
         };
       }) as unknown as typeof safeGenerateObject,
@@ -2358,7 +2365,7 @@ describe("Campaign Play player-action turn runtime", () => {
 
     time.advance();
     await runtime.runNextStage(admission.turnId);
-    expect(providerCalls).toBe(1);
+    expect(providerCalls).toBe(2);
     expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
       .find((job) => job.jobId === jobId)).toMatchObject({ stage: "claimed", workerEpoch: 1 });
   });
@@ -2412,7 +2419,7 @@ describe("Campaign Play player-action turn runtime", () => {
     const recoveryReplanner = createCampaignPlayActorReplanner(handle, {
       now: time.clock.now,
       generateObject: (async (request: { prompt: string }) => ({
-        object: actorReplanProposalFromPrompt(request.prompt),
+          object: actorReplanModelObjectFromPrompt(request.prompt),
         trace: actorReplanTrace(),
       })) as unknown as typeof safeGenerateObject,
     });
@@ -2525,7 +2532,7 @@ describe("Campaign Play player-action turn runtime", () => {
         generateObject: (async (request: { prompt: string }) => {
           providerCalls += 1;
           return {
-        object: actorReplanProposalFromPrompt(request.prompt),
+          object: actorReplanModelObjectFromPrompt(request.prompt),
         trace: actorReplanTrace(),
           };
         }) as unknown as typeof safeGenerateObject,
@@ -2565,7 +2572,7 @@ describe("Campaign Play player-action turn runtime", () => {
     await reopenedRuntime.runNextStage(admission.turnId);
 
     expect(secondJobId).not.toBe(firstJobId);
-    expect(providerCalls).toBe(1);
+    expect(providerCalls).toBe(2);
     const rows = handle.sqlite.prepare(`SELECT stage_id AS stageId, status, worker_epoch AS workerEpoch
       FROM campaign_play_model_stages
       WHERE campaign_id = ? AND turn_id = ? AND kind = 'actor_replanner'
