@@ -78,6 +78,8 @@ function frame(): CampaignPlayJudgeFrame {
       { handle: "choice-ask", kind: "choice", summary: "Ask the guard why the road is closed." },
       { handle: "choice-cross", kind: "choice", summary: "Cross the reef road." },
       { handle: "notebook", kind: "possession", summary: "A blank waxed notebook." },
+      { handle: "copper-coins", kind: "possession", summary: "Five copper coins." },
+      { handle: "guard-debt", kind: "obligation", summary: "Seven copper owed to the guard." },
     ],
     actorContinuity: [{
       actorHandle: "actor-guard",
@@ -161,6 +163,49 @@ describe("Campaign Play Judge", () => {
         minimumResult: "setback",
       },
       citedVisibleFactHandles: ["actor-you"],
+    })).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+  });
+
+  it("binds a debt payment to one cited obligation and one cited possession", () => {
+    const judge = createCampaignPlayJudge();
+    const input = {
+      originalText: "I hand the guard two of my five copper coins and ask him to mark two paid against my seven-copper debt.",
+      source: "freeform" as const,
+      choiceHandle: null,
+    };
+    const value = proposal({
+      method: "Transfer two copper coins as partial settlement",
+      stakes: "Reduce the existing debt from seven copper to five",
+      requiredObligationEffect: {
+        kind: "pay_actor_obligation",
+        obligationHandle: "guard-debt",
+        paymentPossessionHandle: "copper-coins",
+        unitKey: "copper",
+        amount: 2,
+        minimumResult: "success",
+      },
+      citedVisibleFactHandles: ["actor-guard", "guard-debt", "copper-coins"],
+    });
+
+    expect(judge.compile(frame(), input, value).requiredObligationEffect).toEqual({
+      kind: "pay_actor_obligation",
+      obligationHandle: "guard-debt",
+      paymentPossessionHandle: "copper-coins",
+      unitKey: "copper",
+      amount: 2,
+      minimumResult: "success",
+    });
+    expect(() => judge.compile(frame(), input, {
+      ...value,
+      citedVisibleFactHandles: ["actor-guard", "guard-debt"],
+    })).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+    expect(() => judge.compile(frame(), input, {
+      ...value,
+      requiredObligationEffect: {
+        ...value.requiredObligationEffect,
+        obligationHandle: "copper-coins",
+        paymentPossessionHandle: "guard-debt",
+      },
     })).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
   });
 
@@ -449,6 +494,9 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("For a pure move, elapsedBounds.minimumMinutes and elapsedBounds.maximumMinutes must both equal the selected route's travelCost");
     expect(sentPrompt).toContain('{"kind":"adjust_actor_possession","operation":"transform","possessionHandle":"copied visible handle","quantity":1,"minimumResult":"lowest applicable tier"}');
     expect(sentPrompt).toContain("there is no adjustment field");
+    expect(sentPrompt).toContain('Its exact shape is {"kind":"pay_actor_obligation"');
+    expect(sentPrompt).toContain('"paymentPossessionHandle":"copied visible possession handle"');
+    expect(sentPrompt).toContain("displayed cargo movement, or narration without that transfer does not pay debt");
     expect(sentPrompt).toContain("SOURCE_MOMENT is the exact accepted player-visible scene");
     expect(sentPrompt).toContain(
       'SOURCE_MOMENT="The guard finishes painting a fresh white line across the gate latch."',
@@ -466,13 +514,13 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("Citing the actor does not make the actor a target");
     expect(sentPrompt).toContain("Observation and choice handles are not world targets");
     expect(sentPrompt).toContain(
-      'TARGET_CATALOG=[{"handle":"actor-you","kind":"actor"},{"handle":"location-harbor","kind":"location"},{"handle":"location-reef","kind":"location"},{"handle":"route-reef","kind":"route"},{"handle":"actor-guard","kind":"actor"},{"handle":"notebook","kind":"possession"}]',
+      'TARGET_CATALOG=[{"handle":"actor-you","kind":"actor"},{"handle":"location-harbor","kind":"location"},{"handle":"location-reef","kind":"location"},{"handle":"route-reef","kind":"route"},{"handle":"actor-guard","kind":"actor"},{"handle":"notebook","kind":"possession"},{"handle":"copper-coins","kind":"possession"},{"handle":"guard-debt","kind":"obligation"}]',
     );
     expect(sentPrompt).toContain(
       'VISIBLE_ROUTES=[{"handle":"route-reef","destinationHandle":"location-reef","travelCost":5,"state":"open"}]',
     );
     expect(sentPrompt).toContain(
-      'CITATION_HANDLES=["actor-you","location-harbor","location-reef","route-reef","actor-guard","observation-latch","choice-ask","choice-cross","notebook"]',
+      'CITATION_HANDLES=["actor-you","location-harbor","location-reef","route-reef","actor-guard","observation-latch","choice-ask","choice-cross","notebook","copper-coins","guard-debt"]',
     );
     expect(sentPrompt).toContain("stakes ask what the player hopes to learn or accomplish; they are not evidence");
     expect(sentPrompt).toContain("A clean, empty, missing, or disturbed surface proves only its currently observable state");

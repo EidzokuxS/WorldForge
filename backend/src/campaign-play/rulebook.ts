@@ -294,7 +294,7 @@ function validFrame(frame: CampaignPlayRulebookFrame): boolean {
       && Number.isInteger(row.outstandingAmount)
       && row.principalAmount >= 1
       && row.principalAmount <= CAMPAIGN_PLAY_LIMITS.possessionQuantity
-      && row.outstandingAmount >= 1
+      && row.outstandingAmount >= 0
       && row.outstandingAmount <= row.principalAmount)
     && frame.pressureStates.every((row) =>
       world.pressures.some((pressure) => pressure.id === row.pressureId)
@@ -512,6 +512,37 @@ function commandEntityRefs(
         && (reference.kind !== "obligation" || reference.id !== command.obligationId)),
     ].filter((reference, index, values) =>
       values.findIndex((candidate) => refKey(candidate) === refKey(reference)) === index);
+    case "pay_actor_obligation": {
+      const paymentPossession = state.possessions.find((candidate) =>
+        candidate.possessionId === command.paymentPossessionId);
+      const creditorPossessionId = paymentPossession === undefined
+        ? null
+        : deriveCampaignPlayPossessionId(
+          frame.campaignId,
+          command.creditorActorId,
+          paymentPossession.possessionKey,
+        );
+      return [
+        ref("actor", command.debtorActorId),
+        ref("actor", command.creditorActorId),
+        ref("possession", command.paymentPossessionId),
+        ...(creditorPossessionId === null ? [] : [ref("possession", creditorPossessionId)]),
+        ref("obligation", command.obligationId),
+        ...command.affectedRefs.filter((reference) =>
+          !(
+            (reference.kind === "actor" && (
+              reference.id === command.debtorActorId
+              || reference.id === command.creditorActorId
+            ))
+            || (reference.kind === "possession" && (
+              reference.id === command.paymentPossessionId
+              || reference.id === creditorPossessionId
+            ))
+            || (reference.kind === "obligation" && reference.id === command.obligationId)
+          )),
+      ].filter((reference, index, values) =>
+        values.findIndex((candidate) => refKey(candidate) === refKey(reference)) === index);
+    }
     case "record_world_event": return command.affectedRefs;
     case "create_player_actor": return [ref("actor", command.actorId)];
     case "initialize_player_placement": return [
@@ -542,6 +573,9 @@ function expectedScopes(
     case "update_actor_goal": return { read: refs, write: [refs[0]!] };
     case "adjust_actor_possession": return { read: refs, write: [refs[1]!] };
     case "incur_actor_obligation": return { read: refs.slice(0, 3), write: [refs[2]!] };
+    case "pay_actor_obligation": return refs.length >= 5
+      ? { read: refs.slice(0, 5), write: [refs[2]!, refs[3]!, refs[4]!] }
+      : { read: refs, write: [] };
     case "record_world_event": return { read: refs, write: [] };
     case "initialize_player_placement": return { read: refs, write: refs };
   }
@@ -648,6 +682,10 @@ function exposureGrounding(
     case "advance_pressure": addPressure(command.pressureId); break;
     case "adjust_actor_possession": addActor(command.actorId); break;
     case "incur_actor_obligation":
+      addActor(command.debtorActorId);
+      addActor(command.creditorActorId);
+      break;
+    case "pay_actor_obligation":
       addActor(command.debtorActorId);
       addActor(command.creditorActorId);
       break;
@@ -773,6 +811,9 @@ function validateRefsAndScopes(
   const existingObligation = command.kind === "incur_actor_obligation"
     ? state.obligations.find((row) => row.obligationId === command.obligationId)
     : undefined;
+  const paymentPossession = command.kind === "pay_actor_obligation"
+    ? state.possessions.find((row) => row.possessionId === command.paymentPossessionId)
+    : undefined;
   const grantedPossessionRef = command.kind === "adjust_actor_possession"
     && command.quantityDelta > 0
     && command.possessionKey === deriveCampaignPlayPossessionKey(command.name)
@@ -792,9 +833,18 @@ function validateRefsAndScopes(
     )
     ? refKey(ref("obligation", command.obligationId))
     : null;
+  const grantedCreditorPossessionRef = command.kind === "pay_actor_obligation"
+    && paymentPossession !== undefined
+    ? refKey(ref("possession", deriveCampaignPlayPossessionId(
+      frame.campaignId,
+      command.creditorActorId,
+      paymentPossession.possessionKey,
+    )))
+    : null;
   if (!allRefs.every((reference) =>
     refKey(reference) === grantedPossessionRef
     || refKey(reference) === grantedObligationRef
+    || refKey(reference) === grantedCreditorPossessionRef
     || authorized.has(refKey(reference)))) {
     deny("unauthorized_reference", "Command references an entity outside its frozen frame.", command, index);
   }
@@ -803,6 +853,7 @@ function validateRefsAndScopes(
     refKey(reference) === newPlayerRef
     || (existingPossession === undefined && refKey(reference) === grantedPossessionRef)
     || (existingObligation === undefined && refKey(reference) === grantedObligationRef)
+    || refKey(reference) === grantedCreditorPossessionRef
     || entityExists(frame, state, knownEvents, reference))) {
     deny("invalid_reference", "Command references an entity that does not exist.", command, index);
   }
@@ -901,6 +952,7 @@ function actorJobOwns(
     }
     case "adjust_actor_possession": return command.actorId === actorId;
     case "incur_actor_obligation": return false;
+    case "pay_actor_obligation": return false;
     case "record_world_event": return command.affectedRefs.some((reference) =>
       reference.kind === "actor" && reference.id === actorId);
     case "create_player_actor":
@@ -924,6 +976,13 @@ function validateAvailability(
       && state.human?.actorId === command.debtorActorId
       && actor(frame, state, command.debtorActorId)?.controller === "human"
     );
+  const paymentAvailable = command.kind !== "pay_actor_obligation"
+    || (
+      authority.purpose === "player_action"
+      && authority.actorId === command.debtorActorId
+      && state.human?.actorId === command.debtorActorId
+      && actor(frame, state, command.debtorActorId)?.controller === "human"
+    );
   const available = authority.purpose === "character_bootstrap"
     ? command.kind === "create_player_actor"
       || (command.kind === "adjust_actor_possession" && command.quantityDelta > 0)
@@ -935,6 +994,7 @@ function validateAvailability(
   if (
     !available
     || !obligationAvailable
+    || !paymentAvailable
     || !actorJobOwns(frame, state, authority, command)
   ) {
     deny("command_unavailable", "Command kind is unavailable to this authority.", command, index);
@@ -1131,6 +1191,68 @@ function applyCommand(
           unitKey: command.unitKey,
           principalAmount,
           outstandingAmount,
+        });
+      }
+      break;
+    }
+    case "pay_actor_obligation": {
+      const debtor = actor(frame, state, command.debtorActorId);
+      const creditor = actor(frame, state, command.creditorActorId);
+      const obligation = state.obligations.find((candidate) =>
+        candidate.obligationId === command.obligationId);
+      const paymentPossession = state.possessions.find((candidate) =>
+        candidate.possessionId === command.paymentPossessionId);
+      if (
+        debtor?.controller !== "human"
+        || state.human?.actorId !== command.debtorActorId
+        || creditor === null
+        || command.debtorActorId === command.creditorActorId
+        || obligation === undefined
+        || obligation.debtorActorId !== command.debtorActorId
+        || obligation.creditorActorId !== command.creditorActorId
+        || obligation.unitKey !== command.unitKey
+        || obligation.obligationId !== deriveCampaignPlayObligationId(
+          frame.campaignId,
+          command.debtorActorId,
+          command.creditorActorId,
+          command.unitKey,
+        )
+        || paymentPossession === undefined
+        || paymentPossession.actorId !== command.debtorActorId
+        || paymentPossession.quantity < command.amount
+        || obligation.outstandingAmount < command.amount
+      ) {
+        deny("precondition_failed", "Obligation payment does not match the exact debtor, possession, and balance.", command, index);
+      }
+      const creditorPossessionId = deriveCampaignPlayPossessionId(
+        frame.campaignId,
+        command.creditorActorId,
+        paymentPossession.possessionKey,
+      );
+      const creditorPossession = state.possessions.find((candidate) =>
+        candidate.possessionId === creditorPossessionId);
+      const creditorQuantity = creditorPossession?.quantity ?? 0;
+      if (
+        (creditorPossession !== undefined && (
+          creditorPossession.actorId !== command.creditorActorId
+          || creditorPossession.possessionKey !== paymentPossession.possessionKey
+          || creditorPossession.name !== paymentPossession.name
+        ))
+        || creditorQuantity + command.amount > CAMPAIGN_PLAY_LIMITS.possessionQuantity
+      ) {
+        deny("precondition_failed", "Creditor possession cannot receive the exact payment.", command, index);
+      }
+      paymentPossession.quantity -= command.amount;
+      obligation.outstandingAmount -= command.amount;
+      if (creditorPossession) {
+        creditorPossession.quantity += command.amount;
+      } else {
+        state.possessions.push({
+          possessionId: creditorPossessionId,
+          actorId: command.creditorActorId,
+          possessionKey: paymentPossession.possessionKey,
+          name: paymentPossession.name,
+          quantity: command.amount,
         });
       }
       break;
@@ -1494,6 +1616,7 @@ function eventKind(command: RulebookBatchCommand): string {
     case "advance_pressure": return "pressure_advanced";
     case "adjust_actor_possession": return "actor_possession_adjusted";
     case "incur_actor_obligation": return "actor_obligation_incurred";
+    case "pay_actor_obligation": return "actor_obligation_payment_applied";
     case "record_world_event": return "scene_recorded";
     case "create_player_actor": return "player_actor_created";
     case "initialize_player_placement": return "player_placement_initialized";
@@ -1511,6 +1634,7 @@ function eventAffectedRefs(
   if (command.kind === "record_world_event") return command.affectedRefs;
   if (command.kind === "adjust_actor_possession") return commandEntityRefs(frame, after, command);
   if (command.kind === "incur_actor_obligation") return commandEntityRefs(frame, after, command);
+  if (command.kind === "pay_actor_obligation") return commandEntityRefs(frame, after, command);
   const refs = command.writeScope.length > 0 ? command.writeScope : command.readScope;
   if (refs.length > 0) return refs;
   if (command.source.kind === "actor") return [ref("actor", command.source.actorId)];
@@ -1611,6 +1735,54 @@ function applyStoredMutation(
             command.unitKey, command.amount, command.amount, receiptId, resultWorldVersion,
             input.createdAt);
       }
+      return;
+    }
+    case "pay_actor_obligation": {
+      const paymentPossession = sqlite.prepare(`SELECT possession_key AS possessionKey, name
+        FROM campaign_play_actor_possessions
+        WHERE possession_id = ? AND campaign_id = ?`).get(
+          command.paymentPossessionId,
+          campaignId,
+        ) as { possessionKey: string; name: string } | undefined;
+      if (!paymentPossession) {
+        throw new CampaignPlayRulebookExecutionError(
+          "execution_contract_invalid",
+          "Accepted obligation payment is missing its debtor possession.",
+        );
+      }
+      const creditorPossessionId = deriveCampaignPlayPossessionId(
+        campaignId,
+        command.creditorActorId,
+        paymentPossession.possessionKey,
+      );
+      sqlite.prepare(`UPDATE campaign_play_actor_possessions SET
+        quantity = quantity - ?, causal_receipt_id = ?, world_version = ?, updated_at = ?
+        WHERE possession_id = ? AND campaign_id = ?`)
+        .run(command.amount, receiptId, resultWorldVersion, input.createdAt,
+          command.paymentPossessionId, campaignId);
+      const creditorPossession = sqlite.prepare(`SELECT 1 FROM campaign_play_actor_possessions
+        WHERE possession_id = ? AND campaign_id = ?`).get(creditorPossessionId, campaignId);
+      if (creditorPossession) {
+        sqlite.prepare(`UPDATE campaign_play_actor_possessions SET
+          quantity = quantity + ?, causal_receipt_id = ?, world_version = ?, updated_at = ?
+          WHERE possession_id = ? AND campaign_id = ?`)
+          .run(command.amount, receiptId, resultWorldVersion, input.createdAt,
+            creditorPossessionId, campaignId);
+      } else {
+        sqlite.prepare(`INSERT INTO campaign_play_actor_possessions
+          (possession_id, campaign_id, actor_id, possession_key, name, quantity,
+            causal_receipt_id, world_version, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(creditorPossessionId, campaignId, command.creditorActorId,
+            paymentPossession.possessionKey, paymentPossession.name, command.amount,
+            receiptId, resultWorldVersion, input.createdAt);
+      }
+      sqlite.prepare(`UPDATE campaign_play_actor_obligations SET
+        outstanding_amount = outstanding_amount - ?, causal_receipt_id = ?,
+        world_version = ?, updated_at = ?
+        WHERE obligation_id = ? AND campaign_id = ?`)
+        .run(command.amount, receiptId, resultWorldVersion, input.createdAt,
+          command.obligationId, campaignId);
       return;
     }
     case "record_world_event": return;
@@ -1750,7 +1922,11 @@ export function executeCampaignPlayRulebookBatch(
         hashCampaignPlayProjection(argumentsPayload),
         createdAt);
 
-    if (command.kind === "adjust_actor_possession" || command.kind === "incur_actor_obligation") {
+    if (
+      command.kind === "adjust_actor_possession"
+      || command.kind === "incur_actor_obligation"
+      || command.kind === "pay_actor_obligation"
+    ) {
       applyStoredMutation(input, command, receiptId, after.worldVersion);
     }
 
@@ -1793,6 +1969,7 @@ export function executeCampaignPlayRulebookBatch(
       command.kind !== "create_player_actor"
       && command.kind !== "adjust_actor_possession"
       && command.kind !== "incur_actor_obligation"
+      && command.kind !== "pay_actor_obligation"
     ) {
       applyStoredMutation(input, command, receiptId, after.worldVersion);
     }

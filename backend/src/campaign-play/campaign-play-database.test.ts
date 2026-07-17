@@ -461,7 +461,7 @@ describe("Campaign Play core and Rulebook storage", () => {
         SELECT name FROM sqlite_master
         WHERE type = 'index' AND name IN (
           'campaign_play_actor_possessions_actor_key_unique',
-          'campaign_play_actor_possessions_receipt_unique',
+          'idx_campaign_play_actor_possessions_receipt',
           'idx_campaign_play_actor_possessions_campaign_actor',
           'idx_campaign_play_actor_possessions_campaign_version'
         )
@@ -469,9 +469,9 @@ describe("Campaign Play core and Rulebook storage", () => {
       `).all();
       expect(possessionIndexes).toEqual([
         { name: "campaign_play_actor_possessions_actor_key_unique" },
-        { name: "campaign_play_actor_possessions_receipt_unique" },
         { name: "idx_campaign_play_actor_possessions_campaign_actor" },
         { name: "idx_campaign_play_actor_possessions_campaign_version" },
+        { name: "idx_campaign_play_actor_possessions_receipt" },
       ]);
       const obligationIndexes = sqlite.prepare(`
         SELECT name FROM sqlite_master
@@ -509,6 +509,18 @@ describe("Campaign Play core and Rulebook storage", () => {
         { name: "campaign_play_actor_obligations_insert_guard" },
         { name: "campaign_play_actor_obligations_update_guard" },
       ]);
+      const paymentStorage = sqlite.prepare(`SELECT name, sql FROM sqlite_schema
+        WHERE name IN (
+          'campaign_play_actor_obligations',
+          'campaign_play_events',
+          'campaign_play_events_insert_guard'
+        ) ORDER BY name`).all() as Array<{ name: string; sql: string }>;
+      expect(paymentStorage.find((row) => row.name === "campaign_play_actor_obligations")?.sql)
+        .toContain('"outstanding_amount" BETWEEN 0 AND "campaign_play_actor_obligations"."principal_amount"');
+      expect(paymentStorage.find((row) => row.name === "campaign_play_events")?.sql)
+        .toContain("'actor_obligation_payment_applied'");
+      expect(paymentStorage.find((row) => row.name === "campaign_play_events_insert_guard")?.sql)
+        .toContain("'pay_actor_obligation'");
       const runtimeTriggers = sqlite.prepare(`SELECT name FROM sqlite_master
         WHERE type = 'trigger' AND (
           name LIKE 'campaign_play_actor_due_sets_%'
@@ -689,7 +701,7 @@ describe("Campaign Play core and Rulebook storage", () => {
       .get() as { sql: string };
     expect(after.sql).toContain("job.defer_reason = 'actor_capacity'");
     expect(opened.sqlite.prepare(`SELECT max(created_at) AS latest
-      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_784_178_400_000 });
+      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_784_290_350_130 });
   });
 
   it("adds core play storage to an accepted Campaign World without changing provenance", () => {

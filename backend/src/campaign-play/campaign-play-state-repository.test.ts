@@ -1168,8 +1168,8 @@ describe("Campaign Play atomic Rulebook execution", () => {
       creditorActorId: obligationFrame.acceptedWorld.actors[0]!.id,
       obligationId,
       unitKey: "copper" as const,
-      amount: 8,
-      summary: "The traveler owes eight copper for passage.",
+      amount: 1,
+      summary: "The traveler owes one copper for passage.",
       affectedRefs: [
         { kind: "actor" as const, id: "actor-player" },
         { kind: "actor" as const, id: obligationFrame.acceptedWorld.actors[0]!.id },
@@ -1224,14 +1224,14 @@ describe("Campaign Play atomic Rulebook execution", () => {
     expect(handle.sqlite.prepare(`SELECT principal_amount AS principalAmount,
       outstanding_amount AS outstandingAmount FROM campaign_play_actor_obligations
       WHERE obligation_id = ? AND campaign_id = ?`).get(obligationId, CAMPAIGN_A))
-      .toEqual({ principalAmount: 8, outstandingAmount: 8 });
+      .toEqual({ principalAmount: 1, outstandingAmount: 1 });
     expect(loadCampaignPlayRulebookFrame(handle).obligations).toEqual([{
       obligationId,
       debtorActorId: "actor-player",
       creditorActorId: obligationFrame.acceptedWorld.actors[0]!.id,
       unitKey: "copper",
-      principalAmount: 8,
-      outstandingAmount: 8,
+      principalAmount: 1,
+      outstandingAmount: 1,
     }]);
     const reloadedPublicState = repository.loadState()!.publicState.projection as {
       obligations: Array<{
@@ -1249,13 +1249,145 @@ describe("Campaign Play atomic Rulebook execution", () => {
       ),
       creditorName: obligationFrame.acceptedWorld.actors[0]!.name,
       unitKey: "copper",
-      outstandingAmount: 8,
+      outstandingAmount: 1,
     }]);
     expect(handle.sqlite.prepare(`SELECT
       (SELECT count(*) FROM campaign_play_receipts WHERE command_id = ?) AS receipts,
       (SELECT count(*) FROM campaign_play_events
         WHERE command_id = ? AND event_kind = 'actor_obligation_incurred') AS events`
     ).get(obligationCommand.commandId, obligationCommand.commandId))
+      .toEqual({ receipts: 1, events: 1 });
+
+    const paymentFrame = {
+      ...loadCampaignPlayRulebookFrame(handle),
+      setupPhase: "ready" as const,
+    };
+    const creditorPossessionId = deriveCampaignPlayPossessionId(
+      paymentFrame.campaignId,
+      obligationFrame.acceptedWorld.actors[0]!.id,
+      possessionKey,
+    );
+    const paymentBatchId = "batch-pay-obligation";
+    const paymentCommand = {
+      commandId: deriveCampaignPlayCommandId(
+        paymentFrame.campaignId, "turn-opening", paymentBatchId, 0,
+      ),
+      batchId: paymentBatchId,
+      order: 0,
+      kind: "pay_actor_obligation" as const,
+      causalParent: ordinaryRoot,
+      source: { kind: "actor" as const, actorId: "actor-player" },
+      expectedWorldVersion: paymentFrame.worldVersion,
+      readScope: [
+        { kind: "actor" as const, id: "actor-player" },
+        { kind: "actor" as const, id: obligationFrame.acceptedWorld.actors[0]!.id },
+        { kind: "possession" as const, id: possessionId },
+        { kind: "possession" as const, id: creditorPossessionId },
+        { kind: "obligation" as const, id: obligationId },
+      ],
+      writeScope: [
+        { kind: "possession" as const, id: possessionId },
+        { kind: "possession" as const, id: creditorPossessionId },
+        { kind: "obligation" as const, id: obligationId },
+      ],
+      exposure: { mode: "protected" as const },
+      debtorActorId: "actor-player",
+      creditorActorId: obligationFrame.acceptedWorld.actors[0]!.id,
+      obligationId,
+      paymentPossessionId: possessionId,
+      unitKey: "copper" as const,
+      amount: 1,
+      summary: "The traveler pays one copper toward the passage debt.",
+      affectedRefs: [
+        { kind: "actor" as const, id: "actor-player" },
+        { kind: "actor" as const, id: obligationFrame.acceptedWorld.actors[0]!.id },
+      ],
+    };
+    const paymentPreflight = preflightCampaignPlayRulebook({
+      frame: paymentFrame,
+      authority: {
+        purpose: "player_action",
+        turnId: "turn-opening",
+        actorId: "actor-player",
+        rootParent: ordinaryRoot,
+        authorizedRefs: [
+          { kind: "actor", id: "actor-player" },
+          { kind: "actor", id: obligationFrame.acceptedWorld.actors[0]!.id },
+          { kind: "possession", id: possessionId },
+          { kind: "obligation", id: obligationId },
+        ],
+        witnessActorIds: [],
+        knownWorldEventIds: [],
+      },
+      batch: {
+        batchId: paymentBatchId,
+        baseWorldVersion: paymentFrame.worldVersion,
+        commands: [paymentCommand],
+      },
+    });
+    if (!paymentPreflight.accepted) {
+      throw new Error(`Payment fixture preflight failed: ${paymentPreflight.denial.code}`);
+    }
+    const priorPaymentHash = repository.loadState()!.authority.worldHash;
+    const paymentState = repository.commitMechanicalAndRuntime({
+      worldVersionAdvance: 1,
+      event: {
+        eventId: "runtime-pay-obligation",
+        turnId: "turn-opening",
+        kind: "actor_job_transitioned",
+        workerEpoch: settlementToken.epoch,
+        protectedPayloadHash: HASH_C,
+        createdAt: 1_750,
+      },
+      mutate(context) {
+        executeCampaignPlayRulebookBatch({
+          frame: paymentFrame,
+          accepted: paymentPreflight,
+          context,
+          turnId: "turn-opening",
+          createdAt: 1_750,
+        });
+      },
+    });
+    expect(paymentState.authority.worldVersion).toBe(paymentFrame.worldVersion + 1);
+    expect(paymentState.authority.worldHash).not.toBe(priorPaymentHash);
+    expect(handle.sqlite.prepare(`SELECT principal_amount AS principalAmount,
+      outstanding_amount AS outstandingAmount FROM campaign_play_actor_obligations
+      WHERE obligation_id = ? AND campaign_id = ?`).get(obligationId, CAMPAIGN_A))
+      .toEqual({ principalAmount: 1, outstandingAmount: 0 });
+    expect(handle.sqlite.prepare(`SELECT possession_id AS possessionId, actor_id AS actorId,
+      quantity FROM campaign_play_actor_possessions
+      WHERE possession_id IN (?, ?) ORDER BY actor_id`).all(possessionId, creditorPossessionId))
+      .toEqual([
+        { possessionId: creditorPossessionId, actorId: obligationFrame.acceptedWorld.actors[0]!.id, quantity: 1 },
+        { possessionId, actorId: "actor-player", quantity: 0 },
+      ]);
+    expect(loadCampaignPlayRulebookFrame(handle).obligations).toEqual([{
+      obligationId,
+      debtorActorId: "actor-player",
+      creditorActorId: obligationFrame.acceptedWorld.actors[0]!.id,
+      unitKey: "copper",
+      principalAmount: 1,
+      outstandingAmount: 0,
+    }]);
+    expect(repository.loadState()!.publicState.projection).toMatchObject({ obligations: [] });
+    const reloadedRepository = createCampaignPlayStateRepository(openPlay(CAMPAIGN_A));
+    const reloadedPaymentState = reloadedRepository.loadState()!;
+    expect(reloadedPaymentState.authority.worldHash).toBe(paymentState.authority.worldHash);
+    expect(reloadedPaymentState.publicState.projection).toMatchObject({ obligations: [] });
+    expect(loadCampaignPlayRulebookFrame(openPlay(CAMPAIGN_A)).obligations).toEqual([{
+      obligationId,
+      debtorActorId: "actor-player",
+      creditorActorId: obligationFrame.acceptedWorld.actors[0]!.id,
+      unitKey: "copper",
+      principalAmount: 1,
+      outstandingAmount: 0,
+    }]);
+    expect(handle.sqlite.prepare(`SELECT
+      (SELECT count(*) FROM campaign_play_receipts WHERE command_id = ?) AS receipts,
+      (SELECT count(*) FROM campaign_play_events
+        WHERE command_id = ? AND event_kind = 'actor_obligation_payment_applied') AS events`
+    ).get(paymentCommand.commandId, paymentCommand.commandId))
       .toEqual({ receipts: 1, events: 1 });
   });
 

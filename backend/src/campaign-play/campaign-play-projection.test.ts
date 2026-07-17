@@ -413,7 +413,7 @@ describe("mechanical and runtime truth", () => {
     expect(left.canonicalBytes).toContain("possession:a");
   });
 
-  it("includes outstanding obligations in mechanical truth regardless read order", () => {
+  it("includes outstanding and settled zero obligations in mechanical truth regardless read order", () => {
     const review = acceptedReviewFixture();
     const base = initialMechanicalInput(review);
     const obligations = [
@@ -435,7 +435,7 @@ describe("mechanical and runtime truth", () => {
         creditorActorId: "actor:a",
         unitKey: "copper" as const,
         principalAmount: 8,
-        outstandingAmount: 8,
+        outstandingAmount: 0,
       },
     ];
     const withoutObligations = projectCampaignPlayMechanicalTruth({

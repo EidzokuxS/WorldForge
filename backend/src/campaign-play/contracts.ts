@@ -103,6 +103,7 @@ export const CAMPAIGN_PLAY_COMMAND_KIND_VALUES = [
   "advance_pressure",
   "adjust_actor_possession",
   "incur_actor_obligation",
+  "pay_actor_obligation",
   "record_world_event",
 ] as const;
 
@@ -127,6 +128,7 @@ export const CAMPAIGN_PLAY_WORLD_EVENT_KIND_VALUES = [
   "pressure_advanced",
   "actor_obligation_incurred",
   "actor_possession_adjusted",
+  "actor_obligation_payment_applied",
   "scene_recorded",
 ] as const;
 
@@ -1739,7 +1741,19 @@ export const campaignPlayRequiredObligationEffectSchema = z.discriminatedUnion("
     amount: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
     minimumResult: z.enum(["setback", "limited", "success", "strong_success"]),
   }).strict(),
+  z.object({
+    kind: z.literal("pay_actor_obligation"),
+    obligationHandle: handleSchema,
+    paymentPossessionHandle: handleSchema,
+    unitKey: z.literal("copper"),
+    amount: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+    minimumResult: z.enum(["setback", "limited", "success", "strong_success"]),
+  }).strict(),
 ]);
+
+export type CampaignPlayRequiredObligationEffect = z.infer<
+  typeof campaignPlayRequiredObligationEffectSchema
+>;
 
 const campaignPlayJudgeRulingBaseSchema = z.object({
   disposition: campaignPlayJudgmentDispositionSchema,
@@ -1871,7 +1885,7 @@ export const campaignPlayJudgeRulingSchema =
         });
       }
     }
-    if (ruling.requiredObligationEffect.kind === "incur_actor_obligation") {
+    if (ruling.requiredObligationEffect.kind !== "none") {
       const rank = new Map(
         CAMPAIGN_PLAY_RESULT_TIER_VALUES.map((tier, index) => [tier, index]),
       );
@@ -2248,6 +2262,21 @@ export const incurActorObligationCommandSchema = z.object({
     .max(CAMPAIGN_PLAY_LIMITS.affectedRefs),
 }).strict();
 
+export const payActorObligationCommandSchema = z.object({
+  ...campaignPlayCommandBaseShape,
+  kind: z.literal("pay_actor_obligation"),
+  debtorActorId: idSchema,
+  creditorActorId: idSchema,
+  obligationId: idSchema,
+  paymentPossessionId: idSchema,
+  unitKey: z.literal("copper"),
+  amount: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  summary: textSchema,
+  affectedRefs: z.array(campaignPlayEntityRefSchema)
+    .min(1)
+    .max(CAMPAIGN_PLAY_LIMITS.affectedRefs),
+}).strict();
+
 export const recordWorldEventCommandSchema = z.object({
   ...campaignPlayCommandBaseShape,
   kind: z.literal("record_world_event"),
@@ -2322,6 +2351,7 @@ export const campaignPlayCommandSchema = z.discriminatedUnion("kind", [
   advancePressureCommandSchema,
   adjustActorPossessionCommandSchema,
   incurActorObligationCommandSchema,
+  payActorObligationCommandSchema,
   recordWorldEventCommandSchema,
 ]);
 
@@ -2342,6 +2372,7 @@ export const rulebookBatchCommandSchema = z.discriminatedUnion("kind", [
   advancePressureCommandSchema,
   adjustActorPossessionCommandSchema,
   incurActorObligationCommandSchema,
+  payActorObligationCommandSchema,
   recordWorldEventCommandSchema,
   createPlayerActorCommandSchema,
   initializePlayerPlacementCommandSchema,
@@ -2660,6 +2691,42 @@ export const actorObligationIncurredEventSchema = z.object({
   }
 });
 
+export const actorObligationPaymentAppliedEventSchema = z.object({
+  ...campaignPlayWorldEventBaseShape,
+  kind: z.literal("actor_obligation_payment_applied"),
+  debtorActorId: idSchema,
+  creditorActorId: idSchema,
+  obligationId: idSchema,
+  paymentPossessionId: idSchema,
+  paymentPossessionKey: labelSchema,
+  paymentPossessionName: nameSchema,
+  creditorPossessionId: idSchema,
+  unitKey: z.literal("copper"),
+  amount: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  priorDebtorQuantity: nonnegativeIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  resultDebtorQuantity: nonnegativeIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  priorCreditorQuantity: nonnegativeIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  resultCreditorQuantity: nonnegativeIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  principalAmount: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  priorOutstandingAmount: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  resultOutstandingAmount: nonnegativeIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+}).strict().superRefine((event, context) => {
+  if (
+    event.debtorActorId === event.creditorActorId
+    || event.paymentPossessionId === event.creditorPossessionId
+    || event.resultDebtorQuantity !== event.priorDebtorQuantity - event.amount
+    || event.resultCreditorQuantity !== event.priorCreditorQuantity + event.amount
+    || event.resultOutstandingAmount !== event.priorOutstandingAmount - event.amount
+    || event.priorOutstandingAmount > event.principalAmount
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["resultOutstandingAmount"],
+      message: "Obligation payment must transfer one positive amount and preserve its principal.",
+    });
+  }
+});
+
 export const sceneRecordedEventSchema = z.object({
   ...campaignPlayWorldEventBaseShape,
   kind: z.literal("scene_recorded"),
@@ -2702,6 +2769,7 @@ const campaignPlayWorldEventUnionSchema = z.union([
   pressureAdvancedEventSchema,
   actorPossessionAdjustedEventSchema,
   actorObligationIncurredEventSchema,
+  actorObligationPaymentAppliedEventSchema,
   sceneRecordedEventSchema,
 ]);
 
@@ -3482,6 +3550,7 @@ export const CAMPAIGN_PLAY_WORLD_EVENT_METADATA = {
   pressure_advanced: { commandKind: "advance_pressure" },
   actor_obligation_incurred: { commandKind: "incur_actor_obligation" },
   actor_possession_adjusted: { commandKind: "adjust_actor_possession" },
+  actor_obligation_payment_applied: { commandKind: "pay_actor_obligation" },
   scene_recorded: { commandKind: "record_world_event" },
 } as const satisfies Record<
   CampaignPlayWorldEventKind,
@@ -3822,6 +3891,7 @@ export const CAMPAIGN_PLAY_COMMAND_METADATA = {
   advance_pressure: { modelVisible: true, mechanicalMutation: true },
   adjust_actor_possession: { modelVisible: true, mechanicalMutation: true },
   incur_actor_obligation: { modelVisible: true, mechanicalMutation: true },
+  pay_actor_obligation: { modelVisible: true, mechanicalMutation: true },
   record_world_event: { modelVisible: true, mechanicalMutation: false },
   create_player_actor: { modelVisible: false, mechanicalMutation: true },
   initialize_player_placement: { modelVisible: false, mechanicalMutation: true },

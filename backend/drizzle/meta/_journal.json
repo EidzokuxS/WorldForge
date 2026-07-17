@@ -267,6 +267,13 @@
       "when": 1784178400000,
       "tag": "0037_campaign_play_actor_obligations",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1784290350130,
+      "tag": "0038_campaign_play_actor_obligation_payments",
+      "breakpoints": true
     }
   ]
 }

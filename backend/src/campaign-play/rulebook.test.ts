@@ -717,6 +717,184 @@ describe("Campaign Play Rulebook preflight", () => {
     }]);
   });
 
+  it("settles an exact human obligation by transferring the debtor possession and retaining zero balance", () => {
+    const frame = frameFixture();
+    const paymentPossessionKey = deriveCampaignPlayPossessionKey("Copper chit");
+    const paymentPossessionId = deriveCampaignPlayPossessionId(
+      CAMPAIGN_ID,
+      PLAYER_ID,
+      paymentPossessionKey,
+    );
+    const creditorPossessionId = deriveCampaignPlayPossessionId(
+      CAMPAIGN_ID,
+      "actor-key",
+      paymentPossessionKey,
+    );
+    const obligationId = deriveCampaignPlayObligationId(
+      CAMPAIGN_ID,
+      PLAYER_ID,
+      "actor-key",
+      "copper",
+    );
+    frame.possessions.push({
+      possessionId: paymentPossessionId,
+      actorId: PLAYER_ID,
+      possessionKey: paymentPossessionKey,
+      name: "Copper chit",
+      quantity: 8,
+    });
+    frame.obligations.push({
+      obligationId,
+      debtorActorId: PLAYER_ID,
+      creditorActorId: "actor-key",
+      unitKey: "copper",
+      principalAmount: 8,
+      outstandingAmount: 8,
+    });
+    const authority = playerAuthority();
+    authority.authorizedRefs.push(
+      { kind: "possession", id: paymentPossessionId },
+      { kind: "obligation", id: obligationId },
+    );
+    const payment = (order: number, amount: number) => ({
+      ...commandBase(order, READY_VERSION + order),
+      kind: "pay_actor_obligation" as const,
+      debtorActorId: PLAYER_ID,
+      creditorActorId: "actor-key",
+      obligationId,
+      paymentPossessionId,
+      unitKey: "copper" as const,
+      amount,
+      summary: "The traveler hands over copper toward the passage debt.",
+      affectedRefs: [
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "actor" as const, id: "actor-key" },
+      ],
+      readScope: [
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "actor" as const, id: "actor-key" },
+        { kind: "possession" as const, id: paymentPossessionId },
+        { kind: "possession" as const, id: creditorPossessionId },
+        { kind: "obligation" as const, id: obligationId },
+      ],
+      writeScope: [
+        { kind: "possession" as const, id: paymentPossessionId },
+        { kind: "possession" as const, id: creditorPossessionId },
+        { kind: "obligation" as const, id: obligationId },
+      ],
+    });
+    const accepted = preflightCampaignPlayRulebook({
+      frame,
+      authority,
+      batch: {
+        batchId: BATCH_ID,
+        baseWorldVersion: READY_VERSION,
+        commands: [payment(0, 3), payment(1, 5)],
+      },
+    });
+    expect(accepted.accepted).toBe(true);
+    if (!accepted.accepted) return;
+    expect(accepted.checkpoints[1]?.possessions).toContainEqual({
+      possessionId: paymentPossessionId,
+      actorId: PLAYER_ID,
+      possessionKey: paymentPossessionKey,
+      name: "Copper chit",
+      quantity: 5,
+    });
+    expect(accepted.checkpoints[1]?.possessions).toContainEqual({
+      possessionId: creditorPossessionId,
+      actorId: "actor-key",
+      possessionKey: paymentPossessionKey,
+      name: "Copper chit",
+      quantity: 3,
+    });
+    expect(accepted.simulation.possessions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ possessionId: paymentPossessionId, quantity: 0 }),
+      expect.objectContaining({ possessionId: creditorPossessionId, quantity: 8 }),
+    ]));
+    expect(accepted.simulation.obligations).toEqual([{
+      obligationId,
+      debtorActorId: PLAYER_ID,
+      creditorActorId: "actor-key",
+      unitKey: "copper",
+      principalAmount: 8,
+      outstandingAmount: 0,
+    }]);
+    expect(accepted.simulation.worldVersion).toBe(READY_VERSION + 2);
+  });
+
+  it("rejects obligation payments that exceed the debtor possession, debt, or player authority", () => {
+    const frame = frameFixture();
+    const possessionKey = deriveCampaignPlayPossessionKey("Copper chit");
+    const possessionId = deriveCampaignPlayPossessionId(CAMPAIGN_ID, PLAYER_ID, possessionKey);
+    const obligationId = deriveCampaignPlayObligationId(CAMPAIGN_ID, PLAYER_ID, "actor-key", "copper");
+    frame.possessions.push({
+      possessionId,
+      actorId: PLAYER_ID,
+      possessionKey,
+      name: "Copper chit",
+      quantity: 2,
+    });
+    frame.obligations.push({
+      obligationId,
+      debtorActorId: PLAYER_ID,
+      creditorActorId: "actor-key",
+      unitKey: "copper",
+      principalAmount: 3,
+      outstandingAmount: 3,
+    });
+    const authority = playerAuthority();
+    authority.authorizedRefs.push(
+      { kind: "possession", id: possessionId },
+      { kind: "obligation", id: obligationId },
+    );
+    const creditorPossessionId = deriveCampaignPlayPossessionId(CAMPAIGN_ID, "actor-key", possessionKey);
+    const command = {
+      ...commandBase(0, READY_VERSION),
+      kind: "pay_actor_obligation" as const,
+      debtorActorId: PLAYER_ID,
+      creditorActorId: "actor-key",
+      obligationId,
+      paymentPossessionId: possessionId,
+      unitKey: "copper" as const,
+      amount: 3,
+      summary: "The traveler offers copper toward the passage debt.",
+      affectedRefs: [{ kind: "actor" as const, id: "actor-key" }],
+      readScope: [
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "actor" as const, id: "actor-key" },
+        { kind: "possession" as const, id: possessionId },
+        { kind: "possession" as const, id: creditorPossessionId },
+        { kind: "obligation" as const, id: obligationId },
+      ],
+      writeScope: [
+        { kind: "possession" as const, id: possessionId },
+        { kind: "possession" as const, id: creditorPossessionId },
+        { kind: "obligation" as const, id: obligationId },
+      ],
+    };
+    expect(preflightCampaignPlayRulebook({
+      frame,
+      authority,
+      batch: { batchId: BATCH_ID, baseWorldVersion: READY_VERSION, commands: [command] },
+    })).toMatchObject({ accepted: false, denial: { code: "precondition_failed" } });
+
+    const enoughPossession = structuredClone(frame);
+    enoughPossession.possessions[0]!.quantity = 4;
+    enoughPossession.obligations[0]!.outstandingAmount = 2;
+    expect(preflightCampaignPlayRulebook({
+      frame: enoughPossession,
+      authority,
+      batch: { batchId: BATCH_ID, baseWorldVersion: READY_VERSION, commands: [command] },
+    })).toMatchObject({ accepted: false, denial: { code: "precondition_failed" } });
+
+    expect(preflightCampaignPlayRulebook({
+      frame,
+      authority: { ...authority, purpose: "actor_job", actorId: "actor-key", rootParent: { kind: "actor_job", jobId: "job-key" } },
+      batch: { batchId: BATCH_ID, baseWorldVersion: READY_VERSION, commands: [command] },
+    })).toMatchObject({ accepted: false, denial: { code: "command_unavailable" } });
+  });
+
   it("accepts the complete opening bootstrap and simulates earlier outputs", () => {
     const frame = frameFixture("opening_required");
     const authority: CampaignPlayRulebookAuthority = {

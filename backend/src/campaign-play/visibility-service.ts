@@ -673,7 +673,8 @@ function publicEntry(
     eventSource.kind === "system" && eventSource.system === "game_master" &&
     (exposure.commandKind === "record_world_event"
       || exposure.commandKind === "adjust_actor_possession"
-      || exposure.commandKind === "incur_actor_obligation")
+      || exposure.commandKind === "incur_actor_obligation"
+      || exposure.commandKind === "pay_actor_obligation")
     && typeof commandPayload.summary === "string"
   ) {
     title = "Your action";

@@ -219,6 +219,126 @@ describe("Campaign Play Game Master obligations", () => {
       proposal,
     )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
   });
+
+  it("compiles one Judge-required partial payment as an atomic possession transfer and debt reduction", () => {
+    const paymentFrame = frame();
+    const possessionKey = deriveCampaignPlayPossessionKey("Copper coins");
+    const paymentPossessionId = deriveCampaignPlayPossessionId(CAMPAIGN_ID, PLAYER_ID, possessionKey);
+    const creditorPossessionId = deriveCampaignPlayPossessionId(CAMPAIGN_ID, "actor-guard", possessionKey);
+    const obligationId = deriveCampaignPlayObligationId(
+      CAMPAIGN_ID,
+      PLAYER_ID,
+      "actor-guard",
+      "copper",
+    );
+    paymentFrame.visibleFacts.push(
+      { handle: "coins", kind: "possession", summary: "Five copper coins." },
+      { handle: "guard-debt", kind: "obligation", summary: "Seven copper owed to Oren Tide." },
+    );
+    paymentFrame.handleBindings.push(
+      { handle: "coins", reference: { kind: "possession", id: paymentPossessionId } },
+      { handle: "guard-debt", reference: { kind: "obligation", id: obligationId } },
+    );
+    paymentFrame.rulebookFrame.possessions.push({
+      possessionId: paymentPossessionId,
+      actorId: PLAYER_ID,
+      possessionKey,
+      name: "Copper coins",
+      quantity: 5,
+    });
+    paymentFrame.rulebookFrame.obligations.push({
+      obligationId,
+      debtorActorId: PLAYER_ID,
+      creditorActorId: "actor-guard",
+      unitKey: "copper",
+      principalAmount: 7,
+      outstandingAmount: 7,
+    });
+    paymentFrame.authority.authorizedRefs.push(
+      { kind: "possession", id: paymentPossessionId },
+      { kind: "obligation", id: obligationId },
+    );
+    const requiredObligationEffect = {
+      kind: "pay_actor_obligation" as const,
+      obligationHandle: "guard-debt",
+      paymentPossessionHandle: "coins",
+      unitKey: "copper" as const,
+      amount: 2,
+      minimumResult: "success" as const,
+    };
+    const candidate = createCampaignPlayGameMaster().compile(
+      paymentFrame,
+      ruling({ requiredObligationEffect }),
+      resolution,
+      null,
+      {
+        elapsedMinutes: 1,
+        effects: [{
+          kind: "pay_actor_obligation",
+          debtorActorHandle: "you",
+          creditorActorHandle: "guard",
+          obligationHandle: "guard-debt",
+          paymentPossessionHandle: "coins",
+          unitKey: "copper",
+          amount: 2,
+          summary: "You place two copper coins in Oren Tide's hand; five copper remains owed.",
+          affectedHandles: ["you", "guard", "coins", "guard-debt"],
+        }],
+      },
+    );
+    expect(candidate.batch.commands[1]).toMatchObject({
+      kind: "pay_actor_obligation",
+      order: 1,
+      expectedWorldVersion: 8,
+      debtorActorId: PLAYER_ID,
+      creditorActorId: "actor-guard",
+      obligationId,
+      paymentPossessionId,
+      unitKey: "copper",
+      amount: 2,
+      summary: "You place two copper coins in Oren Tide's hand; five copper remains owed.",
+      affectedRefs: [
+        { kind: "actor", id: PLAYER_ID },
+        { kind: "actor", id: "actor-guard" },
+        { kind: "possession", id: paymentPossessionId },
+        { kind: "possession", id: creditorPossessionId },
+        { kind: "obligation", id: obligationId },
+      ],
+      readScope: [
+        { kind: "actor", id: PLAYER_ID },
+        { kind: "actor", id: "actor-guard" },
+        { kind: "possession", id: paymentPossessionId },
+        { kind: "possession", id: creditorPossessionId },
+        { kind: "obligation", id: obligationId },
+      ],
+      writeScope: [
+        { kind: "possession", id: paymentPossessionId },
+        { kind: "possession", id: creditorPossessionId },
+        { kind: "obligation", id: obligationId },
+      ],
+    });
+    expect(candidate.preflight.accepted).toBe(true);
+    expect(() => createCampaignPlayGameMaster().compile(
+      paymentFrame,
+      ruling(),
+      resolution,
+      null,
+      {
+        elapsedMinutes: 1,
+        effects: [{
+          kind: "pay_actor_obligation",
+          debtorActorHandle: "you",
+          creditorActorHandle: "guard",
+          obligationHandle: "guard-debt",
+          paymentPossessionHandle: "coins",
+          unitKey: "copper",
+          amount: 2,
+          summary: "You place two copper coins in Oren Tide's hand.",
+          affectedHandles: ["you", "guard", "coins", "guard-debt"],
+        }],
+      },
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+  });
 });
 
 function model(): LanguageModel {
@@ -366,7 +486,13 @@ describe("Campaign Play Game Master", () => {
     );
     expect(String(options.prompt)).toContain('"eventClass":"discovery"');
     expect(String(options.prompt)).toContain(
-      "effects[].kind accepts exactly: move_actor, set_route_state, set_actor_condition, update_actor_relation, update_actor_goal, advance_pressure, adjust_actor_possession, incur_actor_obligation, or record_world_event",
+      "effects[].kind accepts exactly: move_actor, set_route_state, set_actor_condition, update_actor_relation, update_actor_goal, advance_pressure, adjust_actor_possession, incur_actor_obligation, pay_actor_obligation, or record_world_event",
+    );
+    expect(String(options.prompt)).toContain(
+      "Use pay_actor_obligation only when the resolved result transfers the player's visible copper possession",
+    );
+    expect(String(options.prompt)).toContain(
+      "Do not add record_world_event or adjust_actor_possession for the same payment",
     );
     expect(String(options.prompt)).toContain(
       "set_actor_condition has exactly these fields: kind, exposure, actorHandle, condition, operation, and summary",

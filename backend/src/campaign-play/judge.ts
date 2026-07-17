@@ -125,6 +125,14 @@ const judgeProposalSchema = z.object({
       amount: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
       minimumResult: z.enum(["setback", "limited", "success", "strong_success"]),
     }).strict(),
+    z.object({
+      kind: z.literal("pay_actor_obligation"),
+      obligationHandle: line(CAMPAIGN_PLAY_LIMITS.handle),
+      paymentPossessionHandle: line(CAMPAIGN_PLAY_LIMITS.handle),
+      unitKey: z.literal("copper"),
+      amount: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+      minimumResult: z.enum(["setback", "limited", "success", "strong_success"]),
+    }).strict(),
   ]),
   disposition: campaignPlayJudgmentDispositionSchema,
   citedVisibleFactHandles: z.array(line(CAMPAIGN_PLAY_LIMITS.handle)).max(CAMPAIGN_PLAY_LIMITS.citedFacts),
@@ -384,7 +392,7 @@ function prompt(frame: CampaignPlayJudgeFrame, input: CampaignPlayJudgeInput): s
     `A suggested wait always means waiting exactly ${CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES} world minutes. Classify it as deterministic and set both elapsed bounds to ${CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES}. A freeform actionable wait must advance at least one world minute.`,
     "VISIBLE_ROUTES carries code-authoritative travelCost ticks. For a pure move, elapsedBounds.minimumMinutes and elapsedBounds.maximumMinutes must both equal the selected route's travelCost. For a compound action that includes travel, elapsedBounds.minimumMinutes must be at least that travelCost. Never estimate a different route duration.",
     "requiredPossessionEffect is Judge-owned mechanical intent, not prose. Use kind adjust_actor_possession when an actionable result at or above minimumResult must acquire a countable possession, spend one, or durably transform an existing retained possession. Writing measurements or other usable records into a visible notebook, form, chart, ledger, or similar retained object is transform with that exact possession handle and quantity 1. The exact notebook shape is {\"kind\":\"adjust_actor_possession\",\"operation\":\"transform\",\"possessionHandle\":\"copied visible handle\",\"quantity\":1,\"minimumResult\":\"lowest applicable tier\"}. operation accepts only acquire, spend, or transform; there is no adjustment field. Set minimumResult to the lowest result tier that still produces the retained change. Use acquire with null possessionHandle for a new item; spend or transform with an exact visible possession handle for an existing item. Cite every non-null possessionHandle in citedVisibleFactHandles. Use kind none when no durable possession change is part of the ruled outcome. Impossible and clarification rulings always use none.",
-    "requiredObligationEffect is Judge-owned mechanical intent, not prose. Use kind incur_actor_obligation when an actionable result at or above minimumResult makes the player owe a definite copper amount to one visible nonplayer actor. Copy that actor's handle into creditorHandle, cite it in citedVisibleFactHandles, use unitKey copper, and set amount to the exact newly incurred amount rather than the running total. Use kind none when the result creates no binding debt. A warning, possible charge, quoted price, requested payment, or declined offer is not debt. Impossible and clarification rulings always use none. Never create a binding debt only in stakes, reason, or prose.",
+    "requiredObligationEffect is Judge-owned mechanical intent, not prose. Use kind incur_actor_obligation when an actionable result at or above minimumResult makes the player owe a definite copper amount to one visible nonplayer actor. Copy that actor's handle into creditorHandle, cite it in citedVisibleFactHandles, use unitKey copper, and set amount to the exact newly incurred amount rather than the running total. Use kind pay_actor_obligation only when the resolved action physically transfers a positive amount from one cited visible copper possession to settle that amount against one cited visible obligation. Its exact shape is {\"kind\":\"pay_actor_obligation\",\"obligationHandle\":\"copied visible obligation handle\",\"paymentPossessionHandle\":\"copied visible possession handle\",\"unitKey\":\"copper\",\"amount\":2,\"minimumResult\":\"success\"}. Copy both exact handles, use only paymentPossessionHandle for the possession field, and choose minimumResult from setback, limited, success, or strong_success. amount is the exact payment rather than the remaining balance. A request, offer, promise, quoted payment, displayed cargo movement, or narration without that transfer does not pay debt. Use kind none when the result creates no binding debt and settles none. Impossible and clarification rulings always use none. Never create or settle a binding debt only in stakes, reason, or prose.",
     "PLAYER_INPUT stakes ask what the player hopes to learn or accomplish; they are not evidence and do not authorize an answer. For observation, authorize only conclusions supported by SOURCE_MOMENT, VISIBLE_FRAME, or ACTOR_CONTINUITY. Preserve unknown authorship, motive, provenance, prior contents, and hidden causes. A clean, empty, missing, or disturbed surface proves only its currently observable state; it does not prove that something existed, was found, removed, stolen, concealed, or carried away.",
     "The reason field explains feasibility and result bounds. It must not add world facts beyond the supplied frames or resolve an uncertainty that the visible evidence leaves open.",
     "ACTOR_CONTINUITY outranks any conflicting earlier dialogue in VISIBLE_FRAME for authorship and actor knowledge of its own actions. Never cite a prior denial to erase an own action; Judge the current request from the accepted action truth and preserve any separate uncertainty, privacy, or willingness to disclose.",
@@ -488,6 +496,18 @@ function compile(
       creditorHandle === frameResult.data.playerActorHandle
       || visible.get(creditorHandle) !== "actor"
       || !proposal.citedVisibleFactHandles.includes(creditorHandle)
+    ) {
+      throw new CampaignPlayJudgeError("model_contract_failed", null);
+    }
+  }
+  if (proposal.requiredObligationEffect.kind === "pay_actor_obligation") {
+    const obligationHandle = proposal.requiredObligationEffect.obligationHandle;
+    const paymentPossessionHandle = proposal.requiredObligationEffect.paymentPossessionHandle;
+    if (
+      visible.get(obligationHandle) !== "obligation"
+      || visible.get(paymentPossessionHandle) !== "possession"
+      || !proposal.citedVisibleFactHandles.includes(obligationHandle)
+      || !proposal.citedVisibleFactHandles.includes(paymentPossessionHandle)
     ) {
       throw new CampaignPlayJudgeError("model_contract_failed", null);
     }

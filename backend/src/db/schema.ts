@@ -246,7 +246,9 @@ export const campaignPlayCommandKindValues = [
   "update_actor_relation",
   "update_actor_goal",
   "advance_pressure",
+  "adjust_actor_possession",
   "incur_actor_obligation",
+  "pay_actor_obligation",
   "record_world_event",
   "create_player_actor",
   "initialize_player_placement",
@@ -266,7 +268,9 @@ export const campaignPlayWorldEventKindValues = [
   "actor_relation_changed",
   "actor_goal_changed",
   "pressure_advanced",
+  "actor_possession_adjusted",
   "actor_obligation_incurred",
+  "actor_obligation_payment_applied",
   "scene_recorded",
 ] as const;
 
@@ -3129,7 +3133,7 @@ export const campaignPlayActorPossessions = sqliteTable(
       table.actorId,
       table.possessionKey,
     ),
-    uniqueIndex("campaign_play_actor_possessions_receipt_unique").on(
+    index("idx_campaign_play_actor_possessions_receipt").on(
       table.causalReceiptId,
     ),
     index("idx_campaign_play_actor_possessions_campaign_actor").on(
@@ -3205,7 +3209,7 @@ export const campaignPlayActorObligations = sqliteTable(
         AND ${table.debtorActorId} <> ${table.creditorActorId}
         AND ${table.unitKey} = 'copper'
         AND ${table.principalAmount} BETWEEN 1 AND 1000000
-        AND ${table.outstandingAmount} BETWEEN 1 AND ${table.principalAmount}
+        AND ${table.outstandingAmount} BETWEEN 0 AND ${table.principalAmount}
         AND ${table.worldVersion} >= 1`,
     ),
   ],
