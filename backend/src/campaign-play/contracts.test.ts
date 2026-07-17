@@ -2031,6 +2031,14 @@ describe("Campaign Play Judge and Rulebook contracts", () => {
     }).success).toBe(false);
     expect(campaignPlayJudgeRulingSchema.safeParse({
       ...baseRuling,
+      disposition: "clarification_required",
+      normalizedIntent: { ...moveIntent, targets: [] },
+      resultBounds: { minimum: "no_effect", maximum: "no_effect" },
+      elapsedBounds: { minimumMinutes: 0, maximumMinutes: 0 },
+      clarificationQuestion: "Which open route do you take?",
+    }).success).toBe(true);
+    expect(campaignPlayJudgeRulingSchema.safeParse({
+      ...baseRuling,
       normalizedIntent: moveIntent,
       movementRouteHandle: routeTarget.handle,
     }).success).toBe(true);

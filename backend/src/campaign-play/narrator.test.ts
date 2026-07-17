@@ -462,7 +462,7 @@ describe("Campaign Play narrator", () => {
     }
   });
 
-  it("accepts narrator wording for a clarification handoff", () => {
+  it("uses only the exact Judge question for a clarification handoff", () => {
     const narrator = createCampaignPlayNarrator();
     const packet: CampaignPlayNarratorPacket = {
       ...packetFixture(),
@@ -482,7 +482,7 @@ describe("Campaign Play narrator", () => {
       beats: [{
         purpose: "action_handoff",
         observationIndexes: [],
-        text: "Which garden bed did you water earlier?",
+        text: "Which previously watered bed do you mean?",
       }],
     };
 
@@ -492,6 +492,28 @@ describe("Campaign Play narrator", () => {
       proposal,
       createdAt: 1_000,
     })).not.toThrow();
+    expect(() => narrator.compile({
+      narrationId: "narration-clarification-extra-action",
+      packet,
+      proposal: {
+        ...proposal,
+        beats: [{
+          purpose: "consequence",
+          observationIndexes: [],
+          text: "You step toward the nearest garden bed.",
+        }, ...proposal.beats],
+      },
+      createdAt: 1_000,
+    })).toThrowError(expect.objectContaining({ code: "narration_invalid" }));
+    expect(() => narrator.compile({
+      narrationId: "narration-clarification-paraphrase",
+      packet,
+      proposal: {
+        ...proposal,
+        beats: [{ ...proposal.beats[0]!, text: "Which bed did you mean?" }],
+      },
+      createdAt: 1_000,
+    })).toThrowError(expect.objectContaining({ code: "narration_invalid" }));
   });
 
   it("accepts a player-action consequence without a synthetic handoff", () => {
@@ -591,6 +613,10 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("strongest immediate follow-through");
     expect(prompt).toContain("grounded fragment of three to eight words");
     expect(prompt).toContain("never a sentence or explanation");
+    expect(prompt).toContain("must authorize one concrete player action when clicked");
+    expect(prompt).toContain("mutually exclusive alternatives");
+    expect(prompt).toContain("must name exactly one supported alternative");
+    expect(prompt).toContain("leaves the Judge or Game Master to choose for the player");
     expect(prompt).toContain("actionContext and continuity as a record of what the player has already tried and learned");
     expect(prompt).toContain("possessions is current player custody");
     expect(prompt).toContain("An item with positive quantity there is already acquired");

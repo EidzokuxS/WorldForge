@@ -1783,11 +1783,15 @@ export const campaignPlayJudgeRulingSchema =
         message: "An actionable wait must advance world time.",
       });
     }
-    if (ruling.normalizedIntent.kind === "move" && ruling.movementRouteHandle === null) {
+    if (
+      ruling.normalizedIntent.kind === "move" &&
+      ruling.movementRouteHandle === null &&
+      ruling.disposition !== "clarification_required"
+    ) {
       context.addIssue({
         code: "custom",
         path: ["movementRouteHandle"],
-        message: "Move intent requires an explicit movement route handle.",
+        message: "An actionable move requires an explicit movement route handle.",
       });
     }
     addDuplicateIssue(

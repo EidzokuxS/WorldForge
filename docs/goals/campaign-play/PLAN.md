@@ -234,6 +234,8 @@ The opening path contains opening planner and narrator calls. Routine actor acti
 
 Every stage stores requested/actual model, strategy, token counts, duration, finish reason, schema outcome, and error code. Prompts contain bounded frames and opaque IDs. Model output has proposal authority only. Route travel cost is code-owned: Judge binds a pure move to the exact visible route cost and raises a compound traversal's elapsed bounds to at least that cost before Rulebook planning.
 
+Suggested actions are exact player authorizations, not invitations for Judge or Game Master to fill in a decision. A suggestion that accepts, selects, orders, takes, or commits among mutually exclusive visible alternatives names one alternative; otherwise Narrator selects another intent. Freeform or suggested input that still omits a necessary alternative resolves as `clarification_required`. A route-less move is valid only in that non-actionable clarification state. Clarification changes no world state and Narrator presents exactly the Judge's question as one `action_handoff` beat.
+
 ## Persistence and transaction design
 
 ### Accepted snapshot prerequisite
