@@ -34,6 +34,7 @@ import { campaignPlayActorContinuitySchema } from "./actor-continuity.js";
 import { hashCampaignPlayProjection } from "./campaign-play-projection.js";
 
 const log = createLogger("campaign-play-judge");
+const CAMPAIGN_PLAY_MIN_ACTION_MINUTES = 1;
 
 const line = (maximum: number) => z.string().min(1).max(maximum)
   .refine((value) => value === value.trim())
@@ -390,6 +391,7 @@ function prompt(frame: CampaignPlayJudgeFrame, input: CampaignPlayJudgeInput): s
     "For suggested input, set movementRouteHandle to the exact route target in FROZEN_CHOICE when it has one, including a route-bound attempt. Set it to null when FROZEN_CHOICE has no route target. Never add, remove, or change travel that the frozen choice did not authorize.",
     "VISIBLE_ROUTES.state is mechanical authority. An open route supports ordinary move. A restricted route never supports ordinary move: classify a request to pass it as attempt, then judge the stated way of satisfying or overcoming the restriction. Deterministic passage requires cited visible evidence of payment, permission, or another concrete access basis. Without such evidence, use uncertain when the player is trying to overcome the restriction, impossible when the stated method cannot work, or clarification_required when one necessary choice is missing.",
     `A suggested wait always means waiting exactly ${CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES} world minutes. Classify it as deterministic and set both elapsed bounds to ${CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES}. A freeform actionable wait must advance at least one world minute.`,
+    `Every deterministic or uncertain action consumes at least ${CAMPAIGN_PLAY_MIN_ACTION_MINUTES} world minute, even when it only observes, speaks, or attempts a local task. Never return zero elapsed minutes for an actionable result. Impossible and clarification_required may use zero.`,
     "VISIBLE_ROUTES carries code-authoritative travelCost ticks. For a pure move, elapsedBounds.minimumMinutes and elapsedBounds.maximumMinutes must both equal the selected route's travelCost. For a compound action that includes travel, elapsedBounds.minimumMinutes must be at least that travelCost. Never estimate a different route duration.",
     "requiredPossessionEffect is Judge-owned mechanical intent, not prose. Use kind adjust_actor_possession when an actionable result at or above minimumResult must acquire a countable possession, spend one, or durably transform an existing retained possession. Writing measurements or other usable records into a visible notebook, form, chart, ledger, or similar retained object is transform with that exact possession handle and quantity 1. The exact notebook shape is {\"kind\":\"adjust_actor_possession\",\"operation\":\"transform\",\"possessionHandle\":\"copied visible handle\",\"quantity\":1,\"minimumResult\":\"lowest applicable tier\"}. operation accepts only acquire, spend, or transform; there is no adjustment field. Set minimumResult to the lowest result tier that still produces the retained change. Use acquire with null possessionHandle for a new item; spend or transform with an exact visible possession handle for an existing item. Cite every non-null possessionHandle in citedVisibleFactHandles. Use kind none when no durable possession change is part of the ruled outcome. Impossible and clarification rulings always use none.",
     "requiredObligationEffect is Judge-owned mechanical intent, not prose. Use kind incur_actor_obligation when an actionable result at or above minimumResult makes the player owe a definite copper amount to one visible nonplayer actor. Copy that actor's handle into creditorHandle, cite it in citedVisibleFactHandles, use unitKey copper, and set amount to the exact newly incurred amount rather than the running total. Use kind pay_actor_obligation only when the resolved action physically transfers a positive amount from one cited visible copper possession to settle that amount against one cited visible obligation. Its exact shape is {\"kind\":\"pay_actor_obligation\",\"obligationHandle\":\"copied visible obligation handle\",\"paymentPossessionHandle\":\"copied visible possession handle\",\"unitKey\":\"copper\",\"amount\":2,\"minimumResult\":\"success\"}. Copy both exact handles, use only paymentPossessionHandle for the possession field, and choose minimumResult from setback, limited, success, or strong_success. amount is the exact payment rather than the remaining balance. A request, offer, promise, quoted payment, displayed cargo movement, or narration without that transfer does not pay debt. Use kind none when the result creates no binding debt and settles none. Impossible and clarification rulings always use none. Never create or settle a binding debt only in stakes, reason, or prose.",
@@ -559,8 +561,21 @@ function compile(
       throw new CampaignPlayJudgeError("model_contract_failed", null);
     }
   }
+  const actionElapsedBounds = proposal.disposition === "deterministic"
+    || proposal.disposition === "uncertain"
+    ? {
+        minimumMinutes: Math.max(
+          CAMPAIGN_PLAY_MIN_ACTION_MINUTES,
+          proposal.elapsedBounds.minimumMinutes,
+        ),
+        maximumMinutes: Math.max(
+          CAMPAIGN_PLAY_MIN_ACTION_MINUTES,
+          proposal.elapsedBounds.maximumMinutes,
+        ),
+      }
+    : proposal.elapsedBounds;
   const elapsedBounds = movementRoute === null
-    ? proposal.elapsedBounds
+    ? actionElapsedBounds
     : proposal.kind === "move"
       ? {
           minimumMinutes: movementRoute.travelCost,
@@ -568,11 +583,11 @@ function compile(
         }
       : {
           minimumMinutes: Math.max(
-            proposal.elapsedBounds.minimumMinutes,
+            actionElapsedBounds.minimumMinutes,
             movementRoute.travelCost,
           ),
           maximumMinutes: Math.max(
-            proposal.elapsedBounds.maximumMinutes,
+            actionElapsedBounds.maximumMinutes,
             movementRoute.travelCost,
           ),
         };

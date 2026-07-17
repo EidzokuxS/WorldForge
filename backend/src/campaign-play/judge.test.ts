@@ -919,6 +919,25 @@ describe("Campaign Play Judge", () => {
     expect(compoundRuling.elapsedBounds).toEqual({ minimumMinutes: 5, maximumMinutes: 10 });
   });
 
+  it("advances world time for actionable local results", () => {
+    const judge = createCampaignPlayJudge();
+    const contactRuling = judge.compile(frame(), {
+      originalText: "I ask the guard about work.", source: "freeform", choiceHandle: null,
+    }, proposal({
+      elapsedBounds: { minimumMinutes: 0, maximumMinutes: 0 },
+    }));
+    const impossibleRuling = judge.compile(frame(), {
+      originalText: "I ask the empty air to answer.", source: "freeform", choiceHandle: null,
+    }, proposal({
+      disposition: "impossible",
+      resultBounds: { minimum: "no_effect", maximum: "no_effect" },
+      elapsedBounds: { minimumMinutes: 0, maximumMinutes: 0 },
+    }));
+
+    expect(contactRuling.elapsedBounds).toEqual({ minimumMinutes: 1, maximumMinutes: 1 });
+    expect(impossibleRuling.elapsedBounds).toEqual({ minimumMinutes: 0, maximumMinutes: 0 });
+  });
+
   it("adds canonical route time to a restricted traversal attempt", () => {
     const judge = createCampaignPlayJudge();
     const restrictedFrame = frame();
