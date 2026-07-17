@@ -466,6 +466,10 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain('CANONICAL_PEOPLE=["Oren Tide"]');
     expect(String(options.prompt)).toContain("PLAYER_MOVEMENT is code-authoritative");
     expect(String(options.prompt)).toContain("When it is restricted, the accepted attempt has earned passage for this traversal only");
+    expect(String(options.prompt)).toContain(
+      "set_route_state has exactly these fields: kind, exposure, routeHandle, state, and reason",
+    );
+    expect(String(options.prompt)).toContain("summary and affectedHandles are forbidden");
     expect(String(options.prompt)).toContain("CURRENT_EXACT_SCENE is the only scene the player occupies before movement");
     expect(String(options.prompt)).toContain("Crossing that boundary requires PLAYER_MOVEMENT");
     expect(String(options.prompt)).toContain(
