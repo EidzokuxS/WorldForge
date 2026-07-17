@@ -50,4 +50,19 @@ describe("TurnProgress", () => {
     expect(onResume).toHaveBeenCalledOnce();
     expect(screen.getByText("The turn stopped before it finished.")).toBeInTheDocument();
   });
+
+  it("replaces a stale interruption with progress after resume is accepted", () => {
+    render(<TurnProgress
+      accepted
+      connection="connecting"
+      onResume={vi.fn()}
+      pendingResume={false}
+      progress={null}
+      turn={turn({ status: "interrupted", progress: null, retryEligible: true })}
+    />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("Action received");
+    expect(screen.queryByText("The turn stopped before it finished.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
+  });
 });

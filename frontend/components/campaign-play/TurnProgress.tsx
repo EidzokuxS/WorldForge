@@ -41,7 +41,7 @@ export const TurnProgress = forwardRef<HTMLDivElement, TurnProgressProps>(functi
   turn,
   onResume,
 }, ref) {
-  if (turn?.status === "interrupted") {
+  if (turn?.status === "interrupted" && !accepted) {
     return (
       <div className="campaign-play-interruption" ref={ref} tabIndex={-1}>
         <p role="status">
