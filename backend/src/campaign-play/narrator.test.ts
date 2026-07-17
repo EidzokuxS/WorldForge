@@ -642,9 +642,10 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Never describe departure in a false entry or remove travel from a true entry");
     expect(prompt).toContain('Address the player as "you"');
     expect(prompt).toContain("never switch to the player character's name");
-    expect(prompt).toContain("people in the current place who remain available to encounter");
+    expect(prompt).toContain("visibleActors as authoritative current placement");
     expect(prompt).toContain("Local gestures and stepping aside do not change placement");
-    expect(prompt).toContain("do not claim that actor traveled to another place");
+    expect(prompt).toContain("Never describe a visible actor as departed, arrived elsewhere, or unavailable");
+    expect(prompt).toContain("A completed accepted actor movement removes that actor from visibleActors");
     expect(prompt).toContain("sourceMoment is the exact previous accepted player-visible scene");
     expect(prompt).toContain("Every concrete claim in a beat must be supported");
     expect(prompt).toContain("Never guess a person's gender or pronouns from their name, title, role, or appearance");

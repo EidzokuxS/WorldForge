@@ -586,7 +586,11 @@ function judgeFixture(disposition: Disposition, compoundDestinationName: string 
   };
 }
 
-function gameMasterFixture(worldEventCount = 1, includeSubmittedText = false) {
+function gameMasterFixture(
+  worldEventCount = 1,
+  includeSubmittedText = false,
+  actorlessResult = false,
+) {
   const compiler = createCampaignPlayGameMaster();
   return {
     plan: vi.fn(async (request: Parameters<ReturnType<typeof createCampaignPlayGameMaster>["plan"]>[0]) => {
@@ -599,8 +603,10 @@ function gameMasterFixture(worldEventCount = 1, includeSubmittedText = false) {
       const movementEffects = request.ruling.movementRouteHandle === null
         ? []
         : [{ kind: "move_actor" as const }];
-      const performingActorHandle = request.ruling.normalizedIntent.targets.find((target) =>
-        target.kind === "actor")?.handle ?? null;
+      const performingActorHandle = actorlessResult
+        ? null
+        : request.ruling.normalizedIntent.targets.find((target) =>
+          target.kind === "actor")?.handle ?? null;
       return {
         ...compiler.compile(
           request.frame,
@@ -2618,7 +2624,7 @@ describe("Campaign Play player-action turn runtime", () => {
         handle,
         time,
         judgeFixture("deterministic"),
-        gameMasterFixture(),
+        gameMasterFixture(1, false, true),
         { actorProposalService },
       );
       const admission = runtime.admitAction({
@@ -2692,7 +2698,7 @@ describe("Campaign Play player-action turn runtime", () => {
       handle,
       time,
       judgeFixture("deterministic"),
-      gameMasterFixture(),
+      gameMasterFixture(1, false, true),
       { actorProposalService, owner: "actor-receipt-worker" },
     );
     const admission = runtime.admitAction({

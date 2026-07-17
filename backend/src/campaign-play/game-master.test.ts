@@ -486,6 +486,9 @@ describe("Campaign Play Game Master", () => {
       "When PLAYER_INTENT targets no actor, every record_world_event must be actorless",
     );
     expect(String(options.prompt)).toContain(
+      "Actor placement changes only through an accepted move_actor effect",
+    );
+    expect(String(options.prompt)).toContain(
       "leave that response for a later contact action",
     );
     expect(String(options.prompt)).toContain('"eventClass":"discovery"');

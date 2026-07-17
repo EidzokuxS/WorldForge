@@ -188,6 +188,7 @@ interface DueRow {
   actorKind: string;
   incapacitated: number;
   currentTurnJob: number;
+  currentTurnPerformer: number;
   pendingJob: number;
 }
 
@@ -309,31 +310,48 @@ function dueRows(
   settledWorldTimeMinutes: number,
 ): DueRow[] {
   return handle.sqlite.prepare(`
-    SELECT s.schedule_id AS scheduleId, s.actor_id AS actorId, s.plan_id AS planId,
-      s.next_act_at_world_time_minutes AS nextActAtWorldTimeMinutes,
-      s.priority, s.agency_debt AS agencyDebt, p.cadence_minutes AS cadenceMinutes,
-      p.status AS planStatus, a.controller AS actorController, a.kind AS actorKind,
-      EXISTS (
-        SELECT 1 FROM campaign_play_actor_conditions c
-        WHERE c.campaign_id = s.campaign_id AND c.actor_id = s.actor_id
-          AND c.condition = 'incapacitated' AND c.present = 1
-      ) AS incapacitated,
-      EXISTS (
-        SELECT 1 FROM campaign_play_actor_jobs j
-        WHERE j.turn_id = ? AND j.actor_id = s.actor_id
-      ) AS currentTurnJob,
-      EXISTS (
-        SELECT 1 FROM campaign_play_actor_jobs j
-        WHERE j.actor_id = s.actor_id
-          AND j.stage IN ('queued', 'claimed', 'interrupted', 'proposed')
-      ) AS pendingJob
-    FROM campaign_play_actor_schedules s
-    JOIN campaign_play_actor_plans p ON p.plan_id = s.plan_id
-    JOIN actors a ON a.id = s.actor_id
-    WHERE s.campaign_id = ? AND s.next_act_at_world_time_minutes <= ?
-    ORDER BY s.next_act_at_world_time_minutes ASC, s.agency_debt DESC,
-      s.priority DESC, s.actor_id ASC
-  `).all(turnId, handle.campaignId, settledWorldTimeMinutes) as DueRow[];
+    WITH due_candidates AS (
+      SELECT s.schedule_id AS scheduleId, s.actor_id AS actorId, s.plan_id AS planId,
+        s.next_act_at_world_time_minutes AS nextActAtWorldTimeMinutes,
+        s.priority, s.agency_debt AS agencyDebt, p.cadence_minutes AS cadenceMinutes,
+        p.status AS planStatus, a.controller AS actorController, a.kind AS actorKind,
+        EXISTS (
+          SELECT 1 FROM campaign_play_actor_conditions c
+          WHERE c.campaign_id = s.campaign_id AND c.actor_id = s.actor_id
+            AND c.condition = 'incapacitated' AND c.present = 1
+        ) AS incapacitated,
+        EXISTS (
+          SELECT 1 FROM campaign_play_actor_jobs j
+          WHERE j.turn_id = ? AND j.actor_id = s.actor_id
+        ) AS currentTurnJob,
+        EXISTS (
+          SELECT 1
+          FROM campaign_play_commands command
+          JOIN campaign_play_receipts receipt
+            ON receipt.campaign_id = command.campaign_id
+            AND receipt.command_id = command.command_id
+          WHERE command.campaign_id = s.campaign_id
+            AND command.turn_id = ?
+            AND command.command_kind = 'record_world_event'
+            AND receipt.outcome = 'applied'
+            AND json_extract(command.protected_payload_json, '$.performingActorId') = s.actor_id
+        ) AS currentTurnPerformer,
+        EXISTS (
+          SELECT 1 FROM campaign_play_actor_jobs j
+          WHERE j.actor_id = s.actor_id
+            AND j.stage IN ('queued', 'claimed', 'interrupted', 'proposed')
+        ) AS pendingJob
+      FROM campaign_play_actor_schedules s
+      JOIN campaign_play_actor_plans p ON p.plan_id = s.plan_id
+      JOIN actors a ON a.id = s.actor_id
+      WHERE s.campaign_id = ?
+    )
+    SELECT * FROM due_candidates
+    WHERE nextActAtWorldTimeMinutes <= ?
+      OR (planStatus <> 'active' AND currentTurnPerformer = 1)
+    ORDER BY currentTurnPerformer DESC, nextActAtWorldTimeMinutes ASC,
+      agencyDebt DESC, priority DESC, actorId ASC
+  `).all(turnId, turnId, handle.campaignId, settledWorldTimeMinutes) as DueRow[];
 }
 
 function makeDecision(

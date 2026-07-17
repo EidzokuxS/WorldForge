@@ -514,6 +514,8 @@ describe("Campaign Play Judge", () => {
     );
     expect(sentPrompt).toContain("Do not change that detail's origin, age, owner, location, or state");
     expect(sentPrompt).toContain("it never overrides the current visible placement or condition of an object");
+    expect(sentPrompt).toContain("Any nonplayer actor listed in TARGET_CATALOG is currently visible and reachable");
+    expect(sentPrompt).toContain("Treat that as placement authority");
     expect(sentPrompt).toContain("never make a visible object vanish or move without explicit evidence");
     expect(sentPrompt).toContain("Every targets entry must copy one exact {handle, kind} pair from TARGET_CATALOG");
     expect(sentPrompt).toContain(

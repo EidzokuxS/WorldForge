@@ -457,6 +457,78 @@ describe("Campaign Play actor scheduler", () => {
     },
   );
 
+  it("wakes a contacted actor with a completed plan before unrelated scheduled work", () => {
+    const { handle, states, settledClock } = createReadyFixture();
+    const current = states.loadState()!;
+    const affectedRefs = [
+      { kind: "actor", id: "actor-c" },
+      { kind: "actor", id: "actor-player" },
+    ] as const;
+    const protectedPayload = canonicalizeCampaignPlayProjection({
+      kind: "record_world_event",
+      eventClass: "dialogue",
+      performingActorId: "actor-c",
+      summary: "Actor C accepts the new information and states a next step.",
+      observableTrace: null,
+      affectedRefs,
+    });
+    states.commitRuntime({
+      event: {
+        eventId: "contact-performer-recorded",
+        turnId: "turn-player",
+        kind: "actor_job_transitioned",
+        workerEpoch: 3,
+        protectedPayloadHash: hashCampaignPlayProjection(protectedPayload),
+        createdAt: 1_570,
+      },
+      mutate(context) {
+        context.sqlite.prepare(`UPDATE campaign_play_actor_plans
+          SET status = 'completed', updated_at = 1570
+          WHERE campaign_id = ? AND actor_id = 'actor-c'`).run(context.campaignId);
+        context.sqlite.prepare(`INSERT INTO campaign_play_commands (
+          command_id, campaign_id, turn_id, batch_id, command_order, command_kind,
+          causal_parent_json, source_json, expected_world_version, read_scope_json,
+          write_scope_json, exposure_policy_json, arguments_hash,
+          protected_payload_json, protected_payload_hash, created_at
+        ) VALUES ('contact-command', ?, 'turn-player', 'contact-batch', 0,
+          'record_world_event', '{"kind":"turn","turnId":"turn-player"}',
+          '{"kind":"system","system":"game_master"}', ?, ?, '[]',
+          '{"mode":"protected"}', ?, ?, ?, 1570)`).run(
+          context.campaignId,
+          current.authority.worldVersion,
+          canonicalizeCampaignPlayProjection(affectedRefs),
+          hashCampaignPlayProjection(protectedPayload),
+          protectedPayload,
+          hashCampaignPlayProjection(protectedPayload),
+        );
+        context.sqlite.prepare(`INSERT INTO campaign_play_receipts (
+          receipt_id, campaign_id, turn_id, command_id, command_kind, outcome,
+          applied_world_mutation, prior_world_version, result_world_version,
+          prior_world_hash, result_world_hash, causal_event_ids_json,
+          protected_payload_json, protected_payload_hash, created_at
+        ) VALUES ('contact-receipt', ?, 'turn-player', 'contact-command',
+          'record_world_event', 'applied', 0, ?, ?, ?, ?,
+          '["contact-world-event"]', ?, ?, 1570)`).run(
+          context.campaignId,
+          current.authority.worldVersion,
+          current.authority.worldVersion,
+          current.authority.worldHash,
+          current.authority.worldHash,
+          protectedPayload,
+          hashCampaignPlayProjection(protectedPayload),
+        );
+      },
+    });
+
+    const dueSet = freezeCurrent(handle);
+    expect(dueSet.decisions[0]).toMatchObject({
+      actorId: "actor-c",
+      disposition: "wake",
+      dueReason: "plan_retry",
+      nextActAtWorldTimeMinutes: settledClock + 1,
+    });
+  });
+
   it("admits one queued job per due actor and reopens with identical deterministic job state", () => {
     const { handle, states } = createReadyFixture();
     const scheduler = createCampaignPlayActorScheduler(handle);

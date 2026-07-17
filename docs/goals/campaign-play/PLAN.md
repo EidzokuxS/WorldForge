@@ -337,8 +337,8 @@ Opening eligibility also requires one hidden non-local person or collective cons
 
 After primary settlement:
 
-1. Freeze due schedules at the settled world time.
-2. Freeze actor IDs and order by `(nextActAt, priority descending, actorId)`; frames and proposals remain unfrozen.
+1. Freeze ordinary due schedules at the settled world time. Also admit an inactive-plan actor as an immediate `plan_retry` opportunity when an applied current-turn command and receipt identify that actor as the event performer; prose, dialogue, intention, or presence alone cannot wake it.
+2. Freeze actor IDs and order current-turn performers first, then by `(nextActAt, agencyDebt descending, priority descending, actorId)`; frames and proposals remain unfrozen. A current-turn performer with an active plan keeps its existing schedule.
 3. Allow one job per actor in the player turn and one pending job per actor.
 4. Build each actor frame from the latest committed mechanical version and that actor's profile, goals, placement, directed relations, durable knowledge, local routes, and known pressures. Before durable visibility projection, merge only applied current-player-turn direct-perception events that the event-time placement snapshot proves this actor witnessed; do not infer knowledge from current location alone.
 5. If the actor perceived a later external accepted event after its active plan was authored, stop at a typed `world_advanced` boundary and replan from the newest accepted continuity before executing another old step. An actor's own settled plan events do not invalidate its remaining causal chain.
@@ -960,11 +960,11 @@ npm --prefix backend test -- src/campaign-play/judge.test.ts src/campaign-play/g
 
 **Work:**
 
-1. Freeze due actor IDs and stable order after primary settlement.
+1. Freeze ordinary due actor IDs after primary settlement, add only applied current-turn event performers whose persisted plans are inactive, and order those causal performers before ordinary due work.
 2. Build each actor frame on demand from the latest committed world version with actor knowledge filtering.
 3. Translate a valid persisted plan step into a shared intent and proposed command input.
 4. Enforce one job per actor per turn and one pending job per actor.
-5. Calculate next due time from settled clock and record skip/wake/defer reasons plus agency debt.
+5. Calculate next due time from settled clock and record skip/wake/defer reasons plus agency debt; current-turn performer priority must remain receipt-backed and must not wake active plans early.
 
 **Verification:**
 
@@ -972,7 +972,7 @@ npm --prefix backend test -- src/campaign-play/judge.test.ts src/campaign-play/g
 npm --prefix backend test -- src/campaign-play/actor-scheduler.test.ts
 ```
 
-**Acceptance evidence:** seeded 30/60-turn scheduler fixtures prove deterministic ID order, latest-version frames, no catch-up storm, no cast sweep beyond due actors, collective participation, fair cadence, and restart-identical job state.
+**Acceptance evidence:** seeded 30/60-turn scheduler fixtures prove deterministic ID order, latest-version frames, no catch-up storm, no cast sweep beyond due actors, collective participation, fair cadence, and restart-identical job state. A focused causal fixture proves that a current-turn contacted performer with a completed plan receives the first `plan_retry` opportunity while unrelated ordinary due work remains queued.
 
 **Parallel:** after Tasks 5 and 6B; may overlap Task 9 in separate files.
 
