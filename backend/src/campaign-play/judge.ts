@@ -56,6 +56,7 @@ export const campaignPlayJudgeFrameSchema = z.object({
     handle: line(CAMPAIGN_PLAY_LIMITS.handle),
     destinationHandle: line(CAMPAIGN_PLAY_LIMITS.handle),
     travelCost: z.number().int().min(1).max(10),
+    state: z.enum(["open", "restricted"]),
   }).strict()).max(CAMPAIGN_PLAY_LIMITS.visibleRoutes),
   worldTimeMinutes: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.worldTimeMinutes),
   sourceMoment: text(CAMPAIGN_PLAY_LIMITS.narrationText),
@@ -369,6 +370,7 @@ function prompt(frame: CampaignPlayJudgeFrame, input: CampaignPlayJudgeInput): s
     "For suggested input, copy FROZEN_CHOICE kind and every frozen target. targets must always be a JSON array. You may add only visible nonplayer actors whose participation, consent, or reaction is material to the rendered action. Add each such actor from TARGET_CATALOG. Never add a destination location or another route, location, pressure, possession, or the player actor. Judge feasibility and outcome without changing the selected action.",
     "movementRouteHandle is a separate mechanical decision from the primary kind. Set it to the exact visible route when the action includes travel before or during its primary action, including compound requests such as travel then contact. Otherwise set it to null. A move kind always requires a non-null movementRouteHandle. Never infer travel from a cited route alone. The route does not need to be repeated in targets; targets describe the action's semantic subjects or destination.",
     "For suggested input, set movementRouteHandle to the exact route target in FROZEN_CHOICE when it has one, including a route-bound attempt. Set it to null when FROZEN_CHOICE has no route target. Never add, remove, or change travel that the frozen choice did not authorize.",
+    "VISIBLE_ROUTES.state is mechanical authority. An open route supports ordinary move. A restricted route never supports ordinary move: classify a request to pass it as attempt, then judge the stated way of satisfying or overcoming the restriction. Deterministic passage requires cited visible evidence of payment, permission, or another concrete access basis. Without such evidence, use uncertain when the player is trying to overcome the restriction, impossible when the stated method cannot work, or clarification_required when one necessary choice is missing.",
     `A suggested wait always means waiting exactly ${CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES} world minutes. Classify it as deterministic and set both elapsed bounds to ${CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES}. A freeform actionable wait must advance at least one world minute.`,
     "VISIBLE_ROUTES carries code-authoritative travelCost ticks. For a pure move, elapsedBounds.minimumMinutes and elapsedBounds.maximumMinutes must both equal the selected route's travelCost. For a compound action that includes travel, elapsedBounds.minimumMinutes must be at least that travelCost. Never estimate a different route duration.",
     "requiredPossessionEffect is Judge-owned mechanical intent, not prose. Use kind adjust_actor_possession when an actionable result at or above minimumResult must acquire a countable possession, spend one, or durably transform an existing retained possession. Writing measurements or other usable records into a visible notebook, form, chart, ledger, or similar retained object is transform with that exact possession handle and quantity 1. The exact notebook shape is {\"kind\":\"adjust_actor_possession\",\"operation\":\"transform\",\"possessionHandle\":\"copied visible handle\",\"quantity\":1,\"minimumResult\":\"lowest applicable tier\"}. operation accepts only acquire, spend, or transform; there is no adjustment field. Set minimumResult to the lowest result tier that still produces the retained change. Use acquire with null possessionHandle for a new item; spend or transform with an exact visible possession handle for an existing item. Cite every non-null possessionHandle in citedVisibleFactHandles. Use kind none when no durable possession change is part of the ruled outcome. Impossible and clarification rulings always use none.",
@@ -504,18 +506,35 @@ function compile(
   const movementRoute = proposal.movementRouteHandle === null
     ? null
     : frameResult.data.visibleRoutes.find((route) => route.handle === proposal.movementRouteHandle) ?? null;
-  if (
-    movementRoute !== null
-    && (
-      (proposal.kind === "move"
-        && (proposal.elapsedBounds.minimumMinutes !== movementRoute.travelCost
-          || proposal.elapsedBounds.maximumMinutes !== movementRoute.travelCost))
-      || (proposal.kind !== "move"
-        && proposal.elapsedBounds.minimumMinutes < movementRoute.travelCost)
-    )
-  ) {
-    throw new CampaignPlayJudgeError("model_contract_failed", null);
+  if (movementRoute?.state === "restricted") {
+    const citedAccessBasis = proposal.citedVisibleFactHandles.some((handle) => {
+      const kind = visible.get(handle);
+      return kind === "possession" || kind === "observation";
+    });
+    if (
+      proposal.kind !== "attempt"
+      || (proposal.disposition === "deterministic" && !citedAccessBasis)
+    ) {
+      throw new CampaignPlayJudgeError("model_contract_failed", null);
+    }
   }
+  const elapsedBounds = movementRoute === null
+    ? proposal.elapsedBounds
+    : proposal.kind === "move"
+      ? {
+          minimumMinutes: movementRoute.travelCost,
+          maximumMinutes: movementRoute.travelCost,
+        }
+      : {
+          minimumMinutes: Math.max(
+            proposal.elapsedBounds.minimumMinutes,
+            movementRoute.travelCost,
+          ),
+          maximumMinutes: Math.max(
+            proposal.elapsedBounds.maximumMinutes,
+            movementRoute.travelCost,
+          ),
+        };
   if (inputResult.data.source === "suggested") {
     const frozenChoice = inputResult.data.frozenChoice!;
     const proposalMatchesFrozenChoice = proposal.kind === frozenChoice.kind
@@ -574,7 +593,11 @@ function compile(
     stakes: _stakes,
     ...rulingProposal
   } = proposal;
-  const rulingResult = campaignPlayJudgeRulingSchema.safeParse({ ...rulingProposal, normalizedIntent });
+  const rulingResult = campaignPlayJudgeRulingSchema.safeParse({
+    ...rulingProposal,
+    elapsedBounds,
+    normalizedIntent,
+  });
   if (!rulingResult.success) throw new CampaignPlayJudgeError("model_contract_failed", null, { cause: rulingResult.error });
   return freeze(rulingResult.data);
 }

@@ -367,6 +367,7 @@ function proposalFixture(): CampaignPlayOpeningProposal {
       anchor: "openingActor",
       eventClass: "dialogue",
       summary: "Oren Tide asks Ilya what the impossible signal has changed in the harbor instruments.",
+      routeRestriction: null,
     },
     actorPlans: [
       actorPlan(
@@ -523,6 +524,34 @@ describe("Campaign Play opening planner", () => {
     expect(narratorJson).not.toContain("Sel Bell");
     expect(narratorJson).not.toContain("goal-bells-explain");
     expect(narratorJson).not.toContain("Lantern Council");
+  });
+
+  it("commits a hard opening passage condition as typed restricted route state", () => {
+    const proposal = proposalFixture();
+    proposal.playerPremise!.routeRestriction = {
+      reason: "The harbor guard requires a stamped passage chit.",
+    };
+    proposal.playerPremise!.summary =
+      "Oren Tide bars the reef road until Ilya presents a stamped passage chit.";
+
+    const artifact = createCampaignPlayOpeningPlanner().compile(
+      frameFixture(),
+      chosenConditions,
+      proposal,
+    ).artifact;
+    const restrictionIndex = artifact.bootstrapCommands.findIndex((command) =>
+      command.kind === "set_route_state");
+    const premiseIndex = artifact.bootstrapCommands.findIndex((command) =>
+      command.kind === "record_world_event");
+    expect(restrictionIndex).toBeGreaterThanOrEqual(0);
+    expect(premiseIndex).toBe(restrictionIndex + 1);
+    expect(artifact.bootstrapCommands[restrictionIndex]).toMatchObject({
+      kind: "set_route_state",
+      routeId: "route-harbor-reef",
+      state: "restricted",
+      reason: "The harbor guard requires a stamped passage chit.",
+      exposure: { mode: "protected" },
+    });
   });
 
   it("requires a premise only when the CharacterRecord supplies motivations", () => {
@@ -953,6 +982,8 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain("zero-based motivationIndex");
     expect(prompt).toContain("If it is empty, set playerPremise to null");
     expect(prompt).toContain("Choose anchor as openingActor or supportActor");
+    expect(prompt).toContain("playerPremise.routeRestriction controls the selected scene candidate's exact outgoing route");
+    expect(prompt).toContain("Do not state or imply a hard passage condition when routeRestriction is null");
     expect(prompt).toContain("Every listed person receives a plan regardless of role");
     expect(prompt).toContain("exactly one concrete next step");
     expect(prompt).toContain("Actor replanning owns later steps after the world changes");

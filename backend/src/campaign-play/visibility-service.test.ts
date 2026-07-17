@@ -186,6 +186,7 @@ function openingProposal(): CampaignPlayOpeningProposal {
       anchor: "openingActor",
       eventClass: "dialogue",
       summary: "The signal keeper asks the player what brought them to the failing route.",
+      routeRestriction: null,
     },
     actorPlans,
     hiddenConsequence: {
@@ -1158,6 +1159,45 @@ describe("Campaign Play visibility service", () => {
     expect(routeAttempts).toHaveLength(3);
     expect(routeAttempts.every((intent) =>
       intent.targets.length === 1 && intent.targets[0]?.kind === "route"))
+      .toBe(true);
+
+    const restrictedRoute = scene.visibleRoutes[0]!;
+    const restrictedIntents = availableIntents(
+      fixture.handle,
+      "turn-restricted-route",
+      actionContext,
+      {
+        ...scene,
+        visibleRoutes: scene.visibleRoutes.map((route) => route.handle === restrictedRoute.handle
+          ? { ...route, state: "restricted" as const }
+          : route),
+      },
+      "actor-player",
+      syntheticOpeningSeed,
+      1,
+    );
+    expect(restrictedIntents.some((intent) =>
+      intent.kind === "move" && intent.targets[0]?.handle === restrictedRoute.handle))
+      .toBe(false);
+    expect(restrictedIntents.find((intent) =>
+      intent.kind === "attempt" && intent.targets[0]?.handle === restrictedRoute.handle)?.label)
+      .toBe(`Try to pass toward ${restrictedRoute.destinationName}`);
+    const openingRestrictedIntents = availableIntents(
+      fixture.handle,
+      "turn-opening-restricted-route",
+      null,
+      {
+        ...scene,
+        visibleRoutes: scene.visibleRoutes.map((route) => route.handle === restrictedRoute.handle
+          ? { ...route, state: "restricted" as const }
+          : route),
+      },
+      "actor-player",
+      syntheticOpeningSeed,
+      1,
+    );
+    expect(openingRestrictedIntents.some((intent) =>
+      intent.kind === "attempt" && intent.targets[0]?.handle === restrictedRoute.handle))
       .toBe(true);
 
     const withActor = availableIntents(

@@ -65,7 +65,7 @@ function frame(): CampaignPlayJudgeFrame {
     turnId: "turn-one",
     playerActorHandle: "actor-you",
     locationHandle: "location-harbor",
-    visibleRoutes: [{ handle: "route-reef", destinationHandle: "location-reef", travelCost: 5 }],
+    visibleRoutes: [{ handle: "route-reef", destinationHandle: "location-reef", travelCost: 5, state: "open" }],
     worldTimeMinutes: 120,
     sourceMoment: "The guard finishes painting a fresh white line across the gate latch.",
     visibleFacts: [
@@ -414,7 +414,7 @@ describe("Campaign Play Judge", () => {
       'TARGET_CATALOG=[{"handle":"actor-you","kind":"actor"},{"handle":"location-harbor","kind":"location"},{"handle":"location-reef","kind":"location"},{"handle":"route-reef","kind":"route"},{"handle":"actor-guard","kind":"actor"},{"handle":"notebook","kind":"possession"}]',
     );
     expect(sentPrompt).toContain(
-      'VISIBLE_ROUTES=[{"handle":"route-reef","destinationHandle":"location-reef","travelCost":5}]',
+      'VISIBLE_ROUTES=[{"handle":"route-reef","destinationHandle":"location-reef","travelCost":5,"state":"open"}]',
     );
     expect(sentPrompt).toContain(
       'CITATION_HANDLES=["actor-you","location-harbor","location-reef","route-reef","actor-guard","observation-latch","choice-ask","choice-cross","notebook"]',
@@ -485,6 +485,42 @@ describe("Campaign Play Judge", () => {
       kind: "move",
       targets: suggestedMove.frozenChoice.targets,
       movementRouteHandle: null,
+    }))).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
+  });
+
+  it("treats restricted passage as an attempt with a visible access basis", () => {
+    const judge = createCampaignPlayJudge();
+    const restrictedFrame = frame();
+    restrictedFrame.visibleRoutes[0]!.state = "restricted";
+    const input = {
+      originalText: "Try to pass the guarded reef road.",
+      source: "suggested" as const,
+      choiceHandle: "choice-cross",
+      frozenChoice: {
+        kind: "attempt" as const,
+        targets: [{ handle: "route-reef", kind: "route" as const }],
+      },
+    };
+    const valid = proposal({
+      kind: "attempt",
+      targets: input.frozenChoice.targets,
+      method: "Present the permission recorded at the latch",
+      stakes: "Pass the guarded road",
+      movementRouteHandle: "route-reef",
+      citedVisibleFactHandles: ["route-reef", "observation-latch"],
+      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 6 },
+    });
+    expect(judge.compile(restrictedFrame, input, valid)).toMatchObject({
+      normalizedIntent: { kind: "attempt" },
+      movementRouteHandle: "route-reef",
+    });
+    expect(() => judge.compile(restrictedFrame, input, proposal({
+      ...valid,
+      kind: "move",
+    }))).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
+    expect(() => judge.compile(restrictedFrame, input, proposal({
+      ...valid,
+      citedVisibleFactHandles: ["route-reef"],
     }))).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
   });
 
@@ -755,28 +791,62 @@ describe("Campaign Play Judge", () => {
       targets: [{ handle: "route-reef", kind: "route" }],
       movementRouteHandle: null,
     }))).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
-    expect(() => judge.compile(frame(), input, proposal({
-      kind: "move",
-      targets: [{ handle: "route-reef", kind: "route" }],
-      movementRouteHandle: "route-reef",
-      elapsedBounds: { minimumMinutes: 1, maximumMinutes: 30 },
-    }))).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
-    expect(() => judge.compile(frame(), input, proposal({
-      kind: "contact",
-      targets: [{ handle: "location-reef", kind: "location" }],
-      movementRouteHandle: "route-reef",
-      elapsedBounds: { minimumMinutes: 4, maximumMinutes: 10 },
-    }))).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
   });
 
-  it("binds pure movement time to the canonical visible route cost", () => {
-    const ruling = createCampaignPlayJudge().compile(frame(), {
+  it("binds route time to the canonical visible route cost", () => {
+    const judge = createCampaignPlayJudge();
+    const moveRuling = judge.compile(frame(), {
       originalText: "I cross the reef road.", source: "freeform", choiceHandle: null,
     }, proposal({
       kind: "move",
       targets: [{ handle: "route-reef", kind: "route" }],
       movementRouteHandle: "route-reef",
-      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 5 },
+      elapsedBounds: { minimumMinutes: 1, maximumMinutes: 30 },
+    }));
+    const compoundRuling = judge.compile(frame(), {
+      originalText: "I cross the road, then ask the guard.", source: "freeform", choiceHandle: null,
+    }, proposal({
+      kind: "contact",
+      targets: [{ handle: "location-reef", kind: "location" }],
+      movementRouteHandle: "route-reef",
+      elapsedBounds: { minimumMinutes: 4, maximumMinutes: 10 },
+    }));
+
+    expect(moveRuling.elapsedBounds).toEqual({ minimumMinutes: 5, maximumMinutes: 5 });
+    expect(compoundRuling.elapsedBounds).toEqual({ minimumMinutes: 5, maximumMinutes: 10 });
+  });
+
+  it("adds canonical route time to a restricted traversal attempt", () => {
+    const judge = createCampaignPlayJudge();
+    const restrictedFrame = frame();
+    restrictedFrame.visibleRoutes[0]!.state = "restricted";
+    const input = {
+      originalText: "Try to reach Reef Road: push through the blocked gate.",
+      source: "suggested" as const,
+      choiceHandle: "choice-cross",
+      frozenChoice: {
+        kind: "attempt" as const,
+        targets: [{ handle: "route-reef", kind: "route" as const }],
+      },
+    };
+
+    const ruling = judge.compile(restrictedFrame, input, proposal({
+      kind: "attempt",
+      targets: input.frozenChoice.targets,
+      method: "Push through the blocked gate",
+      stakes: "Reach Reef Road without permission",
+      movementRouteHandle: "route-reef",
+      citedVisibleFactHandles: ["route-reef"],
+      disposition: "uncertain",
+      resultBounds: { minimum: "setback", maximum: "success" },
+      elapsedBounds: { minimumMinutes: 1, maximumMinutes: 2 },
+      uncertainty: {
+        kind: "check",
+        dieSides: 20,
+        difficulty: 14,
+        modifierMinimum: -2,
+        modifierMaximum: 2,
+      },
     }));
 
     expect(ruling.elapsedBounds).toEqual({ minimumMinutes: 5, maximumMinutes: 5 });

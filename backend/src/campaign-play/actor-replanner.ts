@@ -315,7 +315,7 @@ function compilePlan(
         ? frame.localRoutes.find((candidate) => candidate.id === routeTargets[0]!.id)
         : undefined;
       if (
-        originLocationId === null || !route || route.state === "blocked" ||
+        originLocationId === null || !route || route.state !== "open" ||
         route.fromLocationId !== originLocationId || locationTargets.length > 1 ||
         (locationTargets[0] !== undefined && locationTargets[0].id !== route.toLocationId)
       ) {

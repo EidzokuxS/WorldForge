@@ -234,6 +234,7 @@ function openingProposal(actorCadenceMinutes = 1): CampaignPlayOpeningProposal {
       anchor: "openingActor",
       eventClass: "dialogue",
       summary: "The signal keeper asks Mara what she has learned about the impossible signal.",
+      routeRestriction: null,
     },
     actorPlans,
     hiddenConsequence: {

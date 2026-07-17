@@ -380,6 +380,7 @@ interface CanonicalMovement {
   from: CampaignPlayEntityRef;
   to: CampaignPlayEntityRef;
   travelCost: number;
+  initialRouteState: "open" | "restricted";
 }
 
 interface DestinationScene {
@@ -418,6 +419,7 @@ function destinationScene(
 function canonicalMovement(
   frame: CampaignPlayGameMasterFrame,
   ruling: CampaignPlayJudgeRuling,
+  resolution: CampaignPlayUncertaintyResolution,
   map: ReadonlyMap<string, CampaignPlayEntityRef>,
 ): CanonicalMovement | null {
   if (ruling.movementRouteHandle === null) return null;
@@ -462,6 +464,16 @@ function canonicalMovement(
   const toLocationHandle = frame.handleBindings.find((binding) =>
     binding.reference.kind === "location" && binding.reference.id === routeRecord.toLocationId)?.handle;
   if (!toLocationHandle) throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
+  const initialRouteState = frame.rulebookFrame.routeStates.find((candidate) =>
+    candidate.routeId === route.id)?.state ?? "open";
+  if (initialRouteState === "blocked") {
+    throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
+  }
+  if (
+    initialRouteState === "restricted"
+    && resolution.result !== "success"
+    && resolution.result !== "strong_success"
+  ) return null;
   return {
     handles: { actorHandle, routeHandle, fromLocationHandle, toLocationHandle },
     actor: requireRef(map, actorHandle, "actor"),
@@ -469,6 +481,7 @@ function canonicalMovement(
     from: requireRef(map, fromLocationHandle, "location"),
     to: requireRef(map, toLocationHandle, "location"),
     travelCost: routeRecord.travelCost,
+    initialRouteState,
   };
 }
 
@@ -792,7 +805,7 @@ function compile(
   const parsed = campaignPlayGameMasterProposalSchema.safeParse(rawProposal);
   if (!parsed.success) throw new CampaignPlayGameMasterError("model_contract_failed", null, null, { cause: parsed.error });
   const proposal = parsed.data;
-  const movement = canonicalMovement(frame, ruling, map);
+  const movement = canonicalMovement(frame, ruling, resolution, map);
   if (proposal.elapsedMinutes < ruling.elapsedBounds.minimumMinutes
     || proposal.elapsedMinutes > ruling.elapsedBounds.maximumMinutes) {
     throw new CampaignPlayGameMasterError("model_contract_failed", null);
@@ -831,6 +844,29 @@ function compile(
     || companionMovementEffects.length > 1
   ) {
     throw new CampaignPlayGameMasterError("model_contract_failed", null);
+  }
+  if (movement?.initialRouteState === "restricted") {
+    const routeTransitions = proposal.effects.flatMap((effect, index) =>
+      effect.kind === "set_route_state"
+      && effect.routeHandle === movement.handles.routeHandle
+        ? [{ effect, index }]
+        : []);
+    const opened = routeTransitions.filter(({ effect }) =>
+      effect.state === "open" && effect.exposure.mode === "protected");
+    const restored = routeTransitions.filter(({ effect }) =>
+      effect.state === "restricted" && effect.exposure.mode === "protected");
+    const firstMovementIndex = Math.min(...movementEffects.map(({ index }) => index));
+    const lastMovementIndex = Math.max(...movementEffects.map(({ index }) => index));
+    if (
+      ruling.normalizedIntent.kind !== "attempt"
+      || opened.length !== 1
+      || restored.length !== 1
+      || routeTransitions.length !== 2
+      || opened[0]!.index >= firstMovementIndex
+      || restored[0]!.index <= lastMovementIndex
+    ) {
+      throw new CampaignPlayGameMasterError("model_contract_failed", null);
+    }
   }
   if (companionMovementEffects.length === 1) {
     const companionMovement = companionMovementEffects[0]!;
@@ -925,7 +961,7 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     (grouped[kind] ??= []).push(binding.handle);
     return grouped;
   }, {});
-  const movement = canonicalMovement(frame, ruling, map);
+  const movement = canonicalMovement(frame, ruling, resolution, map);
   const arrivalScene = destinationScene(frame, movement);
   const directives = actorDirectives(frame, ruling, map);
   const currentPlacement = frame.rulebookFrame.placements.find((placement) =>
@@ -962,6 +998,7 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     "For contact, write the targeted person's actual spoken reply, silence, gesture, or action in the record_world_event summary and copy that person's handle into performingActorHandle. The performer must be one of PLAYER_INTENT's actor targets. Do not replace the exchange with audit labels such as common knowledge, offers no interpretation, nothing further, or has nothing to share. If the person withholds something, show the words or action used to withhold it. A concrete deflection, counterquestion, or condition is useful when ACTOR_DIRECTIVES support one.",
     "PLAYER_MOVEMENT is code-authoritative. When it is non-null, return exactly one {\"kind\":\"move_actor\",\"actorHandle\":null} effect for the player at the chronological point where travel occurs. Code binds the player actor, route, endpoints, and direct perception from this order. When PLAYER_MOVEMENT is null, never return move_actor. Do not copy PLAYER_MOVEMENT fields or exposure into an effect.",
     "PLAYER_MOVEMENT also carries the route's code-authoritative travelCost ticks. For a pure move, elapsedMinutes must equal travelCost exactly. For a compound action that includes travel, elapsedMinutes must be at least travelCost and remain within RULING.elapsedBounds. Never estimate a different route duration.",
+    "PLAYER_MOVEMENT.initialRouteState is code-authoritative. When it is restricted, the accepted attempt has earned passage for this traversal only. Return one protected set_route_state effect that changes the exact route to open before any movement effect. After the player and any willing companion have moved, return one protected set_route_state effect that restores the same route to restricted. Return no other state transition for that route. When a restricted attempt did not earn passage, PLAYER_MOVEMENT is null: commit the visible failed result without moving anyone or changing the route.",
     "CURRENT_EXACT_SCENE is the only scene the player occupies before movement. When PLAYER_MOVEMENT is null, every result must remain inside it. A trail may point toward another named location or route destination, but stop before the player enters, reaches, stands on, or inspects that location's surfaces. Do not place evidence on its door, ramp, gate, floor, wall, or other scene detail. Crossing that boundary requires PLAYER_MOVEMENT.",
     "A targeted visible agent may voluntarily travel with the player over PLAYER_MOVEMENT. First record that person's explicit agreement or willing action as an origin dialogue/interaction. After the player's move_actor effect, return at most one second move_actor effect with that targeted person's exact actorHandle. Code binds the same route and endpoints. Never move an untargeted, remote, incapacitated, non-agent, or unwilling person. If the person does not travel, omit the second effect and do not describe that person at the destination.",
     "Order movement effects as origin interaction, player move_actor with null actorHandle, optional companion move_actor with the targeted actorHandle, then arrival or destination interaction. Put any record_world_event describing the arrival after the movement effects and use eventClass scene for an actorless arrival. Every person described as present in a destination summary must already be there or have a preceding accepted move_actor effect, and their handle must appear in affectedHandles.",
@@ -981,6 +1018,7 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     `PLAYER_MOVEMENT=${JSON.stringify(movement === null ? null : {
       ...movement.handles,
       travelCost: movement.travelCost,
+      initialRouteState: movement.initialRouteState,
     })}`,
     `DESTINATION_SCENE=${JSON.stringify(arrivalScene)}`,
     `VISIBLE_FACTS=${JSON.stringify(frame.visibleFacts)}`,

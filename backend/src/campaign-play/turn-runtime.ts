@@ -1433,6 +1433,7 @@ export function createCampaignPlayTurnRuntime(
                   handle: route.handle,
                   destinationHandle: route.destinationHandle,
                   travelCost: canonicalRoute.travelCost,
+                  state: route.state,
                 };
               });
               const result = await judge.judge({

@@ -716,6 +716,46 @@ describe("Campaign Play Rulebook preflight", () => {
     });
   });
 
+  it("admits one typed outgoing-route restriction immediately before its opening premise", () => {
+    const frame = frameFixture("opening_required");
+    const authority: CampaignPlayRulebookAuthority = {
+      purpose: "opening",
+      turnId: TURN_ID,
+      actorId: PLAYER_ID,
+      rootParent: { kind: "turn", turnId: TURN_ID },
+      authorizedRefs: allRefs(),
+      witnessActorIds: [],
+      knownWorldEventIds: [],
+    };
+    const batch = openingBatchWithPremise();
+    const premise = batch.commands.pop()!;
+    const restriction = {
+      ...commandBase(3, READY_VERSION, { kind: "turn" as const, turnId: TURN_ID }),
+      source: { kind: "system" as const, system: "opening_bootstrap" as const },
+      kind: "set_route_state" as const,
+      routeId: "route-a-b",
+      state: "restricted" as const,
+      reason: "The harbor keeper requires a stamped passage chit.",
+      readScope: [{ kind: "route" as const, id: "route-a-b" }],
+      writeScope: [{ kind: "route" as const, id: "route-a-b" }],
+    };
+    batch.commands.push(restriction, {
+      ...premise,
+      commandId: "command-4",
+      order: 4,
+      expectedWorldVersion: READY_VERSION + 1,
+      causalParent: { kind: "command", commandId: "command-3" },
+    });
+    const result = preflightCampaignPlayRulebook({ frame, authority, batch });
+    expect(result).toMatchObject({ accepted: true });
+    if (!result.accepted) return;
+    expect(result.simulation.routeStates).toEqual([{
+      routeId: "route-a-b",
+      state: "restricted",
+    }]);
+    expect(result.simulation.worldVersion).toBe(READY_VERSION + 1);
+  });
+
   it("rejects opening bootstrap into a macro region", () => {
     const frame = frameFixture("opening_required");
     const batch = structuredClone(openingBatch());
@@ -1020,6 +1060,71 @@ describe("Campaign Play Rulebook preflight", () => {
       denial: { code: "precondition_failed", commandId: "command-1" },
     });
     expect(frame.routeStates).toEqual([]);
+  });
+
+  it("rejects movement while a route remains restricted", () => {
+    const frame = frameFixture();
+    frame.routeStates = [{ routeId: "route-a-b", state: "restricted" }];
+    const move = {
+      ...ordinaryBatch().commands[1]!,
+      ...commandBase(0, READY_VERSION),
+    };
+    const result = preflightCampaignPlayRulebook({
+      frame,
+      authority: playerAuthority(),
+      batch: { batchId: BATCH_ID, baseWorldVersion: READY_VERSION, commands: [move] },
+    });
+    expect(result).toMatchObject({
+      accepted: false,
+      denial: { code: "precondition_failed", commandId: "command-0" },
+    });
+    expect(frame.placements.find((placement) => placement.actorId === PLAYER_ID)?.locationId)
+      .toBe("location-a");
+  });
+
+  it("allows one restricted traversal only through explicit open, move, and restore commands", () => {
+    const frame = frameFixture();
+    frame.routeStates = [{ routeId: "route-a-b", state: "restricted" }];
+    const routeScope = [{ kind: "route" as const, id: "route-a-b" }];
+    const open = {
+      ...ordinaryBatch().commands[2]!,
+      ...commandBase(0, READY_VERSION),
+      routeId: "route-a-b",
+      state: "open" as const,
+      reason: "The traveler earns passage for this crossing.",
+      readScope: routeScope,
+      writeScope: routeScope,
+    };
+    const move = {
+      ...ordinaryBatch().commands[1]!,
+      ...commandBase(1, READY_VERSION + 1),
+    };
+    const restore = {
+      ...ordinaryBatch().commands[2]!,
+      ...commandBase(2, READY_VERSION + 2),
+      routeId: "route-a-b",
+      state: "restricted" as const,
+      reason: "The passage condition remains for the next traveler.",
+      readScope: routeScope,
+      writeScope: routeScope,
+    };
+    const result = preflightCampaignPlayRulebook({
+      frame,
+      authority: playerAuthority(),
+      batch: {
+        batchId: BATCH_ID,
+        baseWorldVersion: READY_VERSION,
+        commands: [open, move, restore],
+      },
+    });
+    expect(result).toMatchObject({ accepted: true });
+    if (!result.accepted) return;
+    expect(result.simulation.placements.find((placement) => placement.actorId === PLAYER_ID)?.locationId)
+      .toBe("location-b");
+    expect(result.simulation.routeStates).toEqual([{
+      routeId: "route-a-b",
+      state: "restricted",
+    }]);
   });
 
   it("rejects movement for an actor outside the accepted world", () => {

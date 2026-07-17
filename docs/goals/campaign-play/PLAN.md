@@ -230,7 +230,7 @@ The initial critical path contains:
 
 The opening path contains opening planner and narrator calls. Routine actor actions execute persisted typed plans. Actor replanning invokes a strict planner only when a plan completes or its preconditions fail, and records that job separately from the player critical path.
 
-Every stage stores requested/actual model, strategy, token counts, duration, finish reason, schema outcome, and error code. Prompts contain bounded frames and opaque IDs. Model output has proposal authority only.
+Every stage stores requested/actual model, strategy, token counts, duration, finish reason, schema outcome, and error code. Prompts contain bounded frames and opaque IDs. Model output has proposal authority only. Route travel cost is code-owned: Judge binds a pure move to the exact visible route cost and raises a compound traversal's elapsed bounds to at least that cost before Rulebook planning.
 
 ## Persistence and transaction design
 
@@ -262,7 +262,7 @@ Later current-contract migrations extend these same owners. `0035_campaign_play_
 | `campaign_play_receipts` | command result, prior/result version, before/after hashes, causal event IDs |
 | `campaign_play_events` | source, cause, affected refs, world time, protected before/after payload and hash |
 | `campaign_play_event_exposures` | executable channel and typed location/route/witness/aftermath predicate |
-| `campaign_play_route_states` | current open/restricted/blocked state and causal receipt |
+| `campaign_play_route_states` | current open/restricted/blocked state and causal receipt; ordinary movement requires `open`, while one successful `restricted` traversal is committed as protected `open -> move -> restricted` commands in the same Rulebook batch |
 | `campaign_play_actor_conditions` | typed current actor condition/status and causal receipt |
 | `campaign_play_actor_possessions` | current nonnegative actor-owned quantity by deterministic possession key, with causal receipt and world version |
 | `campaign_play_pressure_states` | progress, status, last advanced time, causal receipt |

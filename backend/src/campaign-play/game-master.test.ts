@@ -282,6 +282,7 @@ describe("Campaign Play Game Master", () => {
     );
     expect(String(options.prompt)).toContain('CANONICAL_PEOPLE=["Oren Tide"]');
     expect(String(options.prompt)).toContain("PLAYER_MOVEMENT is code-authoritative");
+    expect(String(options.prompt)).toContain("When it is restricted, the accepted attempt has earned passage for this traversal only");
     expect(String(options.prompt)).toContain("CURRENT_EXACT_SCENE is the only scene the player occupies before movement");
     expect(String(options.prompt)).toContain("Crossing that boundary requires PLAYER_MOVEMENT");
     expect(String(options.prompt)).toContain(
@@ -731,7 +732,7 @@ describe("Campaign Play Game Master", () => {
       },
     )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
-      'PLAYER_MOVEMENT={"actorHandle":"you","routeHandle":"passage","fromLocationHandle":"here","toLocationHandle":"south","travelCost":5}',
+      'PLAYER_MOVEMENT={"actorHandle":"you","routeHandle":"passage","fromLocationHandle":"here","toLocationHandle":"south","travelCost":5,"initialRouteState":"open"}',
     );
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
       "For a pure move, elapsedMinutes must equal travelCost exactly",
@@ -763,6 +764,112 @@ describe("Campaign Play Game Master", () => {
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
       "do not claim that the destination is empty or inaccessible",
     );
+  });
+
+  it("opens, traverses, and restores a restricted route in one accepted batch", () => {
+    const restrictedFrame = frame();
+    restrictedFrame.rulebookFrame.routeStates = [{
+      routeId: "route-a-b",
+      state: "restricted",
+    }];
+    const restrictedRuling = ruling({
+      movementRouteHandle: "passage",
+      normalizedIntent: {
+        originalText: "I present my permission and pass the gate.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "attempt",
+        targets: [{ handle: "passage", kind: "route" }],
+        method: "Present permission and pass",
+        stakes: "Reach South Harbor",
+      },
+      citedVisibleFactHandles: ["passage"],
+      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 5 },
+    });
+    const restrictedProposal = {
+      elapsedMinutes: 5,
+      effects: [
+        { kind: "set_route_state" as const, routeHandle: "passage", state: "open" as const,
+          reason: "Permission grants this crossing.", exposure: { mode: "protected" as const } },
+        { kind: "move_actor" as const, actorHandle: null },
+        { kind: "set_route_state" as const, routeHandle: "passage", state: "restricted" as const,
+          reason: "Permission remains required for later crossings.", exposure: { mode: "protected" as const } },
+      ],
+    };
+    const accepted = createCampaignPlayGameMaster().compile(
+      restrictedFrame,
+      restrictedRuling,
+      resolution,
+      null,
+      restrictedProposal,
+    );
+    expect(accepted.preflight.accepted).toBe(true);
+    expect(accepted.batch.commands.map((command) => command.kind)).toEqual([
+      "advance_world_time",
+      "set_route_state",
+      "move_actor",
+      "set_route_state",
+    ]);
+    expect(accepted.preflight.simulation.routeStates).toEqual([{
+      routeId: "route-a-b",
+      state: "restricted",
+    }]);
+    expect(accepted.preflight.simulation.placements.find((placement) =>
+      placement.actorId === PLAYER_ID)?.locationId).toBe("location-b");
+    expect(() => createCampaignPlayGameMaster().compile(
+      restrictedFrame,
+      restrictedRuling,
+      resolution,
+      null,
+      { elapsedMinutes: 5, effects: [{ kind: "move_actor", actorHandle: null }] },
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+  });
+
+  it("keeps the player in place when a restricted traversal does not earn passage", () => {
+    const restrictedFrame = frame();
+    restrictedFrame.rulebookFrame.routeStates = [{
+      routeId: "route-a-b",
+      state: "restricted",
+    }];
+    const restrictedRuling = ruling({
+      movementRouteHandle: "passage",
+      normalizedIntent: {
+        originalText: "I try to slip through the guarded passage.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "attempt",
+        targets: [{ handle: "passage", kind: "route" }],
+        method: "Slip past the guard",
+        stakes: "Reach South Harbor",
+      },
+      disposition: "deterministic",
+      resultBounds: { minimum: "limited", maximum: "limited" },
+      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 10 },
+      uncertainty: { kind: "none" },
+    });
+    const failed = createCampaignPlayGameMaster().compile(
+      restrictedFrame,
+      restrictedRuling,
+      { kind: "deterministic", result: "limited" },
+      null,
+      {
+        elapsedMinutes: 5,
+        effects: [{
+          kind: "record_world_event",
+          eventClass: "scene",
+          performingActorHandle: null,
+          summary: "The guard closes the gap before the traveler reaches the passage.",
+          affectedHandles: ["you", "passage"],
+        }],
+      },
+    );
+    expect(failed.batch.commands.some((command) => command.kind === "move_actor")).toBe(false);
+    expect(failed.preflight.simulation.placements.find((placement) =>
+      placement.actorId === PLAYER_ID)?.locationId).toBe("location-a");
+    expect(failed.preflight.simulation.routeStates).toEqual([{
+      routeId: "route-a-b",
+      state: "restricted",
+    }]);
   });
 
   it("requires the Judge's explicit route instead of inferring movement from citations", async () => {

@@ -686,6 +686,26 @@ function isOpeningPremiseCommand(
     && refsEqual(command.affectedRefs, expectedRefs);
 }
 
+function isOpeningRouteRestrictionCommand(
+  frame: CampaignPlayRulebookFrame,
+  state: CampaignPlayRulebookSimulation,
+  command: RulebookBatchCommand,
+): boolean {
+  if (
+    command.kind !== "set_route_state"
+    || command.source.kind !== "system"
+    || command.source.system !== "opening_bootstrap"
+    || command.state !== "restricted"
+    || command.exposure.mode !== "protected"
+    || state.human === null
+  ) return false;
+  const playerLocations = operativeActorLocations(frame, state, state.human.actorId);
+  if (playerLocations.length !== 1) return false;
+  const route = frame.acceptedWorld.routes.find((row) => row.id === command.routeId);
+  return route?.fromLocationId === playerLocations[0]
+    && routeState(state, command.routeId) === "open";
+}
+
 function validateRefsAndScopes(
   frame: CampaignPlayRulebookFrame,
   authority: CampaignPlayRulebookAuthority,
@@ -836,7 +856,9 @@ function validateAvailability(
     ? command.kind === "create_player_actor"
       || (command.kind === "adjust_actor_possession" && command.quantityDelta > 0)
     : authority.purpose === "opening"
-      ? !modelVisible || isOpeningPremiseCommand(frame, state, command)
+      ? !modelVisible
+        || isOpeningPremiseCommand(frame, state, command)
+        || isOpeningRouteRestrictionCommand(frame, state, command)
       : modelVisible;
   if (
     !available
@@ -877,7 +899,7 @@ function applyCommand(
         || toLocation?.kind !== "persistent_sublocation"
         || route.fromLocationId !== command.fromLocationId
         || route.toLocationId !== command.toLocationId
-        || routeState(state, route.id) === "blocked"
+        || routeState(state, route.id) !== "open"
         || placement?.locationId !== command.fromLocationId
         || state.actorConditions.some((condition) =>
           condition.actorId === command.actorId
@@ -1110,18 +1132,22 @@ function validateBootstrapCoverage(
   const placements = commands.filter((command) => command.kind === "initialize_player_placement");
   const clocks = commands.filter((command) => command.kind === "initialize_world_time");
   const pressures = commands.filter((command) => command.kind === "initialize_pressure_state");
+  const routeRestrictions = commands.filter((command) => command.kind === "set_route_state");
   const premises = commands.filter((command) => command.kind === "record_world_event");
   const expectedPressureIds = [...frame.acceptedWorld.pressures].map((pressure) => pressure.id).sort(compareText);
   const actualPressureIds = pressures.map((command) => command.pressureId).sort(compareText);
   if (
     placements.length !== 1
     || clocks.length !== 1
+    || routeRestrictions.length > 1
     || premises.length > 1
+    || (routeRestrictions.length === 1 && premises.length !== 1)
+    || (routeRestrictions.length === 1 && commands.at(-2) !== routeRestrictions[0])
     || (premises.length === 1 && commands.at(-1) !== premises[0])
-    || commands.length !== 2 + expectedPressureIds.length + premises.length
+    || commands.length !== 2 + expectedPressureIds.length + routeRestrictions.length + premises.length
     || JSON.stringify(actualPressureIds) !== JSON.stringify(expectedPressureIds)
   ) {
-    deny("invalid_bootstrap_coverage", "Opening must initialize placement, clock, and every pressure exactly once, followed by at most one player-premise event.");
+    deny("invalid_bootstrap_coverage", "Opening must initialize placement, clock, and every pressure exactly once, followed by an optional route restriction and at most one player-premise event.");
   }
 }
 

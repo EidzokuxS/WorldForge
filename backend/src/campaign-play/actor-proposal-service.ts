@@ -251,10 +251,10 @@ function compileProposal(
   const route = present
     ? explicitRoute
       ? frame.localRoutes.find((candidate) => candidate.id === explicitRoute.id
-        && candidate.state !== "blocked"
+        && candidate.state === "open"
         && candidate.fromLocationId === present.locationId)
       : explicitTargetLocation
-        ? frame.localRoutes.find((candidate) => candidate.state !== "blocked"
+        ? frame.localRoutes.find((candidate) => candidate.state === "open"
           && candidate.fromLocationId === present.locationId
           && candidate.toLocationId === explicitTargetLocation.id)
         : undefined

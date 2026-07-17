@@ -25,6 +25,7 @@ import {
   campaignPlayElapsedBoundsSchema,
   campaignPlayExposurePredicateSchema,
   recordWorldEventCommandSchema,
+  setRouteStateCommandSchema,
   type CampaignPlayActorIntent,
   type CampaignPlayActorPlan,
   type CampaignPlayActorSchedule,
@@ -100,6 +101,9 @@ export const campaignPlayOpeningProposalSchema = z.object({
     anchor: z.enum(["openingActor", "supportActor"]),
     eventClass: z.enum(["dialogue", "interaction"]),
     summary: boundedText(CAMPAIGN_PLAY_LIMITS.text),
+    routeRestriction: z.object({
+      reason: boundedLine(CAMPAIGN_PLAY_LIMITS.shortText),
+    }).strict().nullable(),
   }).strict().nullable(),
   actorPlans: z.array(openingActorPlanProposalSchema)
     .min(1)
@@ -198,11 +202,12 @@ export interface CampaignPlayOpeningNarratorFacts {
 }
 
 type CampaignPlayOpeningCommand = CampaignPlayBootstrapCommand |
-  Extract<CampaignPlayCommand, { kind: "record_world_event" }>;
+  Extract<CampaignPlayCommand, { kind: "record_world_event" | "set_route_state" }>;
 
 const campaignPlayOpeningCommandSchema: z.ZodType<CampaignPlayOpeningCommand> = z.union([
   campaignPlayBootstrapCommandSchema,
   recordWorldEventCommandSchema,
+  setRouteStateCommandSchema,
 ]);
 
 export interface CampaignPlayOpeningArtifact {
@@ -790,6 +795,7 @@ function compilePlans(
 function compileBootstrapCommands(
   frame: CampaignPlayOpeningFrame,
   startLocationId: string,
+  premiseRouteId: string,
   playerPremise: CampaignPlayOpeningProposal["playerPremise"],
   openingActorId: string,
   supportActorId: string,
@@ -836,6 +842,18 @@ function compileBootstrapCommands(
         progress: 0,
         status: "active" as const,
       })),
+    ...(playerPremise === null || playerPremise.routeRestriction === null
+      ? []
+      : [{
+          kind: "set_route_state" as const,
+          source,
+          readScope: [{ kind: "route" as const, id: premiseRouteId }],
+          writeScope: [{ kind: "route" as const, id: premiseRouteId }],
+          exposure: { mode: "protected" as const },
+          routeId: premiseRouteId,
+          state: "restricted" as const,
+          reason: playerPremise.routeRestriction.reason,
+        }]),
     ...(playerPremise === null
       ? []
       : [{
@@ -1187,6 +1205,16 @@ export function createCampaignPlayOpeningPlanner(
       openingActorId,
       start.sceneLocationId,
     );
+    if (
+      proposal.playerPremise !== null
+      && proposal.playerPremise.routeRestriction !== null
+      && plans.some((plan) => plan.steps.some((step) =>
+        step.intent.kind === "move"
+        && step.intent.targets.some((target) =>
+          target.kind === "route" && target.id === narratorFacts.route.id)))
+    ) {
+      fail("opening_proposal_invalid");
+    }
     const exposureSeed = compileExposureSeed(frame, proposal, narratorFacts, plans);
     const frameHash = hashCampaignPlayProjection({
       domain: "campaign_play_opening_frame",
@@ -1200,6 +1228,7 @@ export function createCampaignPlayOpeningPlanner(
     const bootstrapCommands = compileBootstrapCommands(
       frame,
       start.sceneLocationId,
+      narratorFacts.route.id,
       proposal.playerPremise,
       openingActorId,
       supportActorId,

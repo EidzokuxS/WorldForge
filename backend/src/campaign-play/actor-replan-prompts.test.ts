@@ -215,6 +215,8 @@ describe("campaign play actor replan prompt", () => {
     expect(prompt).toContain("Each later step must begin from state established by accepted events or the preceding step's observableTrace");
     expect(prompt).toContain("Every non-null method, stakes, and observableTrace must be at most 500 characters");
     expect(prompt).toContain("Every move step must use exactly one supplied route whose name starts at the actor's occupied location");
+    expect(prompt).toContain("whose state is open");
+    expect(prompt).toContain("Restricted and blocked routes do not support ordinary movement");
     expect(prompt).toContain("Every non-move step that targets a location must target the actor's location established for that step");
     expect(prompt).toContain("The trace may contain only an after-state caused by handling or work stated in that step's method");
     expect(prompt).toContain("A raw, unfinished, tilted, open, damaged, displaced, or unpaid subject cannot become finished");

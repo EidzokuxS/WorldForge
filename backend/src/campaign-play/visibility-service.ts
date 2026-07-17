@@ -919,16 +919,22 @@ export function availableIntents(
       return 0;
     });
   routes.forEach((route) => {
-    intents.push({
-      handle: publicHandle("choice", campaignId, `${turnId}:move:${route.handle}`),
-      label: `Go to ${route.destinationName}`,
-      kind: "move",
-      targets: [{ handle: route.handle, kind: "route" }],
-    });
-    if (attemptsAvailable) {
+    if (route.state === "open") {
+      intents.push({
+        handle: publicHandle("choice", campaignId, `${turnId}:move:${route.handle}`),
+        label: `Go to ${route.destinationName}`,
+        kind: "move",
+        targets: [{ handle: route.handle, kind: "route" }],
+      });
+    }
+    const routeAttemptAvailable = actionContext?.disposition !== "clarification_required"
+      && (route.state === "restricted" || attemptsAvailable);
+    if (routeAttemptAvailable) {
       intents.push({
         handle: publicHandle("choice", campaignId, `${turnId}:attempt:${route.handle}`),
-        label: `Try a risky approach to ${route.destinationName}`,
+        label: route.state === "restricted"
+          ? `Try to pass toward ${route.destinationName}`
+          : `Try a risky approach to ${route.destinationName}`,
         kind: "attempt",
         targets: [{ handle: route.handle, kind: "route" }],
       });
