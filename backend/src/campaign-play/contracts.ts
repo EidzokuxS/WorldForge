@@ -635,6 +635,20 @@ export const campaignPlayNarratorPacketSchema:
         ["availableIntents", index, "targets"],
         "Available intent target handles",
       );
+      const routeTargets = intent.targets.filter((target) => target.kind === "route");
+      const routeTargetIsVisible = routeTargets.every((target) =>
+        packet.visibleRoutes.some((route) => route.handle === target.handle));
+      if (
+        !routeTargetIsVisible
+        || (intent.kind === "move" && routeTargets.length !== 1)
+        || (intent.kind === "attempt" && routeTargets.length > 1)
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["availableIntents", index, "targets"],
+          message: "Available intent route authority must match its visible move or route-bound attempt.",
+        });
+      }
     });
     const newObservationHandles = new Set(
       packet.newObservations.map((entry) => entry.observationHandle),
@@ -720,7 +734,18 @@ export function campaignPlaySuggestedActionLabelPrefix(
   switch (intent.kind) {
     case "observe": return "Examine ";
     case "wait": return "Wait and ";
-    case "attempt": return "Try to ";
+    case "attempt": {
+      const routeHandle = intent.targets.find((target) => target.kind === "route")?.handle;
+      if (routeHandle === undefined) return "Try to ";
+      const route = packet.visibleRoutes.find((candidate) => candidate.handle === routeHandle);
+      if (!route) {
+        throw new CampaignPlayContractError(
+          "narration_invalid",
+          "Route-bound attempt label requires its frozen visible route.",
+        );
+      }
+      return `Try to reach ${playerFacingName(route.destinationName)}: `;
+    }
     case "move": {
       const routeHandle = intent.targets.find((target) => target.kind === "route")?.handle;
       const route = packet.visibleRoutes.find((candidate) => candidate.handle === routeHandle);

@@ -1139,14 +1139,25 @@ describe("Campaign Play visibility service", () => {
       "observe",
       "attempt",
       "move",
+      "attempt",
       "move",
+      "attempt",
       "move",
+      "attempt",
       "wait",
     ]);
-    expect(continuation.find((intent) => intent.kind === "attempt")?.targets).toEqual([{
+    expect(continuation.find((intent) =>
+      intent.kind === "attempt" && !intent.targets.some((target) => target.kind === "route"))?.targets)
+      .toEqual([{
       handle: scene.currentLocation.handle,
       kind: "location",
     }]);
+    const routeAttempts = continuation.filter((intent) =>
+      intent.kind === "attempt" && intent.targets.some((target) => target.kind === "route"));
+    expect(routeAttempts).toHaveLength(3);
+    expect(routeAttempts.every((intent) =>
+      intent.targets.length === 1 && intent.targets[0]?.kind === "route"))
+      .toBe(true);
 
     const withActor = availableIntents(
       fixture.handle,
@@ -1175,13 +1186,16 @@ describe("Campaign Play visibility service", () => {
       syntheticOpeningSeed,
       1,
     );
-    expect(withActor).toHaveLength(8);
+    expect(withActor).toHaveLength(11);
     expect(withActor.map((intent) => intent.kind)).toEqual([
       "observe",
       "attempt",
       "move",
+      "attempt",
       "move",
+      "attempt",
       "move",
+      "attempt",
       "contact",
       "contact",
       "wait",

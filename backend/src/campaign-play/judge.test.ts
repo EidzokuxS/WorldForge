@@ -380,11 +380,14 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("targets must always be a JSON array");
     expect(sentPrompt).toContain("copy FROZEN_CHOICE kind and every frozen target");
     expect(sentPrompt).toContain("visible nonplayer actors whose participation, consent, or reaction is material");
-    expect(sentPrompt).toContain("Never add another location, route, pressure, possession, or the player actor");
+    expect(sentPrompt).toContain(
+      "Never add a destination location or another route, location, pressure, possession, or the player actor",
+    );
     expect(sentPrompt).toContain("ACTOR_CONTINUITY outranks any conflicting earlier dialogue");
     expect(sentPrompt).toContain("movementRouteHandle is a separate mechanical decision");
     expect(sentPrompt).toContain("compound requests such as travel then contact");
-    expect(sentPrompt).toContain("Every suggested non-move choice must set movementRouteHandle to null");
+    expect(sentPrompt).toContain("including a route-bound attempt");
+    expect(sentPrompt).toContain("Never add, remove, or change travel");
     expect(sentPrompt).toContain("For a pure move, elapsedBounds.minimumMinutes and elapsedBounds.maximumMinutes must both equal the selected route's travelCost");
     expect(sentPrompt).toContain('{"kind":"adjust_actor_possession","operation":"transform","possessionHandle":"copied visible handle","quantity":1,"minimumResult":"lowest applicable tier"}');
     expect(sentPrompt).toContain("there is no adjustment field");
@@ -397,7 +400,10 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("never make a visible object vanish or move without explicit evidence");
     expect(sentPrompt).toContain("Every targets entry must copy one exact {handle, kind} pair from TARGET_CATALOG");
     expect(sentPrompt).toContain(
-      "For movement with a named willing companion, include both the destination and the companion actor in targets",
+      "For freeform movement with a named willing companion, include the movement destination and the companion actor in targets",
+    );
+    expect(sentPrompt).toContain(
+      "For suggested movement, the frozen route already carries the destination: copy it and never add the destination location as another target",
     );
     expect(sentPrompt).toContain("Citing the actor does not make the actor a target");
     expect(sentPrompt).toContain("Observation and choice handles are not world targets");
@@ -544,6 +550,72 @@ describe("Campaign Play Judge", () => {
         ...suggestedInput.frozenChoice.targets,
         { handle: "actor-you", kind: "actor" },
       ],
+    })).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
+  });
+
+  it("freezes one visible route into a route-bound suggested attempt", async () => {
+    const suggestedInput = {
+      originalText: "Try to reach Reef Road: raise the gate bar with the guard.",
+      source: "suggested" as const,
+      choiceHandle: "choice-ask",
+      frozenChoice: {
+        kind: "attempt" as const,
+        targets: [{ handle: "route-reef", kind: "route" as const }],
+      },
+    };
+    const validProposal = proposal({
+      kind: "attempt",
+      targets: [
+        ...suggestedInput.frozenChoice.targets,
+        { handle: "actor-guard", kind: "actor" },
+      ],
+      method: "Raise the gate bar with the guard and cross Reef Road",
+      stakes: "Reach the route destination with the guard",
+      movementRouteHandle: "route-reef",
+      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 7 },
+      disposition: "uncertain",
+      resultBounds: { minimum: "setback", maximum: "success" },
+      uncertainty: {
+        kind: "check",
+        dieSides: 20,
+        difficulty: 12,
+        modifierMinimum: -1,
+        modifierMaximum: 1,
+      },
+    });
+    const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
+      object: validProposal,
+      trace: trace(),
+    }));
+    const judge = createCampaignPlayJudge({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const result = await judge.judge({
+      frame: frame(),
+      input: suggestedInput,
+      model: model(),
+      temperature: 0.2,
+      budget,
+    });
+    expect(result.ruling).toMatchObject({
+      movementRouteHandle: "route-reef",
+      normalizedIntent: { kind: "attempt", targets: validProposal.targets },
+    });
+    const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    expect(options.schema.safeParse(validProposal).success).toBe(true);
+    expect(options.schema.safeParse({
+      ...validProposal,
+      targets: [
+        ...validProposal.targets,
+        { handle: "location-reef", kind: "location" },
+      ],
+    }).success).toBe(false);
+    expect(options.schema.safeParse({ ...validProposal, movementRouteHandle: null }).success)
+      .toBe(false);
+    expect(() => judge.compile(frame(), suggestedInput, {
+      ...validProposal,
+      movementRouteHandle: null,
     })).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
   });
 

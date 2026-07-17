@@ -393,7 +393,12 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Purposes label a beat's work. Do not emit one beat for every purpose");
     expect(prompt).toContain("Default to one or two beats");
     expect(prompt).toContain("Never add a moment beat to repeat sourceMoment");
+    expect(prompt).toContain("Each actionSelection contains exactly intentIndex and detail");
+    expect(prompt).toContain("includesTravel belongs only to the input catalog");
     expect(prompt).toContain("wait uses a base-form verb phrase");
+    expect(prompt).toContain("Code fixes includesTravel for each entry");
+    expect(prompt).toContain("When it is false, the whole action must finish in currentLocation");
+    expect(prompt).toContain("Never describe departure in a false entry or remove travel from a true entry");
     expect(prompt).toContain('Address the player as "you"');
     expect(prompt).toContain("never switch to the player character's name");
     expect(prompt).toContain("people in the current place who remain available to encounter");

@@ -877,21 +877,21 @@ describe("Campaign Play Game Master", () => {
     });
   });
 
-  it("moves one willing targeted companion through Rulebook after the player", () => {
+  it("moves one willing targeted companion after a route-bound attempt", () => {
     const companionRuling = ruling({
       movementRouteHandle: "passage",
       elapsedBounds: { minimumMinutes: 5, maximumMinutes: 5 },
       normalizedIntent: {
-        originalText: "I ask Oren to walk with me to South Harbor and we set out together.",
+        originalText: "On Oren's call, I shove the skiff into the passage toward South Harbor.",
         source: "freeform",
         choiceHandle: null,
-        kind: "move",
+        kind: "attempt",
         targets: [
-          { handle: "south", kind: "location" },
+          { handle: "passage", kind: "route" },
           { handle: "guard", kind: "actor" },
         ],
-        method: "Travel the open passage beside Oren",
-        stakes: "Reach South Harbor together",
+        method: "Time the launch with Oren and enter the passage",
+        stakes: "Reach South Harbor together without losing control of the skiff",
       },
     });
     const result = createCampaignPlayGameMaster().compile(frame(), companionRuling, resolution, null, {

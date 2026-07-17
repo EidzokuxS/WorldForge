@@ -1550,7 +1550,10 @@ describe("Campaign Play shared public contracts", () => {
         (_, index) => ({
           ...packet.availableIntents[0]!,
           handle: `choice_${index}`,
-          targets: [{ handle: `route_${index}`, kind: "route" }],
+          targets: [{
+            handle: `route_${index % CAMPAIGN_PLAY_LIMITS.visibleRoutes}`,
+            kind: "route",
+          }],
         }),
       ),
     };
@@ -1737,6 +1740,14 @@ describe("Campaign Play shared public contracts", () => {
       attemptIntentFixture(),
       "stow the tools and chit in the locker",
     )).toBe("Try to stow the tools and chit in the locker");
+    expect(buildCampaignPlaySuggestedActionLabel(
+      narratorPacketFixture(),
+      {
+        ...attemptIntentFixture(),
+        targets: [{ handle: "route_market", kind: "route" }],
+      },
+      "shove off on Netta's signal",
+    )).toBe("Try to reach Flood Market: shove off on Netta's signal");
   });
 
   it("rejects stale mechanical and runtime expectations contextually", () => {

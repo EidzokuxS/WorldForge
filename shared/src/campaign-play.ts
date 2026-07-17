@@ -28,7 +28,7 @@ export const CAMPAIGN_PLAY_LIMITS = {
   affectedRefs: 16,
   preconditionsPerPlan: 8,
   planSteps: 8,
-  availableIntents: 19,
+  availableIntents: 27,
   suggestedActions: 4,
   effects: 6,
   visibleActors: 8,

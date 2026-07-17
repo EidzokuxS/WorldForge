@@ -893,10 +893,12 @@ export function availableIntents(
     kind: "observe",
     targets: [{ handle: scene.currentLocation.handle, kind: "location" }],
   }];
-  if (actionContext !== null && actionContext.disposition !== "clarification_required") {
+  const attemptsAvailable = actionContext !== null
+    && actionContext.disposition !== "clarification_required";
+  if (attemptsAvailable) {
     intents.push({
       handle: publicHandle("choice", campaignId, `${turnId}:attempt`),
-      label: "Try the immediate next step",
+      label: "Try the immediate local step",
       kind: "attempt",
       targets: [{ handle: scene.currentLocation.handle, kind: "location" }],
     });
@@ -915,12 +917,22 @@ export function availableIntents(
       if (right.handle === preferredRoute?.handle) return 1;
       return 0;
     });
-  routes.forEach((route) => intents.push({
-    handle: publicHandle("choice", campaignId, `${turnId}:move:${route.handle}`),
-    label: `Go to ${route.destinationName}`,
-    kind: "move",
-    targets: [{ handle: route.handle, kind: "route" }],
-  }));
+  routes.forEach((route) => {
+    intents.push({
+      handle: publicHandle("choice", campaignId, `${turnId}:move:${route.handle}`),
+      label: `Go to ${route.destinationName}`,
+      kind: "move",
+      targets: [{ handle: route.handle, kind: "route" }],
+    });
+    if (attemptsAvailable) {
+      intents.push({
+        handle: publicHandle("choice", campaignId, `${turnId}:attempt:${route.handle}`),
+        label: `Try a risky approach to ${route.destinationName}`,
+        kind: "attempt",
+        targets: [{ handle: route.handle, kind: "route" }],
+      });
+    }
+  });
   scene.visibleActors.forEach((actor) => intents.push({
     handle: publicHandle("choice", campaignId, `${turnId}:contact:${actor.handle}`),
     label: `Talk to ${actor.name}`,

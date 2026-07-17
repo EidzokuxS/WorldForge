@@ -911,8 +911,16 @@ function assertSuggestedRuling(
   if (admission.judgeInput.source !== "suggested") return;
   const binding = admission.choiceBindings.find((choice) =>
     choice.handle === admission.judgeInput.choiceHandle);
+  const frozenRouteHandles = binding?.targets
+    .filter((target) => target.kind === "route")
+    .map((target) => target.handle) ?? [];
+  const expectedMovementRouteHandle = (binding?.kind === "move" || binding?.kind === "attempt")
+    && frozenRouteHandles.length === 1
+    ? frozenRouteHandles[0]!
+    : null;
   if (
     !binding || ruling.normalizedIntent.kind !== binding.kind ||
+    ruling.movementRouteHandle !== expectedMovementRouteHandle ||
     !campaignPlaySuggestedTargetsAreAuthorized({
       frozenTargets: binding.targets,
       proposedTargets: ruling.normalizedIntent.targets,
