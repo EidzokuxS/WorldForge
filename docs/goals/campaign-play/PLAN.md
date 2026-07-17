@@ -175,6 +175,8 @@ The Judge receives the player-visible frame plus server-side handle bindings. It
 
 Code owns the roll, seed, and result. The GM planner receives the ruling and emits a plan drawn from this command set:
 
+The GM also receives code-derived world-time coordinates for the action start and the Judge-bounded result range. Model-authored clock times, named parts of day, dates, deadlines, durations, and relative intervals must agree with the chosen elapsed time and with one another. Code supplies temporal authority but does not parse, rewrite, or replace model-authored scene prose.
+
 ```ts
 type CampaignPlayCommand =
   | AdvanceWorldTimeCommand

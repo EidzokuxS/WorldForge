@@ -526,6 +526,9 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("required means include exactly one matching adjust_actor_possession effect");
     expect(String(options.prompt)).toContain("permitted means include zero or one");
     expect(String(options.prompt)).toContain("When no authority applies, every adjust_actor_possession effect is forbidden");
+    expect(String(options.prompt)).toContain("WORLD_TIME_AUTHORITY is code-owned");
+    expect(String(options.prompt)).toContain("Any clock time, part of day, date, deadline, duration, or relative phrase");
+    expect(String(options.prompt)).toContain('WORLD_TIME_AUTHORITY={"actionStart":{"totalMinutes":10,"day":1,"hour":0,"minute":10},"resultRange":{"earliest":{"totalMinutes":11,"day":1,"hour":0,"minute":11},"latest":{"totalMinutes":13,"day":1,"hour":0,"minute":13}}}');
     expect(String(options.prompt)).toContain("Every non-null adjust_actor_possession name must be at most 120 characters");
     expect(String(options.prompt)).toContain("put state, contents, provenance, and other details in summary");
     expect(String(options.prompt)).toContain("Every summary must fit its schema limit: at most 1200 characters");

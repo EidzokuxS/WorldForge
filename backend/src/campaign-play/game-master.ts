@@ -1115,12 +1115,30 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
   const currentLocation = currentPlacement === undefined ? undefined
     : frame.rulebookFrame.acceptedWorld.locations.find((location) =>
       location.id === currentPlacement.locationId && location.kind === "persistent_sublocation");
-  if (!currentLocation) {
+  const worldTimeMinutes = frame.rulebookFrame.worldTimeMinutes;
+  if (!currentLocation || worldTimeMinutes === null) {
     throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
   }
   const currentExactScene = {
     locationName: currentLocation.name,
     description: currentLocation.description,
+  };
+  const worldTimeCoordinates = (totalMinutes: number) => ({
+    totalMinutes,
+    day: Math.floor(totalMinutes / 1_440) + 1,
+    hour: Math.floor((totalMinutes % 1_440) / 60),
+    minute: totalMinutes % 60,
+  });
+  const worldTimeAuthority = {
+    actionStart: worldTimeCoordinates(worldTimeMinutes),
+    resultRange: {
+      earliest: worldTimeCoordinates(
+        worldTimeMinutes + ruling.elapsedBounds.minimumMinutes,
+      ),
+      latest: worldTimeCoordinates(
+        worldTimeMinutes + ruling.elapsedBounds.maximumMinutes,
+      ),
+    },
   };
   return [
     "You are the Campaign Game Master. Plan effects within the Judge ruling and resolved result.",
@@ -1144,6 +1162,7 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     "For contact, write the targeted person's actual spoken reply, silence, gesture, or action in the record_world_event summary and copy that person's handle into performingActorHandle. The performer must be one of PLAYER_INTENT's actor targets. Do not replace the exchange with audit labels such as common knowledge, offers no interpretation, nothing further, or has nothing to share. If the person withholds something, show the words or action used to withhold it. A concrete deflection, counterquestion, or condition is useful when ACTOR_DIRECTIVES support one.",
     "PLAYER_MOVEMENT is code-authoritative. When it is non-null, return exactly one {\"kind\":\"move_actor\",\"actorHandle\":null} effect for the player at the chronological point where travel occurs. Code binds the player actor, route, endpoints, and direct perception from this order. When PLAYER_MOVEMENT is null, never return move_actor. Do not copy PLAYER_MOVEMENT fields or exposure into an effect.",
     "PLAYER_MOVEMENT also carries the route's code-authoritative travelCost ticks. For a pure move, elapsedMinutes must equal travelCost exactly. For a compound action that includes travel, elapsedMinutes must be at least travelCost and remain within RULING.elapsedBounds. Never estimate a different route duration.",
+    "WORLD_TIME_AUTHORITY is code-owned. The result occurs at actionStart.totalMinutes plus your elapsedMinutes, inside resultRange. Any clock time, part of day, date, deadline, duration, or relative phrase in a summary must agree with that result time and with every other time claim. When supplied facts do not fix a schedule, you may materialize concrete schedule values for an observation, but keep them internally consistent and omit a relation you cannot support.",
     "PLAYER_MOVEMENT.initialRouteState is code-authoritative. When it is restricted, the accepted attempt has earned passage for this traversal only. Return one protected set_route_state effect that changes the exact route to open before any movement effect. After the player and any willing companion have moved, return one protected set_route_state effect that restores the same route to restricted. Return no other state transition for that route. When a restricted attempt did not earn passage, PLAYER_MOVEMENT is null: commit the visible failed result without moving anyone or changing the route.",
     "set_route_state has exactly these fields: kind, exposure, routeHandle, state, and reason. reason is the short mechanical basis for this route transition. summary and affectedHandles are forbidden.",
     "CURRENT_EXACT_SCENE is the only scene the player occupies before movement. When PLAYER_MOVEMENT is null, every result must remain inside it. A trail may point toward another named location or route destination, but stop before the player enters, reaches, stands on, or inspects that location's surfaces. Do not place evidence on its door, ramp, gate, floor, wall, or other scene detail. Crossing that boundary requires PLAYER_MOVEMENT.",
@@ -1173,6 +1192,7 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
       initialRouteState: movement.initialRouteState,
     })}`,
     `DESTINATION_SCENE=${JSON.stringify(arrivalScene)}`,
+    `WORLD_TIME_AUTHORITY=${JSON.stringify(worldTimeAuthority)}`,
     `VISIBLE_FACTS=${JSON.stringify(frame.visibleFacts)}`,
     `ACTOR_CONTINUITY=${JSON.stringify(frame.actorContinuity)}`,
     `ACTOR_DIRECTIVES=${JSON.stringify(directives)}`,
