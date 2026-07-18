@@ -575,6 +575,10 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("Possession authority also bounds the meaning of the scene");
     expect(String(options.prompt)).toContain("possessionEffectAuthority is none, resolve only the negotiation");
     expect(String(options.prompt)).toContain("no bargained information, service, access, or other return is delivered yet");
+    expect(String(options.prompt)).toContain("possession quantity counts Rulebook stack units");
+    expect(String(options.prompt)).toContain("Never invent a smaller unit by interpreting a number, duration, volume, contents, or measure inside the possession name");
+    expect(String(options.prompt)).toContain("Three days of travel food with quantity 1 is one indivisible Rulebook unit");
+    expect(String(options.prompt)).toContain("Request the whole unit or another consideration");
     expect(String(options.prompt)).toContain("A completed exchange requires matching spend authority");
     expect(String(options.prompt)).toContain("record_world_event cannot substitute for that transition");
     expect(String(options.prompt)).toContain("WORLD_TIME_AUTHORITY is code-owned");

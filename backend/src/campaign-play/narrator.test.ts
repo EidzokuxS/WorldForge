@@ -691,6 +691,10 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("possessions is current player custody");
     expect(prompt).toContain("An item with positive quantity there is already acquired");
     expect(prompt).toContain("A detail may require a tool or consumable only when possessions contains it with positive quantity");
+    expect(prompt).toContain("possession.quantity counts indivisible Rulebook stack units");
+    expect(prompt).toContain("never derive smaller units from a number, duration, volume, contents, or measure inside the item name");
+    expect(prompt).toContain("A detail may offer or spend only a positive integer no greater than that quantity");
+    expect(prompt).toContain("do not suggest giving one day from it");
     expect(prompt).toContain("A general tool possession never includes raw material, fasteners, or another consumable");
     expect(prompt).toContain("prior narration does not put supplies in player custody");
     expect(prompt).toContain("Never suggest using, installing, spending, or transforming absent material");
