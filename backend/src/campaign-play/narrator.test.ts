@@ -752,6 +752,9 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("The first beat must use orientation");
     expect(prompt).toContain("describe it inside that orientation beat");
     expect(prompt).toContain("Do not label the first beat consequence");
+    expect(prompt).toContain("openingContext is descriptive and cannot create a route restriction");
+    expect(prompt).toContain("visibleRoutes is mechanical authority");
+    expect(prompt).toContain("do not say or imply that passage, departure, or travel is stopped");
     expect(prompt).toContain("On non-opening turns, use consequence");
     expect(prompt).toContain("On openings, the orientation beat may carry that visible result");
     expect(prompt).toContain("availableIntents never requires another beat");

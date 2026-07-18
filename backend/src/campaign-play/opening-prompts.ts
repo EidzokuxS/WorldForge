@@ -1,8 +1,11 @@
+import { CAMPAIGN_PLAY_LIMITS } from "@worldforge/shared";
 import type {
   CampaignPlayOpeningFrame,
   CampaignPlayOpeningSceneCandidate,
   CampaignPlayResolvedStartingConditions,
 } from "./opening-planner.js";
+
+const OPENING_MIN_PLAN_STEPS = 3;
 
 function promptData(
   frame: CampaignPlayOpeningFrame,
@@ -19,7 +22,8 @@ function promptData(
         .filter((goal) => goal.actorId === actor.id && goal.status === "active")
         .map((goal) => goal.id),
       actorLocationIds: frame.acceptedWorld.placements
-        .filter((placement) => placement.actorId === actor.id)
+        .filter((placement) =>
+          placement.actorId === actor.id && placement.placementKind === "present")
         .map((placement) => placement.locationId),
     }));
   return JSON.stringify({
@@ -95,7 +99,11 @@ Do not invent another person, organization, location, document, possession, rela
 
 playerPremise.routeRestriction controls the selected scene candidate's exact outgoing route. Set it to null unless the summary makes ordinary passage unavailable until the player pays, obtains permission, or overcomes another stated obstacle. A warning, request, price, or preference that does not stop passage is not a restriction. For a real restriction, return {"reason":"one short concrete condition"} and state that same condition in the summary. Do not state or imply a hard passage condition when routeRestriction is null. Do not apply the restriction to another route or location. When it is non-null, no actorPlan move step may target selectedScene.routeId.
 
-Create actorPlans with exactly openingConstraints.plannedActors.length items. Include every actorId listed there exactly once and no other actorId. Every listed person receives a plan regardless of role. Each actor proposal selects one active goal as primary and gives that person exactly one concrete next step. Actor replanning owns later steps after the world changes. Every step must include possessionOutcome. Use {"kind":"none"} unless a non-move step acquires a named, positive quantity for that actor. An acquire outcome is {"kind":"acquire","name":"...","quantity":1}; it cannot spend, transform, move, or describe cargo. For the step, write observableTrace as one concrete sensory result that could remain at the action location for another person to discover. State only visible or audible evidence. Describe material, shape, placement, sound, motion, or literal writing; do not label the trace by an administrative meaning, hidden category, or inferred function that a witness could not perceive from the trace itself. Do not name the acting person, reveal a goal or motive, assert an unseen cause, or address the player. Other active goals remain available for later replanning. Copy all actor, goal, location, route, relation, and pressure IDs character-for-character from OPENING_DATA. Invent no IDs.
+Create actorPlans with exactly openingConstraints.plannedActors.length items. Include every actorId listed there exactly once and no other actorId. Every listed person receives a plan regardless of role. Each actor proposal selects one active goal as primary and gives that person a bounded plan of at least ${OPENING_MIN_PLAN_STEPS} and at most ${CAMPAIGN_PLAY_LIMITS.planSteps} causal steps. Give the actor enough grounded work to continue across several scheduled opportunities; Actor Replanner takes over only when the plan is exhausted or accepted events make its next step stale.
+
+Each step's method is an action by that actor alone. It may contact or observe another supplied actor, but it cannot require, narrate, or settle that actor's response, work, movement, consent, signature, approval, payment, or completed outcome. A later step cannot assume that a contact answered, agreed, handed over information, or performed work. The acting person may send or leave a request and continue with work they control, or wait for a later accepted event. Do not invent an unnamed clerk, guard, patrol member, debtor, helper, official, witness, or other person. A move step changes only the acting person's location; it cannot move a squad, companion, vehicle, cargo, tool, material, or other object with them, and later steps cannot assume that anything else traveled.
+
+Steps execute in array order. Every move step must target exactly one directed route that starts at the actor's location established for that step. The route determines the next location, and any location target on that move must match the route destination. Every non-move step that targets a location must target the actor's location established for that step. Never use a route in reverse. Every step must include possessionOutcome. Use {"kind":"none"} unless a non-move step acquires a named, positive quantity for that actor. An acquire outcome is {"kind":"acquire","name":"...","quantity":1}; it cannot spend, transform, move, or describe cargo. For each step, write observableTrace as one concrete sensory result that could remain at the action location for another person to discover. State only visible or audible evidence. Describe material, shape, placement, sound, motion, or literal writing; do not label the trace by an administrative meaning, hidden category, or inferred function that a witness could not perceive from the trace itself. Do not name the acting person, reveal a goal or motive, assert an unseen cause, or address the player. Other active goals remain available for later replanning. Copy all actor, goal, location, route, relation, and pressure IDs character-for-character from OPENING_DATA. Invent no IDs.
 
 The selected scene's openingActorId is the person whose first step creates the immediate local situation. That actor's first-step targets must include exactly {"kind":"location","id":selectedScene.sceneLocationId}. Write a physical action that can happen in that scene while the player arrives. Its observableTrace must leave the Narrator a concrete sight or sound to begin with. Do not turn this into a tour of the place or a summary of its description.
 

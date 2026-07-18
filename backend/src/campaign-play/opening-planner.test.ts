@@ -18,6 +18,7 @@ import {
   type CampaignPlayOpeningFrame,
   type CampaignPlayOpeningProposal,
 } from "./opening-planner.js";
+import { buildCampaignPlayOpeningPrompt } from "./opening-prompts.js";
 
 const CAMPAIGN_ID = "campaign-opening";
 const TURN_ID = "turn-opening-zero";
@@ -334,16 +335,17 @@ function actorPlan(
     ...goalIds.map((id) => ({ kind: "goal" as const, id })),
     ...extraTargets,
   ]);
+  const step = {
+    intent: planIntent,
+    observableTrace,
+    possessionOutcome: { kind: "none" as const },
+    elapsedBounds: { minimumMinutes: 5, maximumMinutes: 30 },
+  };
   return {
     actorId,
     primaryGoalId,
     cadenceMinutes: 30,
-    steps: [{
-      intent: planIntent,
-      observableTrace,
-      possessionOutcome: { kind: "none" as const },
-      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 30 },
-    }],
+    steps: Array.from({ length: 3 }, () => structuredClone(step)),
   };
 }
 
@@ -708,20 +710,92 @@ describe("Campaign Play opening planner", () => {
     expect(campaignPlayOpeningProposalSchema.safeParse({
       ...proposal,
       actorPlans: proposal.actorPlans.map((plan) => plan.actorId === "actor-keeper"
-        ? { ...plan, steps: [{ ...plan.steps[0], possessionOutcome: undefined }] }
+        ? {
+            ...plan,
+            steps: plan.steps.map((step, index) => index === 0
+              ? { ...step, possessionOutcome: undefined }
+              : step),
+          }
         : plan),
     }).success).toBe(false);
   });
 
-  it("rejects a precomputed second opening step", () => {
+  it("requires three to eight opening plan steps", () => {
+    const tooShort = proposalFixture();
+    tooShort.actorPlans[0]!.steps = tooShort.actorPlans[0]!.steps.slice(0, 2);
+    expect(() => createCampaignPlayOpeningPlanner().compile(
+      frameFixture(), chosenConditions, tooShort,
+    )).toThrow(CampaignPlayOpeningPlannerError);
+
+    const tooLong = proposalFixture();
+    while (tooLong.actorPlans[0]!.steps.length < 9) {
+      tooLong.actorPlans[0]!.steps.push(
+        structuredClone(tooLong.actorPlans[0]!.steps[0]!),
+      );
+    }
+    expect(() => createCampaignPlayOpeningPlanner().compile(
+      frameFixture(), chosenConditions, tooLong,
+    )).toThrow(CampaignPlayOpeningPlannerError);
+  });
+
+  it("compiles sequential movement through directed routes", () => {
     const proposal = proposalFixture();
-    proposal.actorPlans[0]!.steps.push(
-      structuredClone(proposal.actorPlans[0]!.steps[0]!),
-    );
+    const keeperPlan = proposal.actorPlans.find((plan) => plan.actorId === "actor-keeper")!;
+    keeperPlan.steps[0]!.intent = {
+      ...intent([
+        { kind: "route", id: "route-reef-market" },
+        { kind: "location", id: "scene-reef-market" },
+      ]),
+      kind: "move",
+    };
+    keeperPlan.steps[1]!.intent = intent([
+      { kind: "location", id: "scene-reef-market" },
+    ]);
+    keeperPlan.steps[2]!.intent = {
+      ...intent([
+        { kind: "route", id: "route-reef-bells" },
+        { kind: "location", id: "scene-bells-tower" },
+      ]),
+      kind: "move",
+    };
+
+    const compiled = createCampaignPlayOpeningPlanner().compile(
+      frameFixture(), chosenConditions, proposal,
+    ).artifact.actorPlans.find((plan) => plan.actorId === "actor-keeper")!;
+    expect(compiled.steps.map((step) => step.intent.kind)).toEqual([
+      "move",
+      "attempt",
+      "move",
+    ]);
+  });
+
+  it("rejects movement through a route that does not start at the step location", () => {
+    const proposal = proposalFixture();
+    const keeperPlan = proposal.actorPlans.find((plan) => plan.actorId === "actor-keeper")!;
+    keeperPlan.steps[0]!.intent = {
+      ...intent([{ kind: "route", id: "route-reef-bells" }]),
+      kind: "move",
+    };
 
     expect(() => createCampaignPlayOpeningPlanner().compile(
       frameFixture(), chosenConditions, proposal,
-    )).toThrow(CampaignPlayOpeningPlannerError);
+    )).toThrowError(expect.objectContaining({ code: "opening_proposal_invalid" }));
+  });
+
+  it("rejects a non-move step at a location left by an earlier move", () => {
+    const proposal = proposalFixture();
+    const keeperPlan = proposal.actorPlans.find((plan) => plan.actorId === "actor-keeper")!;
+    keeperPlan.steps[0]!.intent = {
+      ...intent([{ kind: "route", id: "route-reef-market" }]),
+      kind: "move",
+    };
+    keeperPlan.steps[1]!.intent = intent([
+      { kind: "location", id: "scene-reef-quay" },
+    ]);
+
+    expect(() => createCampaignPlayOpeningPlanner().compile(
+      frameFixture(), chosenConditions, proposal,
+    )).toThrowError(expect.objectContaining({ code: "opening_proposal_invalid" }));
   });
 
   it("rejects unknown model-authored targets", () => {
@@ -957,6 +1031,29 @@ describe("Campaign Play opening planner", () => {
     expect(generateObject).not.toHaveBeenCalled();
   });
 
+  it("gives the opening model only each actor's present location", () => {
+    const world = worldFixture();
+    world.placements.push({
+      id: "placement-council-home",
+      actorId: "actor-council",
+      locationId: "scene-bells-archive",
+      placementKind: "home",
+    });
+    const frame = frameFixture(world);
+    const prompt = buildCampaignPlayOpeningPrompt(
+      frame,
+      chosenConditions,
+      buildCampaignPlayOpeningSceneCandidates(frame, chosenConditions),
+    );
+
+    expect(prompt).toContain(
+      '"actorId":"actor-council","actorKind":"person","actorRole":"background","activeGoalIds":["goal-council-control"],"actorLocationIds":["scene-reef-market"]',
+    );
+    expect(prompt).not.toContain(
+      '"actorLocationIds":["scene-reef-market","scene-bells-archive"]',
+    );
+  });
+
   it("uses exactly one strict structured model attempt", async () => {
     const workerController = new AbortController();
     const generateObject = vi.fn(async (
@@ -1018,8 +1115,15 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain("playerPremise.routeRestriction controls the selected scene candidate's exact outgoing route");
     expect(prompt).toContain("Do not state or imply a hard passage condition when routeRestriction is null");
     expect(prompt).toContain("Every listed person receives a plan regardless of role");
-    expect(prompt).toContain("exactly one concrete next step");
-    expect(prompt).toContain("Actor replanning owns later steps after the world changes");
+    expect(prompt).toContain("at least 3 and at most 8 causal steps");
+    expect(prompt).toContain("Actor Replanner takes over only when the plan is exhausted");
+    expect(prompt).toContain("Each step's method is an action by that actor alone");
+    expect(prompt).toContain("cannot require, narrate, or settle that actor's response");
+    expect(prompt).toContain("A later step cannot assume that a contact answered");
+    expect(prompt).toContain("Do not invent an unnamed clerk, guard, patrol member");
+    expect(prompt).toContain("A move step changes only the acting person's location");
+    expect(prompt).toContain("Every move step must target exactly one directed route");
+    expect(prompt).toContain("Every non-move step that targets a location");
     expect(prompt).toContain("Every step must include possessionOutcome");
     expect(prompt).toContain("An acquire outcome is {\"kind\":\"acquire\",\"name\":\"...\",\"quantity\":1}");
     expect(prompt).toContain("observableTrace");

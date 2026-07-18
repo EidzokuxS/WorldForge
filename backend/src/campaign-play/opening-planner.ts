@@ -48,6 +48,7 @@ import { deriveCampaignPlayCommandId } from "./rulebook.js";
 const OPENING_MAX_ELIGIBLE_ACTORS = 20;
 const OPENING_MAX_EXPOSURE_ACTIONS = 5;
 const OPENING_MAX_SCENE_CANDIDATES = 24;
+const OPENING_MIN_PLAN_STEPS = 3;
 const log = createLogger("campaign-play-opening-planner");
 
 const boundedLine = (maximum: number) => z.string().min(1).max(maximum)
@@ -93,7 +94,8 @@ const openingActorPlanProposalSchema = z.object({
   primaryGoalId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
   cadenceMinutes: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes),
   steps: z.array(openingPlanStepProposalSchema)
-    .length(1),
+    .min(OPENING_MIN_PLAN_STEPS)
+    .max(CAMPAIGN_PLAY_LIMITS.planSteps),
 }).strict();
 
 export const campaignPlayOpeningProposalSchema = z.object({
@@ -709,6 +711,39 @@ function intentTargetKeys(intent: CampaignPlayActorIntent): Set<string> {
   return new Set(intent.targets.map((target) => `${target.kind}:${target.id}`));
 }
 
+function validatePlanStepSequence(
+  world: CampaignWorldReview,
+  startLocationId: string,
+  steps: CampaignPlayOpeningProposal["actorPlans"][number]["steps"],
+): void {
+  let currentLocationId = startLocationId;
+  for (const step of steps) {
+    const routeTargets = step.intent.targets.filter((target) => target.kind === "route");
+    const locationTargets = step.intent.targets.filter((target) => target.kind === "location");
+    if (step.intent.kind === "move") {
+      const route = routeTargets.length === 1
+        ? world.routes.find((candidate) => candidate.id === routeTargets[0]!.id)
+        : undefined;
+      if (
+        !route
+        || route.fromLocationId !== currentLocationId
+        || locationTargets.length > 1
+        || (
+          locationTargets[0] !== undefined
+          && locationTargets[0].id !== route.toLocationId
+        )
+      ) {
+        fail("opening_proposal_invalid");
+      }
+      currentLocationId = route.toLocationId;
+      continue;
+    }
+    if (locationTargets.some((target) => target.id !== currentLocationId)) {
+      fail("opening_proposal_invalid");
+    }
+  }
+}
+
 function compilePlans(
   frame: CampaignPlayOpeningFrame,
   proposal: CampaignPlayOpeningProposal,
@@ -741,16 +776,22 @@ function compilePlans(
       fail("opening_proposal_invalid");
     }
     const locationIds = actorLocations(world, actor.id);
-    if (locationIds.length === 0) fail("opening_proposal_invalid");
+    if (locationIds.length !== 1) fail("opening_proposal_invalid");
     proposed.steps.forEach((step) => {
       validateIntent(world, locationIds, step.intent);
       if (step.observableTrace.toLowerCase().includes(actor.name.toLowerCase())) {
         fail("opening_proposal_invalid");
       }
     });
+    validatePlanStepSequence(world, locationIds[0]!, proposed.steps);
+    const openingStepLocationTargets = proposed.steps[0]!.intent.targets
+      .filter((target) => target.kind === "location");
     if (
       actor.id === openingActorId
-      && !intentTargetKeys(proposed.steps[0]!.intent).has(`location:${startLocationId}`)
+      && (
+        openingStepLocationTargets.length !== 1
+        || openingStepLocationTargets[0]!.id !== startLocationId
+      )
     ) {
       fail("opening_proposal_invalid");
     }
