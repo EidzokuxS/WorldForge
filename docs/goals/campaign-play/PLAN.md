@@ -232,7 +232,7 @@ The initial critical path contains:
 2. GM planner: produce the ordered command plan from the ruling.
 3. Narrator: render the frozen public packet.
 
-The opening path contains opening planner and narrator calls. Routine actor actions execute persisted typed plans. Actor replanning invokes a strict planner only when a plan completes or its preconditions fail, then an independent strict grounding reviewer checks the proposed plan against the same accepted actor frame before persistence or execution. The reviewer returns only an accept/reject verdict: it cannot rewrite the plan, supply an outcome, retry the proposer, or fall back to backend prose. A rejected plan interrupts as `model_contract_invalid`. The proposer and reviewer remain one durable actor-replanner stage with combined model telemetry and a single worker epoch.
+The opening path contains opening planner and narrator calls. Routine actor actions execute persisted typed plans. Actor replanning invokes a strict planner only when a plan completes or its preconditions fail and must return at least three bounded causal steps, then an independent strict grounding reviewer checks the proposed plan against the same accepted actor frame before persistence or execution. The reviewer returns only an accept/reject verdict: it cannot rewrite the plan, supply an outcome, retry the proposer, or fall back to backend prose. A rejected plan interrupts as `model_contract_invalid`. The proposer and reviewer remain one durable actor-replanner stage with combined model telemetry and a single worker epoch.
 
 Every stage stores requested/actual model, strategy, token counts, duration, finish reason, schema outcome, and error code. Prompts contain bounded frames and opaque IDs. Model output has proposal authority only. Route travel cost is code-owned: Judge binds a pure move to the exact visible route cost and raises a compound traversal's elapsed bounds to at least that cost before Rulebook planning.
 
@@ -320,14 +320,14 @@ Failure records `world_not_playable` with typed unmet requirements and creates n
 ### Turn transactions and recovery
 
 1. Admission transaction acquires the campaign active-turn lock, increments the worker lease epoch, persists input/idempotency/expected world version/frame hash/provider selection, allocates its event sequence from the turn row, and advances runtime revision/hash.
-2. A worker claims each next stage with one atomic compare-and-swap whose predicate requires expected stage, observed epoch, and an unowned lease. Deterministic work may also claim an expired deterministic lease. The update sets owner/expiry, increments epoch, and returns the new token. External-stage claim inserts its numbered `started` attempt in that same transaction before any provider call. Renewal requires the same owner/epoch; artifact commit requires that token and atomically advances stage plus runtime revision/hash.
+2. A worker claims each next stage with one atomic compare-and-swap whose predicate requires expected stage, observed epoch, and an unowned lease. Deterministic work may also claim an expired deterministic lease. The update sets owner/expiry, increments epoch, and returns the new token. External-stage claim inserts its numbered `started` attempt in that same transaction before any provider call. Renewal requires the same owner/epoch; ordinary stage execution and explicit actor-replan Resume both heartbeat that token while awaiting a provider, so model latency does not become a hidden lease deadline. Artifact commit requires the latest renewed token and atomically advances stage plus runtime revision/hash.
 3. Rulebook preflight validates the complete primary batch against the frozen mechanical base projection. The primary batch represents either opening bootstrap or the player's current action.
 4. One SQLite transaction applies the primary batch, stores commands/receipts/events, advances mechanical world version/hash, records `primary_settled`, and advances runtime revision/hash.
 5. Scheduler freezes due actor IDs and order from settled time. For each ID, it builds a frame from the latest committed mechanical version, immediately preflights/commits that actor batch, and only then processes the next ID. The turn records `actors_settled` after all frozen jobs reach terminal status.
 6. Visibility commits actor knowledge, player observations/consequences, protected audit hash, immutable public narrator packet, and `visibility_projected` together while advancing runtime revision/hash.
 7. Narration runs from that packet. The accepted narration artifact remains fenced by worker epoch. Narration, terminal turn fields, active-turn lock release, terminal event, and completed runtime revision/hash commit together; `narrated` is not a separate durable stage.
 
-A same-key request returns the existing turn. A competing key receives `409 turn_in_progress`. Startup automatically resumes deterministic transitions only when their complete required artifacts already exist. An expired or orphaned external `started` attempt becomes `interrupted`; no worker performs an automatic provider call. Explicit resume uses the same unowned-lease claim primitive, increments epoch, and creates a new numbered attempt. Any late result from an older epoch fails its commit CAS. Accepted plans and command batches remain immutable. Narration resume reads the same packet and executes zero commands.
+A same-key request returns the existing turn. A competing key receives `409 turn_in_progress`. Startup automatically resumes deterministic transitions only when their complete required artifacts already exist. An expired or orphaned external `started` attempt becomes `interrupted`; no worker performs an automatic provider call. Explicit resume uses the same unowned-lease claim primitive, increments epoch, creates a new numbered attempt, and renews that exact epoch while its provider call remains active. Any late result from an older epoch fails its commit CAS. Accepted plans and command batches remain immutable. Narration resume reads the same packet and executes zero commands.
 
 Scheduled restart playtests occur between completed turns. Fault tests stop the process after each committed stage and verify forward recovery without checkpoint restoration.
 
@@ -339,8 +339,8 @@ Opening eligibility also requires one hidden non-local person or collective cons
 
 After primary settlement:
 
-1. Freeze ordinary due schedules at the settled world time. Also admit an inactive-plan actor as an immediate `plan_retry` opportunity when an applied current-turn command and receipt identify that actor as the event performer; prose, dialogue, intention, or presence alone cannot wake it.
-2. Freeze actor IDs and order current-turn performers first, then by `(nextActAt, agencyDebt descending, priority descending, actorId)`; frames and proposals remain unfrozen. A current-turn performer with an active plan keeps its existing schedule.
+1. Freeze only schedules that are due at the settled world time. Performing an applied current-turn event does not create a second autonomous opportunity or bypass cadence; the accepted event remains available to the actor's next scheduled frame and replan.
+2. Freeze actor IDs and order genuinely due current-turn performers first, then by `(nextActAt, agencyDebt descending, priority descending, actorId)`; frames and proposals remain unfrozen.
 3. Allow one job per actor in the player turn and one pending job per actor.
 4. Build each actor frame from the latest committed mechanical version and that actor's profile, goals, placement, directed relations, durable knowledge, local routes, and known pressures. Before durable visibility projection, merge only applied current-player-turn direct-perception events that the event-time placement snapshot proves this actor witnessed; do not infer knowledge from current location alone.
 5. If the actor perceived a later external accepted event after its active plan was authored, stop at a typed `world_advanced` boundary and replan from the newest accepted continuity before executing another old step. An actor's own settled plan events do not invalidate its remaining causal chain.
@@ -962,11 +962,11 @@ npm --prefix backend test -- src/campaign-play/judge.test.ts src/campaign-play/g
 
 **Work:**
 
-1. Freeze ordinary due actor IDs after primary settlement, add only applied current-turn event performers whose persisted plans are inactive, and order those causal performers before ordinary due work.
+1. Freeze only actor schedules due after primary settlement. A receipt-backed current-turn performer wins ordering only when already due; performing the primary event neither bypasses cadence nor grants a second same-turn autonomous action.
 2. Build each actor frame on demand from the latest committed world version with actor knowledge filtering.
 3. Translate a valid persisted plan step into a shared intent and proposed command input.
 4. Enforce one job per actor per turn and one pending job per actor.
-5. Calculate next due time from settled clock and record skip/wake/defer reasons plus agency debt; current-turn performer priority must remain receipt-backed and must not wake active plans early.
+5. Calculate next due time from settled clock and record skip/wake/defer reasons plus agency debt; current-turn performer priority must remain receipt-backed and must not wake any plan early.
 
 **Verification:**
 
@@ -974,7 +974,7 @@ npm --prefix backend test -- src/campaign-play/judge.test.ts src/campaign-play/g
 npm --prefix backend test -- src/campaign-play/actor-scheduler.test.ts
 ```
 
-**Acceptance evidence:** seeded 30/60-turn scheduler fixtures prove deterministic ID order, latest-version frames, no catch-up storm, no cast sweep beyond due actors, collective participation, fair cadence, and restart-identical job state. A focused causal fixture proves that a current-turn contacted performer with a completed plan receives the first `plan_retry` opportunity while unrelated ordinary due work remains queued.
+**Acceptance evidence:** seeded 30/60-turn scheduler fixtures prove deterministic ID order, latest-version frames, no catch-up storm, no cast sweep beyond due actors, collective participation, fair cadence, and restart-identical job state. A focused causal fixture proves that a contacted performer with a completed plan does not receive an unscheduled extra action, while an already-due receipt-backed performer retains deterministic priority.
 
 **Parallel:** after Tasks 5 and 6B; may overlap Task 9 in separate files.
 
@@ -989,7 +989,7 @@ npm --prefix backend test -- src/campaign-play/actor-scheduler.test.ts
 1. For each frozen actor ID, build the latest-version frame, create one proposal, and immediately preflight/commit it before processing the next ID.
 2. Persist proposal base version, read/write scope, expiry, causal parent, and terminal result.
 3. Reject genuinely stale detached work with zero mutation, clear the pending job, increase agency debt, and schedule one bounded future retry.
-4. Replan only completed or invalid plans through an explicit strict model attempt protected by worker epoch.
+4. Replan only completed or invalid plans through an explicit strict model attempt protected by worker epoch, and require at least three causal steps so normal scheduled work does not exhaust the replacement plan after one exchange.
 5. Prove the opening's scheduled non-local consequence becomes eligible within the first five player actions without global disclosure.
 6. Compile every move from exactly one supplied directed route whose origin is the actor's current or preceding-step location; an optional location target must equal the route destination. Every executable non-move step that targets a location must target the actor's location established for that step, never an earlier or remote scene. A semantically invalid replan interrupts as `model_contract_invalid` before plan persistence.
 7. If a persisted active step cannot compile against current typed state, commit one proposal-less `rejected` job, block the invalid plan, add agency debt, and schedule a bounded retry in one zero-world-version actor transition. Do not create a proposal, command, receipt, event prose, or mechanical mutation for that step.

@@ -759,17 +759,18 @@ function actorReplanProposalFromPrompt(prompt: string) {
     method: "Check the signal archive",
     stakes: "The harbor route remains uncertain",
   };
+  const step = {
+    intent,
+    observableTrace: "Fresh archive tabs mark a recently checked signal ledger.",
+    possessionOutcome: { kind: "none" as const },
+    elapsedBounds: { minimumMinutes: 2, maximumMinutes: 10 },
+  };
   return {
     goalHandle: goal.handle,
     cadenceMinutes: 15,
     priority: 4,
     intent,
-    steps: [{
-      intent,
-      observableTrace: "Fresh archive tabs mark a recently checked signal ledger.",
-      possessionOutcome: { kind: "none" as const },
-      elapsedBounds: { minimumMinutes: 2, maximumMinutes: 10 },
-    }],
+    steps: [step, step, step],
   };
 }
 
@@ -2045,6 +2046,90 @@ describe("Campaign Play player-action turn runtime", () => {
         expect.objectContaining({ status: "interrupted", costComplete: false }),
         expect.objectContaining({ status: "accepted", costComplete: true }),
       ]);
+  });
+
+  it("renews the same worker epoch while an explicit actor resume waits on the model", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening();
+    const time = fixedClock(3_800);
+    const originalWait = time.clock.wait;
+    let heartbeatArmed = false;
+    let resolveHeartbeat!: () => void;
+    const heartbeatObserved = new Promise<void>((resolve) => {
+      resolveHeartbeat = resolve;
+    });
+    time.clock.wait = async (delayMs, signal) => {
+      if (!heartbeatArmed) return originalWait(delayMs, signal);
+      heartbeatArmed = false;
+      time.advanceBy(delayMs);
+      resolveHeartbeat();
+    };
+    let providerCalls = 0;
+    const actorReplanner = createCampaignPlayActorReplanner(handle, {
+      now: time.clock.now,
+      generateObject: (async (request: { prompt: string }) => {
+        providerCalls += 1;
+        if (providerCalls === 1) throw new Error("provider transport interrupted");
+        if (providerCalls === 2) await heartbeatObserved;
+        return {
+          object: actorReplanModelObjectFromPrompt(request.prompt),
+          trace: actorReplanTrace(),
+        };
+      }) as unknown as typeof safeGenerateObject,
+    });
+    const runtime = turnRuntime(
+      handle,
+      time,
+      judgeFixture("deterministic"),
+      gameMasterFixture(),
+      { actorReplanner, owner: "actor-resume-heartbeat-worker" },
+    );
+    const admission = runtime.admitAction({
+      request: admissionRequest(state, "actor-resume-heartbeat"),
+      submittedAt: 3_800,
+    });
+    await advanceToPrimarySettlement(runtime, time, admission.turnId);
+    time.advance();
+    await runtime.runNextStage(admission.turnId);
+    const jobId = forceFirstActorReplan(handle, time, admission.turnId);
+
+    time.advance();
+    await runtime.runNextStage(admission.turnId);
+    const interruptedTurn = runtime.loadTurn(admission.turnId)!;
+    expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
+      .find((job) => job.jobId === jobId)).toMatchObject({
+        stage: "interrupted",
+        workerEpoch: 1,
+      });
+
+    heartbeatArmed = true;
+    time.advance();
+    await runtime.resumeInterruptedStage({
+      turnId: admission.turnId,
+      interruptedStage: "primary_settled",
+      observedEpoch: interruptedTurn.workerEpoch,
+    });
+
+    expect(providerCalls).toBe(3);
+    expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
+      .find((job) => job.jobId === jobId)).toMatchObject({
+        stage: "claimed",
+        workerEpoch: 2,
+      });
+    expect(handle.sqlite.prepare(`SELECT count(*) AS value
+      FROM campaign_play_runtime_events
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'worker_lease_renewed'
+        AND worker_epoch = ?`).get(
+          CAMPAIGN_ID,
+          admission.turnId,
+          interruptedTurn.workerEpoch + 1,
+        )).toEqual({ value: 1 });
+    expect(handle.sqlite.prepare(`SELECT status, worker_epoch AS workerEpoch
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'actor_replanner'
+      ORDER BY attempt`).all(CAMPAIGN_ID, admission.turnId)).toEqual([
+      { status: "interrupted", workerEpoch: 1 },
+      { status: "accepted", workerEpoch: 2 },
+    ]);
   });
 
   it.each([

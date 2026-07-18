@@ -496,6 +496,18 @@ describe("Campaign Play Game Master", () => {
       "Dialogue and SOURCE_MOMENT do not create route access rules",
     );
     expect(String(options.prompt)).toContain(
+      "A route claim with state open and accessRequirement none establishes no crossing payment",
+    );
+    expect(String(options.prompt)).toContain(
+      "do not infer a conditional charge from the route's name, an actor's title or duties",
+    );
+    expect(String(options.prompt)).toContain(
+      "they establish no charge, debt, tithe, collection rule, liable category, or conditional obligation",
+    );
+    expect(String(options.prompt)).toContain(
+      "omit every separate financial duty, collection practice, liable category, and conditional payment",
+    );
+    expect(String(options.prompt)).toContain(
       "treat that dialogue as a continuity error rather than protected character belief",
     );
     expect(String(options.prompt)).toContain(
@@ -765,6 +777,12 @@ describe("Campaign Play Game Master", () => {
     expect(generateObject).toHaveBeenCalledTimes(2);
     expect(String(generateObject.mock.calls[1]![0].prompt)).toContain(
       "Do not rewrite, repair, or continue the story",
+    );
+    expect(String(generateObject.mock.calls[1]![0].prompt)).toContain(
+      "The route itself may be named or described as a bridge, toll bridge, gate, or passage",
+    );
+    expect(String(generateObject.mock.calls[1]![0].prompt)).toContain(
+      "An explicit statement that no toll, payment, permission, stamp, or permit is required agrees",
     );
   });
 

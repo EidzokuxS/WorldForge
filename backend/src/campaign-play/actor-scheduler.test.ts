@@ -289,6 +289,7 @@ function createReadyFixture(completedActions: 30 | 60 = 30) {
       judgeArtifactHash,
       batch: gameMasterBatch,
       batchHash: hashCampaignPlayProjection(gameMasterBatch),
+      semanticReview: { kind: "not_required" },
     },
     evidence: modelEvidence("game-master"),
     mutationDomain: "runtime", acceptedAt: 1_540, mutationId: "game-master-accepted",
@@ -457,7 +458,7 @@ describe("Campaign Play actor scheduler", () => {
     },
   );
 
-  it("wakes a contacted actor with a completed plan before unrelated scheduled work", () => {
+  it("does not grant an unscheduled extra action to a contacted actor with a completed plan", () => {
     const { handle, states, settledClock } = createReadyFixture();
     const current = states.loadState()!;
     const affectedRefs = [
@@ -521,12 +522,10 @@ describe("Campaign Play actor scheduler", () => {
     });
 
     const dueSet = freezeCurrent(handle);
-    expect(dueSet.decisions[0]).toMatchObject({
-      actorId: "actor-c",
-      disposition: "wake",
-      dueReason: "plan_retry",
-      nextActAtWorldTimeMinutes: settledClock + 1,
-    });
+    expect(dueSet.decisions.some((decision) => decision.actorId === "actor-c")).toBe(false);
+    expect(dueSet.decisions.some((decision) =>
+      decision.disposition === "wake" && decision.nextActAtWorldTimeMinutes <= settledClock))
+      .toBe(true);
   });
 
   it("admits one queued job per due actor and reopens with identical deterministic job state", () => {

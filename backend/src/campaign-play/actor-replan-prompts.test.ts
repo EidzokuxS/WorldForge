@@ -57,6 +57,8 @@ describe("campaign play actor replan prompt", () => {
     expect(prompt).toContain("Use only handles present in ACTOR_FRAME");
     expect(prompt).toContain("cadenceMinutes is a whole number from 1 through");
     expect(prompt).toContain("world minutes pass between this actor's opportunities to act");
+    expect(prompt).toContain("at least 3 and at most 8 causal steps");
+    expect(prompt).toContain("continue across several scheduled opportunities");
     expect(prompt).toContain("Code owns canonical identifiers");
   });
 
@@ -153,6 +155,17 @@ describe("campaign play actor replan prompt", () => {
   });
 
   it("accepts bounded handle-only plans and rejects invented output fields", () => {
+    const step = {
+      intent: {
+        kind: "contact",
+        targetHandles: ["location:gate"],
+        method: "Question the watch",
+        stakes: "The safe passage may close",
+      },
+      observableTrace: "Fresh chalk marks interrupt the watch rota beside the gate.",
+      possessionOutcome: { kind: "none" },
+      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 15 },
+    };
     const proposal = {
       goalHandle: "goal:keep-gate-open",
       cadenceMinutes: 20,
@@ -163,17 +176,7 @@ describe("campaign play actor replan prompt", () => {
         method: "Question the watch",
         stakes: "The safe passage may close",
       },
-      steps: [{
-        intent: {
-          kind: "contact",
-          targetHandles: ["location:gate"],
-          method: "Question the watch",
-          stakes: "The safe passage may close",
-        },
-        observableTrace: "Fresh chalk marks interrupt the watch rota beside the gate.",
-        possessionOutcome: { kind: "none" },
-        elapsedBounds: { minimumMinutes: 5, maximumMinutes: 15 },
-      }],
+      steps: [step, step, step],
     };
 
     expect(campaignPlayActorReplanProposalSchema.safeParse(proposal).success).toBe(true);
@@ -190,17 +193,17 @@ describe("campaign play actor replan prompt", () => {
     }).success).toBe(false);
     expect(campaignPlayActorReplanProposalSchema.safeParse({
       ...proposal,
-      steps: [{
-        ...proposal.steps[0],
+      steps: proposal.steps.map((candidate, index) => index === 0 ? {
+        ...candidate,
         possessionOutcome: { kind: "acquire", name: "Two brass keys", quantity: 2 },
-      }],
+      } : candidate),
     }).success).toBe(true);
     expect(campaignPlayActorReplanProposalSchema.safeParse({
       ...proposal,
-      steps: [{
-        ...proposal.steps[0],
+      steps: proposal.steps.map((candidate, index) => index === 0 ? {
+        ...candidate,
         possessionOutcome: { kind: "acquire", name: "Two brass keys", quantity: 0 },
-      }],
+      } : candidate),
     }).success).toBe(false);
     expect(campaignPlayActorReplanProposalSchema.safeParse({
       ...proposal,
@@ -216,6 +219,17 @@ describe("campaign play actor replan prompt", () => {
     const schema = campaignPlayActorReplanProposalSchemaForFrame(frame);
     expect(schema).not.toBeNull();
     if (!schema) throw new Error("The actor frame requires an output schema.");
+    const step = {
+      intent: {
+        kind: "observe",
+        targetHandles: ["location:gate"],
+        method: "Read the watch rota",
+        stakes: null,
+      },
+      observableTrace: "Fresh chalk marks interrupt the watch rota beside the gate.",
+      possessionOutcome: { kind: "none" },
+      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 15 },
+    };
     const proposal = {
       goalHandle: "goal:keep-gate-open",
       cadenceMinutes: 20,
@@ -226,17 +240,7 @@ describe("campaign play actor replan prompt", () => {
         method: "Question the watch",
         stakes: "The safe passage may close",
       },
-      steps: [{
-        intent: {
-          kind: "observe",
-          targetHandles: ["location:gate"],
-          method: "Read the watch rota",
-          stakes: null,
-        },
-        observableTrace: "Fresh chalk marks interrupt the watch rota beside the gate.",
-        possessionOutcome: { kind: "none" },
-        elapsedBounds: { minimumMinutes: 5, maximumMinutes: 15 },
-      }],
+      steps: [step, step, step],
     };
 
     expect(schema.safeParse(proposal).success).toBe(true);
@@ -250,10 +254,10 @@ describe("campaign play actor replan prompt", () => {
     }).success).toBe(false);
     expect(schema.safeParse({
       ...proposal,
-      steps: [{
-        ...proposal.steps[0],
-        intent: { ...proposal.steps[0]!.intent, targetHandles: ["location:foreign"] },
-      }],
+      steps: proposal.steps.map((candidate, index) => index === 0 ? {
+        ...candidate,
+        intent: { ...candidate.intent, targetHandles: ["location:foreign"] },
+      } : candidate),
     }).success).toBe(false);
     expect(campaignPlayActorReplanProposalSchemaForFrame({
       ...frame,

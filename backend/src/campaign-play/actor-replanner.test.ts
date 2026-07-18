@@ -124,6 +124,10 @@ function modelEvidence(actualModel: string) {
   };
 }
 
+function threeStepPlan<T>(step: T): [T, T, T] {
+  return [step, step, step];
+}
+
 function replanProposalFromPrompt(prompt: string) {
   const startMarker = "ACTOR_FRAME\n";
   const endMarker = "\nEND_ACTOR_FRAME";
@@ -146,12 +150,12 @@ function replanProposalFromPrompt(prompt: string) {
     cadenceMinutes: 15,
     priority: 4,
     intent,
-    steps: [{
+    steps: threeStepPlan({
       intent,
       observableTrace: "Fresh sealing wax flakes lie beside the open ledger case.",
       possessionOutcome: { kind: "none" },
       elapsedBounds: { minimumMinutes: 2, maximumMinutes: 10 },
-    }],
+    }),
   };
 }
 
@@ -190,12 +194,12 @@ function reverseMoveProposalFromPrompt(prompt: string) {
     cadenceMinutes: 15,
     priority: 4,
     intent,
-    steps: [{
+    steps: threeStepPlan({
       intent,
       observableTrace: "Fresh boot prints continue along the wet stones.",
       possessionOutcome: { kind: "none" },
       elapsedBounds: { minimumMinutes: 2, maximumMinutes: 10 },
-    }],
+    }),
   };
 }
 
@@ -225,7 +229,7 @@ function remoteNonMoveProposalFromPrompt(prompt: string) {
     cadenceMinutes: 15,
     priority: 4,
     intent: planIntent,
-    steps: [{
+    steps: threeStepPlan({
       intent: {
         ...planIntent,
         targetHandles: [goal.handle, remoteLocation.handle],
@@ -234,7 +238,7 @@ function remoteNonMoveProposalFromPrompt(prompt: string) {
       observableTrace: "Fresh boot prints mark the remote paving.",
       possessionOutcome: { kind: "none" },
       elapsedBounds: { minimumMinutes: 2, maximumMinutes: 10 },
-    }],
+    }),
   };
 }
 
@@ -622,7 +626,7 @@ describe("Campaign Play actor replanner", () => {
       kind: "replanned",
       jobId,
       workerEpoch: 1,
-      plan: { steps: [{ possessionOutcome: { kind: "none" } }] },
+      plan: { steps: threeStepPlan({ possessionOutcome: { kind: "none" } }) },
     });
     expect(generateObject).toHaveBeenCalledTimes(2);
     expect(generateObject.mock.calls[0]![0].prompt).toContain(knownScene);
@@ -719,15 +723,15 @@ describe("Campaign Play actor replanner", () => {
             method: "Clear scale while the visitor reseats the wick",
             stakes: "The visitor is already working inside the housing",
           },
-          steps: [{
-            ...proposal.steps[0],
+          steps: proposal.steps.map((candidate, index) => index === 0 ? {
+            ...candidate,
             intent: {
-              ...proposal.steps[0]!.intent,
+              ...candidate.intent,
               method: "Watch the visitor finish reseating the wick",
               stakes: "The visitor is already working inside the housing",
             },
             observableTrace: "The wick assembly sits square after the visitor's repair.",
-          }],
+          } : candidate),
         },
         trace: acceptedTrace(),
       };

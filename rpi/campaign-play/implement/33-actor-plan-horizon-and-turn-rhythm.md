@@ -1,0 +1,45 @@
+# Task 33: actor-plan horizon and turn rhythm
+
+Status: implementation complete; rendered scheduling acceptance passed, accepted-plan horizon evidence pending.
+
+Bellglass actions 31–33 exposed a foreground rhythm defect rather than a provider failure. Each action completed coherent Judge, Game Master, and Narrator work, but Actor Replanner added `140217 ms`, `252166 ms`, and then `185296 ms` interrupted plus `96864 ms` resumed before Narrator could run. The accepted replacement plans for Dain Solkeen and Netta Scarpa contained only two steps. With up to three actor opportunities in one player turn, short plans repeatedly exhausted and invoked the two-call proposer/reviewer stage on the player's critical path.
+
+Action 33 exposed a second scheduling issue. Sestra Olo's applied dialogue response made her a current-turn performer while her prior plan was inactive. The scheduler woke her immediately even though her stored next opportunity was world minute `133` and the settled player turn was minute `89`. After the expensive replan, the same player turn also executed Sestra's first autonomous step before visibility and narration. Her response and background action were both causally valid, but the extra opportunity was neither required by cadence nor good turn rhythm.
+
+The repair keeps model and Rulebook authority unchanged:
+
+- a strict replacement plan must contain at least three and at most eight causal steps;
+- proposer and independent grounding reviewer remain mandatory, with no retry, repair, provider switch, or backend-authored fallback;
+- only schedules due at settled world time enter the frozen due set;
+- a receipt-backed current-turn performer retains priority when genuinely due, but performing the primary event does not bypass cadence or grant a second autonomous action;
+- accepted current-turn events remain durable continuity for the actor's next scheduled frame and replan.
+
+GitNexus upstream impact is LOW for `dueRows`, `campaignPlayActorReplanProposalSchema`, `campaignPlayActorReplanProposalSchemaForFrame`, and `buildCampaignPlayActorReplanPrompt`, with no affected execution flow reported. Rendered acceptance must continue the same Bellglass campaign through ordinary scheduled actor work and the next real replan boundary, comparing latency, prose, autonomy, persistence, and reload without claiming that a single run establishes general model reliability.
+
+Prompt review: `humanizer` keeps the instruction because it states a concrete scheduling horizon in ordinary language and does not author setting facts, actions, outcomes, or prose. `deslop` passes it because the two new sentences carry distinct mechanical constraints without recap, rhetorical framing, or vague quality language.
+
+Verification:
+
+- actor replan prompt, replanner, and scheduler: `31/31`;
+- complete player-turn runtime: `38/38`;
+- focused actor prompt, replanner, scheduler, and Game Master contracts: `66/66`;
+- backend typecheck: pass;
+- the scheduler fixture's already-required Game Master `semanticReview` field was restored so its existing seventeen tests once again execute the scheduler behavior instead of failing at fixture admission.
+
+Rendered Action 34 then exposed a directly blocking route-authority case before actor scheduling began. Nera asked Collector Kael for the exact Marrowfen Toll Bridge terms. Three explicit Game Master attempts each supplied the correct typed `open` / `accessRequirement:none` claim but still invented a conditional bellglass tithe from the route name, Kael's collector role, scales, ledgers, or the player's question. The independent route-authority reviewer rejected all three as `model_contract_invalid`; no Game Master artifact, actor job, or world mutation was accepted. The repair adds one setting-neutral instruction: open/none means no crossing payment for any traveler, role, cargo, profession, or circumstance, and a separate transaction requires its own supplied fact or typed obligation. It does not add a toll answer, NPC decision, retry, repair, provider switch, or fallback.
+
+Attempt four used the first repaired prompt and correctly said there was no toll, stamp, or permit, but then preserved the same invented rule as a separate bellglass tithe for licensed harvesters and merchants. The reviewer rejected it. The instruction therefore closes that observed loophole: an actor title, scales, and ledger may characterize work but establish no charge, debt, tithe, liable category, or conditional obligation; mentioning one requires an exact typed obligation with parties and amount that the player separately asked to transact.
+
+Attempt five still answered the route correctly and then volunteered the same unsupported harvester/merchant tithe as background job context. Because the independent reviewer receives only route claims and summary, the proposer contract is aligned with that evidence boundary: the route-contact event must omit separate financial duties, collection practices, liable categories, and conditional payments unless an exact typed obligation with parties and amount is both supplied and separately sought.
+
+Attempt six obeyed that contract: it stated that the Marrowfen Toll Bridge was open with no toll, stamp, permit, or charge and answered the unrelated writing-work question without inventing an obligation. The reviewer still rejected it because its own wording treated any mention of a `bridge` or `toll` as contradictory even when those words were the route's name or an explicit negation. The reviewer rule now distinguishes the named route from an additional intermediate structure and treats explicit `no toll/payment/permission/stamp/permit` language as agreement with `open` / `none`; a positive requirement or extra checkpoint remains rejected.
+
+Attempt seven passed that boundary. Action 34 advanced to world minute `91` with no due actor jobs: Kael's primary reply did not bypass his minute-`102` cadence and did not receive a second autonomous action. Actions 35 and 36 then followed the displayed open routes to Marrowfen Toll Bridge and Brackish Crossing in exactly two and three world minutes. Neither action invoked Actor Replanner, recreated a toll, or summoned an unrelated actor. The rendered prose remained concise and preserved the typed open-route authority.
+
+Action 37 advanced five minutes toward Outer Ring Gateworks and froze only two genuinely due schedules, Netta Scarpa and Dain Solkeen, both due at minute `98`. Netta correctly reached a `world_advanced` replan boundary rather than executing stale intent. Her first strict attempt returned `model_contract_invalid` after `220757 ms`. Explicit Resume attempt two exposed a separate runtime defect: GLM 5.2 successfully returned a `14584`-token proposal after `254343 ms`, but the special actor-resume path did not run the ordinary worker heartbeat, so its fixed lease expired and the valid provider result was discarded as `worker_lease_lost`.
+
+The repair gives explicit actor Resume the same durable lease behavior as ordinary stage execution. It claims one fresh epoch, renews that exact owner/epoch while the provider remains active, mutates the in-memory fencing token to the latest expiry, passes an abort signal only for a real heartbeat/fence failure, and commits or rejects against the renewed token. It does not increase a timeout, retry a model call, accept a late older epoch, or add fallback output. GitNexus reports LOW upstream impact for `createCampaignPlayTurnRuntime`: four direct consumers and one affected execution flow.
+
+The live replay proved the repair under longer-than-lease work. Attempt three remained on worker epoch `7` for `429552 ms` and persisted `41` `worker_lease_renewed` events; its proposer succeeded, but its reviewer returned unparsable native JSON and the attempt remained `model_contract_invalid`. Attempt four remained on epoch `8` for `240441 ms`; proposer and reviewer both returned valid native JSON, but the reviewer rejected the proposed plan semantically. No replacement plan, actor proposal, autonomous effect, or player-visible prose was accepted from either attempt. Repeating unchanged attempts would turn explicit recovery into model attrition, so the retained campaign remains at the explicit Resume boundary. The scheduling repair is rendered: only genuinely due actors entered the turn. The three-step horizon still lacks an accepted live artifact in this lane and is not claimed as rendered acceptance.
+
+Prompt and copy review: the actor-horizon instruction is setting-neutral and specifies only the causal scheduling horizon. The Game Master additions encode typed open-route authority without authoring a toll answer, NPC decision, or story outcome. The route reviewer distinguishes positive requirements from a route's own name and explicit negation. `humanizer` and `deslop` retain the wording: each sentence carries one necessary contract, avoids vague quality language, and introduces no narrative fallback.

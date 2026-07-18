@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { setTimeout as waitForTimer } from "node:timers/promises";
 import type { LanguageModel } from "ai";
 import { z } from "zod";
 import {
@@ -1299,6 +1300,13 @@ export function createCampaignPlayTurnRuntime(
     }
     return value;
   };
+  const waitForHeartbeat = async (delayMs: number, signal: AbortSignal): Promise<void> => {
+    if (input.clock) {
+      await input.clock.wait(delayMs, signal);
+      return;
+    }
+    await waitForTimer(delayMs, undefined, { signal });
+  };
   const judge = input.judge ?? createCampaignPlayJudge();
   const gameMaster = input.gameMaster ?? createCampaignPlayGameMaster();
   const actorScheduler = input.actorScheduler ?? createCampaignPlayActorScheduler(input.handle);
@@ -2080,20 +2088,66 @@ export function createCampaignPlayTurnRuntime(
           "Campaign Play actor resume lease exceeds the timestamp range.",
         );
       }
-      const token = repository.claimStage({
-        turnId: turn.turnId,
-        expectedStage: "primary_settled",
-        observedEpoch: turn.workerEpoch,
-        owner: input.owner,
-        claimedAt: resumedAt,
-        leaseExpiresAt: expiresAt,
-        mutationId: runtimeId("actor-replan-resumed", {
+      const token = {
+        ...repository.claimStage({
           turnId: turn.turnId,
-          jobId: interruptedJob.jobId,
-          epoch: turn.workerEpoch + 1,
+          expectedStage: "primary_settled",
+          observedEpoch: turn.workerEpoch,
+          owner: input.owner,
+          claimedAt: resumedAt,
+          leaseExpiresAt: expiresAt,
+          mutationId: runtimeId("actor-replan-resumed", {
+            turnId: turn.turnId,
+            jobId: interruptedJob.jobId,
+            epoch: turn.workerEpoch + 1,
+          }),
         }),
+      };
+      const controller = new AbortController();
+      let heartbeatStopped = false;
+      let renewalCount = 0;
+      const heartbeat = (async () => {
+        while (!heartbeatStopped) {
+          try {
+            await waitForHeartbeat(input.heartbeatIntervalMs, controller.signal);
+          } catch (error) {
+            if (controller.signal.aborted) return;
+            throw error;
+          }
+          if (heartbeatStopped) return;
+          const renewedAt = now();
+          if (renewedAt >= token.expiresAt) {
+            throw new CampaignPlayTurnRepositoryError(
+              "turn_fence_lost",
+              "Campaign Play actor resume heartbeat reached an expired lease.",
+            );
+          }
+          const renewedLeaseExpiresAt = renewedAt + input.leaseDurationMs;
+          if (!Number.isSafeInteger(renewedLeaseExpiresAt)) {
+            throw new CampaignPlayTurnRuntimeError(
+              "turn_state_invalid",
+              "Campaign Play actor resume lease renewal exceeds the timestamp range.",
+            );
+          }
+          const renewed = repository.renewLease({
+            token,
+            renewedAt,
+            leaseExpiresAt: renewedLeaseExpiresAt,
+            mutationId: runtimeId("actor-replan-resume-heartbeat", {
+              turnId: turn.turnId,
+              jobId: interruptedJob.jobId,
+              epoch: token.epoch,
+              ordinal: renewalCount + 1,
+            }),
+          });
+          token.expiresAt = renewed.expiresAt;
+          renewalCount += 1;
+        }
+      })();
+      const heartbeatFailure = new Promise<never>((_resolve, reject) => {
+        void heartbeat.catch(reject);
       });
-      const outcome = await actorReplanner.replan({
+      const replanning = actorReplanner.replan({
         jobId: interruptedJob.jobId,
         token,
         model: input.actorReplannerModel.languageModel,
@@ -2103,8 +2157,18 @@ export function createCampaignPlayTurnRuntime(
         maximumOutputTokens: input.actorReplannerModel.maximumOutputTokens,
         maximumTotalTokens: input.actorReplannerModel.maximumTotalTokens,
         maximumCostMicros: input.actorReplannerModel.maximumCostMicros,
+        signal: controller.signal,
         createdAt: now(),
       });
+      void replanning.catch(() => undefined);
+      let outcome: Awaited<typeof replanning>;
+      try {
+        outcome = await Promise.race([replanning, heartbeatFailure]);
+      } finally {
+        heartbeatStopped = true;
+        controller.abort();
+        await heartbeat.catch(() => undefined);
+      }
       releaseActorBoundary(token, interruptedJob.jobId, outcome.kind);
       const settledTurn = repository.loadTurn(turn.turnId)!;
       return {

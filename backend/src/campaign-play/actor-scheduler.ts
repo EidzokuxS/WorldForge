@@ -348,7 +348,6 @@ function dueRows(
     )
     SELECT * FROM due_candidates
     WHERE nextActAtWorldTimeMinutes <= ?
-      OR (planStatus <> 'active' AND currentTurnPerformer = 1)
     ORDER BY currentTurnPerformer DESC, nextActAtWorldTimeMinutes ASC,
       agencyDebt DESC, priority DESC, actorId ASC
   `).all(turnId, turnId, handle.campaignId, settledWorldTimeMinutes) as DueRow[];
