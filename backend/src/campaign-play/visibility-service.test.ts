@@ -145,16 +145,10 @@ function openingProposal(actorBAcquiresPossession = false): CampaignPlayOpeningP
     const actorId = `actor-${suffix}`;
     const goalId = `goal-${suffix}`;
     const targets = suffix === "b"
-      ? actorBAcquiresPossession
-        ? [
-            { kind: "location" as const, id: "location-a" },
-            { kind: "goal" as const, id: goalId },
-          ]
-        : [
-            { kind: "location" as const, id: "location-b" },
-            { kind: "location" as const, id: "location-a" },
-            { kind: "goal" as const, id: goalId },
-          ]
+      ? [
+          { kind: "location" as const, id: "location-a" },
+          { kind: "goal" as const, id: goalId },
+        ]
       : suffix === "c"
         ? [
             { kind: "location" as const, id: "location-c" },
@@ -171,16 +165,16 @@ function openingProposal(actorBAcquiresPossession = false): CampaignPlayOpeningP
       actorId,
       primaryGoalId: goalId,
       cadenceMinutes: 15,
-      steps: [{
+      steps: Array.from({ length: 3 }, (_, stepIndex) => ({
         intent,
-        observableTrace: suffix === "b"
+        observableTrace: suffix === "b" && stepIndex === 0
           ? "Fresh sealing wax and torn binding thread mark a ledger removed in haste."
           : "Fresh work marks show that someone acted here recently.",
-        possessionOutcome: suffix === "b" && actorBAcquiresPossession
+        possessionOutcome: suffix === "b" && actorBAcquiresPossession && stepIndex === 0
           ? { kind: "acquire" as const, name: "Brass tally", quantity: 2 }
           : { kind: "none" as const },
         elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
-      }],
+      })),
     };
   });
   return {
@@ -417,7 +411,10 @@ function createVisibilityFixture(
       if (openingScheduler) {
         openingScheduler.initializeOpeningActors({
           plans: openingCandidate.artifact.actorPlans,
-          schedules: openingCandidate.artifact.actorSchedules,
+          schedules: openingCandidate.artifact.actorSchedules.map((schedule) =>
+            schedule.actorId === "actor-c"
+              ? { ...schedule, nextActAtWorldTimeMinutes: 15 }
+              : schedule),
           context,
           createdAt: 1_550,
         });
@@ -474,6 +471,7 @@ function createVisibilityFixture(
       authorizedRefs: [
         { kind: "actor", id: "actor-player" },
         { kind: "actor", id: "actor-a" },
+        { kind: "actor", id: "actor-b" },
         { kind: "actor", id: "actor-c" },
         { kind: "location", id: "location-a" },
         { kind: "location", id: "location-b" },
@@ -591,6 +589,7 @@ function createVisibilityFixture(
           readScope: [
             { kind: "actor", id: "actor-player" },
             { kind: "actor", id: "actor-a" },
+            { kind: "actor", id: "actor-b" },
             { kind: "location", id: "location-a" },
           ],
           writeScope: [],
@@ -607,6 +606,7 @@ function createVisibilityFixture(
           affectedRefs: [
             { kind: "actor", id: "actor-player" },
             { kind: "actor", id: "actor-a" },
+            { kind: "actor", id: "actor-b" },
             { kind: "location", id: "location-a" },
           ],
         },
@@ -1082,6 +1082,14 @@ describe("Campaign Play visibility service", () => {
       performingActorHandle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-a"),
       performingActorName: "Mara Venn",
     });
+    expect(result.packet.observationSubjects?.find((binding) =>
+      binding.observationHandle === performed?.observationHandle)).toEqual({
+        observationHandle: performed?.observationHandle,
+        actors: [{
+          handle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-b"),
+          name: "Oren Tide",
+        }],
+      });
     const premise = result.packet.consequences.find((entry) =>
       entry.whatChanged === "The signal keeper asks the player what brought them to the failing route.");
     expect(premise).toMatchObject({

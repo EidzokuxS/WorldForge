@@ -62,6 +62,7 @@ function packetFixture(): CampaignPlayNarratorPacket {
     obligations: [],
     newObservations: [],
     consequences: [],
+    observationSubjects: [],
     continuity: [],
     elapsedMinutes: 0,
     availableIntents: [{
@@ -697,6 +698,15 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Purposes label a beat's work. Do not emit one beat for every purpose");
     expect(prompt).toContain("Prefer one beat");
     expect(prompt).toContain("combine the action result and its immediately visible aftermath in one beat");
+    expect(prompt).toContain("later current-turn observation attributes visible action to an actor");
+    expect(prompt).toContain("do not retain the stale absence claim");
+    expect(prompt).toContain("observationSubjects, when present, is code-owned identity binding");
+    expect(prompt).toContain('"observationSubjects":[]');
+    expect(prompt).toContain("the bound actor, never the player");
+    expect(prompt).toContain("Do not replace a bound actor with \"you\"");
+    expect(prompt).toContain("Second person identifies only the player");
+    expect(prompt).toContain("Never merge the player with a named or unnamed actor");
+    expect(prompt).toContain("is not approaching or watching \"you\" without that identity evidence");
     expect(prompt).toContain("If removing a beat loses no supported information, omit it");
     expect(prompt).toContain("Never add a moment beat to repeat sourceMoment");
     expect(prompt).toContain("Each actionSelection contains exactly intentIndex and detail");

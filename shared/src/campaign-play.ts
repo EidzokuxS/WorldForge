@@ -269,6 +269,16 @@ export interface CampaignPlayConsequence {
   causalCue: CampaignPlayConsequenceCue;
 }
 
+export interface CampaignPlayObservationActor {
+  handle: string;
+  name: string;
+}
+
+export interface CampaignPlayObservationSubjects {
+  observationHandle: string;
+  actors: CampaignPlayObservationActor[];
+}
+
 export interface CampaignPlayJournalEntry {
   observationHandle: string;
   title: string;
@@ -324,6 +334,7 @@ export interface CampaignPlayNarratorPacket extends CampaignPlayPublicVersions {
   obligations: CampaignPlayVisibleObligation[];
   newObservations: CampaignPlayJournalEntry[];
   consequences: CampaignPlayConsequence[];
+  observationSubjects?: CampaignPlayObservationSubjects[];
   continuity: CampaignPlayJournalEntry[];
   elapsedMinutes: number;
   availableIntents: CampaignPlayAvailableIntent[];

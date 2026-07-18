@@ -662,6 +662,7 @@ describe("Campaign Play actor replanner", () => {
     expect(generateObject.mock.calls[1]![0]).toMatchObject({
       allowRepair: false,
       allowTextFallback: false,
+      mode: "tool",
       retries: 1,
       strictSchema: true,
       temperature: 0,

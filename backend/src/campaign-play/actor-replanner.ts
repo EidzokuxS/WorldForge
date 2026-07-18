@@ -408,7 +408,10 @@ function acceptedTrace(trace: Readonly<SafeGenerateTrace>, providerId: string, m
   const provider = trace.capability?.providerId;
   const model = trace.response?.modelId ?? trace.capability?.model;
   const strategies = new Set(["native_schema", "native_json", "tool_mode"]);
-  if (trace.requestedMode !== "auto" || !primary || !strategies.has(primary)
+  const requestedContractAccepted = trace.requestedMode === "auto"
+    || ((trace.requestedMode === "tool" || trace.requestedMode === "tool_mode")
+      && primary === "tool_mode");
+  if (!requestedContractAccepted || !primary || !strategies.has(primary)
     || actual !== primary || trace.repair !== undefined || trace.strategy === "repair"
     || trace.strategy === "full_retry" || trace.strategy === "text_fallback"
     || provider !== providerId || model !== modelName
@@ -717,7 +720,7 @@ export function createCampaignPlayActorReplanner(
           ),
           temperature: 0,
           maxOutputTokens: request.maxOutputTokens,
-          mode: "auto",
+          mode: "tool",
           strictSchema: true,
           allowRepair: false,
           allowTextFallback: false,

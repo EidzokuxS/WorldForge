@@ -649,11 +649,19 @@ function publicEntry(
     : exposure.commandKind === "adjust_actor_possession"
       ? commandPayload.actorId
       : undefined;
+  const directlyPerceivedSourceActorId = eventSource.kind === "actor"
+    && typeof eventSource.actorId === "string"
+    && eventSource.actorId !== humanActorId
+    ? eventSource.actorId
+    : undefined;
+  const attributedActorId = typeof performingActorId === "string"
+    ? performingActorId
+    : directlyPerceivedSourceActorId;
   const performingActor = exposure.channel === "direct_perception"
-    && typeof performingActorId === "string"
+    && typeof attributedActorId === "string"
     ? handle.sqlite.prepare(`SELECT id, name FROM actors
         WHERE id = ? AND campaign_id = ? AND kind = 'person'`)
-      .get(performingActorId, handle.campaignId) as { id: string; name: string } | undefined
+      .get(attributedActorId, handle.campaignId) as { id: string; name: string } | undefined
     : undefined;
   const openingTrace = resolveCampaignPlayOpeningObservableTrace(openingExposureSeed, {
     openingTurnId,
@@ -771,6 +779,45 @@ function publicEntry(
     whereOrRoute: label,
     worldTimeLabel: timeLabel(exposure.eventWorldTimeMinutes),
     consequence,
+  });
+}
+
+function directlyPerceivedObservationSubjects(
+  handle: CampaignPlayDatabaseHandle,
+  candidate: EpistemicCandidate,
+  humanActorId: string,
+): Array<{ handle: string; name: string }> {
+  const exposure = candidate.exposure;
+  if (exposure.channel !== "direct_perception" || exposure.locationId === null) return [];
+  const eventSource = parseRecord(exposure.eventSourceJson, "Event source");
+  const commandPayload = parseRecord(exposure.commandPayloadJson, "Command payload");
+  const performingActorId = exposure.commandKind === "record_world_event"
+    ? commandPayload.performingActorId
+    : exposure.commandKind === "adjust_actor_possession"
+      ? commandPayload.actorId
+      : undefined;
+  const attributedActorId = typeof performingActorId === "string"
+    ? performingActorId
+    : eventSource.kind === "actor" && typeof eventSource.actorId === "string"
+      ? eventSource.actorId
+      : undefined;
+  const actorIds = [...new Set(
+    parseRecordArray(exposure.eventAffectedRefsJson, "Event affected references")
+      .filter((reference) => reference.kind === "actor"
+        && typeof reference.id === "string"
+        && reference.id !== humanActorId
+        && reference.id !== attributedActorId)
+      .map((reference) => reference.id as string),
+  )].filter((actorId) =>
+    actorLocationFromSnapshot(exposure.eventAfterPayloadJson, actorId) === exposure.locationId);
+  if (actorIds.length === 0) return [];
+  const actors = handle.sqlite.prepare(`SELECT id, name FROM actors
+    WHERE campaign_id = ? AND kind = 'person' AND id IN (${actorIds.map(() => "?").join(",")})`)
+    .all(handle.campaignId, ...actorIds) as Array<{ id: string; name: string }>;
+  const actorById = new Map(actors.map((actor) => [actor.id, actor]));
+  return actorIds.flatMap((actorId) => {
+    const actor = actorById.get(actorId);
+    return actor ? [{ handle: publicHandle("actor", handle.campaignId, actor.id), name: actor.name }] : [];
   });
 }
 
@@ -1381,6 +1428,10 @@ export function createCampaignPlayVisibilityService(
         ...scene,
         newObservations: observationPlans.map((plan) => plan.entry),
         consequences: observationPlans.map((plan) => plan.entry.consequence!),
+        observationSubjects: observationPlans.map((plan) => ({
+          observationHandle: plan.entry.observationHandle,
+          actors: directlyPerceivedObservationSubjects(handle, plan.candidate, human.id),
+        })),
         continuity: priorContinuity(
           handle,
           new Set(observationPlans.map((plan) => plan.observationId)),

@@ -477,6 +477,24 @@ export const campaignPlayConsequenceSchema = z.object({
   }
 });
 
+const campaignPlayObservationActorSchema = z.object({
+  handle: handleSchema,
+  name: nameSchema,
+}).strict();
+
+const campaignPlayObservationSubjectsSchema = z.object({
+  observationHandle: handleSchema,
+  actors: z.array(campaignPlayObservationActorSchema)
+    .max(CAMPAIGN_PLAY_LIMITS.visibleActors),
+}).strict().superRefine((binding, context) => {
+  addDuplicateIssue(
+    binding.actors.map((actor) => actor.handle),
+    context,
+    ["actors"],
+    "Observation subject actor handles",
+  );
+});
+
 export const campaignPlayJournalEntrySchema = z.object({
   observationHandle: handleSchema,
   title: labelSchema,
@@ -564,6 +582,9 @@ const campaignPlayNarratorPacketBaseSchema =
       .max(CAMPAIGN_PLAY_LIMITS.newObservations),
     consequences: z.array(campaignPlayConsequenceSchema)
       .max(CAMPAIGN_PLAY_LIMITS.newObservations),
+    observationSubjects: z.array(campaignPlayObservationSubjectsSchema)
+      .max(CAMPAIGN_PLAY_LIMITS.newObservations)
+      .optional(),
     continuity: z.array(campaignPlayJournalEntrySchema)
       .max(CAMPAIGN_PLAY_LIMITS.continuityEntries),
     elapsedMinutes: nonnegativeIntegerSchema.max(
@@ -617,6 +638,26 @@ export const campaignPlayNarratorPacketSchema:
       ["visibleActors"],
       "Visible actor handles",
     );
+    if (packet.observationSubjects !== undefined) {
+      addDuplicateIssue(
+        packet.observationSubjects.map((binding) => binding.observationHandle),
+        context,
+        ["observationSubjects"],
+        "Observation subject bindings",
+      );
+      const observationHandles = new Set(
+        packet.newObservations.map((observation) => observation.observationHandle),
+      );
+      packet.observationSubjects.forEach((binding, bindingIndex) => {
+        if (!observationHandles.has(binding.observationHandle)) {
+          context.addIssue({
+            code: "custom",
+            path: ["observationSubjects", bindingIndex, "observationHandle"],
+            message: "Observation subject binding must reference a current observation.",
+          });
+        }
+      });
+    }
     addDuplicateIssue(
       packet.visibleRoutes.map((route) => route.handle),
       context,

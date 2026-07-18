@@ -445,6 +445,8 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("Preserve every concrete trade, material, tool, target, and explicit exclusion or refusal");
     expect(String(options.prompt)).toContain("never substitute a nearby profession or revive a rejected method");
     expect(String(options.prompt)).toContain("A generic approach, observation, or wait does not authorize an offer");
+    expect(String(options.prompt)).toContain("Autonomous actor scheduling runs after the primary batch");
+    expect(String(options.prompt)).toContain("Do not freeze their later state in an actorless summary");
     expect(String(options.prompt)).toContain("Prior scene prose may explain context but cannot add a player action");
     expect(String(options.prompt)).toContain("does not turn an unfamiliar actor into a fully cooperative informant");
     expect(String(options.prompt)).toContain("an actor must not deny, misattribute, or forget an action");
