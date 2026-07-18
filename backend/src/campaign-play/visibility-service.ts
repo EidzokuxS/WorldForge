@@ -106,6 +106,10 @@ interface StoredObservationRow {
   publicEntryJson: string;
 }
 
+interface StoredPlayerTurnRow {
+  turnId: string;
+}
+
 export interface ProjectCampaignPlayVisibilityInput {
   token: CampaignPlayWorkerLeaseToken;
   actionContext: CampaignPlayActionContext | null;
@@ -1162,6 +1166,40 @@ function actionContextForTurn(
   });
 }
 
+function priorPlayerHistory(
+  handle: CampaignPlayDatabaseHandle,
+  currentTurn: LoadedCampaignPlayTurn,
+  turnRepository: ReturnType<typeof createCampaignPlayTurnRepository>,
+): CampaignPlayActionContext[] {
+  if (currentTurn.turnKind === "opening") return [];
+  const rows = handle.sqlite.prepare(`SELECT id AS turnId
+    FROM campaign_play_turns
+    WHERE campaign_id = ? AND turn_kind = 'player_action'
+      AND stage = 'completed' AND id <> ?
+    ORDER BY submitted_at DESC, id DESC LIMIT ?`).all(
+      handle.campaignId,
+      currentTurn.turnId,
+      CAMPAIGN_PLAY_LIMITS.continuityEntries,
+    ) as StoredPlayerTurnRow[];
+  return rows.reverse().map((row) => {
+    const priorTurn = turnRepository.loadTurn(row.turnId);
+    if (!priorTurn || priorTurn.stage !== "completed") {
+      throw new CampaignPlayVisibilityError(
+        "visibility_state_invalid",
+        "Player history requires each selected prior turn to remain completed.",
+      );
+    }
+    const action = actionContextForTurn(priorTurn, turnRepository);
+    if (action === null) {
+      throw new CampaignPlayVisibilityError(
+        "visibility_state_invalid",
+        "Player history requires a frozen prior player action.",
+      );
+    }
+    return action;
+  });
+}
+
 export function createCampaignPlayVisibilityService(
   handle: CampaignPlayDatabaseHandle,
 ): CampaignPlayVisibilityService {
@@ -1335,6 +1373,7 @@ export function createCampaignPlayVisibilityService(
             })()
           : null,
         actionContext,
+        playerHistory: priorPlayerHistory(handle, turn, turnRepository),
         sourceMoment: input.sourceMoment,
         acceptedWorldVersion: state.acceptedWorldVersion,
         worldVersion: state.worldVersion,

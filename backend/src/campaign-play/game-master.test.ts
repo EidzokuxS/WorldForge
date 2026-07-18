@@ -441,6 +441,11 @@ describe("Campaign Play Game Master", () => {
       "route_state has exactly channel, anchorHandle, and the required non-empty triggers array",
     );
     expect(String(options.prompt)).toContain("Resolve only the exact PLAYER_INTENT");
+    expect(String(options.prompt)).toContain("PLAYER_INTENT owns the player's method and scope");
+    expect(String(options.prompt)).toContain("Preserve every concrete trade, material, tool, target, and explicit exclusion or refusal");
+    expect(String(options.prompt)).toContain("never substitute a nearby profession or revive a rejected method");
+    expect(String(options.prompt)).toContain("A generic approach, observation, or wait does not authorize an offer");
+    expect(String(options.prompt)).toContain("Prior scene prose may explain context but cannot add a player action");
     expect(String(options.prompt)).toContain("does not turn an unfamiliar actor into a fully cooperative informant");
     expect(String(options.prompt)).toContain("an actor must not deny, misattribute, or forget an action");
     expect(String(options.prompt)).toContain(

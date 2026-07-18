@@ -223,6 +223,7 @@ function narratorPacketFixture(): CampaignPlayNarratorPacket {
       result: "success",
       clarificationQuestion: null,
     },
+    playerHistory: [],
     acceptedWorldVersion: 7,
     worldVersion: 11,
     runtimeRevision: 29,
@@ -1428,6 +1429,14 @@ describe("Campaign Play shared public contracts", () => {
       ...packet,
       turnKind: "opening",
       openingContext,
+      actionContext: null,
+      playerHistory: [packet.actionContext],
+      sourceMoment: null,
+    }).success).toBe(false);
+    expect(campaignPlayNarratorPacketSchema.safeParse({
+      ...packet,
+      turnKind: "opening",
+      openingContext,
     }).success).toBe(false);
     expect(playerIntentSchema.safeParse({
       ...intentFixture(),
@@ -1605,6 +1614,13 @@ describe("Campaign Play shared public contracts", () => {
         { length: CAMPAIGN_PLAY_LIMITS.continuityEntries },
         (_, index) => entry(`old_${index}`),
       ),
+      playerHistory: Array.from(
+        { length: CAMPAIGN_PLAY_LIMITS.continuityEntries },
+        (_, index) => ({
+          ...packet.actionContext!,
+          submittedText: `Prior player action ${index}`,
+        }),
+      ),
       availableIntents: Array.from(
         { length: CAMPAIGN_PLAY_LIMITS.availableIntents },
         (_, index) => ({
@@ -1625,6 +1641,7 @@ describe("Campaign Play shared public contracts", () => {
       "newObservations",
       "consequences",
       "continuity",
+      "playerHistory",
       "availableIntents",
     ] as const) {
       const values = cappedPacket[key];

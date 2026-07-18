@@ -546,6 +546,8 @@ const campaignPlayNarratorPacketBaseSchema =
     turnKind: z.enum(CAMPAIGN_TURN_KIND_VALUES),
     openingContext: campaignPlayOpeningContextSchema.nullable(),
     actionContext: campaignPlayActionContextSchema.nullable(),
+    playerHistory: z.array(campaignPlayActionContextSchema)
+      .max(CAMPAIGN_PLAY_LIMITS.continuityEntries),
     sourceMoment: narrationTextSchema.nullable(),
     currentLocation: campaignPlayVisibleLocationSchema,
     visibleActors: z.array(campaignPlayVisibleActorSchema)
@@ -586,6 +588,13 @@ export const campaignPlayNarratorPacketSchema:
         code: "custom",
         path: ["actionContext"],
         message: "Action context belongs exactly to a player action turn.",
+      });
+    }
+    if (packet.turnKind === "opening" && packet.playerHistory.length !== 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["playerHistory"],
+        message: "Opening cannot have prior player actions.",
       });
     }
     if ((packet.turnKind === "player_action") !== (packet.sourceMoment !== null)) {

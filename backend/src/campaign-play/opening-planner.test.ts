@@ -1006,6 +1006,13 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain("If it is empty, set playerPremise to null");
     expect(prompt).toContain("Choose anchor as openingActor or supportActor");
     expect(prompt).toContain("A motivation is a present desire");
+    expect(prompt).toContain("not authority to tailor the world around them");
+    expect(prompt).toContain("Do not choose a scene merely because its pressure resembles the motivation");
+    expect(prompt).toContain("The selected NPC's need and action must follow independently");
+    expect(prompt).toContain("a specific craft does not imply a broader profession");
+    expect(prompt).toContain("carrying a tool roll does not establish every kind of repair");
+    expect(prompt).toContain("ordinary local interaction rather than approximating the player's skill");
+    expect(prompt).toContain("The local pressure may remain visible and consequential without becoming the player's assignment");
     expect(prompt).toContain("An NPC question is not allowed to presuppose an unstated player experience");
     expect(prompt).toContain("do not ask what the player saw on the road");
     expect(prompt).toContain("playerPremise.routeRestriction controls the selected scene candidate's exact outgoing route");

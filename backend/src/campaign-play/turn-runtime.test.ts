@@ -1634,6 +1634,21 @@ describe("Campaign Play player-action turn runtime", () => {
       WHERE campaign_id = ? AND turn_kind = 'player_action'`).get(
         CAMPAIGN_ID,
       )).toEqual({ value: 2 });
+
+    await advanceUntilStage(runtime, time, nextAdmission.turnId, "completed");
+    const nextNarrationRow = handle.sqlite.prepare(`SELECT packet_json AS packetJson
+      FROM campaign_play_narrations WHERE campaign_id = ? AND turn_id = ?`).get(
+        CAMPAIGN_ID,
+        nextAdmission.turnId,
+      ) as { packetJson: string };
+    const nextPacket = JSON.parse(nextNarrationRow.packetJson) as CampaignPlayNarratorPacket;
+    expect(nextPacket.actionContext?.submittedText).toBe(nextRequest.text);
+    expect(nextPacket.playerHistory).toEqual([expect.objectContaining({
+      submittedText: request.text,
+      disposition: "deterministic",
+      result: "success",
+    })]);
+    expect(narrator.narrate).toHaveBeenCalledTimes(2);
   });
 
   it("admits the next action when the public moment fills both observation windows", async () => {

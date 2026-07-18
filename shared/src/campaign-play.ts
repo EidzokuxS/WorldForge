@@ -314,6 +314,7 @@ export interface CampaignPlayNarratorPacket extends CampaignPlayPublicVersions {
   turnKind: CampaignTurnKind;
   openingContext: CampaignPlayOpeningContext | null;
   actionContext: CampaignPlayActionContext | null;
+  playerHistory: CampaignPlayActionContext[];
   sourceMoment: string | null;
   currentLocation: CampaignPlayVisibleLocation;
   visibleActors: CampaignPlayVisibleActor[];

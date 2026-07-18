@@ -528,6 +528,7 @@ function advanceOpeningToVisibility(
     },
     sourceMoment: null,
     actionContext: null,
+    playerHistory: [],
     currentLocation: {
       handle: "location_harbor",
       name: "Harbor",

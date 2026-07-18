@@ -29,6 +29,7 @@ function packetFixture(): CampaignPlayNarratorPacket {
       immediateSituation: "The harbor gates close as an impossible bell pattern crosses the water.",
     },
     actionContext: null,
+    playerHistory: [],
     sourceMoment: null,
     acceptedWorldVersion: 1,
     worldVersion: 5,
@@ -611,6 +612,12 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Return exactly 1 actionSelections");
     expect(prompt).toContain("copy one exact, unique intentIndex");
     expect(prompt).toContain("strongest immediate follow-through");
+    expect(prompt).toContain("playerHistory lists accepted prior player actions in chronological order");
+    expect(prompt).toContain("any playerHistory[].submittedText remains resolved");
+    expect(prompt).toContain("unless a later player action deliberately re-enters it");
+    expect(prompt).toContain("not the highest world stakes");
+    expect(prompt).toContain("a central pressure has no automatic priority");
+    expect(prompt).toContain("include a supported local intent for the chosen thread");
     expect(prompt).toContain("grounded fragment of three to eight words");
     expect(prompt).toContain("never a sentence or explanation");
     expect(prompt).toContain("must authorize one concrete player action when clicked");
@@ -629,7 +636,10 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("already at that fixture or inside that container");
     expect(prompt).toContain("Never make a detail load, haul, insert, or move it there again");
     expect(prompt).toContain("Do not infer a changed object position when the packet does not state one");
-    expect(prompt).toContain("Do not point an intent back at an observation, question, or attempt that already resolved");
+    expect(prompt).toContain("Do not point an intent back at any other observation, question, or attempt that already resolved");
+    expect(prompt).toContain("explicitly refused, declined, corrected, or left");
+    expect(prompt).toContain("Do not suggest it or use it as a reason to return");
+    expect(prompt).toContain("The original need's continued existence does not renew the offer");
     expect(prompt).toContain("Do not disguise the old action with synonyms");
     expect(prompt).toContain("A click-to-submit suggestion cannot require the player to supply a missing fact");
     expect(prompt).toContain("degree of disclosure, or another player-owned value absent from the packet");
