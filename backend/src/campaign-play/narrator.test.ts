@@ -632,7 +632,9 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Do not point an intent back at an observation, question, or attempt that already resolved");
     expect(prompt).toContain("Do not disguise the old action with synonyms");
     expect(prompt).toContain("Purposes label a beat's work. Do not emit one beat for every purpose");
-    expect(prompt).toContain("Default to one or two beats");
+    expect(prompt).toContain("Prefer one beat");
+    expect(prompt).toContain("combine the action result and its immediately visible aftermath in one beat");
+    expect(prompt).toContain("If removing a beat loses no supported information, omit it");
     expect(prompt).toContain("Never add a moment beat to repeat sourceMoment");
     expect(prompt).toContain("Each actionSelection contains exactly intentIndex and detail");
     expect(prompt).toContain("includesTravel belongs only to the input catalog");
@@ -650,6 +652,9 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Never describe a visible actor as departed, arrived elsewhere, or unavailable");
     expect(prompt).toContain("A completed accepted actor movement removes that actor from visibleActors");
     expect(prompt).toContain("sourceMoment is the exact previous accepted player-visible scene");
+    expect(prompt).toContain("another character's statement, question, assumption, or demand does not establish");
+    expect(prompt).toContain("Never turn an NPC premise into narrator fact or an action detail that adopts it");
+    expect(prompt).toContain("an accepted your_action consequence in the packet explicitly establishes that experience");
     expect(prompt).toContain("Every concrete claim in a beat must be supported");
     expect(prompt).toContain("Never guess a person's gender or pronouns from their name, title, role, or appearance");
     expect(prompt).toContain("only when sourceMoment, newObservations, consequences, or continuity already uses it unambiguously");

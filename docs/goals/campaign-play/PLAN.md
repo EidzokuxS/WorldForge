@@ -240,6 +240,8 @@ Route topology and access claims in Game Master prose cross an additional semant
 
 Suggested actions are exact player authorizations, not invitations for Judge or Game Master to fill in a decision. A suggestion that accepts, selects, orders, takes, or commits among mutually exclusive visible alternatives names one alternative; otherwise Narrator selects another intent. Freeform or suggested input that still omits a necessary alternative resolves as `clarification_required`. A route-less move is valid only in that non-actionable clarification state. Clarification changes no world state and Narrator presents exactly the Judge's question as one `action_handoff` beat.
 
+Player history has its own semantic authority boundary. Literal CharacterRecord facts, chosen starting conditions, and the player's submitted actions may establish what the player previously experienced; an NPC statement, question, assumption, demand, motivation, or search target may not. Opening Planner cannot presuppose an unstated player experience, and Narrator cannot convert an NPC premise into viewpoint fact or a suggested action that adopts it.
+
 ## Persistence and transaction design
 
 ### Accepted snapshot prerequisite
@@ -380,7 +382,7 @@ The cue describes the player's earned evidence and never names a hidden cause. T
 
 Protected events, distant actors, private goals, raw CharacterRecord fields outside the player projection, model reasoning, provider traces, internal entity IDs, rejected proposals, and global state collections remain in protected storage.
 
-The narrator returns structured beats, display text, zero to four suggested actions, and restrained effects from `fade`, `flash`, `shake`, `danger`, and `pause`. Each proposed beat identifies the zero-based `newObservations` entries it synthesizes. Backend validation requires every newly visible accepted observation to be covered exactly once, binds each suggestion to a currently available intent, and discards the narration stage as invalid when either contract fails. Successive observations of the same actor, object, or place remain causally ordered and the latest accepted observation owns the narrated current state. Reduced-motion settings suppress nonessential motion.
+The narrator returns structured beats, display text, zero to four suggested actions, and restrained effects from `fade`, `flash`, `shake`, `danger`, and `pause`. Each proposed beat identifies the zero-based `newObservations` entries it synthesizes. Backend validation requires every newly visible accepted observation to be covered exactly once, binds each suggestion to a currently available intent, and discards the narration stage as invalid when either contract fails. Successive observations of the same actor, object, or place remain causally ordered and the latest accepted observation owns the narrated current state. One beat is preferred. Travel or observation combines its result and immediately visible aftermath when they are understandable together; another beat exists only for a separate supported observation or necessary unresolved reply and does not recap an earlier beat. Reduced-motion settings suppress nonessential motion.
 
 ## API
 

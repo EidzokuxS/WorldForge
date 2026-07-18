@@ -1005,6 +1005,9 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain("zero-based motivationIndex");
     expect(prompt).toContain("If it is empty, set playerPremise to null");
     expect(prompt).toContain("Choose anchor as openingActor or supportActor");
+    expect(prompt).toContain("A motivation is a present desire");
+    expect(prompt).toContain("An NPC question is not allowed to presuppose an unstated player experience");
+    expect(prompt).toContain("do not ask what the player saw on the road");
     expect(prompt).toContain("playerPremise.routeRestriction controls the selected scene candidate's exact outgoing route");
     expect(prompt).toContain("Do not state or imply a hard passage condition when routeRestriction is null");
     expect(prompt).toContain("Every listed person receives a plan regardless of role");
@@ -1020,6 +1023,7 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain('"openingActorId":"actor-');
     expect(prompt).toContain('"openingActorName":');
     expect(prompt).toContain("copy only its candidateId into scene.candidateId");
+    expect(prompt).toContain("A delegated immediateSituation describes only the player's current physical or social circumstance");
     expect(prompt).toContain("openingActorId is the person whose first step creates the immediate local situation");
     expect(prompt).toContain('{"kind":"location","id":selectedScene.sceneLocationId}');
     expect(prompt).toContain("Do not turn this into a tour of the place");
