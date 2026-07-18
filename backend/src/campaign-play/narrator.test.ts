@@ -726,11 +726,15 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Unless another packet source independently corroborates the claim");
     expect(prompt).toContain("preserve attribution by asking about the claim");
     expect(prompt).toContain("No detail may restate an unconfirmed claim or condition as an existing fact");
+    expect(prompt).toContain("a contact detail must ask about the marks, evidence, condition, or possible cause");
+    expect(prompt).toContain("it must not call that cause recent maintenance, a repair, tampering, or restored function");
     expect(prompt).toContain("Preserve the condition in actionable grammar");
     expect(prompt).toContain('Do not use possessive or definite wording such as "your sister\'s passage terms"');
     expect(prompt).toContain("Set detail to null for move");
     expect(prompt).toContain("code publishes the exact route destination as the complete action");
     expect(prompt).toContain("Every concrete claim in a beat must be supported");
+    expect(prompt).toContain("When evidence is only consistent with maintenance, repair, tampering, restored function");
+    expect(prompt).toContain('never turn it into "someone did" that act or claim that the purpose succeeded');
     expect(prompt).toContain("Never guess a person's gender or pronouns from their name, title, role, or appearance");
     expect(prompt).toContain("only when sourceMoment, newObservations, consequences, or continuity already uses it unambiguously");
     expect(prompt).toContain("Otherwise repeat the person's name or use a supported role noun");
