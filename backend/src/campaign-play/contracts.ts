@@ -786,7 +786,7 @@ export function campaignPlaySuggestedActionLabelPrefix(
           "Move action label requires its frozen visible route.",
         );
       }
-      return `Go to ${playerFacingName(route.destinationName)}: `;
+      return `Go to ${playerFacingName(route.destinationName)}`;
     }
     case "contact": {
       const actorHandle = intent.targets.find((target) => target.kind === "actor")?.handle;
@@ -805,15 +805,28 @@ export function campaignPlaySuggestedActionLabelPrefix(
 export function buildCampaignPlaySuggestedActionLabel(
   packet: CampaignPlayNarratorPacket,
   intent: CampaignPlayAvailableIntent,
-  detail: string,
+  detail: string | null,
 ): string {
-  if (detail.length === 0 || detail !== detail.trim() || detail.includes("\n") || detail.includes("\r")) {
+  const prefix = campaignPlaySuggestedActionLabelPrefix(packet, intent);
+  if (intent.kind === "move") {
+    if (detail !== null) {
+      throw new CampaignPlayContractError(
+        "narration_invalid",
+        "Move action label must use only its frozen route destination.",
+      );
+    }
+    return prefix;
+  }
+  if (
+    detail === null || detail.length === 0 || detail !== detail.trim() ||
+    detail.includes("\n") || detail.includes("\r")
+  ) {
     throw new CampaignPlayContractError(
       "narration_invalid",
       "Suggested action detail must be one trimmed line.",
     );
   }
-  return `${campaignPlaySuggestedActionLabelPrefix(packet, intent)}${detail}`;
+  return `${prefix}${detail}`;
 }
 
 export function validateNarrationAgainstPacket(
@@ -843,11 +856,10 @@ export function validateNarrationAgainstPacket(
     const prefix = available
       ? campaignPlaySuggestedActionLabelPrefix(packet, available)
       : null;
-    if (
-      !available || available.handle !== action.choiceHandle ||
-      prefix === null || !action.label.startsWith(prefix) ||
-      action.label.length === prefix.length
-    ) {
+    const hasExactBinding = available?.kind === "move"
+      ? action.label === prefix
+      : prefix !== null && action.label.startsWith(prefix) && action.label.length > prefix.length;
+    if (!available || available.handle !== action.choiceHandle || !hasExactBinding) {
       throw new CampaignPlayContractError(
         "narration_invalid",
         `Suggested action ${action.choiceHandle} has no exact available intent binding.`,

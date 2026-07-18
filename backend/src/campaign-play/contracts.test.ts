@@ -1827,6 +1827,26 @@ describe("Campaign Play shared public contracts", () => {
     )).toBe("Try to reach Flood Market: shove off on Netta's signal");
   });
 
+  it("renders ordinary moves only from frozen route authority", () => {
+    const packet = narratorPacketFixture();
+    const moveIntent = {
+      handle: "choice_move_market",
+      label: "Go to Flood Market",
+      kind: "move" as const,
+      targets: [{ handle: "route_market", kind: "route" as const }],
+    };
+    expect(buildCampaignPlaySuggestedActionLabel(
+      packet,
+      moveIntent,
+      null,
+    )).toBe("Go to Flood Market");
+    expect(() => buildCampaignPlaySuggestedActionLabel(
+      packet,
+      moveIntent,
+      "toward another scene's documents",
+    )).toThrow(CampaignPlayContractError);
+  });
+
   it("rejects stale mechanical and runtime expectations contextually", () => {
     expect(() => validateCampaignPlayVersionExpectation(
       { expectedWorldVersion: 11, expectedRuntimeRevision: 29 },

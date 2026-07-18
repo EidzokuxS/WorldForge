@@ -282,7 +282,11 @@ describe("Campaign Play narrator", () => {
       beats,
       actionSelections: [1, 0, 2, 3].map((intentIndex) => ({
         intentIndex,
-        detail: intentIndex === 1 ? "accept the uncertain share" : `visible option ${intentIndex}`,
+        detail: intentIndex === 2
+          ? null
+          : intentIndex === 1
+            ? "accept the uncertain share"
+            : `visible option ${intentIndex}`,
       })),
     };
     const narrator = createCampaignPlayNarrator();
@@ -293,7 +297,11 @@ describe("Campaign Play narrator", () => {
         beats,
         actionSelections: [0, 2, 3, 1].map((intentIndex) => ({
           intentIndex,
-          detail: intentIndex === 1 ? "accept the uncertain share" : `visible option ${intentIndex}`,
+          detail: intentIndex === 2
+            ? null
+            : intentIndex === 1
+              ? "accept the uncertain share"
+              : `visible option ${intentIndex}`,
         })),
       },
       createdAt: 1_000,
@@ -334,6 +342,47 @@ describe("Campaign Play narrator", () => {
       ],
     }).success).toBe(false);
     expect(String(options.prompt)).toContain("REQUIRED_REPLY_INTENT_INDEX=1");
+    expect(String(options.prompt)).toContain("Set detail to null for move");
+    expect(String(options.prompt)).toContain("An ordinary move has no model-authored detail");
+  });
+
+  it("publishes ordinary moves as exact code-owned destinations", () => {
+    const packet: CampaignPlayNarratorPacket = {
+      ...packetFixture(),
+      availableIntents: [{
+        handle: "choice_public_move",
+        label: "Go to Flood Market",
+        kind: "move",
+        targets: [{ handle: "route_public_gate", kind: "route" }],
+      }],
+    };
+    const narrator = createCampaignPlayNarrator();
+    const proposal: CampaignPlayNarratorProposal = {
+      ...proposalFixture(),
+      actionSelections: [{ intentIndex: 0, detail: null }],
+    };
+
+    expect(narrator.compile({
+      narrationId: "narration-exact-move",
+      packet,
+      proposal,
+      createdAt: 1_000,
+    }).narration.suggestedActions).toEqual([{
+      choiceHandle: "choice_public_move",
+      label: "Go to Flood Market",
+    }]);
+    expect(() => narrator.compile({
+      narrationId: "narration-move-with-scene-detail",
+      packet,
+      proposal: {
+        ...proposal,
+        actionSelections: [{
+          intentIndex: 0,
+          detail: "toward another scene's torn documents",
+        }],
+      },
+      createdAt: 1_000,
+    })).toThrow(CampaignPlayNarratorError);
   });
 
   it("rejects narration that omits a later visible consequence", () => {
@@ -677,8 +726,8 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("No detail may restate an unconfirmed claim or condition as an existing fact");
     expect(prompt).toContain("Preserve the condition in actionable grammar");
     expect(prompt).toContain('Do not use possessive or definite wording such as "your sister\'s passage terms"');
-    expect(prompt).toContain("must not relocate a hypothetical or NPC-only claim into that destination");
-    expect(prompt).toContain("without claiming what will be found there");
+    expect(prompt).toContain("Set detail to null for move");
+    expect(prompt).toContain("code publishes the exact route destination as the complete action");
     expect(prompt).toContain("Every concrete claim in a beat must be supported");
     expect(prompt).toContain("Never guess a person's gender or pronouns from their name, title, role, or appearance");
     expect(prompt).toContain("only when sourceMoment, newObservations, consequences, or continuity already uses it unambiguously");
