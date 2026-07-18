@@ -91,6 +91,7 @@ vi.mock("../knowledge-model.js", () => ({
 
 vi.mock("ai", () => ({
   generateText: vi.fn(),
+  streamText: vi.fn(),
   hasToolCall: vi.fn((toolName: string) => ({ type: "has-tool-call", toolName })),
   stepCountIs: vi.fn((count: number) => ({ type: "step-count", count })),
 }));
@@ -1964,6 +1965,9 @@ describe("runGmToolLoop", () => {
     expect(generateArgs.prompt).toContain("no-answer/unavailable-role outcomes are still procedural outcomes");
     expect(generateArgs.prompt).toContain("Do not mark a reusable procedural outcome scene_local");
     expect(generateArgs.prompt).toContain("do not spend a step recording the player's intent");
+    expect(generateArgs.prompt).toContain("private knowledge as decision context, not dialogue content");
+    expect(generateArgs.prompt).toContain("A player question creates an opportunity to respond, not a reason to disclose");
+    expect(generateArgs.prompt).toContain("Do not volunteer hidden objectives, orders, stakes, names, allies, destinations, or failure conditions");
     expect(generateArgs.prompt).toContain("Quick actions are not a substitute");
     expect(generateArgs.activeTools).toEqual([
       "list_visible_affordances",
