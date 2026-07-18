@@ -674,6 +674,10 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("playerHistory lists accepted prior player actions in chronological order");
     expect(prompt).toContain("any playerHistory[].submittedText remains resolved");
     expect(prompt).toContain("unless a later player action deliberately re-enters it");
+    expect(prompt).toContain("An ordinary move to a different location with no stated purpose");
+    expect(prompt).toContain("leaves every optional offer, task, search target, and contact request from sourceMoment at the origin");
+    expect(prompt).toContain("Do not carry a person name, lead, destination purpose, or follow-up question from origin dialogue");
+    expect(prompt).toContain("only when actionContext.submittedText states that purpose");
     expect(prompt).toContain("not the highest world stakes");
     expect(prompt).toContain("a central pressure has no automatic priority");
     expect(prompt).toContain("include a supported local intent for the chosen thread");
