@@ -450,6 +450,10 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("Crossing the boundary requires PLAYER_MOVEMENT");
     expect(String(options.prompt)).toContain("Prior scene prose may explain context but cannot add a player action");
     expect(String(options.prompt)).toContain("does not turn an unfamiliar actor into a fully cooperative informant");
+    expect(String(options.prompt)).toContain("A direct question identifies the topic but never gives the speaker a reason to answer");
+    expect(String(options.prompt)).toContain("reciprocal value already supplied or explicitly committed in PLAYER_INTENT");
+    expect(String(options.prompt)).toContain("do not recruit the player to find or report on that person");
+    expect(String(options.prompt)).toContain("Do not invent a quest");
     expect(String(options.prompt)).toContain("an actor must not deny, misattribute, or forget an action");
     expect(String(options.prompt)).toContain(
       'ACTOR_CONTINUITY=[{"actorHandle":"guard","recentOwnActions":[{"summary":"Oren Tide inspected the passage latch before the traveler arrived.","observableTrace":"Fresh oil marks the passage latch."}]}]',
