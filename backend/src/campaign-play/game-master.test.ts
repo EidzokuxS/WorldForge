@@ -133,13 +133,13 @@ function ruling(overrides: Partial<CampaignPlayJudgeRuling> = {}): CampaignPlayJ
   return {
     disposition: "deterministic",
     normalizedIntent: {
-      originalText: "I ask the guard why the road is closed.", source: "freeform", choiceHandle: null,
-      kind: "contact", targets: [{ handle: "guard", kind: "actor" }], method: "Ask calmly", stakes: "Learn the reason",
+      originalText: "I ask the guard what happened here.", source: "freeform", choiceHandle: null,
+      kind: "contact", targets: [{ handle: "guard", kind: "actor" }], method: "Ask calmly", stakes: "Learn what happened",
     },
     movementRouteHandle: null,
     possessionEffectAuthority: { kind: "none" },
     requiredObligationEffect: { kind: "none" },
-    citedVisibleFactHandles: ["guard", "passage"],
+    citedVisibleFactHandles: ["guard"],
     resultBounds: { minimum: "success", maximum: "success" },
     elapsedBounds: { minimumMinutes: 1, maximumMinutes: 3 },
     uncertainty: { kind: "none" },
@@ -707,9 +707,24 @@ describe("Campaign Play Game Master", () => {
     expect(createCampaignPlayGameMaster().compile(
       frame(), routeRuling, resolution, null, grounded,
     ).preflight.accepted).toBe(true);
+    const citedRouteRuling = ruling({
+      normalizedIntent: {
+        originalText: "I ask what passage stamping requires.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "contact",
+        targets: [{ handle: "guard", kind: "actor" }],
+        method: "Ask about passage stamping",
+        stakes: "Learn the local access rule",
+      },
+      citedVisibleFactHandles: ["guard", "passage"],
+    });
     expect(createCampaignPlayGameMaster().compile(
-      frame(), ruling(), resolution, null, grounded,
+      frame(), citedRouteRuling, resolution, null, grounded,
     ).preflight.accepted).toBe(true);
+    expect(() => createCampaignPlayGameMaster().compile(
+      frame(), citedRouteRuling, resolution, null, proposal,
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
     expect(() => createCampaignPlayGameMaster().compile(
       frame(), routeRuling, resolution, null, proposal,
     )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
@@ -963,7 +978,7 @@ describe("Campaign Play Game Master", () => {
           quantity: 1,
           minimumResult: "success",
         },
-        citedVisibleFactHandles: ["guard", "passage", "copper-chit"],
+        citedVisibleFactHandles: ["guard", "copper-chit"],
       }),
       resolution,
       null,
@@ -990,7 +1005,7 @@ describe("Campaign Play Game Master", () => {
 
     expect(() => createCampaignPlayGameMaster().compile(
       spendingFrame,
-      ruling({ citedVisibleFactHandles: ["guard", "passage", "copper-chit"] }),
+      ruling({ citedVisibleFactHandles: ["guard", "copper-chit"] }),
       resolution,
       null,
       {
@@ -1019,7 +1034,7 @@ describe("Campaign Play Game Master", () => {
           quantity: 1,
           minimumResult: "limited",
         },
-        citedVisibleFactHandles: ["guard", "passage", "copper-chit"],
+        citedVisibleFactHandles: ["guard", "copper-chit"],
       }),
       resolution,
       null,
@@ -1064,7 +1079,7 @@ describe("Campaign Play Game Master", () => {
           quantity: 1,
           minimumResult: "limited",
         },
-        citedVisibleFactHandles: ["guard", "passage", "copper-chit"],
+        citedVisibleFactHandles: ["guard", "copper-chit"],
       }),
       resolution,
       null,

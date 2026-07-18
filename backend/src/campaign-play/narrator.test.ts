@@ -707,6 +707,8 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Never describe departure in a false entry or remove travel from a true entry");
     expect(prompt).toContain("visibleRoutes is code-authoritative topology and access state");
     expect(prompt).toContain("Dialogue, sourceMoment, and consequence prose do not make an open route gated or indirect");
+    expect(prompt).toContain("do not suggest asking about passage terms, travel conditions, stamping, clearance, permits, tolls, or fees");
+    expect(prompt).toContain("offer an ordinary move or another grounded local action");
     expect(prompt).toContain("When an ordinary move intent exists for an open route, treat it as the supported travel action");
     expect(prompt).toContain('Address the player as "you"');
     expect(prompt).toContain("never switch to the player character's name");

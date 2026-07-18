@@ -520,6 +520,8 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("Every targets entry must copy one exact {handle, kind} pair from TARGET_CATALOG");
     expect(sentPrompt).toContain("When a no-travel PLAYER_INPUT asks about the topology");
     expect(sentPrompt).toContain("Citing the route does not replace the route target");
+    expect(sentPrompt).toContain("asks generally about passage, clearance, stamping, permits, tolls, or fees");
+    expect(sentPrompt).toContain("copy every handle in VISIBLE_ROUTES to citedVisibleFactHandles");
     expect(sentPrompt).toContain(
       "For freeform movement with a named willing companion, include the movement destination and the companion actor in targets",
     );
