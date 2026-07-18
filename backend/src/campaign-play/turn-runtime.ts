@@ -666,7 +666,6 @@ function buildPublicAuthority(input: {
   const observations = [
     ...relevantPlayerHistory({ handle, mechanicalFrame, human, judgeInput }),
     ...packet.newObservations,
-    ...packet.continuity,
   ];
   let admittedObservationCount = 0;
   for (const observation of observations) {

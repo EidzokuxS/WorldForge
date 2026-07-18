@@ -1623,13 +1623,25 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(telemetry.stageExecutions.every((stage) => stage.outcome === "advanced")).toBe(true);
 
     const nextState = createCampaignPlayStateRepository(handle).loadState()!;
-    const nextRequest = admissionRequest(nextState, "real-second-action-playtest");
+    const nextRequest = admissionRequest(
+      nextState,
+      "real-second-action-playtest",
+      "I count the blue rivets on the north arch.",
+    );
     const nextAdmission = runtime.admitAction({ request: nextRequest, submittedAt: 7_100 });
+    const nextAdmissionFrame = loadCampaignPlayPlayerActionAdmissionFrame(
+      runtime.loadTurn(nextAdmission.turnId)!,
+    );
+    const continuityHandles = nextAdmissionFrame.sourcePacket.continuity.map((entry) =>
+      entry.observationHandle);
 
     expect(runtime.loadTurn(nextAdmission.turnId)).toMatchObject({
       stage: "admitted",
       terminalReason: null,
     });
+    expect(continuityHandles.length).toBeGreaterThan(0);
+    expect(nextAdmissionFrame.visibleFacts.some((fact) =>
+      continuityHandles.includes(fact.handle))).toBe(false);
     expect(handle.sqlite.prepare(`SELECT count(*) AS value FROM campaign_play_turns
       WHERE campaign_id = ? AND turn_kind = 'player_action'`).get(
         CAMPAIGN_ID,
