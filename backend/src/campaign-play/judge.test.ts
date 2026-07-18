@@ -498,6 +498,8 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("Never add, remove, or change travel");
     expect(sentPrompt).toContain("A persistent location is the complete current scene");
     expect(sentPrompt).toContain("Do not reinterpret unmodeled traversal as a local attempt");
+    expect(sentPrompt).toContain("Write clarificationQuestion as a concise in-world question");
+    expect(sentPrompt).toContain("Never mention models, scenes, packets, handles, typed routes, schemas, code, or game mechanics");
     expect(sentPrompt).toContain("For a pure move, elapsedBounds.minimumMinutes and elapsedBounds.maximumMinutes must both equal the selected route's travelCost");
     expect(sentPrompt).toContain('{"kind":"adjust_actor_possession","enforcement":"required","operation":"transform","possessionHandle":"copied visible handle","quantity":1,"minimumResult":"lowest applicable tier"}');
     expect(sentPrompt).toContain("there is no adjustment field");
