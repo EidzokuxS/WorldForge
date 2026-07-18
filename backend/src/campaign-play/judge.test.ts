@@ -470,6 +470,10 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("does not authorize the Judge or Game Master to choose for the player");
     expect(sentPrompt).toContain("two or more visible mutually exclusive alternatives");
     expect(sentPrompt).toContain("use clarification_required and ask which alternative");
+    expect(sentPrompt).toContain("Accepting an offer authorizes only acceptance");
+    expect(sentPrompt).toContain(
+      "use clarification_required and ask what the player provides before Game Master runs",
+    );
     expect(sentPrompt).toContain('uncertainty must be exactly {"kind":"none"}');
     expect(sentPrompt).toContain("resultBounds must not contain no_effect");
     expect(sentPrompt).toContain("clarificationQuestion must be non-null only");

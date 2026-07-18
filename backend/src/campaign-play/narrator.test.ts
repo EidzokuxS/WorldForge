@@ -349,6 +349,9 @@ describe("Campaign Play narrator", () => {
     expect(String(options.prompt)).toContain(
       "the prose must make that reply legible before the choices appear",
     );
+    expect(String(options.prompt)).toContain(
+      "merely accepting the exchange cannot stand in for that missing disclosure",
+    );
     expect(String(options.prompt)).toContain("Set detail to null for move");
     expect(String(options.prompt)).toContain("An ordinary move has no model-authored detail");
   });
