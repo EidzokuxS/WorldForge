@@ -1331,7 +1331,6 @@ describe("Campaign Play visibility service", () => {
     );
     expect(continuation.map((intent) => intent.kind)).toEqual([
       "observe",
-      "attempt",
       "move",
       "attempt",
       "move",
@@ -1341,12 +1340,9 @@ describe("Campaign Play visibility service", () => {
       "wait",
     ]);
     expect(continuation.at(-1)?.label).toBe("Wait 10 minutes");
-    expect(continuation.find((intent) =>
-      intent.kind === "attempt" && !intent.targets.some((target) => target.kind === "route"))?.targets)
-      .toEqual([{
-      handle: scene.currentLocation.handle,
-      kind: "location",
-    }]);
+    expect(continuation.some((intent) =>
+      intent.kind === "attempt" && !intent.targets.some((target) => target.kind === "route")))
+      .toBe(false);
     const routeAttempts = continuation.filter((intent) =>
       intent.kind === "attempt" && intent.targets.some((target) => target.kind === "route"));
     expect(routeAttempts).toHaveLength(3);
@@ -1420,10 +1416,9 @@ describe("Campaign Play visibility service", () => {
       syntheticOpeningSeed,
       1,
     );
-    expect(withActor).toHaveLength(11);
+    expect(withActor).toHaveLength(10);
     expect(withActor.map((intent) => intent.kind)).toEqual([
       "observe",
-      "attempt",
       "move",
       "attempt",
       "move",

@@ -988,14 +988,6 @@ export function availableIntents(
   }];
   const attemptsAvailable = actionContext !== null
     && actionContext.disposition !== "clarification_required";
-  if (attemptsAvailable) {
-    intents.push({
-      handle: publicHandle("choice", campaignId, `${turnId}:attempt`),
-      label: "Try the immediate local step",
-      kind: "attempt",
-      targets: [{ handle: scene.currentLocation.handle, kind: "location" }],
-    });
-  }
   const preferredRoute = preferredOpeningExposureRoute(
     handle,
     scene,

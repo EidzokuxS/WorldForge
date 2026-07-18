@@ -713,12 +713,12 @@ export const campaignPlayNarratorPacketSchema:
       if (
         !routeTargetIsVisible
         || (intent.kind === "move" && routeTargets.length !== 1)
-        || (intent.kind === "attempt" && routeTargets.length > 1)
+        || (intent.kind === "attempt" && routeTargets.length !== 1)
       ) {
         context.addIssue({
           code: "custom",
           path: ["availableIntents", index, "targets"],
-          message: "Available intent route authority must match its visible move or route-bound attempt.",
+          message: "Available move and attempt intents require exactly one frozen visible route.",
         });
       }
     });

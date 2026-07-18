@@ -1409,6 +1409,24 @@ describe("Campaign Play shared public contracts", () => {
         targets: [{ ...packet.availableIntents[0]?.targets[0], unknown: true }],
       }],
     }).success).toBe(false);
+    expect(campaignPlayNarratorPacketSchema.safeParse({
+      ...packet,
+      availableIntents: [{
+        handle: "choice_local_attempt",
+        label: "Try the immediate local step",
+        kind: "attempt",
+        targets: [{ handle: packet.currentLocation.handle, kind: "location" }],
+      }],
+    }).success).toBe(false);
+    expect(campaignPlayNarratorPacketSchema.safeParse({
+      ...packet,
+      availableIntents: [{
+        handle: "choice_route_attempt",
+        label: "Try a risky approach to the market",
+        kind: "attempt",
+        targets: [{ handle: packet.visibleRoutes[0]!.handle, kind: "route" }],
+      }],
+    }).success).toBe(true);
     const openingContext = {
       role: "A newly arrived visitor",
       arrivalMode: "On foot through the rain",

@@ -496,6 +496,8 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("compound requests such as travel then contact");
     expect(sentPrompt).toContain("including a route-bound attempt");
     expect(sentPrompt).toContain("Never add, remove, or change travel");
+    expect(sentPrompt).toContain("A persistent location is the complete current scene");
+    expect(sentPrompt).toContain("Do not reinterpret unmodeled traversal as a local attempt");
     expect(sentPrompt).toContain("For a pure move, elapsedBounds.minimumMinutes and elapsedBounds.maximumMinutes must both equal the selected route's travelCost");
     expect(sentPrompt).toContain('{"kind":"adjust_actor_possession","enforcement":"required","operation":"transform","possessionHandle":"copied visible handle","quantity":1,"minimumResult":"lowest applicable tier"}');
     expect(sentPrompt).toContain("there is no adjustment field");
