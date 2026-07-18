@@ -572,6 +572,11 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("required means include exactly one matching adjust_actor_possession effect");
     expect(String(options.prompt)).toContain("permitted means include zero or one");
     expect(String(options.prompt)).toContain("When no authority applies, every adjust_actor_possession effect is forbidden");
+    expect(String(options.prompt)).toContain("Possession authority also bounds the meaning of the scene");
+    expect(String(options.prompt)).toContain("possessionEffectAuthority is none, resolve only the negotiation");
+    expect(String(options.prompt)).toContain("no bargained information, service, access, or other return is delivered yet");
+    expect(String(options.prompt)).toContain("A completed exchange requires matching spend authority");
+    expect(String(options.prompt)).toContain("record_world_event cannot substitute for that transition");
     expect(String(options.prompt)).toContain("WORLD_TIME_AUTHORITY is code-owned");
     expect(String(options.prompt)).toContain("Any clock time, part of day, date, deadline, duration, or relative phrase");
     expect(String(options.prompt)).toContain('WORLD_TIME_AUTHORITY={"actionStart":{"totalMinutes":10,"day":1,"hour":0,"minute":10},"resultRange":{"earliest":{"totalMinutes":11,"day":1,"hour":0,"minute":11},"latest":{"totalMinutes":13,"day":1,"hour":0,"minute":13}}}');
