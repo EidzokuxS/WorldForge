@@ -655,6 +655,10 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("another character's statement, question, assumption, or demand does not establish");
     expect(prompt).toContain("Never turn an NPC premise into narrator fact or an action detail that adopts it");
     expect(prompt).toContain("an accepted your_action consequence in the packet explicitly establishes that experience");
+    expect(prompt).toContain("Preserve the epistemic status of every source used by a detail");
+    expect(prompt).toContain("generic record type proves only that the NPC mentioned it");
+    expect(prompt).toContain("must not relocate a hypothetical into that destination");
+    expect(prompt).toContain("without claiming what will be found there");
     expect(prompt).toContain("Every concrete claim in a beat must be supported");
     expect(prompt).toContain("Never guess a person's gender or pronouns from their name, title, role, or appearance");
     expect(prompt).toContain("only when sourceMoment, newObservations, consequences, or continuity already uses it unambiguously");
