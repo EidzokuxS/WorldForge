@@ -332,6 +332,7 @@ export const campaignPlayActorJobDeferReasonValues = [
   "incapacitated",
   "actor_capacity",
   "replan_capacity",
+  "replan_invalid",
 ] as const;
 
 export const campaignPlayProposalStatusValues = [
@@ -3399,7 +3400,8 @@ export const campaignPlayActorJobs = sqliteTable(
       AND (${table.stage} <> 'queued' OR (${table.workerEpoch} = 0 AND ${table.claimTurnWorkerEpoch} IS NULL))
       AND ((${table.stage} IN ('settled', 'rejected', 'deferred') AND ${table.completedAt} IS NOT NULL)
         OR (${table.stage} NOT IN ('settled', 'rejected', 'deferred') AND ${table.completedAt} IS NULL))
-      AND ((${table.stage} = 'deferred' AND ${table.deferReason} IN ('incapacitated', 'actor_capacity', 'replan_capacity'))
+      AND ((${table.stage} = 'deferred' AND ${table.deferReason} IS NOT NULL
+          AND ${table.deferReason} IN ('incapacitated', 'actor_capacity', 'replan_capacity', 'replan_invalid'))
         OR (${table.stage} <> 'deferred' AND ${table.deferReason} IS NULL))
       AND (${table.stage} NOT IN ('proposed', 'settled') OR ${table.proposalId} IS NOT NULL)`),
   ],

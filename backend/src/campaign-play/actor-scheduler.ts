@@ -51,7 +51,11 @@ export type CampaignPlayActorSkipReason =
   | "already_considered_this_turn"
   | "pending_job"
   | "actor_ineligible";
-export type CampaignPlayActorDeferReason = "incapacitated" | "actor_capacity" | "replan_capacity";
+export type CampaignPlayActorDeferReason =
+  | "incapacitated"
+  | "actor_capacity"
+  | "replan_capacity"
+  | "replan_invalid";
 
 interface CampaignPlayActorDueDecisionBase {
   dueOrder: number;
@@ -1073,6 +1077,15 @@ export function createCampaignPlayActorScheduler(
             turnId,
             deriveCampaignPlayActorReplanStageId(job.jobId),
           ) as { artifactJson: string } | undefined;
+        const latestReplanAttempt = handle.sqlite.prepare(`SELECT status, error_code AS errorCode
+          FROM campaign_play_model_stages
+          WHERE campaign_id = ? AND turn_id = ? AND stage_id = ?
+            AND kind = 'actor_replanner'
+          ORDER BY attempt DESC LIMIT 1`).get(
+            handle.campaignId,
+            turnId,
+            deriveCampaignPlayActorReplanStageId(job.jobId),
+          ) as { status: string; errorCode: string | null } | undefined;
         let replanned: CampaignPlayActorPlan | null = null;
         if (acceptedReplan) {
           try {
@@ -1112,9 +1125,11 @@ export function createCampaignPlayActorScheduler(
             baseWorldVersion: number;
           }>;
         if (job.stage === "deferred") {
+          const invalidReplan = latestReplanAttempt?.status === "interrupted"
+            && latestReplanAttempt.errorCode === "model_contract_invalid";
           const expectedDeferReason = decision.disposition === "defer"
             ? decision.reason
-            : "replan_capacity";
+            : invalidReplan ? "replan_invalid" : "replan_capacity";
           if (
             proposalRows.length !== 0 || job.proposalId !== null ||
             job.deferReason !== expectedDeferReason || replanned !== null ||

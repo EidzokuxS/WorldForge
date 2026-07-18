@@ -700,7 +700,7 @@ describe("Campaign Play actor replanner", () => {
       .toEqual({ count: 1 });
   });
 
-  it("rejects a plan that turns an offer into another actor's completed work", async () => {
+  it("defers an ungrounded replan without interrupting the player turn", async () => {
     const { handle, token, jobId } = createReplanFixture();
     const generateObject = vi.fn(async (request: { prompt: string }) => {
       if (request.prompt.includes("ACTOR_PLAN_REVIEW\n")) {
@@ -756,8 +756,9 @@ describe("Campaign Play actor replanner", () => {
     });
 
     expect(outcome).toEqual({
-      kind: "interrupted",
+      kind: "deferred",
       jobId,
+      reason: "replan_invalid",
       errorCode: "model_contract_invalid",
       workerEpoch: 1,
     });
@@ -781,9 +782,16 @@ describe("Campaign Play actor replanner", () => {
       WHERE campaign_id = ? AND actor_id = 'actor-b' AND plan_id <> 'actor-replanner-plan'`).get(
         CAMPAIGN_ID,
       )).toEqual({ count: 0 });
+    expect(createCampaignPlayActorScheduler(handle).listTurnJobs("turn-player")[0])
+      .toMatchObject({ stage: "deferred", deferReason: "replan_invalid" });
+    expect(handle.sqlite.prepare(`SELECT p.status, s.next_act_at_world_time_minutes AS nextActAt,
+        s.last_act_at_world_time_minutes AS lastActAt, s.agency_debt AS agencyDebt
+      FROM campaign_play_actor_plans p JOIN campaign_play_actor_schedules s ON s.plan_id = p.plan_id
+      WHERE p.campaign_id = ? AND p.plan_id = 'actor-replanner-plan'`).get(CAMPAIGN_ID))
+      .toEqual({ status: "completed", nextActAt: 15, lastActAt: null, agencyDebt: 1 });
   });
 
-  it("interrupts a reverse-route move before replacing the active schedule plan", async () => {
+  it("defers a reverse-route move before replacing the active schedule plan", async () => {
     const { handle, token, jobId } = createReplanFixture();
     const generateObject = vi.fn(async (request: { prompt: string }) => ({
       object: reverseMoveProposalFromPrompt(request.prompt),
@@ -808,14 +816,16 @@ describe("Campaign Play actor replanner", () => {
     });
 
     expect(outcome).toEqual({
-      kind: "interrupted",
+      kind: "deferred",
       jobId,
+      reason: "replan_invalid",
       errorCode: "model_contract_invalid",
       workerEpoch: 1,
     });
     expect(createCampaignPlayActorScheduler(handle).listTurnJobs("turn-player")[0])
       .toMatchObject({
-        stage: "interrupted",
+        stage: "deferred",
+        deferReason: "replan_invalid",
         admittedPlanId: "actor-replanner-plan",
         planId: "actor-replanner-plan",
       });
@@ -834,7 +844,7 @@ describe("Campaign Play actor replanner", () => {
       )).toEqual({ count: 0 });
   });
 
-  it("interrupts a non-move step aimed outside the actor's current scene", async () => {
+  it("defers a non-move step aimed outside the actor's current scene", async () => {
     const { handle, token, jobId } = createReplanFixture();
     const generateObject = vi.fn(async (request: { prompt: string }) => ({
       object: remoteNonMoveProposalFromPrompt(request.prompt),
@@ -859,14 +869,16 @@ describe("Campaign Play actor replanner", () => {
     });
 
     expect(outcome).toEqual({
-      kind: "interrupted",
+      kind: "deferred",
       jobId,
+      reason: "replan_invalid",
       errorCode: "model_contract_invalid",
       workerEpoch: 1,
     });
     expect(createCampaignPlayActorScheduler(handle).listTurnJobs("turn-player")[0])
       .toMatchObject({
-        stage: "interrupted",
+        stage: "deferred",
+        deferReason: "replan_invalid",
         admittedPlanId: "actor-replanner-plan",
         planId: "actor-replanner-plan",
       });

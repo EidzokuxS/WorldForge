@@ -701,7 +701,7 @@ describe("Campaign Play core and Rulebook storage", () => {
       .get() as { sql: string };
     expect(after.sql).toContain("job.defer_reason = 'actor_capacity'");
     expect(opened.sqlite.prepare(`SELECT max(created_at) AS latest
-      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_784_290_350_130 });
+      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_784_405_611_560 });
   });
 
   it("adds core play storage to an accepted Campaign World without changing provenance", () => {
@@ -2109,7 +2109,7 @@ describe("Campaign Play core and Rulebook storage", () => {
         UPDATE campaign_play_actor_jobs
         SET stage = ?, completed_at = 1924
         WHERE job_id = 'job-agent-one'
-      `).run(terminalStage)).toThrow();
+      `).run(terminalStage), terminalStage).toThrow();
     }
     handle.sqlite.prepare(`
       UPDATE campaign_play_actor_jobs

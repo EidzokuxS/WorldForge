@@ -11,6 +11,7 @@ import {
   type CampaignPlayEntityRef,
 } from "./contracts.js";
 import {
+  calculateCampaignPlayActorNextDueTime,
   createCampaignPlayActorScheduler,
   type CampaignPlayActorFrame,
 } from "./actor-scheduler.js";
@@ -64,6 +65,13 @@ export interface InterruptExpiredCampaignPlayActorReplanRequest {
 export type CampaignPlayActorReplanOutcome =
   | { kind: "replanned"; jobId: string; plan: CampaignPlayActorPlan; workerEpoch: number }
   | {
+      kind: "deferred";
+      jobId: string;
+      reason: "replan_invalid";
+      errorCode: "model_contract_invalid";
+      workerEpoch: number;
+    }
+  | {
       kind: "interrupted";
       jobId: string;
       errorCode:
@@ -110,8 +118,10 @@ interface ReplanCompilationFrame {
 
 interface ScheduleRow {
   scheduleId: string;
+  planId: string;
   nextActAtWorldTimeMinutes: number;
   lastActAtWorldTimeMinutes: number | null;
+  cadenceMinutes: number;
   agencyDebt: number;
 }
 
@@ -883,6 +893,34 @@ export function createCampaignPlayActorReplanner(
         const schemaOutcome = errorCode === "model_contract_invalid" || errorCode === "stage_budget_exceeded"
           ? "invalid" as const
           : "transport_error" as const;
+        const rejectedSchedule = errorCode === "model_contract_invalid"
+          ? (() => {
+              const row = handle.sqlite.prepare(`SELECT s.schedule_id AS scheduleId,
+                s.plan_id AS planId,
+                s.next_act_at_world_time_minutes AS nextActAtWorldTimeMinutes,
+                s.last_act_at_world_time_minutes AS lastActAtWorldTimeMinutes,
+                s.agency_debt AS agencyDebt, p.cadence_minutes AS cadenceMinutes
+                FROM campaign_play_actor_schedules s
+                JOIN campaign_play_actor_plans p
+                  ON p.campaign_id = s.campaign_id AND p.plan_id = s.plan_id
+                WHERE s.campaign_id = ? AND s.actor_id = ?`).get(
+                  handle.campaignId,
+                  frame.actorId,
+                ) as ScheduleRow | undefined;
+              if (!row || row.planId !== frame.plan.planId) return null;
+              return {
+                row,
+                transition: calculateCampaignPlayActorNextDueTime({
+                  settledWorldTimeMinutes: frame.worldTimeMinutes,
+                  cadenceMinutes: row.cadenceMinutes,
+                  lastActAtWorldTimeMinutes: row.lastActAtWorldTimeMinutes,
+                  agencyDebt: row.agencyDebt,
+                  outcome: "deferred",
+                }),
+              };
+            })()
+          : null;
+        const deferInvalidReplan = rejectedSchedule !== null;
         try {
           requireTurnLease(handle, request.token, interruptedAt);
         } catch {
@@ -891,10 +929,18 @@ export function createCampaignPlayActorReplanner(
         turnRepository.commitActorTransition({
           token: request.token,
           leaseMode: "live",
-          publicInterruption: true,
+          publicInterruption: !deferInvalidReplan,
           worldVersionAdvance: 0,
-          mutationId: stableId("actor-job-event", { jobId: request.jobId, stage: "replan_interrupted", workerEpoch }),
-          protectedPayloadHash: hashCampaignPlayProjection({ errorCode, actorWorkerEpoch: workerEpoch }),
+          mutationId: stableId("actor-job-event", {
+            jobId: request.jobId,
+            stage: deferInvalidReplan ? "replan_deferred" : "replan_interrupted",
+            workerEpoch,
+          }),
+          protectedPayloadHash: hashCampaignPlayProjection({
+            errorCode,
+            actorWorkerEpoch: workerEpoch,
+            outcome: deferInvalidReplan ? "deferred" : "interrupted",
+          }),
           committedAt: interruptedAt,
           mutate(context) {
             const stage = context.sqlite.prepare(`SELECT status FROM campaign_play_model_stages
@@ -922,19 +968,61 @@ export function createCampaignPlayActorReplanner(
               stageId,
               workerEpoch,
             );
-            const interrupted = context.sqlite.prepare(`UPDATE campaign_play_actor_jobs
-              SET stage = 'interrupted'
-              WHERE job_id = ? AND campaign_id = ? AND stage = 'claimed'
-                AND worker_epoch = ? AND claim_turn_worker_epoch = ?`).run(
-              request.jobId, context.campaignId,
-              workerEpoch, request.token.epoch,
-            );
-            if (modelUpdate.changes !== 1 || interrupted.changes !== 1) {
+            let terminalChanges: number;
+            if (deferInvalidReplan) {
+              const terminal = context.sqlite.prepare(`UPDATE campaign_play_actor_jobs
+                SET stage = 'deferred', defer_reason = 'replan_invalid', completed_at = ?
+                WHERE job_id = ? AND campaign_id = ? AND stage = 'claimed'
+                  AND proposal_id IS NULL AND worker_epoch = ?
+                  AND claim_turn_worker_epoch = ?`).run(
+                  interruptedAt,
+                  request.jobId,
+                  context.campaignId,
+                  workerEpoch,
+                  request.token.epoch,
+                );
+              terminalChanges = terminal.changes;
+              const scheduleUpdate = context.sqlite.prepare(`UPDATE campaign_play_actor_schedules SET
+                next_act_at_world_time_minutes = ?, last_act_at_world_time_minutes = ?,
+                agency_debt = ?, updated_at = ?
+                WHERE schedule_id = ? AND campaign_id = ? AND actor_id = ? AND plan_id = ?`).run(
+                  rejectedSchedule.transition.nextActAtWorldTimeMinutes,
+                  rejectedSchedule.transition.lastActAtWorldTimeMinutes,
+                  rejectedSchedule.transition.agencyDebt,
+                  interruptedAt,
+                  rejectedSchedule.row.scheduleId,
+                  context.campaignId,
+                  frame.actorId,
+                  rejectedSchedule.row.planId,
+                );
+              if (scheduleUpdate.changes !== 1) {
+                throw new CampaignPlayActorReplannerError("replan_state_invalid");
+              }
+            } else {
+              terminalChanges = context.sqlite.prepare(`UPDATE campaign_play_actor_jobs
+                SET stage = 'interrupted'
+                WHERE job_id = ? AND campaign_id = ? AND stage = 'claimed'
+                  AND worker_epoch = ? AND claim_turn_worker_epoch = ?`).run(
+                  request.jobId,
+                  context.campaignId,
+                  workerEpoch,
+                  request.token.epoch,
+                ).changes;
+            }
+            if (modelUpdate.changes !== 1 || terminalChanges !== 1) {
               throw new CampaignPlayActorReplannerError("replan_epoch_lost");
             }
           },
         });
-        return { kind: "interrupted", jobId: request.jobId, errorCode, workerEpoch };
+        return deferInvalidReplan
+          ? {
+              kind: "deferred",
+              jobId: request.jobId,
+              reason: "replan_invalid",
+              errorCode: "model_contract_invalid",
+              workerEpoch,
+            }
+          : { kind: "interrupted", jobId: request.jobId, errorCode, workerEpoch };
       }
     },
   };

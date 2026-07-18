@@ -205,14 +205,34 @@ function openingProposal(actorCadenceMinutes = 1): CampaignPlayOpeningProposal {
       actorId,
       primaryGoalId: goalId,
       cadenceMinutes: actorCadenceMinutes,
-      steps: [{
-        intent,
-        observableTrace: suffix === "b"
-          ? "Fresh sealing wax and torn binding thread mark a ledger removed in haste."
-          : "Fresh work marks show that someone acted here recently.",
-        possessionOutcome: { kind: "none" as const },
-        elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
-      }],
+      steps: [
+        {
+          intent,
+          observableTrace: suffix === "b"
+            ? "Fresh sealing wax and torn binding thread mark a ledger removed in haste."
+            : "Fresh work marks show that someone acted here recently.",
+          possessionOutcome: { kind: "none" as const },
+          elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
+        },
+        {
+          intent: {
+            ...intent,
+            method: `Check local evidence before advancing ${goalId}`,
+          },
+          observableTrace: "Sorted notes and disturbed tools show that evidence was checked in place.",
+          possessionOutcome: { kind: "none" as const },
+          elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
+        },
+        {
+          intent: {
+            ...intent,
+            method: `Commit the next grounded action toward ${goalId}`,
+          },
+          observableTrace: "A fresh notation records the next grounded action in the ongoing work.",
+          possessionOutcome: { kind: "none" as const },
+          elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
+        },
+      ],
     };
   });
   return {
@@ -360,7 +380,9 @@ function narratorActionSelections(packet: CampaignPlayNarratorPacket) {
     : [requiredReplyIndex, ...indexes.filter((intentIndex) => intentIndex !== requiredReplyIndex)];
   return orderedIndexes.slice(0, CAMPAIGN_PLAY_LIMITS.suggestedActions).map((intentIndex) => ({
     intentIndex,
-    detail: "the immediate situation",
+    detail: packet.availableIntents[intentIndex]?.kind === "move"
+      ? null
+      : "the immediate situation",
   }));
 }
 
@@ -1533,6 +1555,11 @@ describe("Campaign Play player-action turn runtime", () => {
             locationId: "location-a",
             validUntilWorldTimeMinutes: 1_441,
           },
+          {
+            channel: "local_aftermath",
+            locationId: "location-a",
+            validUntilWorldTimeMinutes: 1_441,
+          },
         ]);
   });
 
@@ -1663,7 +1690,7 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(narrator.narrate).toHaveBeenCalledTimes(2);
   });
 
-  it("admits the next action when the public moment fills both observation windows", async () => {
+  it("admits the next action when a known observation is outside both packet windows", async () => {
     const { handle } = await createReadyCampaignWithOpening(10_000);
     const time = fixedClock(7_500);
     const runtime = turnRuntime(
@@ -1726,7 +1753,9 @@ describe("Campaign Play player-action turn runtime", () => {
       handle: firstObservationHandle,
       kind: "observation",
     }));
-    expect(frame.authority.knownWorldEventIds.length).toBeGreaterThan(16);
+    expect(frame.authority.knownWorldEventIds.length).toBeGreaterThan(
+      CAMPAIGN_PLAY_LIMITS.newObservations,
+    );
     expect(frame.authority.knownWorldEventIds.length).toBeLessThanOrEqual(
       CAMPAIGN_PLAY_LIMITS.newObservations + CAMPAIGN_PLAY_LIMITS.continuityEntries,
     );
@@ -2159,8 +2188,61 @@ describe("Campaign Play player-action turn runtime", () => {
     ]);
   });
 
+  it("defers an invalid background replan and continues the committed player turn", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening();
+    const time = fixedClock(3_800);
+    let providerCalls = 0;
+    const actorReplanner = createCampaignPlayActorReplanner(handle, {
+      now: time.clock.now,
+      generateObject: (async () => {
+        providerCalls += 1;
+        return {
+          object: { unexpected: true },
+          trace: actorReplanTrace(),
+        };
+      }) as unknown as typeof safeGenerateObject,
+    });
+    const runtime = turnRuntime(
+      handle,
+      time,
+      judgeFixture("deterministic"),
+      gameMasterFixture(),
+      { actorReplanner },
+    );
+    const admission = runtime.admitAction({
+      request: admissionRequest(state, "actor-replanner-invalid"),
+      submittedAt: 3_800,
+    });
+    await advanceToPrimarySettlement(runtime, time, admission.turnId);
+    time.advance();
+    await runtime.runNextStage(admission.turnId);
+    const jobId = forceFirstActorReplan(handle, time, admission.turnId);
+
+    time.advance();
+    await runtime.runNextStage(admission.turnId);
+
+    expect(providerCalls).toBe(1);
+    expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
+      .find((job) => job.jobId === jobId)).toMatchObject({
+        stage: "deferred",
+        deferReason: "replan_invalid",
+        workerEpoch: 1,
+      });
+    expect(handle.sqlite.prepare(`SELECT status, error_code AS errorCode
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'actor_replanner'`).get(
+        CAMPAIGN_ID,
+        admission.turnId,
+      )).toEqual({ status: "interrupted", errorCode: "model_contract_invalid" });
+    expect(runtime.loadTurn(admission.turnId)).toMatchObject({
+      stage: "primary_settled",
+      workerLeaseOwner: null,
+    });
+
+    await advanceUntilStage(runtime, time, admission.turnId, "actors_settled");
+  });
+
   it.each([
-    ["schema", "model_contract_invalid"],
     ["budget", "stage_budget_exceeded"],
     ["persistence", "persistence_failed"],
   ] as const)(
@@ -2178,9 +2260,7 @@ describe("Campaign Play player-action turn runtime", () => {
             trace.usage = { inputTokens: 1_001, outputTokens: 25, totalTokens: 1_026 };
           }
           return {
-            object: providerCalls === 1 && failure === "schema"
-              ? { unexpected: true }
-              : actorReplanModelObjectFromPrompt(request.prompt),
+            object: actorReplanModelObjectFromPrompt(request.prompt),
             trace,
           };
         }) as unknown as typeof safeGenerateObject,

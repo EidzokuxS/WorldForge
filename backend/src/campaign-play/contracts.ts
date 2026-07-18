@@ -3146,7 +3146,12 @@ export const campaignPlayActorJobSchema = z.object({
   claimTurnWorkerEpoch: positiveIntegerSchema.nullable(),
   stage: campaignPlayActorJobStageSchema,
   proposalId: idSchema.nullable(),
-  deferReason: z.enum(["incapacitated", "actor_capacity", "replan_capacity"]).nullable(),
+  deferReason: z.enum([
+    "incapacitated",
+    "actor_capacity",
+    "replan_capacity",
+    "replan_invalid",
+  ]).nullable(),
   createdAt: timestampSchema,
   completedAt: timestampSchema.nullable(),
 }).strict().superRefine((job, context) => {
