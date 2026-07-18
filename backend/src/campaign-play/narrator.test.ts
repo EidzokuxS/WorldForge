@@ -660,10 +660,14 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Never turn an NPC premise into narrator fact or an action detail that adopts it");
     expect(prompt).toContain("an accepted your_action consequence in the packet explicitly establishes that experience");
     expect(prompt).toContain("Preserve the epistemic status of every source used by a detail");
-    expect(prompt).toContain("No detail may restate an unconfirmed condition as an existing fact");
+    expect(prompt).toContain("Any claim made only by an NPC proves that the NPC made the claim");
+    expect(prompt).toContain("even when stated without a hedge");
+    expect(prompt).toContain("Unless another packet source independently corroborates the claim");
+    expect(prompt).toContain("preserve attribution by asking about the claim");
+    expect(prompt).toContain("No detail may restate an unconfirmed claim or condition as an existing fact");
     expect(prompt).toContain("Preserve the condition in actionable grammar");
     expect(prompt).toContain('Do not use possessive or definite wording such as "your sister\'s passage terms"');
-    expect(prompt).toContain("must not relocate a hypothetical into that destination");
+    expect(prompt).toContain("must not relocate a hypothetical or NPC-only claim into that destination");
     expect(prompt).toContain("without claiming what will be found there");
     expect(prompt).toContain("Every concrete claim in a beat must be supported");
     expect(prompt).toContain("Never guess a person's gender or pronouns from their name, title, role, or appearance");
