@@ -343,6 +343,12 @@ describe("Campaign Play narrator", () => {
       ],
     }).success).toBe(false);
     expect(String(options.prompt)).toContain("REQUIRED_REPLY_INTENT_INDEX=1");
+    expect(String(options.prompt)).toContain(
+      "the beat carrying that observationIndex must name that actor",
+    );
+    expect(String(options.prompt)).toContain(
+      "the prose must make that reply legible before the choices appear",
+    );
     expect(String(options.prompt)).toContain("Set detail to null for move");
     expect(String(options.prompt)).toContain("An ordinary move has no model-authored detail");
   });
