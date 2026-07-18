@@ -631,6 +631,10 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Do not infer a changed object position when the packet does not state one");
     expect(prompt).toContain("Do not point an intent back at an observation, question, or attempt that already resolved");
     expect(prompt).toContain("Do not disguise the old action with synonyms");
+    expect(prompt).toContain("A click-to-submit suggestion cannot require the player to supply a missing fact");
+    expect(prompt).toContain("degree of disclosure, or another player-owned value absent from the packet");
+    expect(prompt).toContain('Never summarize missing values as "give the details" or "answer the question"');
+    expect(prompt).toContain("freeform input remains available");
     expect(prompt).toContain("Purposes label a beat's work. Do not emit one beat for every purpose");
     expect(prompt).toContain("Prefer one beat");
     expect(prompt).toContain("combine the action result and its immediately visible aftermath in one beat");
