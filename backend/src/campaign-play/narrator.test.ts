@@ -478,6 +478,100 @@ describe("Campaign Play narrator", () => {
     })).not.toThrow();
   });
 
+  it("requires typed observation attribution before naming a visible actor", () => {
+    const consequence = {
+      observationHandle: "observation_receding_footsteps",
+      performingActorHandle: null,
+      performingActorName: null,
+      whatChanged: "Heavy footsteps recede west and do not return during the wait.",
+      whereOrRoute: "Salt Harbor",
+      worldTimeLabel: "Day 1, 00:28",
+      causalCue: "your_action" as const,
+    };
+    const packet: CampaignPlayNarratorPacket = {
+      ...packetFixture(),
+      turnKind: "player_action",
+      openingContext: null,
+      sourceMoment: "Mara Venn stands beside you in the rain.",
+      actionContext: {
+        submittedText: "Wait and listen for five minutes.",
+        intentKind: "observe",
+        disposition: "deterministic",
+        result: "success",
+        clarificationQuestion: null,
+      },
+      newObservations: [{
+        observationHandle: consequence.observationHandle,
+        title: "Your action",
+        text: consequence.whatChanged,
+        whereOrRoute: consequence.whereOrRoute,
+        worldTimeLabel: consequence.worldTimeLabel,
+        consequence,
+      }],
+      consequences: [consequence],
+      observationSubjects: [],
+      elapsedMinutes: 5,
+    };
+    const proposal: CampaignPlayNarratorProposal = {
+      actionSelections: [{ intentIndex: 0, detail: "the receding footsteps" }],
+      beats: [{
+        purpose: "consequence",
+        observationIndexes: [0],
+        text: "Mara's heavy footsteps recede west and do not return.",
+      }],
+    };
+    const narrator = createCampaignPlayNarrator();
+
+    expect(() => narrator.compile({
+      narrationId: "narration-unattributed-footsteps",
+      packet,
+      proposal,
+      createdAt: 1_000,
+    })).toThrowError(expect.objectContaining({ code: "narration_invalid" }));
+    expect(() => narrator.compile({
+      narrationId: "narration-anonymous-footsteps",
+      packet,
+      proposal: {
+        ...proposal,
+        beats: [{
+          ...proposal.beats[0]!,
+          text: "Heavy footsteps recede west and do not return during the wait.",
+        }],
+      },
+      createdAt: 1_000,
+    })).not.toThrow();
+    expect(() => narrator.compile({
+      narrationId: "narration-bound-footsteps",
+      packet: {
+        ...packet,
+        observationSubjects: [{
+          observationHandle: consequence.observationHandle,
+          actors: [{ handle: "actor_public_keeper", name: "Mara Venn" }],
+        }],
+      },
+      proposal,
+      createdAt: 1_000,
+    })).not.toThrow();
+    expect(() => narrator.compile({
+      narrationId: "narration-place-name-collision",
+      packet: {
+        ...packet,
+        currentLocation: {
+          ...packet.currentLocation,
+          name: "Mara Quay",
+        },
+      },
+      proposal: {
+        ...proposal,
+        beats: [{
+          ...proposal.beats[0]!,
+          text: "Rain strikes Mara Quay while the footsteps fade west.",
+        }],
+      },
+      createdAt: 1_000,
+    })).not.toThrow();
+  });
+
   it("allows opening pressure to remain part of orientation without a consequence beat", () => {
     const narrator = createCampaignPlayNarrator();
     const proposal: CampaignPlayNarratorProposal = {
@@ -718,6 +812,8 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("later current-turn observation attributes visible action to an actor");
     expect(prompt).toContain("do not retain the stale absence claim");
     expect(prompt).toContain("observationSubjects, when present, is code-owned identity binding");
+    expect(prompt).toContain("Actorless sounds, traces, silhouettes, and motion remain unattributed");
+    expect(prompt).toContain("Resemblance is not identity");
     expect(prompt).toContain('"observationSubjects":[]');
     expect(prompt).toContain("the bound actor, never the player");
     expect(prompt).toContain("Do not replace a bound actor with \"you\"");
