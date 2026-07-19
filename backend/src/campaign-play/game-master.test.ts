@@ -494,6 +494,15 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain(
       'CURRENT_EXACT_SCENE={"locationName":"North Harbor Gate","description":"A guarded passage gate."}',
     );
+    expect(String(options.prompt)).toContain(
+      'LOCAL_SCENE_AUTHORITY={"forbiddenNames":["North Harbor Gate"],"presentPeople":[]}',
+    );
+    expect(String(options.prompt)).toContain(
+      "Its name must differ case-insensitively from every LOCAL_SCENE_AUTHORITY.forbiddenNames entry",
+    );
+    expect(String(options.prompt)).toContain(
+      "presentPeople is the complete named-person roster permitted in that scene",
+    );
     expect(String(options.prompt)).toContain("Order movement effects as origin interaction");
     expect(String(options.prompt)).toContain("current location at that effect's chronological position");
     expect(String(options.prompt)).toContain("PLAYER_MOVEMENT=null");
@@ -1313,6 +1322,9 @@ describe("Campaign Play Game Master", () => {
     );
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
       'DESTINATION_SCENE={"locationName":"South Harbor Market","description":"A market beyond the passage.","presentPeople":["Mara Quay"]}',
+    );
+    expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
+      'LOCAL_SCENE_AUTHORITY={"forbiddenNames":["North Harbor Gate","South Harbor Market"],"presentPeople":[]}',
     );
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
       "Do not call the scene empty, move a listed person behind an unentered boundary, or contradict their presence",
