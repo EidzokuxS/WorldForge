@@ -1288,6 +1288,30 @@ function compile(
   const parsed = campaignPlayGameMasterProposalSchema.safeParse(rawProposal);
   if (!parsed.success) throw new CampaignPlayGameMasterError("model_contract_failed", null, null, { cause: parsed.error });
   const proposal = parsed.data;
+  const targetedNonplayerActorHandles = ruling.normalizedIntent.targets.flatMap((target) => {
+    if (target.kind !== "actor") return [];
+    const reference = map.get(target.handle);
+    return reference?.kind === "actor" && reference.id !== frame.authority.actorId
+      ? [target.handle]
+      : [];
+  });
+  if (ruling.normalizedIntent.kind === "attempt" && targetedNonplayerActorHandles.length > 0) {
+    const firstActorlessResultIndex = proposal.effects.findIndex((effect) =>
+      effect.kind === "record_world_event"
+      && (effect.eventClass === "discovery" || effect.eventClass === "scene")
+      && effect.performingActorHandle === null);
+    const everyTargetRespondsFirst = targetedNonplayerActorHandles.every((actorHandle) => {
+      const responseIndex = proposal.effects.findIndex((effect) =>
+        effect.kind === "record_world_event"
+        && (effect.eventClass === "dialogue" || effect.eventClass === "interaction")
+        && effect.performingActorHandle === actorHandle);
+      return responseIndex >= 0
+        && (firstActorlessResultIndex < 0 || responseIndex < firstActorlessResultIndex);
+    });
+    if (!everyTargetRespondsFirst) {
+      throw new CampaignPlayGameMasterError("model_contract_failed", null);
+    }
+  }
   const movement = canonicalMovement(frame, ruling, resolution, map);
   const targetedRouteHandles = ruling.normalizedIntent.targets
     .filter((target) => target.kind === "route")
@@ -1627,6 +1651,15 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
   const movement = canonicalMovement(frame, ruling, resolution, map);
   const arrivalScene = destinationScene(frame, movement);
   const directives = actorDirectives(frame, ruling, map);
+  const requiredActorResponseHandles = effectiveRuling.normalizedIntent.kind === "attempt"
+    ? effectiveRuling.normalizedIntent.targets.flatMap((target) => {
+        if (target.kind !== "actor") return [];
+        const reference = map.get(target.handle);
+        return reference?.kind === "actor" && reference.id !== frame.authority.actorId
+          ? [target.handle]
+          : [];
+      })
+    : [];
   const currentPlacement = frame.rulebookFrame.placements.find((placement) =>
     placement.actorId === frame.authority.actorId && placement.placementKind === "present");
   const currentLocation = currentPlacement === undefined ? undefined
@@ -1689,6 +1722,7 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     "ACTOR_CONTINUITY is protected causal truth about visible actors' own completed actions and outranks conflicting earlier dialogue in VISIBLE_FACTS. Maintain identity and causality: an actor must not deny, misattribute, or forget an action listed under its handle. Reconcile a prior denial instead of repeating it. Use this truth only when the exact PLAYER_INTENT and RULING make it relevant; do not volunteer unrelated protected history. An absent action means unknown, not that the actor did nothing.",
     "ACTOR_DIRECTIVES is protected roleplay authority for each agent actor targeted by PLAYER_INTENT. Use the person's profile, present conditions, active goals, and relations to choose what they actually say or do. These directives establish characterization and decision pressure, not player knowledge or permission to disclose protected facts. Never quote a hidden goal or motive merely because it appears there.",
     "For an attempt with nonplayer actor targets, their response is part of the outcome. Use ACTOR_DIRECTIVES and a dialogue or interaction effect before any actorless physical result. A successful roll resolves the player's effort; it does not create permission or cooperation.",
+    "REQUIRED_ACTOR_RESPONSES is the complete code-owned list for this proposal. For every listed handle, include one dialogue or interaction record_world_event with that exact performingActorHandle before the first actorless discovery or scene event. An empty list requires none. Omitting, delaying, or replacing a required response with actorless prose invalidates the whole proposal.",
     "CANONICAL_PEOPLE is the complete durable person roster at the start of this call, not permission to disclose anyone. Mention a listed person only when VISIBLE_FACTS, ACTOR_CONTINUITY, or ACTOR_DIRECTIVES supports the reference. A person name outside this list does not identify an actor, even when SOURCE_MOMENT or prior prose mentions it. Do not repeat that name as established identity. Unless the materialize_support_actor contract below applies, an unlisted resident cannot own a job, payment, permission, appointment, access, or future reply.",
     "Use materialize_support_actor only for a contact with unnamed ambient residents in CURRENT_EXACT_SCENE, with no actor target, when one concrete person voluntarily gives an identity-bearing reply or takes a specific continuing stake that must persist beyond this paragraph. Silence, refusal without identity, a passing glance, crowd noise, generic service, or scenery is not enough. Return at most one. Set actorHandle exactly to introduced-support-actor. Give the person a stable name and compact summary, then state one goal, the motivation behind it, and one stationary next action that belongs to the person rather than the player. nextIntentKind must be observe, contact, wait, or attempt; move is not allowed. nextAction may be omitted only when goal already states the concrete action. observableTrace is the sensory evidence that next action would leave in the scene. cadenceMinutes is when this person may next act. Put materialize_support_actor immediately before one dialogue or interaction record_world_event whose performingActorHandle is introduced-support-actor and whose affectedHandles includes that handle. The event contains the person's actual words or action. Code derives every identity, placement, role, priority, plan step, timing bounds, scope, version, and receipt; it persists the goal and plan and admits the person to the normal scheduler.",
     "For contact with a roster person, write that targeted person's actual spoken reply, silence, gesture, or action in the record_world_event summary and copy the person's handle into performingActorHandle. The performer must be one of PLAYER_INTENT's actor targets. The only exception is introduced-support-actor immediately after its materialize_support_actor effect. Do not replace the exchange with audit labels such as common knowledge, offers no interpretation, nothing further, or has nothing to share. If the person withholds something, show the words or action used to withhold it. A concrete deflection, counterquestion, or condition is useful when ACTOR_DIRECTIVES support one.",
@@ -1751,6 +1785,7 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     `VISIBLE_FACTS=${JSON.stringify(frame.visibleFacts)}`,
     `ACTOR_CONTINUITY=${JSON.stringify(frame.actorContinuity)}`,
     `ACTOR_DIRECTIVES=${JSON.stringify(directives)}`,
+    `REQUIRED_ACTOR_RESPONSES=${JSON.stringify(requiredActorResponseHandles)}`,
     `CANONICAL_PEOPLE=${JSON.stringify(canonicalPersonNames)}`,
     `PLAYER_INTENT=${JSON.stringify(effectiveRuling.normalizedIntent)}`,
     `RULING=${JSON.stringify({ ...effectiveRuling, normalizedIntent: undefined })}`,

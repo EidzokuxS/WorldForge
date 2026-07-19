@@ -106,6 +106,12 @@ export const campaignPlayJudgeFrameSchema = z.object({
 const judgeProposalSchema = z.object({
   kind: z.enum(["observe", "move", "contact", "wait", "attempt"]),
   targets: z.array(campaignPlayVisibleTargetSchema).max(CAMPAIGN_PLAY_LIMITS.targets),
+  visibleActorReactions: z.array(z.object({
+    actorHandle: line(CAMPAIGN_PLAY_LIMITS.handle),
+    reaction: z.enum(["none", "immediate"]),
+    supportingVisibleFactHandle: line(CAMPAIGN_PLAY_LIMITS.handle).nullable(),
+    reason: line(CAMPAIGN_PLAY_LIMITS.shortText),
+  }).strict()).max(8),
   method: line(CAMPAIGN_PLAY_LIMITS.shortText).nullable(),
   stakes: line(CAMPAIGN_PLAY_LIMITS.shortText).nullable(),
   movementRouteHandle: line(CAMPAIGN_PLAY_LIMITS.handle).nullable(),
@@ -175,6 +181,22 @@ function judgeProposalSchemaForFrame(
   const routeHandles = frame.visibleFacts
     .filter((fact) => fact.kind === "route")
     .map((fact) => fact.handle);
+  const visibleNonplayerActorHandles = frame.visibleFacts
+    .filter((fact) => fact.kind === "actor" && fact.handle !== frame.playerActorHandle)
+    .map((fact) => fact.handle);
+  const visibleActorReactions = visibleNonplayerActorHandles.length === 0
+    ? z.array(z.object({
+        actorHandle: line(CAMPAIGN_PLAY_LIMITS.handle),
+        reaction: z.enum(["none", "immediate"]),
+        supportingVisibleFactHandle: line(CAMPAIGN_PLAY_LIMITS.handle).nullable(),
+        reason: line(CAMPAIGN_PLAY_LIMITS.shortText),
+      }).strict()).length(0)
+    : z.array(z.object({
+        actorHandle: visibleHandleSchema(visibleNonplayerActorHandles),
+        reaction: z.enum(["none", "immediate"]),
+        supportingVisibleFactHandle: visibleHandleSchema(visibleHandles).nullable(),
+        reason: line(CAMPAIGN_PLAY_LIMITS.shortText),
+      }).strict()).length(visibleNonplayerActorHandles.length);
   const frameSchema = judgeProposalSchema.extend({
     targets: z.array(campaignPlayVisibleTargetSchema.extend({
       handle: visibleHandleSchema(targetHandles),
@@ -184,6 +206,7 @@ function judgeProposalSchemaForFrame(
       : z.null(),
     citedVisibleFactHandles: z.array(visibleHandleSchema(visibleHandles))
       .max(CAMPAIGN_PLAY_LIMITS.citedFacts),
+    visibleActorReactions,
   });
   if (input?.source !== "suggested" || !input.frozenChoice) return frameSchema;
 
@@ -387,6 +410,7 @@ function prompt(frame: CampaignPlayJudgeFrame, input: CampaignPlayJudgeInput): s
     "Every targets entry must copy one exact {handle, kind} pair from TARGET_CATALOG. When a visible nonplayer actor explicitly participates in PLAYER_INPUT as an addressee, companion, or performer, copy that actor's exact pair into targets. For freeform movement with a named willing companion, include the movement destination and the companion actor in targets. For suggested movement, the frozen route already carries the destination: copy it and never add the destination location as another target. Citing the actor does not make the actor a target and cannot replace this entry. Observation and choice handles are not world targets: cite a relevant observation in citedVisibleFactHandles and target its visible location, actor, route, pressure, or possession instead. A detail described only in SOURCE_MOMENT or an observation has no separate object handle; never invent one. Every citation must be copied from CITATION_HANDLES.",
     "When a no-travel PLAYER_INPUT asks about the topology, direction, openness, restriction, toll, checkpoint, permission, credential, or access requirement of one visible route, copy that route's exact TARGET_CATALOG pair into targets. Keep a visible actor addressee as a separate actor target. Citing the route does not replace the route target.",
     "When a no-travel contact asks generally about passage, clearance, stamping, permits, tolls, or fees without identifying one visible route, keep only the spoken addressee or addressees in targets and copy every handle in VISIBLE_ROUTES to citedVisibleFactHandles. This supplies the complete local route authority for the answer; it does not authorize movement or establish any requirement.",
+    "Evaluate every visible nonplayer actor exactly once in visibleActorReactions. Use reaction immediate when the actor is an addressee, companion, performer, or when VISIBLE_FRAME, SOURCE_MOMENT, or ACTOR_CONTINUITY concretely establishes that the current action interferes with that actor's stated leverage, work, possession, safety, or immediate objective. This applies to the attempted interference itself even when its mechanical disposition is impossible or its result is no_effect. Copy the strongest supporting visible fact handle when one exists; otherwise use null. Use none with a null supporting handle for a mere witness or actor with no established stake. Never infer a hidden stake or include a remote actor. Code will add every immediate actor to normalized targets without changing the player's action or deciding the actor's response.",
     "Classify the action as deterministic, uncertain, impossible, or clarification_required.",
     "PLAYER_INPUT does not authorize the Judge or Game Master to choose for the player. When accepting, signing up, selecting, ordering, taking, or committing requires a choice between two or more visible mutually exclusive alternatives and PLAYER_INPUT does not name one, use clarification_required and ask which alternative. Never infer the choice from list order, convenience, equipment, goals, or likely benefit.",
     "PLAYER_INPUT is the entire authority for what the player does now. Accepting an offer authorizes only acceptance; it never authorizes unstated consideration or fulfillment. Do not add sharing information, revealing a secret, choosing what to disclose, giving an item, paying, promising terms, signing, or performing work unless PLAYER_INPUT states that exact action and content. When the other side requires a player-owned value or action that PLAYER_INPUT omits, use clarification_required and ask what the player provides before Game Master runs.",
@@ -413,7 +437,7 @@ function prompt(frame: CampaignPlayJudgeFrame, input: CampaignPlayJudgeInput): s
     "The reason field explains feasibility and result bounds. It must not add world facts beyond the supplied frames or resolve an uncertainty that the visible evidence leaves open.",
     "ACTOR_CONTINUITY outranks any conflicting earlier dialogue in VISIBLE_FRAME for authorship and actor knowledge of its own actions. Never cite a prior denial to erase an own action; Judge the current request from the accepted action truth and preserve any separate uncertainty, privacy, or willingness to disclose.",
     "Outcome tiers never create trust, permission, leverage, knowledge, or access absent from VISIBLE_FRAME or ACTOR_CONTINUITY. Absence of visible trust or leverage means none is established. A plain question claims only that the question is delivered; Judge that delivery deterministically and leave the response to the Game Master. For an attempt to persuade, coerce, or extract private information against resistance, cap resultBounds.maximum at limited unless supplied facts already justify fuller cooperation.",
-    "Return exactly these top-level keys: kind, targets, method, stakes, movementRouteHandle, possessionEffectAuthority, requiredObligationEffect, disposition, citedVisibleFactHandles, resultBounds, elapsedBounds, uncertainty, reason, clarificationQuestion. Spell citedVisibleFactHandles exactly; never use citedVisibleFacts or another key.",
+    "Return exactly these top-level keys: kind, targets, visibleActorReactions, method, stakes, movementRouteHandle, possessionEffectAuthority, requiredObligationEffect, disposition, citedVisibleFactHandles, resultBounds, elapsedBounds, uncertainty, reason, clarificationQuestion. Spell citedVisibleFactHandles and visibleActorReactions exactly; never use citedVisibleFacts or another alternate key.",
     "Return one strict schema object and no prose.",
     `SOURCE_MOMENT=${JSON.stringify(frame.sourceMoment)}`,
     `VISIBLE_FRAME=${JSON.stringify(visibleFrame)}`,
@@ -489,12 +513,56 @@ function compile(
   if (!inputResult.success) throw new CampaignPlayJudgeError("judge_input_invalid", null, { cause: inputResult.error });
   const proposalResult = judgeProposalSchema.safeParse(raw);
   if (!proposalResult.success) throw new CampaignPlayJudgeError("model_contract_failed", null, { cause: proposalResult.error });
-  const proposal = proposalResult.data;
+  let proposal = proposalResult.data;
   const visible = new Map(frameResult.data.visibleFacts.map((fact) => [fact.handle, fact.kind]));
   const choice = inputResult.data.choiceHandle;
   if (choice !== null && visible.get(choice) !== "choice") {
     throw new CampaignPlayJudgeError("judge_input_invalid", null);
   }
+  const visibleNonplayerActorHandles = frameResult.data.visibleFacts
+    .filter((fact) => fact.kind === "actor" && fact.handle !== frameResult.data.playerActorHandle)
+    .map((fact) => fact.handle);
+  const reactionHandles = proposal.visibleActorReactions.map((entry) => entry.actorHandle);
+  if (
+    reactionHandles.length !== visibleNonplayerActorHandles.length
+    || new Set(reactionHandles).size !== reactionHandles.length
+    || visibleNonplayerActorHandles.some((handle) => !reactionHandles.includes(handle))
+    || proposal.visibleActorReactions.some((entry) =>
+      (entry.reaction === "none" && entry.supportingVisibleFactHandle !== null)
+      || (entry.supportingVisibleFactHandle !== null && !visible.has(entry.supportingVisibleFactHandle)))
+  ) {
+    throw new CampaignPlayJudgeError("model_contract_failed", null);
+  }
+  const targetKeys = proposal.targets.map((target) => `${target.kind}:${target.handle}`);
+  if (new Set(targetKeys).size !== targetKeys.length) {
+    throw new CampaignPlayJudgeError("model_contract_failed", null);
+  }
+  const normalizedTargets = [...proposal.targets];
+  const normalizedCitations = [...proposal.citedVisibleFactHandles];
+  for (const entry of proposal.visibleActorReactions) {
+    if (entry.reaction !== "immediate") continue;
+    if (!normalizedTargets.some((target) =>
+      target.kind === "actor" && target.handle === entry.actorHandle)) {
+      normalizedTargets.push({ handle: entry.actorHandle, kind: "actor" });
+    }
+    if (
+      entry.supportingVisibleFactHandle !== null
+      && !normalizedCitations.includes(entry.supportingVisibleFactHandle)
+    ) {
+      normalizedCitations.push(entry.supportingVisibleFactHandle);
+    }
+  }
+  if (
+    normalizedTargets.length > CAMPAIGN_PLAY_LIMITS.targets
+    || normalizedCitations.length > CAMPAIGN_PLAY_LIMITS.citedFacts
+  ) {
+    throw new CampaignPlayJudgeError("model_contract_failed", null);
+  }
+  proposal = {
+    ...proposal,
+    targets: normalizedTargets,
+    citedVisibleFactHandles: normalizedCitations,
+  };
   const targetsAreVisible = proposal.targets.every((target) => visible.get(target.handle) === target.kind);
   const citationsAreVisible = proposal.citedVisibleFactHandles.every((handle) => visible.has(handle));
   if (!targetsAreVisible || !citationsAreVisible) throw new CampaignPlayJudgeError("model_contract_failed", null);
@@ -685,6 +753,7 @@ function compile(
   const {
     kind: _kind,
     targets: _targets,
+    visibleActorReactions: _visibleActorReactions,
     method: _method,
     stakes: _stakes,
     ...rulingProposal

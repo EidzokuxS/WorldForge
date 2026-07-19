@@ -96,6 +96,12 @@ function proposal(overrides: Record<string, unknown> = {}) {
   return {
     kind: "contact",
     targets: [{ handle: "actor-guard", kind: "actor" }],
+    visibleActorReactions: [{
+      actorHandle: "actor-guard",
+      reaction: "none",
+      supportingVisibleFactHandle: null,
+      reason: "No additional material reaction is under test.",
+    }],
     method: "Ask calmly",
     stakes: "Learn why the road is closed",
     movementRouteHandle: null,
@@ -352,6 +358,36 @@ describe("Campaign Play Judge", () => {
     })).success).toBe(false);
   });
 
+  it("normalizes a model-authored immediate actor reaction into targets even for no effect", () => {
+    const ruling = createCampaignPlayJudge().compile(frame(), {
+      originalText: "I pull at the locked gate while the guard watches.",
+      source: "freeform",
+      choiceHandle: null,
+    }, proposal({
+      kind: "attempt",
+      targets: [{ handle: "location-harbor", kind: "location" }],
+      visibleActorReactions: [{
+        actorHandle: "actor-guard",
+        reaction: "immediate",
+        supportingVisibleFactHandle: "observation-latch",
+        reason: "The attempted interference concerns the gate the guard just secured.",
+      }],
+      method: "Pull at the locked gate",
+      stakes: "Open the gate",
+      disposition: "impossible",
+      citedVisibleFactHandles: ["location-harbor"],
+      resultBounds: { minimum: "no_effect", maximum: "no_effect" },
+      elapsedBounds: { minimumMinutes: 0, maximumMinutes: 0 },
+      reason: "The secured latch prevents the gate from moving.",
+    }));
+
+    expect(ruling.normalizedIntent.targets).toEqual([
+      { handle: "location-harbor", kind: "location" },
+      { handle: "actor-guard", kind: "actor" },
+    ]);
+    expect(ruling.citedVisibleFactHandles).toContain("observation-latch");
+  });
+
   it("keeps a compound action's primary intent while authorizing its explicit route movement", () => {
     const ruling = createCampaignPlayJudge().compile(frame(), {
       originalText: "I cross the reef road and ask the guard what happened.",
@@ -438,11 +474,13 @@ describe("Campaign Play Judge", () => {
     };
     expect(() => judge.compile(ambientFrame, input, proposal({
       targets: [],
+      visibleActorReactions: [],
       citedVisibleFactHandles: ["location-harbor", "observation-presence"],
     })))
       .toThrow(expect.objectContaining({ code: "model_contract_failed" }));
     expect(judge.compile(ambientFrame, input, proposal({
       targets: [{ handle: "location-harbor", kind: "location" }],
+      visibleActorReactions: [],
       citedVisibleFactHandles: ["location-harbor", "observation-presence"],
     })).normalizedIntent).toMatchObject({
       kind: "contact",
@@ -450,6 +488,7 @@ describe("Campaign Play Judge", () => {
     });
     expect(judge.compile(ambientFrame, input, proposal({
       targets: [],
+      visibleActorReactions: [],
       disposition: "clarification_required",
       citedVisibleFactHandles: ["location-harbor", "observation-presence"],
       resultBounds: { minimum: "no_effect", maximum: "no_effect" },
@@ -556,6 +595,9 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("targets must always be a JSON array");
     expect(sentPrompt).toContain("copy FROZEN_CHOICE kind and every frozen target");
     expect(sentPrompt).toContain("visible nonplayer actors whose participation, consent, or reaction is material");
+    expect(sentPrompt).toContain("Evaluate every visible nonplayer actor exactly once in visibleActorReactions");
+    expect(sentPrompt).toContain("even when its mechanical disposition is impossible or its result is no_effect");
+    expect(sentPrompt).toContain("Code will add every immediate actor to normalized targets");
     expect(sentPrompt).toContain(
       "Never add a destination location or another route, location, pressure, possession, or the player actor",
     );
@@ -631,7 +673,7 @@ describe("Campaign Play Judge", () => {
       'ACTOR_CONTINUITY=[{"actorHandle":"actor-guard","recentOwnActions":[{"summary":"The guard inspected and locked the reef-road gate before the traveler arrived.","observableTrace":"Fresh oil and a new seal mark the gate latch."}]}]',
     );
     expect(sentPrompt).toContain("Return exactly these top-level keys");
-    expect(sentPrompt).toContain("Spell citedVisibleFactHandles exactly");
+    expect(sentPrompt).toContain("Spell citedVisibleFactHandles and visibleActorReactions exactly");
     expect(sentPrompt).toContain("never use citedVisibleFacts");
     expect(sentPrompt).toContain(
       "resultBounds.minimum and resultBounds.maximum must be the same literal result tier",

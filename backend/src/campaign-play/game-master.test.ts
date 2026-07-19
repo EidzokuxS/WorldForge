@@ -768,6 +768,8 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain(
       "For an attempt with nonplayer actor targets, their response is part of the outcome",
     );
+    expect(String(options.prompt)).toContain("REQUIRED_ACTOR_RESPONSES is the complete code-owned list");
+    expect(String(options.prompt)).toContain("Omitting, delaying, or replacing a required response with actorless prose invalidates the whole proposal");
     expect(String(options.prompt)).toContain(
       "A successful roll resolves the player's effort; it does not create permission or cooperation",
     );
@@ -995,6 +997,60 @@ describe("Campaign Play Game Master", () => {
       ...proposal,
       effects: [{ ...proposal.effects[0], performingActorHandle: "you" }],
     })).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+  });
+
+  it("requires a targeted actor to respond before an actorless attempt result", () => {
+    const attemptRuling = ruling({
+      normalizedIntent: {
+        originalText: "I pull at the latch the guard just secured.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "attempt",
+        targets: [
+          { handle: "here", kind: "location" },
+          { handle: "guard", kind: "actor" },
+        ],
+        method: "Pull at the secured latch",
+        stakes: "Open the gate",
+      },
+    });
+    const actorlessResult = {
+      kind: "record_world_event" as const,
+      eventClass: "discovery" as const,
+      performingActorHandle: null,
+      summary: "The latch holds fast under the pull.",
+      affectedHandles: ["here"],
+    };
+    expect(() => createCampaignPlayGameMaster().compile(
+      frame(),
+      attemptRuling,
+      resolution,
+      null,
+      { elapsedMinutes: 1, effects: [actorlessResult] },
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+
+    const response = {
+      kind: "record_world_event" as const,
+      eventClass: "interaction" as const,
+      performingActorHandle: "guard",
+      routeAccessClaims: [],
+      summary: "The guard plants one hand on the gate and orders you away from the latch.",
+      affectedHandles: ["guard"],
+    };
+    expect(createCampaignPlayGameMaster().compile(
+      frame(),
+      attemptRuling,
+      resolution,
+      null,
+      { elapsedMinutes: 1, effects: [response, actorlessResult] },
+    ).preflight.accepted).toBe(true);
+    expect(() => createCampaignPlayGameMaster().compile(
+      frame(),
+      attemptRuling,
+      resolution,
+      null,
+      { elapsedMinutes: 1, effects: [actorlessResult, response] },
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
   });
 
   it("binds route-targeted dialogue to the code-owned direct access state", () => {

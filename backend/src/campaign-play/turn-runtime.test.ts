@@ -578,6 +578,14 @@ function judgeFixture(disposition: Disposition, compoundDestinationName: string 
                 { handle: destination.handle, kind: "location" },
               ]
             : !target ? [] : [{ handle: target.handle, kind: "actor" }],
+        visibleActorReactions: request.frame.visibleFacts
+          .filter((fact) => fact.kind === "actor" && fact.handle !== request.frame.playerActorHandle)
+          .map((fact) => ({
+            actorHandle: fact.handle,
+            reaction: "none" as const,
+            supportingVisibleFactHandle: null,
+            reason: "No additional material reaction is under test.",
+          })),
         method: useChoice
           ? "Follow the selected opportunity"
           : useCompoundMovement ? "Take the route, then ask whoever is organizing crossings"
@@ -673,6 +681,14 @@ function ambientContactJudgeFixture() {
       const ruling = compiler.compile(request.frame, request.input, {
         kind: "contact",
         targets: [{ handle: request.frame.locationHandle, kind: "location" }],
+        visibleActorReactions: request.frame.visibleFacts
+          .filter((fact) => fact.kind === "actor" && fact.handle !== request.frame.playerActorHandle)
+          .map((fact) => ({
+            actorHandle: fact.handle,
+            reaction: "none" as const,
+            supportingVisibleFactHandle: null,
+            reason: "The contact is addressed to an unnamed ambient presence.",
+          })),
         method: "Offer an unnamed courier a free satchel inspection and ask their name.",
         stakes: "Find paid repair work before the next eastbound run.",
         movementRouteHandle: null,
@@ -1039,6 +1055,14 @@ describe("Campaign Play player-action turn runtime", () => {
         const ruling = judgeCompiler.compile(request.frame, request.input, {
           kind: "attempt",
           targets: [{ handle: possession.handle, kind: "possession" }],
+          visibleActorReactions: request.frame.visibleFacts
+            .filter((fact) => fact.kind === "actor" && fact.handle !== request.frame.playerActorHandle)
+            .map((fact) => ({
+              actorHandle: fact.handle,
+              reaction: "none" as const,
+              supportingVisibleFactHandle: null,
+              reason: "No visible actor participates in the possession spend.",
+            })),
           method: "Use the final repair roll on the damaged strap.",
           stakes: "Consume the repair roll while completing the repair.",
           movementRouteHandle: null,
