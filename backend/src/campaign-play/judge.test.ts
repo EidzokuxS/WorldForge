@@ -584,6 +584,11 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("directly uses a tool or consumable that is depleted or has no visible possession handle, classify it as impossible");
     expect(sentPrompt).toContain("A plain request for an item uses permitted acquire");
     expect(sentPrompt).toContain("authorize a permitted acquire instead of assuming either transfer or refusal");
+    expect(sentPrompt).toContain("Putting newly collected contents into a visible container possession");
+    expect(sentPrompt).toContain("require transform of the exact container handle");
+    expect(sentPrompt).toContain("never acquire the contents as a separate possession while leaving the container stack unchanged");
+    expect(sentPrompt).toContain("A plural or kit-like possession at quantity 1 cannot become one used container");
+    expect(sentPrompt).toContain("Transform the complete quantity-1 stack");
     expect(sentPrompt).toContain('Its exact shape is {"kind":"pay_actor_obligation"');
     expect(sentPrompt).toContain('"paymentPossessionHandle":"copied visible possession handle"');
     expect(sentPrompt).toContain("A request, offer, promise, quote, cargo movement, or narration without an authoritative transfer neither incurs nor pays debt");

@@ -1290,10 +1290,96 @@ describe("Campaign Play Game Master", () => {
     expect(options.schema.safeParse(acquisitionProposal).success).toBe(true);
     expect(String(options.prompt)).toContain('PERMITTED_RESOURCE_EFFECT_KINDS=["adjust_actor_possession"]');
     expect(String(options.prompt)).toContain("Use adjust_actor_possession whenever");
+    expect(String(options.prompt)).toContain("The transform name must identify the post-transform possession and must differ from the source possession name");
+    expect(String(options.prompt)).toContain("changing only the summary is invalid");
+    expect(String(options.prompt)).toContain("For a quantity-1 plural container or kit, name the whole retained set together with its new contents or state");
     expect(String(options.prompt)).toContain("Every non-null adjust_actor_possession name must be at most 120 characters");
     expect(String(options.prompt)).toContain("put state, contents, provenance, and other details in summary");
     expect(String(options.prompt)).not.toContain("Use incur_actor_obligation for");
     expect(String(options.prompt)).not.toContain("Use pay_actor_obligation for");
+  });
+
+  it("requires independent semantic review for a pure possession transform", async () => {
+    const sourceFrame = frame();
+    const possessionKey = deriveCampaignPlayPossessionKey("Specimen jars");
+    const possessionId = deriveCampaignPlayPossessionId(CAMPAIGN_ID, PLAYER_ID, possessionKey);
+    sourceFrame.visibleFacts.push({
+      handle: "specimen-jars",
+      kind: "possession",
+      summary: "Specimen jars: 1",
+    });
+    sourceFrame.handleBindings.push({
+      handle: "specimen-jars",
+      reference: { kind: "possession", id: possessionId },
+    });
+    sourceFrame.authority.authorizedRefs.push({ kind: "possession", id: possessionId });
+    sourceFrame.rulebookFrame.possessions.push({
+      possessionId,
+      actorId: PLAYER_ID,
+      possessionKey,
+      name: "Specimen jars",
+      quantity: 1,
+    });
+    const transformRuling = ruling({
+      normalizedIntent: {
+        originalText: "Seal one loose corrosion flake in the specimen jars.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "attempt",
+        targets: [{ handle: "here", kind: "location" }],
+        method: "Seal one corrosion flake in one jar while retaining the whole set",
+        stakes: "Keep the sealed sample and remaining empty jars together",
+      },
+      possessionEffectAuthority: {
+        kind: "adjust_actor_possession",
+        enforcement: "required",
+        operation: "transform",
+        possessionHandle: "specimen-jars",
+        quantity: 1,
+        minimumResult: "success",
+      },
+      citedVisibleFactHandles: ["here", "specimen-jars"],
+    });
+    const transformProposal = {
+      elapsedMinutes: 1,
+      effects: [{
+        kind: "adjust_actor_possession" as const,
+        operation: "transform" as const,
+        actorHandle: "you",
+        possessionHandle: "specimen-jars",
+        name: "Specimen jar set with sealed corrosion flake and empty jars",
+        quantity: 1,
+        summary: "One jar holds the sealed corrosion flake; the remaining empty jars stay with it.",
+        affectedHandles: ["you", "specimen-jars", "here"],
+      }],
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: transformProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: { verdict: "accepted", reason: "The name preserves the complete set and its sealed contents." },
+        trace: trace(),
+      });
+
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: sourceFrame,
+      ruling: transformRuling,
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+    });
+
+    expect(candidate.semanticReview.kind).toBe("mechanical_authority");
+    expect(generateObject).toHaveBeenCalledTimes(2);
+    const reviewPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    expect(reviewPrompt).toContain('"sourcePossessions":[{"handle":"specimen-jars","kind":"possession","summary":"Specimen jars: 1"}]');
+    expect(reviewPrompt).toContain('"originalText":"Seal one loose corrosion flake in the specimen jars."');
+    expect(reviewPrompt).toContain("Accept only when the name is a concise durable identity for the complete retained possession after the transform");
+    expect(reviewPrompt).toContain("names only remaining empty containers while omitting what was collected or sealed inside the set");
+    expect(reviewPrompt).toContain("relies on summary to carry material possession state missing from name");
   });
 
   it("compiles acquisition, spending, and transformation into typed Rulebook possession effects", () => {
