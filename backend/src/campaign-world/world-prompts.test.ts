@@ -36,9 +36,13 @@ describe("Campaign World prompts", () => {
     const prompt = buildWorldFramePrompt(source);
 
     expect(prompt).toContain("A macro region groups and selects scenes. It is not a place anyone can occupy or visit.");
+    expect(prompt).toContain("Every locationRef value must be a full identifier in the exact form location:<lowercase-kebab-case>");
+    expect(prompt).toContain("Every non-null parentLocationRef, fromLocationRef, and toLocationRef must repeat one of those full location:<lowercase-kebab-case> identifiers exactly.");
     expect(prompt).toContain("Every persistent sublocation is one concrete, directly perceivable scene");
     expect(prompt).toContain("Its description is shown verbatim to the player whenever that scene is current.");
-    expect(prompt).toContain("Never put a secret, concealed discovery, private motive, disputed hidden cause, future event, or another actor's private knowledge in a location description");
+    expect(prompt).toContain("The campaign source may explicitly state a secret, concealed discovery, private motive, disputed hidden cause, future event, or another actor's private knowledge.");
+    expect(prompt).toContain("Do not copy, paraphrase, confirm, or imply that protected truth in any location description.");
+    expect(prompt).toContain("Describe only its publicly perceivable surface; later cast goals, relations, and pressures own the protected claim.");
     expect(prompt).toContain("Every route connects persistent sublocations directly, never macro regions.");
     expect(prompt).toContain("The directed graph of persistent sublocations must be strongly connected");
   });
