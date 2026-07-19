@@ -570,6 +570,34 @@ describe("Campaign Play narrator", () => {
       },
       createdAt: 1_000,
     })).not.toThrow();
+    const surnameConsequence = {
+      ...consequence,
+      observationHandle: "observation-household-surname",
+      whatChanged: "The registry lists Venn among the carved household names.",
+    };
+    expect(() => narrator.compile({
+      narrationId: "narration-household-surname-collision",
+      packet: {
+        ...packet,
+        newObservations: [{
+          observationHandle: surnameConsequence.observationHandle,
+          title: "Your action",
+          text: surnameConsequence.whatChanged,
+          whereOrRoute: surnameConsequence.whereOrRoute,
+          worldTimeLabel: surnameConsequence.worldTimeLabel,
+          consequence: surnameConsequence,
+        }],
+        consequences: [surnameConsequence],
+      },
+      proposal: {
+        ...proposal,
+        beats: [{
+          ...proposal.beats[0]!,
+          text: "The registry lists Venn among the carved household names.",
+        }],
+      },
+      createdAt: 1_000,
+    })).not.toThrow();
   });
 
   it("exposes literal forbidden actor names for an actorless current observation", async () => {

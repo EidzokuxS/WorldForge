@@ -445,7 +445,7 @@ function assertProposalForPacket(
   );
   const aliasOwners = new Map<string, Set<string>>();
   packet.visibleActors.forEach((actor) => {
-    [actor.name, ...actor.name.split(/\s+/u)]
+    [actor.name, actor.name.split(/\s+/u)[0] ?? actor.name]
       .filter((alias) => alias.length >= 3)
       .forEach((alias) => {
         const normalizedAlias = alias.toLocaleLowerCase("en-US");
@@ -466,7 +466,7 @@ function assertProposalForPacket(
     ).test(text);
   };
   const identifiesActor = (beatText: string, actorName: string): boolean =>
-    [actorName, ...actorName.split(/\s+/u)]
+    [actorName, actorName.split(/\s+/u)[0] ?? actorName]
       .filter((alias) => alias.length >= 3)
       .some((alias) => {
         const normalizedAlias = alias.toLocaleLowerCase("en-US");
