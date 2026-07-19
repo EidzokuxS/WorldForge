@@ -814,6 +814,8 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("observationSubjects, when present, is code-owned identity binding");
     expect(prompt).toContain("Actorless sounds, traces, silhouettes, and motion remain unattributed");
     expect(prompt).toContain("Resemblance is not identity");
+    expect(prompt).toContain("Put any orientation mention of that actor in a separate beat with observationIndexes: []");
+    expect(prompt).toContain("Do not attach an unbound actor name to the travel observation");
     expect(prompt).toContain('"observationSubjects":[]');
     expect(prompt).toContain("the bound actor, never the player");
     expect(prompt).toContain("Do not replace a bound actor with \"you\"");

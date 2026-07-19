@@ -786,6 +786,8 @@ function directlyPerceivedObservationSubjects(
   handle: CampaignPlayDatabaseHandle,
   candidate: EpistemicCandidate,
   humanActorId: string,
+  visibleActors: CampaignPlayVisibleActor[],
+  observationText: string,
 ): Array<{ handle: string; name: string }> {
   const exposure = candidate.exposure;
   if (exposure.channel !== "direct_perception" || exposure.locationId === null) return [];
@@ -810,15 +812,31 @@ function directlyPerceivedObservationSubjects(
       .map((reference) => reference.id as string),
   )].filter((actorId) =>
     actorLocationFromSnapshot(exposure.eventAfterPayloadJson, actorId) === exposure.locationId);
-  if (actorIds.length === 0) return [];
-  const actors = handle.sqlite.prepare(`SELECT id, name FROM actors
-    WHERE campaign_id = ? AND kind = 'person' AND id IN (${actorIds.map(() => "?").join(",")})`)
-    .all(handle.campaignId, ...actorIds) as Array<{ id: string; name: string }>;
+  const actors = actorIds.length === 0
+    ? []
+    : handle.sqlite.prepare(`SELECT id, name FROM actors
+        WHERE campaign_id = ? AND kind = 'person' AND id IN (${actorIds.map(() => "?").join(",")})`)
+      .all(handle.campaignId, ...actorIds) as Array<{ id: string; name: string }>;
   const actorById = new Map(actors.map((actor) => [actor.id, actor]));
-  return actorIds.flatMap((actorId) => {
+  const subjects = actorIds.flatMap((actorId) => {
     const actor = actorById.get(actorId);
     return actor ? [{ handle: publicHandle("actor", handle.campaignId, actor.id), name: actor.name }] : [];
   });
+  const performingActorHandle = typeof attributedActorId === "string"
+    ? publicHandle("actor", handle.campaignId, attributedActorId)
+    : null;
+  visibleActors.forEach((actor) => {
+    if (actor.handle === performingActorHandle) return;
+    const escapedName = actor.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (!new RegExp(
+      `(?<![\\p{L}\\p{N}])${escapedName}(?![\\p{L}\\p{N}])`,
+      "iu",
+    ).test(observationText)) return;
+    if (!subjects.some((subject) => subject.handle === actor.handle)) {
+      subjects.push({ handle: actor.handle, name: actor.name });
+    }
+  });
+  return subjects;
 }
 
 function visibleScene(
@@ -1422,7 +1440,13 @@ export function createCampaignPlayVisibilityService(
         consequences: observationPlans.map((plan) => plan.entry.consequence!),
         observationSubjects: observationPlans.map((plan) => ({
           observationHandle: plan.entry.observationHandle,
-          actors: directlyPerceivedObservationSubjects(handle, plan.candidate, human.id),
+          actors: directlyPerceivedObservationSubjects(
+            handle,
+            plan.candidate,
+            human.id,
+            scene.visibleActors,
+            plan.entry.text,
+          ),
         })),
         continuity: priorContinuity(
           handle,

@@ -591,7 +591,6 @@ function createVisibilityFixture(
           readScope: [
             { kind: "actor", id: "actor-player" },
             { kind: "actor", id: "actor-a" },
-            { kind: "actor", id: "actor-b" },
             { kind: "location", id: "location-a" },
           ],
           writeScope: [],
@@ -603,12 +602,11 @@ function createVisibilityFixture(
           },
           eventClass: "dialogue",
           performingActorId: "actor-a",
-          summary: "Mara Venn says the signal lantern has failed.",
+          summary: "Mara Venn says the signal lantern has failed while Oren Tide listens nearby.",
           observableTrace: null,
           affectedRefs: [
             { kind: "actor", id: "actor-player" },
             { kind: "actor", id: "actor-a" },
-            { kind: "actor", id: "actor-b" },
             { kind: "location", id: "location-a" },
           ],
         },
@@ -1042,7 +1040,7 @@ describe("Campaign Play visibility service", () => {
       "The signal keeper asks the player what brought them to the failing route.",
     );
     expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
-      "Mara Venn says the signal lantern has failed.",
+      "Mara Venn says the signal lantern has failed while Oren Tide listens nearby.",
     );
     expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
       "Mara Venn left for Glass Reef Quay.",
@@ -1057,10 +1055,10 @@ describe("Campaign Play visibility service", () => {
     expect(chronologicalTexts.indexOf(
       "Fresh scuff marks and a snapped seal remain beside the route board.",
     )).toBeLessThan(chronologicalTexts.indexOf(
-      "Mara Venn says the signal lantern has failed.",
+      "Mara Venn says the signal lantern has failed while Oren Tide listens nearby.",
     ));
     expect(chronologicalTexts.indexOf(
-      "Mara Venn says the signal lantern has failed.",
+      "Mara Venn says the signal lantern has failed while Oren Tide listens nearby.",
     )).toBeLessThan(chronologicalTexts.indexOf(
       "Mara Venn left for Glass Reef Quay.",
     ));
@@ -1079,7 +1077,7 @@ describe("Campaign Play visibility service", () => {
     expect(result.packet.consequences.filter((entry) => entry.causalCue === "direct_perception"))
       .toHaveLength(2);
     const performed = result.packet.consequences.find((entry) =>
-      entry.whatChanged === "Mara Venn says the signal lantern has failed.");
+      entry.whatChanged === "Mara Venn says the signal lantern has failed while Oren Tide listens nearby.");
     expect(performed).toMatchObject({
       performingActorHandle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-a"),
       performingActorName: "Mara Venn",
