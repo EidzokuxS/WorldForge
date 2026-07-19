@@ -294,6 +294,28 @@ function narratorProposalSchemaForPacket(packet: CampaignPlayNarratorPacket) {
 
 function buildPrompt(packet: CampaignPlayNarratorPacket): string {
   const requiredIntentIndex = requiredReplyIntentIndex(packet);
+  const observationSubjects = new Map(
+    (packet.observationSubjects ?? []).map((binding) => [binding.observationHandle, binding.actors]),
+  );
+  const observationActorNameFrame = packet.newObservations.map((observation, observationIndex) => {
+    const permittedNames = new Set<string>();
+    const performingActorName = observation.consequence?.performingActorName;
+    if (performingActorName !== null && performingActorName !== undefined) {
+      permittedNames.add(performingActorName);
+    }
+    observationSubjects.get(observation.observationHandle)?.forEach((actor) => {
+      permittedNames.add(actor.name);
+    });
+    return {
+      observationIndex,
+      permittedActorNames: packet.visibleActors
+        .filter((actor) => permittedNames.has(actor.name))
+        .map((actor) => actor.name),
+      forbiddenActorNames: packet.visibleActors
+        .filter((actor) => !permittedNames.has(actor.name))
+        .map((actor) => actor.name),
+    };
+  });
   const semanticPacketBytes = canonicalizeCampaignPlayProjection({
     ...packet,
     visibleActors: packet.visibleActors.map((actor) => ({
@@ -316,6 +338,10 @@ END_NARRATOR_PACKET
 
 REQUIRED_REPLY_INTENT_INDEX=${JSON.stringify(requiredIntentIndex)}
 
+OBSERVATION_ACTOR_NAME_FRAME
+${canonicalizeCampaignPlayProjection(observationActorNameFrame)}
+END_OBSERVATION_ACTOR_NAME_FRAME
+
 actionContext is the current submitted action. playerHistory lists accepted prior player actions in chronological order. Read both before selecting actions. An offer, task, job, method, destination purpose, or interaction explicitly refused, declined, corrected, or left in any playerHistory[].submittedText remains resolved. Do not suggest it or use it as a reason to return unless a later player action deliberately re-enters it or a later accepted observation materially renews it after the refusal. The original need's continued existence does not renew the offer.
 
 An ordinary move to a different location with no stated purpose in actionContext.submittedText leaves every optional offer, task, search target, and contact request from sourceMoment at the origin. Do not carry a person name, lead, destination purpose, or follow-up question from origin dialogue into arrival actionSelections. The move re-enters a prior thread only when actionContext.submittedText states that purpose or a new accepted observation at the destination materially renews it.
@@ -328,9 +354,9 @@ newObservations contains accepted consequences visible to the player in chronolo
 
 When a newObservation has a non-null consequence.performingActorName, the beat carrying that observationIndex must name that actor and show the actor's visible part in the change. Do not reduce an actor-attributed observation to agentless aftermath. Because REQUIRED_REPLY_INTENT_INDEX may bind a reply to that actor, the prose must make that reply legible before the choices appear.
 
-observationSubjects, when present, is code-owned identity binding for the non-performing visible actors affected by each current observation. Match it by observationHandle. If an observation names a performing actor and binds exactly one other actor, an unnamed person, silhouette, hooded figure, traveler, witness, or other human target in that observation is the bound actor, never the player. Preserve the bound name or a clearly separate third-person reference. Do not replace a bound actor with "you", even when sourceMoment previously confused their identity or the player stands nearby.
+observationSubjects, when present, is code-owned identity binding for the non-performing visible actors affected by each current observation. OBSERVATION_ACTOR_NAME_FRAME turns the performer and subject bindings into literal permitted and forbidden visible-actor names for every observation index. Match observationSubjects by observationHandle. If an observation names a performing actor and binds exactly one other actor, an unnamed person, silhouette, hooded figure, traveler, witness, or other human target in that observation is the bound actor, never the player. Preserve the bound name or a clearly separate third-person reference. Do not replace a bound actor with "you", even when sourceMoment previously confused their identity or the player stands nearby.
 
-A beat may name a visible actor from a current observation only when that observation names the actor as its performer or observationSubjects binds the actor to it. Actorless sounds, traces, silhouettes, and motion remain unattributed, even when sourceMoment makes a visible actor seem like the likely source. Resemblance is not identity.
+For each beat, union permittedActorNames from every frame entry named by its observationIndexes. Do not write any other visible actor's canonical name or a unique part of that name in the beat. This remains true when actionContext, sourceMoment, or the observation text repeats a forbidden name. Describe the accepted result without that name. Actorless sounds, traces, silhouettes, and motion remain unattributed. The same rule applies to weather and other scene changes, even when earlier context makes a visible actor seem like the likely source. Resemblance is not identity.
 
 An actor may still be present in visibleActors without being bound to a current observation. Put any orientation mention of that actor in a separate beat with observationIndexes: []. On a movement turn, assign the travel observation to its consequence beat, then orient the player to unbound people at the destination in a separate empty-index beat. Do not attach an unbound actor name to the travel observation.
 
