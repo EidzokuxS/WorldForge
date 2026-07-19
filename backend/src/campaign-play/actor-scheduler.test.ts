@@ -442,12 +442,12 @@ function persistIncapacitatedCondition(
 
 describe("Campaign Play actor scheduler", () => {
   it.each([30, 60] as const)(
-    "freezes the seeded %s-action due set by time, priority, and actor ID without a cast sweep",
+    "freezes the seeded %s-action due set by debt, time, priority, and actor ID without a cast sweep",
     (completedActions) => {
       const { handle } = createReadyFixture(completedActions);
       const dueSet = freezeCurrent(handle);
       expect(dueSet.decisions.map((decision) => decision.actorId)).toEqual([
-        "actor-b", "actor-a", "actor-d",
+        "actor-d", "actor-b", "actor-a",
       ]);
       expect(dueSet.decisions.map((decision) => decision.disposition)).toEqual([
         "wake", "wake", "wake",
@@ -457,6 +457,87 @@ describe("Campaign Play actor scheduler", () => {
         decision.actorId === "actor-d" && decision.disposition === "wake")).toBe(true);
     },
   );
+
+  it("repays agency debt before current-turn and earlier debt-free actors consume capacity", () => {
+    const { handle, states, settledClock } = createReadyFixture();
+    const current = states.loadState()!;
+    const affectedRefs = [
+      { kind: "actor", id: "actor-c" },
+      { kind: "actor", id: "actor-player" },
+    ] as const;
+    const protectedPayload = canonicalizeCampaignPlayProjection({
+      kind: "record_world_event",
+      eventClass: "dialogue",
+      performingActorId: "actor-c",
+      summary: "Actor C answers the player before the scheduler resolves due work.",
+      observableTrace: null,
+      affectedRefs,
+    });
+    states.commitRuntime({
+      event: {
+        eventId: "agency-debt-capacity-fixture",
+        turnId: "turn-player",
+        kind: "actor_job_transitioned",
+        workerEpoch: 3,
+        protectedPayloadHash: HASH_A,
+        createdAt: 1_570,
+      },
+      mutate(context) {
+        context.sqlite.prepare(`UPDATE campaign_play_actor_schedules
+          SET next_act_at_world_time_minutes = ?, updated_at = 1570
+          WHERE campaign_id = ? AND actor_id = 'actor-c'`)
+          .run(settledClock - 9, context.campaignId);
+        context.sqlite.prepare(`INSERT INTO campaign_play_commands (
+          command_id, campaign_id, turn_id, batch_id, command_order, command_kind,
+          causal_parent_json, source_json, expected_world_version, read_scope_json,
+          write_scope_json, exposure_policy_json, arguments_hash,
+          protected_payload_json, protected_payload_hash, created_at
+        ) VALUES ('debt-contact-command', ?, 'turn-player', 'debt-contact-batch', 0,
+          'record_world_event', '{"kind":"turn","turnId":"turn-player"}',
+          '{"kind":"system","system":"game_master"}', ?, ?, '[]',
+          '{"mode":"protected"}', ?, ?, ?, 1570)`).run(
+          context.campaignId,
+          current.authority.worldVersion,
+          canonicalizeCampaignPlayProjection(affectedRefs),
+          hashCampaignPlayProjection(protectedPayload),
+          protectedPayload,
+          hashCampaignPlayProjection(protectedPayload),
+        );
+        context.sqlite.prepare(`INSERT INTO campaign_play_receipts (
+          receipt_id, campaign_id, turn_id, command_id, command_kind, outcome,
+          applied_world_mutation, prior_world_version, result_world_version,
+          prior_world_hash, result_world_hash, causal_event_ids_json,
+          protected_payload_json, protected_payload_hash, created_at
+        ) VALUES ('debt-contact-receipt', ?, 'turn-player', 'debt-contact-command',
+          'record_world_event', 'applied', 0, ?, ?, ?, ?,
+          '["debt-contact-world-event"]', ?, ?, 1570)`).run(
+          context.campaignId,
+          current.authority.worldVersion,
+          current.authority.worldVersion,
+          current.authority.worldHash,
+          current.authority.worldHash,
+          protectedPayload,
+          hashCampaignPlayProjection(protectedPayload),
+        );
+      },
+    });
+
+    const dueSet = freezeCurrent(handle);
+    expect(dueSet.decisions.map((decision) => [
+      decision.actorId,
+      decision.disposition,
+      decision.agencyDebt,
+    ])).toEqual([
+      ["actor-d", "wake", 2],
+      ["actor-c", "wake", 0],
+      ["actor-b", "wake", 0],
+      ["actor-a", "defer", 0],
+    ]);
+    expect(dueSet.decisions[3]).toMatchObject({
+      reason: "actor_capacity",
+      resultAgencyDebt: 1,
+    });
+  });
 
   it("does not grant an unscheduled extra action to a contacted actor with a completed plan", () => {
     const { handle, states, settledClock } = createReadyFixture();
@@ -542,7 +623,7 @@ describe("Campaign Play actor scheduler", () => {
         admitted = scheduler.admitDueSet({ dueSet, context, createdAt: 1_600 });
       },
     });
-    expect(admitted.map((job) => job.actorId)).toEqual(["actor-b", "actor-a", "actor-d"]);
+    expect(admitted.map((job) => job.actorId)).toEqual(["actor-d", "actor-b", "actor-a"]);
     expect(new Set(admitted.map((job) => job.jobId)).size).toBe(3);
     expect(admitted.every((job) => job.stage === "queued" && job.workerEpoch === 0)).toBe(true);
     expect(scheduler.loadDueSet("turn-player")).toEqual(dueSet);
@@ -553,9 +634,9 @@ describe("Campaign Play actor scheduler", () => {
     expect(freezeCurrent(handle).decisions.map((decision) =>
       [decision.actorId, decision.disposition,
         "reason" in decision ? decision.reason : null])).toEqual([
+      ["actor-d", "skip", "already_considered_this_turn"],
       ["actor-b", "skip", "already_considered_this_turn"],
       ["actor-a", "skip", "already_considered_this_turn"],
-      ["actor-d", "skip", "already_considered_this_turn"],
     ]);
 
     const before = structuredClone(admitted);
@@ -833,7 +914,7 @@ describe("Campaign Play actor scheduler", () => {
       mutate(context) { jobs = scheduler.admitDueSet({ dueSet, context, createdAt: 1_600 }); },
     });
     expect(jobs.map((job) => [job.actorId, job.stage])).toEqual([
-      ["actor-b", "queued"], ["actor-a", "deferred"], ["actor-d", "queued"],
+      ["actor-d", "queued"], ["actor-b", "queued"], ["actor-a", "deferred"],
     ]);
     expect(jobs.find((job) => job.actorId === "actor-a")?.completedAt).toBe(1_600);
     expect(handle.sqlite.prepare(`SELECT next_act_at_world_time_minutes AS nextAt,

@@ -352,8 +352,8 @@ function dueRows(
     )
     SELECT * FROM due_candidates
     WHERE nextActAtWorldTimeMinutes <= ?
-    ORDER BY currentTurnPerformer DESC, nextActAtWorldTimeMinutes ASC,
-      agencyDebt DESC, priority DESC, actorId ASC
+    ORDER BY agencyDebt DESC, currentTurnPerformer DESC,
+      nextActAtWorldTimeMinutes ASC, priority DESC, actorId ASC
   `).all(turnId, turnId, handle.campaignId, settledWorldTimeMinutes) as DueRow[];
 }
 

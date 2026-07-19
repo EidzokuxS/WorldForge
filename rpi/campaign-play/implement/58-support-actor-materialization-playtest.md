@@ -43,6 +43,8 @@ The repair turn remembers the exact strap, buckle, and black-rain damage. It als
 
 The current scheduler evidence is narrower than the prose. Dario demonstrably settled once, replanned, and received a next-act schedule. On the following due turn he was deferred while three other actors settled. The UI narration still advanced his inspection because the player explicitly watched him, but that is not proof that the background scheduler selected him. This distinction remains visible in the job ledger and is not collapsed into a stronger autonomy claim.
 
+The subsequent debt-first scheduler correction and autonomous Dario turn are recorded in `59-actor-capacity-fairness-playtest.md`.
+
 ## Failures and corrections
 
 - The first live Game Master attempt exhausted a very large structured schema and did not produce a usable proposal. The command surface was reduced to the semantic fields the model actually owns; output limits and model choice were not changed.
