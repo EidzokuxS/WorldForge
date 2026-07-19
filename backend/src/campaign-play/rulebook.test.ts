@@ -6,6 +6,7 @@ import {
   type CampaignPlayRulebookFrame,
 } from "./rulebook.js";
 import {
+  deriveCampaignPlayLocalSceneTopologyIds,
   deriveCampaignPlayObligationId,
   deriveCampaignPlayPossessionId,
   deriveCampaignPlayPossessionKey,
@@ -188,6 +189,8 @@ function frameFixture(
     worldTimeMinutes: setupPhase === "ready" ? 10 : null,
     human,
     acceptedWorld: world,
+    runtimeLocations: [],
+    runtimeRoutes: [],
     routeStates: [],
     actorConditions: [],
     possessions: [],
@@ -1054,6 +1057,219 @@ describe("Campaign Play Rulebook preflight", () => {
       authority,
       batch: { batchId: BATCH_ID, baseWorldVersion: READY_VERSION, commands: [command] },
     })).toMatchObject({ accepted: false, denial: { code: "precondition_failed" } });
+  });
+
+  it("materializes one exact local scene and makes its return route authoritative", () => {
+    const frame = frameFixture();
+    const name = "Collapsed Fitted-Block Passage";
+    const description = "A low masonry break where black water threads through fitted stone.";
+    const ids = deriveCampaignPlayLocalSceneTopologyIds({
+      campaignId: CAMPAIGN_ID,
+      turnId: TURN_ID,
+      anchorLocationId: "location-a",
+      name,
+      description,
+    });
+    const localMove = {
+      ...commandBase(1, READY_VERSION + 1),
+      kind: "move_actor" as const,
+      actorId: PLAYER_ID,
+      routeId: ids.outboundRouteId,
+      fromLocationId: "location-a",
+      toLocationId: ids.locationId,
+      materializedLocalScene: {
+        ...ids,
+        anchorLocationId: "location-a",
+        name,
+        description,
+        travelCost: 10,
+      },
+      readScope: [
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "location" as const, id: "location-a" },
+      ],
+      writeScope: [
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "route" as const, id: ids.outboundRouteId },
+        { kind: "location" as const, id: "location-a" },
+        { kind: "location" as const, id: ids.locationId },
+        { kind: "route" as const, id: ids.returnRouteId },
+      ],
+      exposure: {
+        mode: "projectable" as const,
+        predicates: [{ channel: "direct_perception" as const, locationId: ids.locationId }],
+      },
+    };
+    const entered = preflightCampaignPlayRulebook({
+      frame,
+      authority: playerAuthority(),
+      batch: {
+        batchId: BATCH_ID,
+        baseWorldVersion: READY_VERSION,
+        commands: [
+          {
+            ...commandBase(0, READY_VERSION),
+            kind: "advance_world_time",
+            readScope: [],
+            writeScope: [],
+            elapsedMinutes: 10,
+          },
+          localMove,
+          {
+            ...commandBase(2, READY_VERSION + 2),
+            kind: "record_world_event",
+            readScope: [
+              { kind: "actor", id: PLAYER_ID },
+              { kind: "location", id: ids.locationId },
+            ],
+            writeScope: [],
+            eventClass: "discovery",
+            performingActorId: null,
+            summary: "Fresh iron arcs score the wet stone beyond the break.",
+            observableTrace: null,
+            affectedRefs: [
+              { kind: "actor", id: PLAYER_ID },
+              { kind: "location", id: ids.locationId },
+            ],
+            exposure: {
+              mode: "projectable",
+              predicates: [{ channel: "direct_perception", locationId: ids.locationId }],
+            },
+          },
+        ],
+      },
+    });
+    expect(entered).toMatchObject({ accepted: true });
+    if (!entered.accepted) return;
+    expect(entered.simulation.runtimeLocations).toMatchObject([{
+      id: ids.locationId,
+      anchorLocationId: "location-a",
+      parentLocationId: "region-a",
+      name,
+    }]);
+    expect(entered.simulation.runtimeRoutes).toHaveLength(2);
+    expect(entered.simulation.runtimeRoutes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: ids.outboundRouteId,
+        fromLocationId: "location-a",
+        toLocationId: ids.locationId,
+        travelCost: 10,
+      }),
+      expect.objectContaining({
+        id: ids.returnRouteId,
+        fromLocationId: ids.locationId,
+        toLocationId: "location-a",
+        travelCost: 10,
+      }),
+    ]));
+    expect(entered.simulation.placements.find((row) => row.actorId === PLAYER_ID)?.locationId)
+      .toBe(ids.locationId);
+
+    const returnFrame: CampaignPlayRulebookFrame = {
+      ...frame,
+      worldVersion: entered.simulation.worldVersion,
+      worldTimeMinutes: entered.simulation.worldTimeMinutes,
+      runtimeLocations: structuredClone(entered.simulation.runtimeLocations),
+      runtimeRoutes: structuredClone(entered.simulation.runtimeRoutes),
+      routeStates: structuredClone(entered.simulation.routeStates),
+      actorConditions: structuredClone(entered.simulation.actorConditions),
+      possessions: structuredClone(entered.simulation.possessions),
+      obligations: structuredClone(entered.simulation.obligations),
+      pressureStates: structuredClone(entered.simulation.pressureStates),
+      placements: structuredClone(entered.simulation.placements),
+      relations: structuredClone(entered.simulation.relations),
+      goals: structuredClone(entered.simulation.goals),
+    };
+    const returnMove = {
+      ...commandBase(0, READY_VERSION + 2),
+      kind: "move_actor" as const,
+      actorId: PLAYER_ID,
+      routeId: ids.returnRouteId,
+      fromLocationId: ids.locationId,
+      toLocationId: "location-a",
+      readScope: [
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "route" as const, id: ids.returnRouteId },
+        { kind: "location" as const, id: ids.locationId },
+        { kind: "location" as const, id: "location-a" },
+      ],
+      writeScope: [
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "location" as const, id: ids.locationId },
+        { kind: "location" as const, id: "location-a" },
+      ],
+      exposure: {
+        mode: "projectable" as const,
+        predicates: [{ channel: "direct_perception" as const, locationId: "location-a" }],
+      },
+    };
+    const returned = preflightCampaignPlayRulebook({
+      frame: returnFrame,
+      authority: {
+        ...playerAuthority(),
+        authorizedRefs: [
+          ...allRefs(),
+          { kind: "location", id: ids.locationId },
+          { kind: "route", id: ids.outboundRouteId },
+          { kind: "route", id: ids.returnRouteId },
+        ],
+      },
+      batch: {
+        batchId: BATCH_ID,
+        baseWorldVersion: READY_VERSION + 2,
+        commands: [returnMove],
+      },
+    });
+    expect(returned).toMatchObject({ accepted: true });
+    if (returned.accepted) {
+      expect(returned.simulation.placements.find((row) => row.actorId === PLAYER_ID)?.locationId)
+        .toBe("location-a");
+    }
+
+    const forged = structuredClone(localMove);
+    forged.materializedLocalScene.locationId = "scene:forged";
+    forged.toLocationId = "scene:forged";
+    forged.writeScope[3] = { kind: "location", id: "scene:forged" };
+    forged.exposure.predicates[0]!.locationId = "scene:forged";
+    expect(preflightCampaignPlayRulebook({
+      frame,
+      authority: playerAuthority(),
+      batch: {
+        batchId: BATCH_ID,
+        baseWorldVersion: READY_VERSION,
+        commands: [
+          {
+            ...commandBase(0, READY_VERSION),
+            kind: "advance_world_time",
+            readScope: [],
+            writeScope: [],
+            elapsedMinutes: 10,
+          },
+          forged,
+        ],
+      },
+    })).toMatchObject({ accepted: false, denial: { code: "invalid_reference" } });
+
+    const mismatchedCost = structuredClone(localMove);
+    mismatchedCost.materializedLocalScene.travelCost = 9;
+    expect(preflightCampaignPlayRulebook({
+      frame,
+      authority: playerAuthority(),
+      batch: {
+        batchId: BATCH_ID,
+        baseWorldVersion: READY_VERSION,
+        commands: [
+          {
+            ...commandBase(0, READY_VERSION),
+            kind: "advance_world_time",
+            readScope: [],
+            writeScope: [],
+            elapsedMinutes: 10,
+          },
+          mismatchedCost,
+        ],
+      },
+    })).toMatchObject({ accepted: false, denial: { code: "invalid_batch" } });
   });
 
   it("accepts the single receipt-bearing character bootstrap command", () => {

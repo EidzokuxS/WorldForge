@@ -281,6 +281,13 @@
       "when": 1784405611560,
       "tag": "0039_campaign_play_replan_deferral",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1784421942006,
+      "tag": "0040_campaign_play_runtime_topology",
+      "breakpoints": true
     }
   ]
 }

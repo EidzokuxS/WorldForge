@@ -13,6 +13,7 @@ import {
 } from "./contracts.js";
 import {
   canonicalizeCampaignPlayProjection,
+  deriveCampaignPlayLocalSceneTopologyIds,
   deriveCampaignPlayObligationId,
   deriveCampaignPlayPossessionId,
   deriveCampaignPlayPossessionKey,
@@ -30,6 +31,8 @@ import type {
   CampaignPlayLivePressureState,
   CampaignPlayLiveRelation,
   CampaignPlayLiveRouteState,
+  CampaignPlayRuntimeLocation,
+  CampaignPlayRuntimeRoute,
 } from "./campaign-play-projection.js";
 
 export type CampaignPlayRulebookPurpose =
@@ -47,6 +50,8 @@ export interface CampaignPlayRulebookFrame {
   worldTimeMinutes: number | null;
   human: CampaignPlayHumanMechanicalIdentity | null;
   acceptedWorld: CampaignWorldReview;
+  runtimeLocations: CampaignPlayRuntimeLocation[];
+  runtimeRoutes: CampaignPlayRuntimeRoute[];
   routeStates: CampaignPlayLiveRouteState[];
   actorConditions: CampaignPlayLiveActorCondition[];
   possessions: CampaignPlayLiveActorPossession[];
@@ -100,6 +105,8 @@ export interface CampaignPlayRulebookSimulation {
   worldVersion: number;
   worldTimeMinutes: number | null;
   human: CampaignPlayHumanMechanicalIdentity | null;
+  runtimeLocations: CampaignPlayRuntimeLocation[];
+  runtimeRoutes: CampaignPlayRuntimeRoute[];
   routeStates: CampaignPlayLiveRouteState[];
   actorConditions: CampaignPlayLiveActorCondition[];
   possessions: CampaignPlayLiveActorPossession[];
@@ -199,6 +206,24 @@ function ref(kind: CampaignPlayEntityRef["kind"], id: string): CampaignPlayEntit
   return { kind, id };
 }
 
+function liveLocation(
+  frame: CampaignPlayRulebookFrame,
+  state: CampaignPlayRulebookSimulation,
+  locationId: string,
+) {
+  return state.runtimeLocations.find((row) => row.id === locationId)
+    ?? frame.acceptedWorld.locations.find((row) => row.id === locationId);
+}
+
+function liveRoute(
+  frame: CampaignPlayRulebookFrame,
+  state: CampaignPlayRulebookSimulation,
+  routeId: string,
+) {
+  return state.runtimeRoutes.find((row) => row.id === routeId)
+    ?? frame.acceptedWorld.routes.find((row) => row.id === routeId);
+}
+
 function validFrame(frame: CampaignPlayRulebookFrame): boolean {
   const world = frame.acceptedWorld;
   const lowerHex = "0123456789abcdef";
@@ -209,6 +234,8 @@ function validFrame(frame: CampaignPlayRulebookFrame): boolean {
       && frame.worldTimeMinutes >= 0
       && frame.worldTimeMinutes <= CAMPAIGN_PLAY_LIMITS.worldTimeMinutes);
   const idsUnique = [
+    frame.runtimeLocations.map((row) => row.id),
+    frame.runtimeRoutes.map((row) => row.id),
     frame.routeStates.map((row) => row.routeId),
     frame.actorConditions.map((row) => `${row.actorId}\u0000${row.condition}`),
     frame.possessions.map((row) => row.possessionId),
@@ -223,7 +250,14 @@ function validFrame(frame: CampaignPlayRulebookFrame): boolean {
   ].every(unique);
   const actorIds = new Set(world.actors.map((actor) => actor.id));
   if (frame.human) actorIds.add(frame.human.actorId);
-  const locationIds = new Set(world.locations.map((location) => location.id));
+  const locationIds = new Set([
+    ...world.locations.map((location) => location.id),
+    ...frame.runtimeLocations.map((location) => location.id),
+  ]);
+  const routeIds = new Set([
+    ...world.routes.map((route) => route.id),
+    ...frame.runtimeRoutes.map((route) => route.id),
+  ]);
   const relationById = new Map(world.relations.map((relation) => [relation.id, relation]));
   const goalById = new Map(world.goals.map((goal) => [goal.id, goal]));
   const acceptedPlacementById = new Map(world.placements.map((placement) => [placement.id, placement]));
@@ -262,7 +296,40 @@ function validFrame(frame: CampaignPlayRulebookFrame): boolean {
     && idsUnique
     && (frame.human === null || validHash(frame.human.recordHash))
     && (frame.human === null || !world.actors.some((candidate) => candidate.id === frame.human!.actorId))
-    && frame.routeStates.every((row) => world.routes.some((route) => route.id === row.routeId))
+    && frame.runtimeLocations.every((location) => {
+      const parent = world.locations.find((candidate) => candidate.id === location.parentLocationId);
+      const outbound = frame.runtimeRoutes.find((candidate) =>
+        candidate.fromLocationId === location.anchorLocationId
+        && candidate.toLocationId === location.id
+        && candidate.causalReceiptId === location.causalReceiptId);
+      const returning = frame.runtimeRoutes.find((candidate) =>
+        candidate.fromLocationId === location.id
+        && candidate.toLocationId === location.anchorLocationId
+        && candidate.causalReceiptId === location.causalReceiptId);
+      return location.kind === "persistent_sublocation"
+        && parent?.kind === "macro"
+        && location.tags.length === 0
+        && location.name === location.name.trim()
+        && location.description === location.description.trim()
+        && !world.locations.some((candidate) => candidate.id === location.id)
+        && Number.isInteger(location.worldVersion)
+        && location.worldVersion >= frame.acceptedWorldVersion
+        && location.worldVersion <= frame.worldVersion
+        && outbound?.travelCost === returning?.travelCost
+        && outbound?.worldVersion === location.worldVersion
+        && returning?.worldVersion === location.worldVersion;
+    })
+    && frame.runtimeRoutes.every((route) =>
+      !world.routes.some((candidate) => candidate.id === route.id)
+      && locationIds.has(route.fromLocationId)
+      && locationIds.has(route.toLocationId)
+      && Number.isInteger(route.travelCost)
+      && route.travelCost >= 1
+      && route.travelCost <= 10
+      && Number.isInteger(route.worldVersion)
+      && route.worldVersion >= frame.acceptedWorldVersion
+      && route.worldVersion <= frame.worldVersion)
+    && frame.routeStates.every((row) => routeIds.has(row.routeId))
     && frame.actorConditions.every((row) => actorIds.has(row.actorId)
       && row.summary.length > 0
       && row.summary.length <= CAMPAIGN_PLAY_LIMITS.shortText
@@ -413,6 +480,8 @@ function cloneSimulation(frame: CampaignPlayRulebookFrame): CampaignPlayRulebook
     worldVersion: frame.worldVersion,
     worldTimeMinutes: frame.worldTimeMinutes,
     human: frame.human ? { ...frame.human } : null,
+    runtimeLocations: structuredClone(frame.runtimeLocations),
+    runtimeRoutes: structuredClone(frame.runtimeRoutes),
     routeStates: structuredClone(frame.routeStates),
     actorConditions: structuredClone(frame.actorConditions),
     possessions: structuredClone(frame.possessions),
@@ -450,8 +519,8 @@ function entityExists(
 ): boolean {
   switch (reference.kind) {
     case "actor": return actor(frame, state, reference.id) !== null;
-    case "location": return frame.acceptedWorld.locations.some((row) => row.id === reference.id);
-    case "route": return frame.acceptedWorld.routes.some((row) => row.id === reference.id);
+    case "location": return liveLocation(frame, state, reference.id) !== undefined;
+    case "route": return liveRoute(frame, state, reference.id) !== undefined;
     case "relation": return state.relations.some((row) => row.relationId === reference.id);
     case "goal": return state.goals.some((row) => row.goalId === reference.id);
     case "pressure": return frame.acceptedWorld.pressures.some((row) => row.id === reference.id);
@@ -472,12 +541,20 @@ function commandEntityRefs(
 ): CampaignPlayEntityRef[] {
   switch (command.kind) {
     case "advance_world_time": return [];
-    case "move_actor": return [
-      ref("actor", command.actorId),
-      ref("route", command.routeId),
-      ref("location", command.fromLocationId),
-      ref("location", command.toLocationId),
-    ];
+    case "move_actor": return command.materializedLocalScene === undefined
+      ? [
+          ref("actor", command.actorId),
+          ref("route", command.routeId),
+          ref("location", command.fromLocationId),
+          ref("location", command.toLocationId),
+        ]
+      : [
+          ref("actor", command.actorId),
+          ref("route", command.routeId),
+          ref("location", command.fromLocationId),
+          ref("location", command.toLocationId),
+          ref("route", command.materializedLocalScene.returnRouteId),
+        ];
     case "set_route_state": return [ref("route", command.routeId)];
     case "set_actor_condition": return [ref("actor", command.actorId)];
     case "update_actor_relation": {
@@ -563,7 +640,9 @@ function expectedScopes(
   switch (command.kind) {
     case "advance_world_time":
     case "initialize_world_time": return { read: [], write: [] };
-    case "move_actor": return { read: refs, write: [refs[0]!, refs[2]!, refs[3]!] };
+    case "move_actor": return command.materializedLocalScene === undefined
+      ? { read: refs, write: [refs[0]!, refs[2]!, refs[3]!] }
+      : { read: [refs[0]!, refs[2]!], write: refs };
     case "set_route_state":
     case "set_actor_condition":
     case "advance_pressure":
@@ -618,7 +697,7 @@ function exposureGrounding(
       .forEach((locationId) => locationIds.add(locationId));
   };
   const addRoute = (routeId: string) => {
-    const route = frame.acceptedWorld.routes.find((candidate) => candidate.id === routeId);
+    const route = liveRoute(frame, state, routeId);
     if (!route) return;
     routeIds.add(route.id);
     locationIds.add(route.fromLocationId);
@@ -673,7 +752,14 @@ function exposureGrounding(
       break;
     case "move_actor":
       addActor(command.actorId);
-      addRoute(command.routeId);
+      if (command.materializedLocalScene === undefined) {
+        addRoute(command.routeId);
+      } else {
+        routeIds.add(command.routeId);
+        routeIds.add(command.materializedLocalScene.returnRouteId);
+        locationIds.add(command.fromLocationId);
+        locationIds.add(command.toLocationId);
+      }
       break;
     case "set_route_state": addRoute(command.routeId); break;
     case "set_actor_condition": addActor(command.actorId); break;
@@ -741,6 +827,26 @@ function validateCausalParent(
   }
 }
 
+function validateMaterializedLocalSceneTiming(
+  commands: RulebookBatchCommand[],
+  command: RulebookBatchCommand,
+  index: number,
+): void {
+  if (command.kind !== "move_actor" || command.materializedLocalScene === undefined) return;
+  const previous = commands[index - 1];
+  if (
+    previous?.kind !== "advance_world_time"
+    || previous.elapsedMinutes !== command.materializedLocalScene.travelCost
+  ) {
+    deny(
+      "invalid_batch",
+      "Materialized local traversal must immediately follow its matching world-time advance.",
+      command,
+      index,
+    );
+  }
+}
+
 function isOpeningPremiseCommand(
   frame: CampaignPlayRulebookFrame,
   state: CampaignPlayRulebookSimulation,
@@ -794,6 +900,51 @@ function isOpeningRouteRestrictionCommand(
     && routeState(state, command.routeId) === "open";
 }
 
+function materializedLocalSceneGrant(
+  frame: CampaignPlayRulebookFrame,
+  authority: CampaignPlayRulebookAuthority,
+  state: CampaignPlayRulebookSimulation,
+  command: RulebookBatchCommand,
+): Set<string> | null {
+  if (command.kind !== "move_actor" || command.materializedLocalScene === undefined) {
+    return new Set();
+  }
+  const scene = command.materializedLocalScene;
+  const origin = liveLocation(frame, state, command.fromLocationId);
+  if (
+    authority.purpose !== "player_action"
+    || authority.turnId === null
+    || authority.actorId !== command.actorId
+    || state.human?.actorId !== command.actorId
+    || command.source.kind !== "system"
+    || command.source.system !== "game_master"
+    || origin?.kind !== "persistent_sublocation"
+    || scene.anchorLocationId !== command.fromLocationId
+    || scene.locationId !== command.toLocationId
+    || scene.outboundRouteId !== command.routeId
+    || liveLocation(frame, state, scene.locationId) !== undefined
+    || liveRoute(frame, state, scene.outboundRouteId) !== undefined
+    || liveRoute(frame, state, scene.returnRouteId) !== undefined
+  ) return null;
+  const expected = deriveCampaignPlayLocalSceneTopologyIds({
+    campaignId: frame.campaignId,
+    turnId: authority.turnId,
+    anchorLocationId: scene.anchorLocationId,
+    name: scene.name,
+    description: scene.description,
+  });
+  if (
+    expected.locationId !== scene.locationId
+    || expected.outboundRouteId !== scene.outboundRouteId
+    || expected.returnRouteId !== scene.returnRouteId
+  ) return null;
+  return new Set([
+    refKey(ref("location", scene.locationId)),
+    refKey(ref("route", scene.outboundRouteId)),
+    refKey(ref("route", scene.returnRouteId)),
+  ]);
+}
+
 function validateRefsAndScopes(
   frame: CampaignPlayRulebookFrame,
   authority: CampaignPlayRulebookAuthority,
@@ -814,6 +965,15 @@ function validateRefsAndScopes(
   const paymentPossession = command.kind === "pay_actor_obligation"
     ? state.possessions.find((row) => row.possessionId === command.paymentPossessionId)
     : undefined;
+  const localSceneGrant = materializedLocalSceneGrant(
+    frame,
+    authority,
+    state,
+    command,
+  );
+  if (localSceneGrant === null) {
+    deny("invalid_reference", "Materialized local scene identity is invalid.", command, index);
+  }
   const grantedPossessionRef = command.kind === "adjust_actor_possession"
     && command.quantityDelta > 0
     && command.possessionKey === deriveCampaignPlayPossessionKey(command.name)
@@ -841,10 +1001,19 @@ function validateRefsAndScopes(
       paymentPossession.possessionKey,
     )))
     : null;
+  const materializedEarlierInBatch = (reference: CampaignPlayEntityRef): boolean =>
+    (reference.kind === "location"
+      && !frame.runtimeLocations.some((row) => row.id === reference.id)
+      && state.runtimeLocations.some((row) => row.id === reference.id))
+    || (reference.kind === "route"
+      && !frame.runtimeRoutes.some((row) => row.id === reference.id)
+      && state.runtimeRoutes.some((row) => row.id === reference.id));
   if (!allRefs.every((reference) =>
     refKey(reference) === grantedPossessionRef
     || refKey(reference) === grantedObligationRef
     || refKey(reference) === grantedCreditorPossessionRef
+    || localSceneGrant.has(refKey(reference))
+    || materializedEarlierInBatch(reference)
     || authorized.has(refKey(reference)))) {
     deny("unauthorized_reference", "Command references an entity outside its frozen frame.", command, index);
   }
@@ -854,6 +1023,7 @@ function validateRefsAndScopes(
     || (existingPossession === undefined && refKey(reference) === grantedPossessionRef)
     || (existingObligation === undefined && refKey(reference) === grantedObligationRef)
     || refKey(reference) === grantedCreditorPossessionRef
+    || localSceneGrant.has(refKey(reference))
     || entityExists(frame, state, knownEvents, reference))) {
     deny("invalid_reference", "Command references an entity that does not exist.", command, index);
   }
@@ -880,7 +1050,10 @@ function validateRefsAndScopes(
         mode: "projectable",
         predicates: [predicate],
       }} as RulebookBatchCommand)[0]!;
-      if (!entityExists(frame, state, knownEvents, exposureReference)) {
+      if (
+        !localSceneGrant.has(refKey(exposureReference))
+        && !entityExists(frame, state, knownEvents, exposureReference)
+      ) {
         deny("invalid_exposure", "Exposure anchor does not exist.", command, index);
       }
       const predicateKey = `${predicate.channel}\u0000${exposureReference.id}`;
@@ -935,7 +1108,7 @@ function actorJobOwns(
     case "advance_world_time": return true;
     case "move_actor": return command.actorId === actorId;
     case "set_route_state": {
-      const route = frame.acceptedWorld.routes.find((row) => row.id === command.routeId);
+      const route = liveRoute(frame, state, command.routeId);
       return !!route && (actorLocations.has(route.fromLocationId) || actorLocations.has(route.toLocationId));
     }
     case "set_actor_condition": return sharesActorLocation(command.actorId);
@@ -1003,6 +1176,7 @@ function validateAvailability(
 
 function applyCommand(
   frame: CampaignPlayRulebookFrame,
+  authority: CampaignPlayRulebookAuthority,
   state: CampaignPlayRulebookSimulation,
   command: RulebookBatchCommand,
   index: number,
@@ -1018,13 +1192,61 @@ function applyCommand(
     }
     case "move_actor": {
       const movingActor = actor(frame, state, command.actorId);
-      const route = frame.acceptedWorld.routes.find((row) => row.id === command.routeId);
-      const fromLocation = frame.acceptedWorld.locations.find((row) =>
-        row.id === command.fromLocationId);
-      const toLocation = frame.acceptedWorld.locations.find((row) =>
-        row.id === command.toLocationId);
+      let route = liveRoute(frame, state, command.routeId);
+      let fromLocation = liveLocation(frame, state, command.fromLocationId);
+      let toLocation = liveLocation(frame, state, command.toLocationId);
       const placement = state.placements.find((row) =>
         row.actorId === command.actorId && row.placementKind === "present");
+      if (command.materializedLocalScene !== undefined) {
+        const scene = command.materializedLocalScene;
+        const parent = fromLocation?.parentLocationId === null
+          ? undefined
+          : frame.acceptedWorld.locations.find((candidate) =>
+              candidate.id === fromLocation?.parentLocationId && candidate.kind === "macro");
+        const grant = materializedLocalSceneGrant(frame, authority, state, command);
+        if (grant === null || parent === undefined || placement?.locationId !== command.fromLocationId) {
+          deny("precondition_failed", "Local scene materialization preconditions failed.", command, index);
+        }
+        const resultWorldVersion = state.worldVersion + 1;
+        const causalReceiptId = deriveCampaignPlayReceiptId(
+          frame.campaignId,
+          authority.turnId,
+          command.batchId,
+          command.order,
+        );
+        state.runtimeLocations.push({
+          id: scene.locationId,
+          name: scene.name,
+          description: scene.description,
+          kind: "persistent_sublocation",
+          parentLocationId: parent.id,
+          anchorLocationId: scene.anchorLocationId,
+          tags: [],
+          causalReceiptId,
+          worldVersion: resultWorldVersion,
+        });
+        state.runtimeRoutes.push(
+          {
+            id: scene.outboundRouteId,
+            fromLocationId: scene.anchorLocationId,
+            toLocationId: scene.locationId,
+            travelCost: scene.travelCost,
+            causalReceiptId,
+            worldVersion: resultWorldVersion,
+          },
+          {
+            id: scene.returnRouteId,
+            fromLocationId: scene.locationId,
+            toLocationId: scene.anchorLocationId,
+            travelCost: scene.travelCost,
+            causalReceiptId,
+            worldVersion: resultWorldVersion,
+          },
+        );
+        route = liveRoute(frame, state, command.routeId);
+        fromLocation = liveLocation(frame, state, command.fromLocationId);
+        toLocation = liveLocation(frame, state, command.toLocationId);
+      }
       if (
         movingActor?.kind !== "person"
         || !route
@@ -1394,6 +1616,8 @@ function validateBootstrapCoverage(
 }
 
 function sortSimulation(state: CampaignPlayRulebookSimulation): void {
+  state.runtimeLocations.sort((left, right) => compareText(left.id, right.id));
+  state.runtimeRoutes.sort((left, right) => compareText(left.id, right.id));
   state.routeStates.sort((left, right) => compareText(left.routeId, right.routeId));
   state.actorConditions.sort((left, right) =>
     compareText(`${left.actorId}\u0000${left.condition}`, `${right.actorId}\u0000${right.condition}`));
@@ -1412,6 +1636,8 @@ function snapshotSimulation(
     worldVersion: state.worldVersion,
     worldTimeMinutes: state.worldTimeMinutes,
     human: state.human === null ? null : { ...state.human },
+    runtimeLocations: state.runtimeLocations.map((row) => ({ ...row, tags: [...row.tags] })),
+    runtimeRoutes: state.runtimeRoutes.map((row) => ({ ...row })),
     routeStates: state.routeStates.map((row) => ({ ...row })),
     actorConditions: state.actorConditions.map((row) => ({ ...row })),
     possessions: state.possessions.map((row) => ({ ...row })),
@@ -1449,6 +1675,7 @@ export function preflightCampaignPlayRulebook(
       validateAvailability(input.frame, input.authority, state, command, index);
       validateSource(input.frame, input.authority, state, command, index);
       validateCausalParent(input.authority, batch.commands, command, index);
+      validateMaterializedLocalSceneTiming(batch.commands, command, index);
       validateRefsAndScopes(
         input.frame,
         input.authority,
@@ -1458,7 +1685,7 @@ export function preflightCampaignPlayRulebook(
         command,
         index,
       );
-      applyCommand(input.frame, state, command, index);
+      applyCommand(input.frame, input.authority, state, command, index);
       sortSimulation(state);
       checkpoints.push(snapshotSimulation(state));
     }
@@ -1594,6 +1821,8 @@ function mechanicalHash(
     acceptedReview: frame.acceptedWorld,
     worldTimeMinutes: state.worldTimeMinutes,
     human: state.human,
+    runtimeLocations: state.runtimeLocations,
+    runtimeRoutes: state.runtimeRoutes,
     routeStates: state.routeStates,
     actorConditions: state.actorConditions,
     possessions: state.possessions,
@@ -1659,6 +1888,34 @@ function applyStoredMutation(
         .run(command.elapsedMinutes, campaignId);
       return;
     case "move_actor":
+      if (command.materializedLocalScene !== undefined) {
+        const scene = command.materializedLocalScene;
+        const origin = sqlite.prepare(`SELECT parent_location_id AS parentLocationId
+          FROM locations WHERE id = ? AND campaign_id = ? AND kind = 'persistent_sublocation'`)
+          .get(command.fromLocationId, campaignId) as { parentLocationId: string | null } | undefined;
+        if (origin?.parentLocationId === null || origin === undefined) {
+          throw new CampaignPlayRulebookExecutionError(
+            "execution_contract_invalid",
+            "Accepted local scene move lost its parent region.",
+          );
+        }
+        sqlite.prepare(`INSERT INTO locations
+          (id, campaign_id, name, description, kind, parent_location_id,
+            anchor_location_id, persistence, tags, is_starting, definition_authority,
+            causal_receipt_id, world_version)
+          VALUES (?, ?, ?, ?, 'persistent_sublocation', ?, ?, 'persistent', '[]', 0,
+            'campaign_play', ?, ?)`)
+          .run(scene.locationId, campaignId, scene.name, scene.description,
+            origin.parentLocationId, scene.anchorLocationId, receiptId, resultWorldVersion);
+        const insertRoute = sqlite.prepare(`INSERT INTO location_edges
+          (id, campaign_id, from_location_id, to_location_id, travel_cost, discovered,
+            definition_authority, causal_receipt_id, world_version)
+          VALUES (?, ?, ?, ?, ?, 1, 'campaign_play', ?, ?)`);
+        insertRoute.run(scene.outboundRouteId, campaignId, scene.anchorLocationId,
+          scene.locationId, scene.travelCost, receiptId, resultWorldVersion);
+        insertRoute.run(scene.returnRouteId, campaignId, scene.locationId,
+          scene.anchorLocationId, scene.travelCost, receiptId, resultWorldVersion);
+      }
       sqlite.prepare(`UPDATE actor_placements SET location_id = ? WHERE campaign_id = ? AND actor_id = ? AND placement_kind = 'present' AND location_id = ?`)
         .run(command.toLocationId, campaignId, command.actorId, command.fromLocationId);
       return;
@@ -1922,11 +2179,13 @@ export function executeCampaignPlayRulebookBatch(
         hashCampaignPlayProjection(argumentsPayload),
         createdAt);
 
-    if (
+    const appliesBeforeEvent = (
       command.kind === "adjust_actor_possession"
       || command.kind === "incur_actor_obligation"
       || command.kind === "pay_actor_obligation"
-    ) {
+      || (command.kind === "move_actor" && command.materializedLocalScene !== undefined)
+    );
+    if (appliesBeforeEvent) {
       applyStoredMutation(input, command, receiptId, after.worldVersion);
     }
 
@@ -1970,6 +2229,7 @@ export function executeCampaignPlayRulebookBatch(
       && command.kind !== "adjust_actor_possession"
       && command.kind !== "incur_actor_obligation"
       && command.kind !== "pay_actor_obligation"
+      && !(command.kind === "move_actor" && command.materializedLocalScene !== undefined)
     ) {
       applyStoredMutation(input, command, receiptId, after.worldVersion);
     }

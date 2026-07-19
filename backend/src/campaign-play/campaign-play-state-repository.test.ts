@@ -216,6 +216,8 @@ function characterBootstrapFrame(
     worldTimeMinutes: null,
     human: null,
     acceptedWorld: world,
+    runtimeLocations: [],
+    runtimeRoutes: [],
     routeStates: [],
     actorConditions: [],
     possessions: [],
@@ -1658,6 +1660,148 @@ describe("Campaign Play state repository transactions", () => {
     expect(after?.runtime).toEqual(before?.runtime);
     expect(after?.protectedAudit).toEqual(before?.protectedAudit);
     expect(after?.publicState).toEqual(before?.publicState);
+  });
+
+  it("persists receipt-authorized local scenes across reload", () => {
+    const { handle, repository, state } = createEligibleState();
+    const anchor = state.acceptedReview.locations.find((location) =>
+      location.kind === "persistent_sublocation" && location.parentLocationId !== null,
+    );
+    if (!anchor || anchor.parentLocationId === null) {
+      throw new Error("Fixture requires an accepted persistent local scene.");
+    }
+    const admitted = repository.commitRuntime({
+      event: {
+        eventId: "runtime-local-scene-turn",
+        turnId: "turn-opening",
+        kind: "turn_admitted",
+        workerEpoch: null,
+        protectedPayloadHash: HASH_A,
+        createdAt: 1_390,
+      },
+      mutate(context) {
+        insertAdmittedTurn({
+          sqlite: context.sqlite,
+          campaignId: context.campaignId,
+          priorWorldVersion: context.priorWorldVersion,
+          priorRuntimeRevision: context.priorRuntimeRevision,
+        });
+      },
+    });
+    const payload = JSON.stringify({
+      kind: "move_actor",
+      actorId: "actor-player",
+      routeId: "route-runtime-reload-outbound",
+      fromLocationId: anchor.id,
+      toLocationId: "scene-runtime-reload",
+      materializedLocalScene: {
+        locationId: "scene-runtime-reload",
+        anchorLocationId: anchor.id,
+        name: "Flooded Bell Passage",
+        description: "A low side passage where a cracked bell chimes under the waterline.",
+        outboundRouteId: "route-runtime-reload-outbound",
+        returnRouteId: "route-runtime-reload-return",
+        travelCost: 2,
+      },
+    });
+    const committed = repository.commitMechanical({
+      worldVersionAdvance: 1,
+      updatedAt: 1_400,
+      mutate(context) {
+        context.sqlite.prepare(`INSERT INTO campaign_play_commands (
+          command_id, campaign_id, turn_id, batch_id, command_order, command_kind,
+          causal_parent_json, source_json, expected_world_version,
+          read_scope_json, write_scope_json, exposure_policy_json,
+          arguments_hash, protected_payload_json, protected_payload_hash, created_at
+        ) VALUES (?, ?, 'turn-opening', 'batch-runtime-reload', 0, 'move_actor',
+          '{"kind":"turn","turnId":"turn-opening"}', '{"kind":"system","system":"game_master"}', ?,
+          '[]', '[]', '{"mode":"protected"}', ?, ?, ?, 1400)`).run(
+          "command-runtime-reload",
+          context.campaignId,
+          context.priorWorldVersion,
+          HASH_A,
+          payload,
+          HASH_B,
+        );
+        context.sqlite.prepare(`INSERT INTO campaign_play_receipts (
+          receipt_id, campaign_id, turn_id, command_id, command_kind, outcome,
+          applied_world_mutation, prior_world_version, result_world_version,
+          prior_world_hash, result_world_hash, causal_event_ids_json,
+          protected_payload_json, protected_payload_hash, created_at
+        ) VALUES (?, ?, 'turn-opening', 'command-runtime-reload', 'move_actor', 'applied',
+          1, ?, ?, ?, ?, '["event-runtime-reload"]', ?, ?, 1400)`).run(
+          "receipt-runtime-reload",
+          context.campaignId,
+          context.priorWorldVersion,
+          context.targetWorldVersion,
+          admitted.authority.worldHash,
+          HASH_C,
+          payload,
+          HASH_B,
+        );
+        context.sqlite.prepare(`INSERT INTO locations (
+          id, campaign_id, name, description, kind, parent_location_id,
+          anchor_location_id, persistence, tags, is_starting, definition_authority,
+          causal_receipt_id, world_version
+        ) VALUES (?, ?, 'Flooded Bell Passage',
+          'A low side passage where a cracked bell chimes under the waterline.',
+          'persistent_sublocation', ?, ?, 'persistent', '[]', 0, 'campaign_play', ?, ?)`).run(
+          "scene-runtime-reload",
+          context.campaignId,
+          anchor.parentLocationId,
+          anchor.id,
+          "receipt-runtime-reload",
+          context.targetWorldVersion,
+        );
+        const insertRoute = context.sqlite.prepare(`INSERT INTO location_edges (
+          id, campaign_id, from_location_id, to_location_id, travel_cost, discovered,
+          definition_authority, causal_receipt_id, world_version
+        ) VALUES (?, ?, ?, ?, 2, 1, 'campaign_play', ?, ?)`);
+        insertRoute.run(
+          "route-runtime-reload-outbound",
+          context.campaignId,
+          anchor.id,
+          "scene-runtime-reload",
+          "receipt-runtime-reload",
+          context.targetWorldVersion,
+        );
+        insertRoute.run(
+          "route-runtime-reload-return",
+          context.campaignId,
+          "scene-runtime-reload",
+          anchor.id,
+          "receipt-runtime-reload",
+          context.targetWorldVersion,
+        );
+      },
+    });
+
+    expect(committed.mechanical.projection).toMatchObject({
+      runtimeLocations: [{
+        id: "scene-runtime-reload",
+        anchorLocationId: anchor.id,
+        causalReceiptId: "receipt-runtime-reload",
+        worldVersion: admitted.authority.worldVersion + 1,
+      }],
+      runtimeRoutes: expect.arrayContaining([
+        expect.objectContaining({ id: "route-runtime-reload-outbound" }),
+        expect.objectContaining({ id: "route-runtime-reload-return" }),
+      ]),
+    });
+    expect(() => handle.sqlite.prepare(`UPDATE locations
+      SET description = 'Mutated.' WHERE id = 'scene-runtime-reload'`).run()).toThrow();
+    handle.close();
+    handles = handles.filter((candidate) => candidate !== handle);
+    const reopened = openPlay();
+    const reloaded = createCampaignPlayStateRepository(reopened).loadState();
+    expect(reloaded?.mechanical).toEqual(committed.mechanical);
+    expect(loadCampaignPlayRulebookFrame(reopened)).toMatchObject({
+      runtimeLocations: [{ id: "scene-runtime-reload", anchorLocationId: anchor.id }],
+      runtimeRoutes: expect.arrayContaining([
+        expect.objectContaining({ id: "route-runtime-reload-outbound" }),
+        expect.objectContaining({ id: "route-runtime-reload-return" }),
+      ]),
+    });
   });
 
   it("rejects stored authority hash drift and runtime event gaps", () => {

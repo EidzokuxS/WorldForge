@@ -28,6 +28,8 @@ import {
   type CampaignPlayLivePressureState,
   type CampaignPlayLiveRelation,
   type CampaignPlayLiveRouteState,
+  type CampaignPlayRuntimeLocation,
+  type CampaignPlayRuntimeRoute,
   type CampaignPlayEligibilitySemanticProjection,
   type CampaignPlayProjection,
   type CampaignPlayProjectionRecord,
@@ -268,7 +270,9 @@ function assertAcceptedFoundation(
   const locations = sqlite.prepare(`
     SELECT id, name, description, kind, parent_location_id AS parentLocationId,
       tags, is_starting AS isStarting
-    FROM locations WHERE campaign_id = ? ORDER BY id
+    FROM locations
+    WHERE campaign_id = ? AND definition_authority = 'accepted_world'
+    ORDER BY id
   `).all(campaignId) as Array<Record<string, unknown>>;
   const normalizedLocations = locations.map((row) => ({
     id: row.id,
@@ -288,7 +292,9 @@ function assertAcceptedFoundation(
   const routes = sqlite.prepare(`
     SELECT id, from_location_id AS fromLocationId, to_location_id AS toLocationId,
       travel_cost AS travelCost
-    FROM location_edges WHERE campaign_id = ? ORDER BY id
+    FROM location_edges
+    WHERE campaign_id = ? AND definition_authority = 'accepted_world'
+    ORDER BY id
   `).all(campaignId);
   const acceptedRoutes = [...review.routes]
     .sort((left, right) => left.id.localeCompare(right.id));
@@ -349,6 +355,97 @@ function assertAcceptedFoundation(
   }
 }
 
+interface CampaignPlayRuntimeTopology {
+  runtimeLocations: CampaignPlayRuntimeLocation[];
+  runtimeRoutes: CampaignPlayRuntimeRoute[];
+}
+
+function selectRuntimeTopology(
+  sqlite: Database.Database,
+  campaignId: string,
+): CampaignPlayRuntimeTopology {
+  const locationRows = sqlite.prepare(`
+    SELECT id, name, description, kind,
+      parent_location_id AS parentLocationId,
+      anchor_location_id AS anchorLocationId,
+      tags,
+      causal_receipt_id AS causalReceiptId,
+      world_version AS worldVersion
+    FROM locations
+    WHERE campaign_id = ? AND definition_authority = 'campaign_play'
+    ORDER BY id
+  `).all(campaignId) as Array<{
+    id: string;
+    name: string;
+    description: string;
+    kind: string;
+    parentLocationId: string | null;
+    anchorLocationId: string | null;
+    tags: string;
+    causalReceiptId: string | null;
+    worldVersion: number | null;
+  }>;
+  const runtimeLocations = locationRows.map((row) => {
+    let tags: unknown;
+    try {
+      tags = JSON.parse(row.tags) as unknown;
+    } catch (error) {
+      throw corrupt("Campaign Play runtime location tags are invalid.", error);
+    }
+    if (
+      row.kind !== "persistent_sublocation" ||
+      row.parentLocationId === null ||
+      row.anchorLocationId === null ||
+      row.causalReceiptId === null ||
+      row.worldVersion === null ||
+      !Array.isArray(tags) ||
+      !tags.every((tag) => typeof tag === "string")
+    ) {
+      throw corrupt("Campaign Play runtime location provenance is invalid.");
+    }
+    return {
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      kind: "persistent_sublocation" as const,
+      parentLocationId: row.parentLocationId,
+      anchorLocationId: row.anchorLocationId,
+      tags,
+      causalReceiptId: row.causalReceiptId,
+      worldVersion: row.worldVersion,
+    };
+  });
+  const routeRows = sqlite.prepare(`
+    SELECT id,
+      from_location_id AS fromLocationId,
+      to_location_id AS toLocationId,
+      travel_cost AS travelCost,
+      causal_receipt_id AS causalReceiptId,
+      world_version AS worldVersion
+    FROM location_edges
+    WHERE campaign_id = ? AND definition_authority = 'campaign_play'
+    ORDER BY id
+  `).all(campaignId) as Array<{
+    id: string;
+    fromLocationId: string;
+    toLocationId: string;
+    travelCost: number;
+    causalReceiptId: string | null;
+    worldVersion: number | null;
+  }>;
+  const runtimeRoutes = routeRows.map((row) => {
+    if (row.causalReceiptId === null || row.worldVersion === null) {
+      throw corrupt("Campaign Play runtime route provenance is invalid.");
+    }
+    return {
+      ...row,
+      causalReceiptId: row.causalReceiptId,
+      worldVersion: row.worldVersion,
+    };
+  });
+  return { runtimeLocations, runtimeRoutes };
+}
+
 function selectMechanicalProjection(
   sqlite: Database.Database,
   campaignId: string,
@@ -356,6 +453,7 @@ function selectMechanicalProjection(
   review: CampaignWorldReview,
 ): CampaignPlayProjection<object> {
   assertAcceptedFoundation(sqlite, campaignId, review);
+  const { runtimeLocations, runtimeRoutes } = selectRuntimeTopology(sqlite, campaignId);
   const humanRows = sqlite.prepare(`
     SELECT a.id AS actorId, c.record_hash AS recordHash
     FROM actors a
@@ -479,6 +577,8 @@ function selectMechanicalProjection(
     human: humanRows.length === 0
       ? null
       : { actorId: humanRows[0].actorId, recordHash: humanRows[0].recordHash as string },
+    runtimeLocations,
+    runtimeRoutes,
     routeStates,
     actorConditions: actorConditions.map((row) => ({ ...row, present: row.present === 1 })),
     pressureStates,
@@ -1169,6 +1269,7 @@ export function loadCampaignPlayRulebookFrame(
     ORDER BY debtor_actor_id, creditor_actor_id, unit_key, obligation_id`).all(
       campaignId,
     ) as CampaignPlayLiveActorObligation[];
+  const { runtimeLocations, runtimeRoutes } = selectRuntimeTopology(sqlite, campaignId);
   return {
     campaignId,
     acceptedWorldVersion: state.authority.acceptedWorldVersion,
@@ -1178,6 +1279,8 @@ export function loadCampaignPlayRulebookFrame(
     worldTimeMinutes: state.authority.worldTimeMinutes,
     human: human ?? null,
     acceptedWorld: state.acceptedReview,
+    runtimeLocations,
+    runtimeRoutes,
     routeStates,
     actorConditions,
     pressureStates,

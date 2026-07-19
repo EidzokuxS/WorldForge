@@ -384,10 +384,19 @@ export const locations = sqliteTable(
       .default(false),
     // Compatibility projection during the Phase 43 reader migration.
     connectedTo: text("connected_to").notNull().default("[]"),
+    definitionAuthority: text("definition_authority", {
+      enum: ["accepted_world", "campaign_play"],
+    }).notNull().default("accepted_world"),
+    causalReceiptId: text("causal_receipt_id"),
+    worldVersion: integer("world_version"),
   },
   (table) => [
     index("idx_locations_campaign").on(table.campaignId),
     index("idx_locations_campaign_kind").on(table.campaignId, table.kind),
+    index("idx_locations_campaign_definition_authority")
+      .on(table.campaignId, table.definitionAuthority),
+    index("idx_locations_campaign_receipt")
+      .on(table.campaignId, table.causalReceiptId),
     index("idx_locations_parent_location").on(table.parentLocationId),
     index("idx_locations_anchor_location").on(table.anchorLocationId),
   ]
@@ -410,11 +419,20 @@ export const locationEdges = sqliteTable(
     discovered: integer("discovered", { mode: "boolean" })
       .notNull()
       .default(true),
+    definitionAuthority: text("definition_authority", {
+      enum: ["accepted_world", "campaign_play"],
+    }).notNull().default("accepted_world"),
+    causalReceiptId: text("causal_receipt_id"),
+    worldVersion: integer("world_version"),
   },
   (table) => [
     index("idx_location_edges_campaign").on(table.campaignId),
     index("idx_location_edges_from").on(table.campaignId, table.fromLocationId),
     index("idx_location_edges_to").on(table.campaignId, table.toLocationId),
+    index("idx_location_edges_campaign_definition_authority")
+      .on(table.campaignId, table.definitionAuthority),
+    index("idx_location_edges_campaign_receipt")
+      .on(table.campaignId, table.causalReceiptId),
     uniqueIndex("location_edges_campaign_from_to_unique").on(
       table.campaignId,
       table.fromLocationId,

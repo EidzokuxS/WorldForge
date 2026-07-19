@@ -66,6 +66,27 @@ export interface CampaignPlayLiveRouteState {
   state: "open" | "restricted" | "blocked";
 }
 
+export interface CampaignPlayRuntimeLocation {
+  id: string;
+  name: string;
+  description: string;
+  kind: "persistent_sublocation";
+  parentLocationId: string;
+  anchorLocationId: string;
+  tags: string[];
+  causalReceiptId: string;
+  worldVersion: number;
+}
+
+export interface CampaignPlayRuntimeRoute {
+  id: string;
+  fromLocationId: string;
+  toLocationId: string;
+  travelCost: number;
+  causalReceiptId: string;
+  worldVersion: number;
+}
+
 export interface CampaignPlayLiveActorCondition {
   actorId: string;
   condition: "occupied" | "strained" | "incapacitated";
@@ -131,6 +152,8 @@ export interface CampaignPlayMechanicalProjectionInput {
   acceptedReview: CampaignWorldReview;
   worldTimeMinutes: number | null;
   human: CampaignPlayHumanMechanicalIdentity | null;
+  runtimeLocations: readonly CampaignPlayRuntimeLocation[];
+  runtimeRoutes: readonly CampaignPlayRuntimeRoute[];
   routeStates: readonly CampaignPlayLiveRouteState[];
   actorConditions: readonly CampaignPlayLiveActorCondition[];
   pressureStates: readonly CampaignPlayLivePressureState[];
@@ -322,6 +345,24 @@ export function deriveCampaignPlayObligationId(
     creditorActorId,
     unitKey,
   }).slice(0, 48)}`;
+}
+
+export function deriveCampaignPlayLocalSceneTopologyIds(input: {
+  campaignId: string;
+  turnId: string;
+  anchorLocationId: string;
+  name: string;
+  description: string;
+}): { locationId: string; outboundRouteId: string; returnRouteId: string } {
+  const identity = hashCampaignPlayProjection({
+    domain: "campaign_play_local_scene_topology",
+    ...input,
+  }).slice(0, 32);
+  return {
+    locationId: `scene:${identity}`,
+    outboundRouteId: `route:${identity}:outbound`,
+    returnRouteId: `route:${identity}:return`,
+  };
 }
 
 function wrapProjection<T>(projection: T): CampaignPlayProjection<T> {
@@ -621,6 +662,8 @@ export function projectAcceptedTopologyEligibility(
 function isAcceptedMechanicalBase(input: CampaignPlayMechanicalProjectionInput): boolean {
   return input.worldTimeMinutes === null &&
     input.human === null &&
+    input.runtimeLocations.length === 0 &&
+    input.runtimeRoutes.length === 0 &&
     input.routeStates.length === 0 &&
     input.actorConditions.length === 0 &&
     input.pressureStates.length === 0 &&
@@ -662,6 +705,8 @@ export function projectCampaignPlayMechanicalTruth(
     acceptedContentHash: input.acceptedReview.contentHash,
     worldTimeMinutes: input.worldTimeMinutes,
     human: input.human,
+    runtimeLocations: sortByText(input.runtimeLocations, (row) => row.id),
+    runtimeRoutes: sortByText(input.runtimeRoutes, (row) => row.id),
     routeStates: sortByText(input.routeStates, (row) => row.routeId),
     actorConditions: sortByText(
       input.actorConditions,

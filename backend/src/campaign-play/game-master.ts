@@ -28,6 +28,7 @@ import {
   type RulebookCommandBatch,
 } from "./contracts.js";
 import {
+  deriveCampaignPlayLocalSceneTopologyIds,
   deriveCampaignPlayObligationId,
   deriveCampaignPlayPossessionId,
   deriveCampaignPlayPossessionKey,
@@ -96,6 +97,11 @@ function createEffectProposalSchema(
   }).strict()).max(CAMPAIGN_PLAY_LIMITS.suggestedActions);
   return z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("move_actor"), actorHandle: handleSchema.nullable() }).strict(),
+  z.object({
+    kind: z.literal("enter_local_scene"),
+    name: line(CAMPAIGN_PLAY_LIMITS.name),
+    description: text(CAMPAIGN_PLAY_LIMITS.text),
+  }).strict(),
   z.object({ ...effectBase, kind: z.literal("set_route_state"), routeHandle: handleSchema,
     state: z.enum(CAMPAIGN_PLAY_ROUTE_STATE_VALUES), reason: line(CAMPAIGN_PLAY_LIMITS.shortText) }).strict(),
   z.object({ ...effectBase, kind: z.literal("set_actor_condition"), actorHandle: handleSchema,
@@ -494,13 +500,22 @@ interface DestinationScene {
   presentPeople: string[];
 }
 
+function liveLocation(frame: CampaignPlayRulebookFrame, locationId: string) {
+  return frame.runtimeLocations.find((candidate) => candidate.id === locationId)
+    ?? frame.acceptedWorld.locations.find((candidate) => candidate.id === locationId);
+}
+
+function liveRoute(frame: CampaignPlayRulebookFrame, routeId: string) {
+  return frame.runtimeRoutes.find((candidate) => candidate.id === routeId)
+    ?? frame.acceptedWorld.routes.find((candidate) => candidate.id === routeId);
+}
+
 function destinationScene(
   frame: CampaignPlayGameMasterFrame,
   movement: CanonicalMovement | null,
 ): DestinationScene | null {
   if (movement === null) return null;
-  const location = frame.rulebookFrame.acceptedWorld.locations.find((candidate) =>
-    candidate.id === movement.to.id && candidate.kind === "persistent_sublocation");
+  const location = liveLocation(frame.rulebookFrame, movement.to.id);
   if (!location) {
     throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
   }
@@ -551,8 +566,7 @@ function canonicalMovement(
   const routeMatchesMovement = (handle: string): boolean => {
     const reference = map.get(handle);
     if (reference?.kind !== "route") return false;
-    const record = frame.rulebookFrame.acceptedWorld.routes.find((candidate) =>
-      candidate.id === reference.id);
+    const record = liveRoute(frame.rulebookFrame, reference.id);
     return record?.fromLocationId === placement.locationId
       && (destination === null || record.toLocationId === destination.id);
   };
@@ -561,8 +575,7 @@ function canonicalMovement(
     throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
   }
   const route = requireRef(map, routeHandle, "route");
-  const routeRecord = frame.rulebookFrame.acceptedWorld.routes.find((candidate) =>
-    candidate.id === route.id);
+  const routeRecord = liveRoute(frame.rulebookFrame, route.id);
   if (!routeRecord || routeRecord.fromLocationId !== placement.locationId) {
     throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
   }
@@ -661,6 +674,7 @@ function compileEffect(
   movement: CanonicalMovement | null,
   ruling: CampaignPlayJudgeRuling,
   perceptionLocationId: string,
+  elapsedMinutes: number,
 ): CommandArguments | CommandArguments[] {
   switch (effect.kind) {
     case "move_actor": {
@@ -693,6 +707,54 @@ function compileEffect(
           mode: "projectable",
           predicates: [{ channel: "direct_perception", locationId: to.id }],
         } };
+    }
+    case "enter_local_scene": {
+      const actorId = frame.authority.actorId;
+      const turnId = frame.authority.turnId;
+      const anchor = liveLocation(frame.rulebookFrame, perceptionLocationId);
+      const actor = actorId === null ? null : { kind: "actor" as const, id: actorId };
+      if (
+        actor === null
+        || turnId === null
+        || anchor?.kind !== "persistent_sublocation"
+        || elapsedMinutes < 1
+        || elapsedMinutes > 10
+      ) {
+        throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
+      }
+      const ids = deriveCampaignPlayLocalSceneTopologyIds({
+        campaignId: frame.rulebookFrame.campaignId,
+        turnId,
+        anchorLocationId: anchor.id,
+        name: effect.name,
+        description: effect.description,
+      });
+      const anchorRef = { kind: "location" as const, id: anchor.id };
+      const locationRef = { kind: "location" as const, id: ids.locationId };
+      const outboundRouteRef = { kind: "route" as const, id: ids.outboundRouteId };
+      const returnRouteRef = { kind: "route" as const, id: ids.returnRouteId };
+      return {
+        kind: "move_actor",
+        actorId: actor.id,
+        routeId: ids.outboundRouteId,
+        fromLocationId: anchor.id,
+        toLocationId: ids.locationId,
+        materializedLocalScene: {
+          locationId: ids.locationId,
+          anchorLocationId: anchor.id,
+          name: effect.name,
+          description: effect.description,
+          outboundRouteId: ids.outboundRouteId,
+          returnRouteId: ids.returnRouteId,
+          travelCost: elapsedMinutes,
+        },
+        readScope: [actor, anchorRef],
+        writeScope: [actor, outboundRouteRef, anchorRef, locationRef, returnRouteRef],
+        exposure: {
+          mode: "projectable",
+          predicates: [{ channel: "direct_perception", locationId: ids.locationId }],
+        },
+      };
     }
     case "set_route_state": {
       const exposurePolicy = exposure(effect.exposure, map, frame.rulebookFrame.worldTimeMinutes);
@@ -1031,8 +1093,7 @@ function compile(
   }
   for (const claim of routeAccessClaims) {
     const routeRef = requireRef(map, claim.routeHandle, "route");
-    const route = frame.rulebookFrame.acceptedWorld.routes.find((candidate) =>
-      candidate.id === routeRef.id);
+    const route = liveRoute(frame.rulebookFrame, routeRef.id);
     if (!route) throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
     const state = frame.rulebookFrame.routeStates.find((candidate) =>
       candidate.routeId === route.id)?.state ?? "open";
@@ -1118,10 +1179,27 @@ function compile(
     effect.kind === "move_actor" ? [{ effect, index }] : []);
   const playerMovementEffects = movementEffects.filter(({ effect }) => effect.actorHandle === null);
   const companionMovementEffects = movementEffects.filter(({ effect }) => effect.actorHandle !== null);
+  const localSceneEffects = proposal.effects.flatMap((effect, index) =>
+    effect.kind === "enter_local_scene" ? [{ effect, index }] : []);
+  const localSceneResult = CAMPAIGN_PLAY_RESULT_TIER_VALUES.indexOf(resolution.result)
+    >= CAMPAIGN_PLAY_RESULT_TIER_VALUES.indexOf("limited");
+  const localSceneEventIndex = proposal.effects.findIndex((effect) =>
+    effect.kind === "record_world_event"
+    && (effect.eventClass === "discovery" || effect.eventClass === "scene")
+    && effect.performingActorHandle === null);
   if (
     (movement === null && movementEffects.length !== 0)
     || (movement !== null && playerMovementEffects.length !== 1)
     || companionMovementEffects.length > 1
+    || localSceneEffects.length > 1
+    || (localSceneEffects.length === 1 && (
+      movement !== null
+      || !localSceneResult
+      || (ruling.normalizedIntent.kind !== "observe" && ruling.normalizedIntent.kind !== "attempt")
+      || proposal.elapsedMinutes < 1
+      || proposal.elapsedMinutes > 10
+      || localSceneEventIndex <= localSceneEffects[0]!.index
+    ))
   ) {
     throw new CampaignPlayGameMasterError("model_contract_failed", null);
   }
@@ -1192,6 +1270,7 @@ function compile(
       movement,
       ruling,
       perceptionLocationId,
+      proposal.elapsedMinutes,
     );
     argumentsList.push(...(Array.isArray(compiled) ? compiled : [compiled]));
     if (effect.kind === "move_actor" && effect.actorHandle === null) {
@@ -1199,6 +1278,12 @@ function compile(
         throw new CampaignPlayGameMasterError("model_contract_failed", null);
       }
       perceptionLocationId = movement.to.id;
+    } else if (effect.kind === "enter_local_scene") {
+      const localMove = Array.isArray(compiled) ? null : compiled;
+      if (localMove?.kind !== "move_actor") {
+        throw new CampaignPlayGameMasterError("model_contract_failed", null);
+      }
+      perceptionLocationId = localMove.toLocationId;
     }
   }
   if (argumentsList.length > CAMPAIGN_PLAY_LIMITS.commandsPerBatch) {
@@ -1247,8 +1332,7 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
   const currentPlacement = frame.rulebookFrame.placements.find((placement) =>
     placement.actorId === frame.authority.actorId && placement.placementKind === "present");
   const currentLocation = currentPlacement === undefined ? undefined
-    : frame.rulebookFrame.acceptedWorld.locations.find((location) =>
-      location.id === currentPlacement.locationId && location.kind === "persistent_sublocation");
+    : liveLocation(frame.rulebookFrame, currentPlacement.locationId);
   const worldTimeMinutes = frame.rulebookFrame.worldTimeMinutes;
   if (!currentLocation || worldTimeMinutes === null) {
     throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
@@ -1283,7 +1367,7 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     "Copy every handle-valued field character-for-character from ALLOWED_HANDLES. This includes performingActorHandle, affectedHandles, and every model-authored exposure predicate anchorHandle. affectedHandles must not repeat a handle. Never put a name, ID, description, or newly invented token in a handle field.",
     "Match each handle to the field's required kind in HANDLES_BY_KIND. direct_perception and local_aftermath anchorHandle require location; route_state anchorHandle requires route; witness_report anchorHandle requires actor. actorHandle, debtorActorHandle, and creditorActorHandle require actor; routeHandle requires route; fromLocationHandle and toLocationHandle require location; relationHandle requires relation; goalHandle requires goal; pressureHandle requires pressure; obligationHandle requires obligation; and paymentPossessionHandle requires possession.",
     "Every exposure field is one object, never an array. It is exactly {\"mode\":\"protected\"} or {\"mode\":\"projectable\",\"predicates\":[...]}; predicates is the only array. Use the exact predicate fields for its channel: direct_perception has only channel and anchorHandle; local_aftermath has exactly channel, anchorHandle, and the required integer visibleForMinutes; route_state has exactly channel, anchorHandle, and the required non-empty triggers array; witness_report has only channel and anchorHandle. Never omit a required field or add one from another channel.",
-    "effects[].kind accepts exactly: move_actor, set_route_state, set_actor_condition, update_actor_relation, update_actor_goal, advance_pressure, adjust_actor_possession, incur_actor_obligation, pay_actor_obligation, or record_world_event. Never return inspect, observe, discover, discovery, reveal, describe, dialogue, interaction, scene, or any other token as an effect kind. Code owns IDs, scopes, versions, causal links, rolls, and Rulebook authority.",
+    "effects[].kind accepts exactly: move_actor, enter_local_scene, set_route_state, set_actor_condition, update_actor_relation, update_actor_goal, advance_pressure, adjust_actor_possession, incur_actor_obligation, pay_actor_obligation, or record_world_event. Never return inspect, observe, discover, discovery, reveal, describe, dialogue, interaction, scene, or any other token as an effect kind. Code owns IDs, scopes, versions, causal links, rolls, and Rulebook authority.",
     "set_actor_condition has exactly these fields: kind, exposure, actorHandle, condition, operation, and summary. condition must be exactly occupied, strained, or incapacitated; operation must be exactly set or clear. affectedHandles is forbidden. If none of those three conditions fits the resolved result, do not use set_actor_condition; commit the result through another authorized effect.",
     "Resolve only the exact PLAYER_INTENT. PLAYER_INTENT owns the player's method and scope. Preserve every concrete trade, material, tool, target, and explicit exclusion or refusal it states; never substitute a nearby profession or revive a rejected method to fit SOURCE_MOMENT. A generic approach, observation, or wait does not authorize an offer, transaction, repair specialty, tool use, disclosure, promise, or commitment absent from PLAYER_INTENT. Prior scene prose may explain context but cannot add a player action. Result tiers change the degree of success inside the admitted scope; they never create trust, permission, leverage, knowledge, or access. strong_success makes the scoped result more useful; it does not turn an unfamiliar actor into a fully cooperative informant.",
     "A direct question identifies the topic but never gives the speaker a reason to answer. Do not disclose a third party's identity, location, contact channel, or private case details, and do not recruit the player to find or report on that person, unless ACTOR_DIRECTIVES or VISIBLE_FACTS establish a concrete speaker-side reason: consent or already-public status, duty or authority, established trust, reciprocal value already supplied or explicitly committed in PLAYER_INTENT, or an immediate safety need. Otherwise have the speaker withhold, deflect, ask the player's purpose, or name a condition. Do not invent a quest.",
@@ -1302,10 +1386,11 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     "For a no-travel contact whose PLAYER_INTENT targets or RULING cites a route, routeAccessClaims is required on every record_world_event and must include exactly one claim per relevant route on the dialogue or interaction; use an empty array on its other events. A general passage, clearance, stamping, permit, toll, or fee question cites every currently visible route, so answer against every supplied claim rather than preserving a generic requirement from earlier dialogue. Otherwise omit routeAccessClaims. Each claim has only routeHandle, state, accessRequirement, and viaLocationHandle. Copy routeHandle from the target or cited visible fact. Match state to VISIBLE_FACTS, use accessRequirement none for open and required for restricted or blocked, and use viaLocationHandle null for a direct route. Every route topology or access statement in summary must agree with these claims. Code rejects a missing, extra, duplicated, misplaced, or mechanically false claim before Rulebook execution.",
     "PLAYER_MOVEMENT is code-authoritative. When it is non-null, return exactly one {\"kind\":\"move_actor\",\"actorHandle\":null} effect for the player at the chronological point where travel occurs. Code binds the player actor, route, endpoints, and direct perception from this order. When PLAYER_MOVEMENT is null, never return move_actor. Do not copy PLAYER_MOVEMENT fields or exposure into an effect.",
     "PLAYER_MOVEMENT also carries the route's code-authoritative travelCost ticks. For a pure move, elapsedMinutes must equal travelCost exactly. For a compound action that includes travel, elapsedMinutes must be at least travelCost and remain within RULING.elapsedBounds. Never estimate a different route duration.",
+    "When a grounded route-less observe or attempt physically changes the player's exact position and the accepted result is limited or better, return exactly one enter_local_scene before one actorless discovery or scene event. enter_local_scene has exactly kind, name, and description. Name the newly reached perceivable scene and describe only stable sensory or publicly obvious context; do not put secrets, hidden causes, actor motives, or unresolved outcomes in its description. Code derives the scene and route IDs, endpoints, and bidirectional topology. It binds travel cost to elapsedMinutes and owns the placement transition, receipt, version, and persistence. Do not use enter_local_scene when the player only looks, searches, listens, manipulates something in place, or fails to advance.",
     "WORLD_TIME_AUTHORITY is code-owned. The result occurs at actionStart.totalMinutes plus your elapsedMinutes, inside resultRange. Any clock time, part of day, date, deadline, duration, or relative phrase in a summary must agree with that result time and with every other time claim. When supplied facts do not fix a schedule, you may materialize concrete schedule values for an observation, but keep them internally consistent and omit a relation you cannot support.",
     "PLAYER_MOVEMENT.initialRouteState is code-authoritative. When it is restricted, the accepted attempt has earned passage for this traversal only. Return one protected set_route_state effect that changes the exact route to open before any movement effect. After the player and any willing companion have moved, return one protected set_route_state effect that restores the same route to restricted. Return no other state transition for that route. When a restricted attempt did not earn passage, PLAYER_MOVEMENT is null: commit the visible failed result without moving anyone or changing the route.",
     "set_route_state has exactly these fields: kind, exposure, routeHandle, state, and reason. reason is the short mechanical basis for this route transition. summary and affectedHandles are forbidden.",
-    "CURRENT_EXACT_SCENE is the Rulebook placement boundary. SOURCE_MOMENT and supplied observations may establish rooms, corridors, thresholds, floors, trails, or other local features inside it. When PLAYER_MOVEMENT is null and PLAYER_INTENT observes or attempts to traverse one already established local feature, resolve the grounded local action and use an actorless discovery or scene result; the player may reach, stand at, or inspect that feature while remaining in the same Rulebook location. Never return move_actor or claim a placement change for this local traversal. Do not invent a feature from PLAYER_INTENT, create an internal path into another persistent location, or place the player on a visible route destination's surfaces. Crossing into another Rulebook location requires PLAYER_MOVEMENT.",
+    "CURRENT_EXACT_SCENE is the Rulebook placement boundary. SOURCE_MOMENT and supplied observations may establish rooms, corridors, thresholds, floors, trails, or other local features inside it. When PLAYER_MOVEMENT is null and PLAYER_INTENT observes or attempts one established local feature without changing exact position, use an actorless discovery or scene result and do not return enter_local_scene. When the accepted action advances into a distinct directly perceivable scene, follow the enter_local_scene contract. Do not invent a feature from PLAYER_INTENT, create an internal path into another known persistent location, or place the player on a visible route destination's surfaces. Crossing into an already known Rulebook location requires PLAYER_MOVEMENT.",
     "A targeted visible agent may voluntarily travel with the player over PLAYER_MOVEMENT. First record that person's explicit agreement or willing action as an origin dialogue/interaction. After the player's move_actor effect, return at most one second move_actor effect with that targeted person's exact actorHandle. Code binds the same route and endpoints. Never move an untargeted, remote, incapacitated, non-agent, or unwilling person. If the person does not travel, omit the second effect and do not describe that person at the destination.",
     "Order movement effects as origin interaction, player move_actor with null actorHandle, optional companion move_actor with the targeted actorHandle, then arrival or destination interaction. Put any record_world_event describing the arrival after the movement effects and use eventClass scene for an actorless arrival. Every person described as present in a destination summary must already be there or have a preceding accepted move_actor effect, and their handle must appear in affectedHandles.",
     "A committed PLAYER_MOVEMENT places the player inside the destination's shared location scene. An arrival summary must not leave the player outside a door, gate, or other access boundary unless supplied route or location authority already represents that boundary. If an unnamed recipient does not answer, report only the lack of a reply; do not claim that the destination is empty or inaccessible.",

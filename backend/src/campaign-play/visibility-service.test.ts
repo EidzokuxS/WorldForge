@@ -251,6 +251,8 @@ function rulebookFrame(handle: CampaignPlayDatabaseHandle): CampaignPlayRulebook
     worldTimeMinutes: authority.worldTimeMinutes,
     human: { actorId: "actor-player", recordHash: HASH_A },
     acceptedWorld: loaded.acceptedReview,
+    runtimeLocations: [],
+    runtimeRoutes: [],
     routeStates,
     actorConditions,
     possessions: [],

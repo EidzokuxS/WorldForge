@@ -14,6 +14,7 @@ import {
 import type { CampaignPlayJudgeRuling, CampaignPlayUncertaintyResolution } from "./contracts.js";
 import { resolveCampaignPlayUncertainty, type CampaignPlayModelBudget } from "./judge.js";
 import {
+  deriveCampaignPlayLocalSceneTopologyIds,
   deriveCampaignPlayObligationId,
   deriveCampaignPlayPossessionId,
   deriveCampaignPlayPossessionKey,
@@ -98,6 +99,8 @@ function frame(): CampaignPlayGameMasterFrame {
       worldTimeMinutes: 10,
       human: { actorId: PLAYER_ID, recordHash: "c".repeat(64) },
       acceptedWorld: world(),
+      runtimeLocations: [],
+      runtimeRoutes: [],
       routeStates: [],
       actorConditions: [],
       possessions: [],
@@ -447,7 +450,7 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("A generic approach, observation, or wait does not authorize an offer");
     expect(String(options.prompt)).toContain("Autonomous actor scheduling runs after the primary batch");
     expect(String(options.prompt)).toContain("Do not freeze their later state in an actorless summary");
-    expect(String(options.prompt)).toContain("Crossing into another Rulebook location requires PLAYER_MOVEMENT");
+    expect(String(options.prompt)).toContain("Crossing into an already known Rulebook location requires PLAYER_MOVEMENT");
     expect(String(options.prompt)).toContain("Prior scene prose may explain context but cannot add a player action");
     expect(String(options.prompt)).toContain("does not turn an unfamiliar actor into a fully cooperative informant");
     expect(String(options.prompt)).toContain("A direct question identifies the topic but never gives the speaker a reason to answer");
@@ -485,10 +488,9 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("summary and affectedHandles are forbidden");
     expect(String(options.prompt)).toContain("CURRENT_EXACT_SCENE is the Rulebook placement boundary");
     expect(String(options.prompt)).toContain("may establish rooms, corridors, thresholds, floors, trails, or other local features inside it");
-    expect(String(options.prompt)).toContain("resolve the grounded local action and use an actorless discovery or scene result");
-    expect(String(options.prompt)).toContain("remaining in the same Rulebook location");
-    expect(String(options.prompt)).toContain("Never return move_actor or claim a placement change for this local traversal");
-    expect(String(options.prompt)).toContain("Crossing into another Rulebook location requires PLAYER_MOVEMENT");
+    expect(String(options.prompt)).toContain("without changing exact position, use an actorless discovery or scene result");
+    expect(String(options.prompt)).toContain("When the accepted action advances into a distinct directly perceivable scene, follow the enter_local_scene contract");
+    expect(String(options.prompt)).toContain("Crossing into an already known Rulebook location requires PLAYER_MOVEMENT");
     expect(String(options.prompt)).toContain(
       'CURRENT_EXACT_SCENE={"locationName":"North Harbor Gate","description":"A guarded passage gate."}',
     );
@@ -540,7 +542,7 @@ describe("Campaign Play Game Master", () => {
     );
     expect(String(options.prompt)).toContain('"eventClass":"discovery"');
     expect(String(options.prompt)).toContain(
-      "effects[].kind accepts exactly: move_actor, set_route_state, set_actor_condition, update_actor_relation, update_actor_goal, advance_pressure, adjust_actor_possession, incur_actor_obligation, pay_actor_obligation, or record_world_event",
+      "effects[].kind accepts exactly: move_actor, enter_local_scene, set_route_state, set_actor_condition, update_actor_relation, update_actor_goal, advance_pressure, adjust_actor_possession, incur_actor_obligation, pay_actor_obligation, or record_world_event",
     );
     expect(String(options.prompt)).toContain(
       "Use pay_actor_obligation only when the resolved result transfers the player's visible copper possession",
@@ -1324,6 +1326,103 @@ describe("Campaign Play Game Master", () => {
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
       "do not claim that the destination is empty or inaccessible",
     );
+  });
+
+  it("compiles grounded route-less traversal into one code-owned local topology move", () => {
+    const localRuling = ruling({
+      normalizedIntent: {
+        originalText: "I squeeze deeper through the fitted-block break.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "attempt",
+        targets: [{ handle: "here", kind: "location" }],
+        method: "Advance through the established fitted-block break",
+        stakes: "Reach the space beyond the collapse",
+      },
+      citedVisibleFactHandles: ["here"],
+      elapsedBounds: { minimumMinutes: 10, maximumMinutes: 10 },
+      reason: "The established passage can be traversed with care.",
+    });
+    const name = "Collapsed Fitted-Block Passage";
+    const description = "A low masonry break where black water threads through fitted stone.";
+    const candidate = createCampaignPlayGameMaster().compile(
+        frame(),
+        localRuling,
+        resolution,
+        null,
+        {
+          elapsedMinutes: 10,
+          effects: [
+            { kind: "enter_local_scene", name, description },
+            {
+              kind: "record_world_event",
+              eventClass: "discovery",
+              performingActorHandle: null,
+              summary: "Beyond the break, a dragged iron edge has scored fresh arcs into the wet stone.",
+              affectedHandles: ["here"],
+            },
+          ],
+        },
+    );
+    const ids = deriveCampaignPlayLocalSceneTopologyIds({
+      campaignId: CAMPAIGN_ID,
+      turnId: TURN_ID,
+      anchorLocationId: "location-a",
+      name,
+      description,
+    });
+    expect(candidate.preflight.accepted).toBe(true);
+    expect(candidate.batch.commands[1]).toMatchObject({
+      kind: "move_actor",
+      actorId: PLAYER_ID,
+      routeId: ids.outboundRouteId,
+      fromLocationId: "location-a",
+      toLocationId: ids.locationId,
+      materializedLocalScene: {
+        ...ids,
+        anchorLocationId: "location-a",
+        name,
+        description,
+        travelCost: 10,
+      },
+    });
+    expect(candidate.batch.commands[2]).toMatchObject({
+      kind: "record_world_event",
+      exposure: {
+        mode: "projectable",
+        predicates: [{ channel: "direct_perception", locationId: ids.locationId }],
+      },
+    });
+
+    expect(() => createCampaignPlayGameMaster().compile(
+      frame(),
+      localRuling,
+      resolution,
+      null,
+      {
+        elapsedMinutes: 10,
+        effects: [{ kind: "enter_local_scene", name, description }],
+      },
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+    expect(() => createCampaignPlayGameMaster().compile(
+      frame(),
+      ruling(),
+      resolution,
+      null,
+      {
+        elapsedMinutes: 1,
+        effects: [
+          { kind: "enter_local_scene", name, description },
+          {
+            kind: "record_world_event",
+            eventClass: "discovery",
+            performingActorHandle: null,
+            summary: "The player stays where they are.",
+            affectedHandles: ["here"],
+          },
+        ],
+      },
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
   });
 
   it("opens, traverses, and restores a restricted route in one accepted batch", () => {

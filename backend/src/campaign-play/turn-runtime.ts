@@ -572,6 +572,9 @@ function candidateBindings(
   frame.acceptedWorld.locations.forEach((location) =>
     add("location", { kind: "location", id: location.id }));
   frame.acceptedWorld.routes.forEach((route) => add("route", { kind: "route", id: route.id }));
+  frame.runtimeLocations.forEach((location) =>
+    add("location", { kind: "location", id: location.id }));
+  frame.runtimeRoutes.forEach((route) => add("route", { kind: "route", id: route.id }));
   frame.acceptedWorld.pressures.forEach((pressure) =>
     add("pressure", { kind: "pressure", id: pressure.id }));
   frame.possessions.forEach((possession) =>
@@ -1435,7 +1438,9 @@ export function createCampaignPlayTurnRuntime(
                   binding.handle === route.handle && binding.reference.kind === "route");
                 const canonicalRoute = routeBinding === undefined
                   ? undefined
-                  : current.frame.rulebookFrame.acceptedWorld.routes.find((candidate) =>
+                  : current.frame.rulebookFrame.runtimeRoutes.find((candidate) =>
+                      candidate.id === routeBinding.reference.id)
+                    ?? current.frame.rulebookFrame.acceptedWorld.routes.find((candidate) =>
                       candidate.id === routeBinding.reference.id);
                 if (canonicalRoute === undefined) {
                   throw new CampaignPlayTurnRuntimeError(

@@ -29,6 +29,8 @@ import {
   type CampaignPlayLivePressureState,
   type CampaignPlayLiveRelation,
   type CampaignPlayLiveRouteState,
+  type CampaignPlayRuntimeLocation,
+  type CampaignPlayRuntimeRoute,
 } from "./campaign-play-projection.js";
 import {
   createCampaignPlayStateRepository,
@@ -412,6 +414,18 @@ function loadRulebookFrame(handle: CampaignPlayDatabaseHandle): CampaignPlayRule
     WHERE a.campaign_id = ? AND a.controller = 'human'`).get(campaignId) as CampaignPlayHumanMechanicalIdentity | undefined;
   const routeStates = sqlite.prepare(`SELECT route_id AS routeId, state FROM campaign_play_route_states
     WHERE campaign_id = ? ORDER BY route_id`).all(campaignId) as CampaignPlayLiveRouteState[];
+  const runtimeLocations = (sqlite.prepare(`SELECT id, name, description, kind,
+    parent_location_id AS parentLocationId, anchor_location_id AS anchorLocationId,
+    tags, causal_receipt_id AS causalReceiptId, world_version AS worldVersion
+    FROM locations WHERE campaign_id = ? AND definition_authority = 'campaign_play'
+    ORDER BY id`).all(campaignId) as Array<Omit<CampaignPlayRuntimeLocation, "tags"> & { tags: string }>)
+    .map((row) => ({ ...row, tags: JSON.parse(row.tags) as string[] }));
+  const runtimeRoutes = sqlite.prepare(`SELECT id,
+    from_location_id AS fromLocationId, to_location_id AS toLocationId,
+    travel_cost AS travelCost, causal_receipt_id AS causalReceiptId,
+    world_version AS worldVersion
+    FROM location_edges WHERE campaign_id = ? AND definition_authority = 'campaign_play'
+    ORDER BY id`).all(campaignId) as CampaignPlayRuntimeRoute[];
   const actorConditions = (sqlite.prepare(`SELECT actor_id AS actorId, condition, present, summary
     FROM campaign_play_actor_conditions WHERE campaign_id = ? ORDER BY actor_id, condition`).all(campaignId) as Array<Omit<CampaignPlayLiveActorCondition, "present"> & { present: number }>)
     .map((row) => ({ ...row, present: row.present === 1 }));
@@ -445,6 +459,8 @@ function loadRulebookFrame(handle: CampaignPlayDatabaseHandle): CampaignPlayRule
     worldTimeMinutes: state.authority.worldTimeMinutes,
     human: human ?? null,
     acceptedWorld: state.acceptedReview,
+    runtimeLocations,
+    runtimeRoutes,
     routeStates,
     actorConditions,
     possessions,

@@ -572,6 +572,50 @@ describe("Campaign Play core and Rulebook storage", () => {
     }
   });
 
+  it("rejects local scenes without a matching Rulebook receipt", () => {
+    createAcceptedCampaign(CAMPAIGN_A);
+    const handle = openPlay(CAMPAIGN_A);
+    try {
+      insertPlayState(handle);
+      const anchor = handle.sqlite.prepare(`SELECT id,
+        parent_location_id AS parentLocationId
+        FROM locations
+        WHERE campaign_id = ? AND kind = 'persistent_sublocation'
+          AND parent_location_id IS NOT NULL
+        ORDER BY id LIMIT 1`).get(CAMPAIGN_A) as {
+          id: string;
+          parentLocationId: string;
+        };
+      expect(() => handle.sqlite.prepare(`INSERT INTO locations (
+        id, campaign_id, name, description, kind, parent_location_id,
+        anchor_location_id, persistence, tags, is_starting, definition_authority,
+        causal_receipt_id, world_version
+      ) VALUES ('scene-without-receipt', ?, 'Unfounded Passage',
+        'A passage without an authoritative origin.', 'persistent_sublocation', ?, ?,
+        'persistent', '[]', 0, 'campaign_play', 'receipt-without-command', 2)`).run(
+          CAMPAIGN_A,
+          anchor.parentLocationId,
+          anchor.id,
+        )).toThrow(/campaign_play_runtime_location_receipt_invalid/);
+      expect(handle.sqlite.prepare(`SELECT name FROM sqlite_master
+        WHERE type = 'trigger' AND name IN (
+          'locations_definition_authority_insert_guard',
+          'location_edges_definition_authority_insert_guard',
+          'locations_campaign_play_runtime_update_immutable',
+          'location_edges_campaign_play_runtime_update_immutable'
+        ) ORDER BY name`).all()).toEqual([
+        { name: "location_edges_campaign_play_runtime_update_immutable" },
+        { name: "location_edges_definition_authority_insert_guard" },
+        { name: "locations_campaign_play_runtime_update_immutable" },
+        { name: "locations_definition_authority_insert_guard" },
+      ]);
+      expect(handle.sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
+      expect(handle.sqlite.pragma("foreign_key_check")).toEqual([]);
+    } finally {
+      handle.close();
+    }
+  });
+
   it("widens a populated Rulebook ledger without rewriting its evidence", () => {
     const databasePath = path.join(root, "populated-before-possessions.db");
     const sqlite = new Database(databasePath);
@@ -701,7 +745,7 @@ describe("Campaign Play core and Rulebook storage", () => {
       .get() as { sql: string };
     expect(after.sql).toContain("job.defer_reason = 'actor_capacity'");
     expect(opened.sqlite.prepare(`SELECT max(created_at) AS latest
-      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_784_405_611_560 });
+      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_784_421_942_006 });
   });
 
   it("adds core play storage to an accepted Campaign World without changing provenance", () => {

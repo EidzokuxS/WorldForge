@@ -2252,6 +2252,16 @@ export const advanceWorldTimeCommandSchema = z.object({
   elapsedMinutes: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes),
 }).strict();
 
+export const campaignPlayMaterializedLocalSceneSchema = z.object({
+  locationId: idSchema,
+  anchorLocationId: idSchema,
+  name: nameSchema,
+  description: textSchema,
+  outboundRouteId: idSchema,
+  returnRouteId: idSchema,
+  travelCost: positiveIntegerSchema.max(10),
+}).strict();
+
 export const moveActorCommandSchema = z.object({
   ...campaignPlayCommandBaseShape,
   kind: z.literal("move_actor"),
@@ -2259,6 +2269,7 @@ export const moveActorCommandSchema = z.object({
   routeId: idSchema,
   fromLocationId: idSchema,
   toLocationId: idSchema,
+  materializedLocalScene: campaignPlayMaterializedLocalSceneSchema.optional(),
   observableTrace: textSchema.optional(),
 }).strict();
 

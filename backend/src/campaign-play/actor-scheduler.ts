@@ -1337,7 +1337,13 @@ export function createCampaignPlayActorScheduler(
         handle.campaignId,
         actor.id,
       ) as CampaignPlayActorFrame["conditions"];
-      const localRoutes = state.acceptedReview.routes.filter((route) =>
+      const topologyRoutes = handle.sqlite.prepare(`SELECT id,
+        from_location_id AS fromLocationId, to_location_id AS toLocationId,
+        travel_cost AS travelCost
+        FROM location_edges WHERE campaign_id = ? ORDER BY id`).all(
+        handle.campaignId,
+      ) as CampaignWorldReview["routes"];
+      const localRoutes = topologyRoutes.filter((route) =>
         operativeLocations.has(route.fromLocationId) || operativeLocations.has(route.toLocationId))
         .map((route) => {
           const live = handle.sqlite.prepare(`SELECT state FROM campaign_play_route_states

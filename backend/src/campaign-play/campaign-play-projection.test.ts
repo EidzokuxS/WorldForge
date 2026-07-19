@@ -189,6 +189,8 @@ function initialMechanicalInput(review: CampaignWorldReview): CampaignPlayMechan
     acceptedReview: review,
     worldTimeMinutes: null,
     human: null,
+    runtimeLocations: [],
+    runtimeRoutes: [],
     routeStates: [],
     actorConditions: [],
     pressureStates: [],
