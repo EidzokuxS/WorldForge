@@ -2576,7 +2576,7 @@ export const campaignPlayGameMasterArtifactSchema = z.object({
   batchHash: hashSchema,
   semanticReview: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("not_required") }).strict(),
-    z.object({ kind: z.literal("route_authority"), reviewHash: hashSchema }).strict(),
+    z.object({ kind: z.literal("mechanical_authority"), reviewHash: hashSchema }).strict(),
   ]),
 }).strict();
 

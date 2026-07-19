@@ -476,18 +476,35 @@ describe("Campaign Play Game Master", () => {
     });
   });
 
-  it("uses one strict provider/model call and keeps canonical bindings out of its prompt", async () => {
+  it("uses one strict proposal and one strict authority review without exposing canonical bindings", async () => {
     const workerController = new AbortController();
-    const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({ object: proposal, trace: trace() }));
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: proposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: { verdict: "accepted", reason: "The dialogue changes no mechanical resource state." },
+        trace: trace(),
+      });
     const gameMaster = createCampaignPlayGameMaster({ generateObject: generateObject as unknown as typeof safeGenerateObject });
     const result = await gameMaster.plan({ frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
       model: model(), temperature: 0.2, budget, signal: workerController.signal });
     expect(result.preflight.accepted).toBe(true);
-    expect(generateObject).toHaveBeenCalledOnce();
+    expect(result.semanticReview).toEqual({
+      kind: "mechanical_authority",
+      reviewHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(generateObject).toHaveBeenCalledTimes(2);
     const options = generateObject.mock.calls[0]![0];
     expect(options).toMatchObject({ strictSchema: true, allowRepair: false, allowTextFallback: false,
       retries: 1, abortSignal: workerController.signal });
     expect("timeout" in options).toBe(false);
+    const reviewOptions = generateObject.mock.calls[1]![0];
+    expect(reviewOptions).toMatchObject({ strictSchema: true, allowRepair: false,
+      allowTextFallback: false, retries: 1, abortSignal: workerController.signal });
+    expect("timeout" in reviewOptions).toBe(false);
+    expect(String(reviewOptions.prompt)).toContain("A record_world_event is presentation evidence, never mechanical authority");
+    expect(String(reviewOptions.prompt)).toContain("unless typedResourceEffects contains the matching possession effect");
+    expect(String(reviewOptions.prompt)).toContain("unless typedResourceEffects contains the matching obligation effect");
+    expect(String(reviewOptions.prompt)).toContain('"typedResourceEffects":[]');
     expect(String(options.prompt)).toContain("opaque handles");
     expect(String(options.prompt)).toContain("SOURCE_MOMENT is the exact accepted player-visible scene");
     expect(String(options.prompt)).toContain(
@@ -691,19 +708,24 @@ describe("Campaign Play Game Master", () => {
   it("constrains every generated handle field to admitted frame bindings", async () => {
     const requestFrame = frame();
     requestFrame.visibleFacts.push({ handle: "choice-only", kind: "choice", summary: "A UI choice, not an entity ref." });
-    const generateObject = vi.fn(async (options: Parameters<typeof safeGenerateObject>[0]) => {
-      const schema = options.schema as typeof campaignPlayGameMasterProposalSchema;
-      expect(schema.safeParse(proposal).success).toBe(true);
-      expect(schema.safeParse({
-        ...proposal,
-        effects: [{ ...proposal.effects[0], performingActorHandle: "guar" }],
-      }).success).toBe(false);
-      expect(schema.safeParse({
-        ...proposal,
-        effects: [{ ...proposal.effects[0], affectedHandles: ["you", "choice-only"] }],
-      }).success).toBe(false);
-      return { object: proposal, trace: trace() };
-    });
+    const generateObject = vi.fn()
+      .mockImplementationOnce(async (options: Parameters<typeof safeGenerateObject>[0]) => {
+        const schema = options.schema as typeof campaignPlayGameMasterProposalSchema;
+        expect(schema.safeParse(proposal).success).toBe(true);
+        expect(schema.safeParse({
+          ...proposal,
+          effects: [{ ...proposal.effects[0], performingActorHandle: "guar" }],
+        }).success).toBe(false);
+        expect(schema.safeParse({
+          ...proposal,
+          effects: [{ ...proposal.effects[0], affectedHandles: ["you", "choice-only"] }],
+        }).success).toBe(false);
+        return { object: proposal, trace: trace() };
+      })
+      .mockResolvedValueOnce({
+        object: { verdict: "accepted", reason: "The dialogue changes no mechanical resource state." },
+        trace: trace(),
+      });
     await createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).plan({ frame: requestFrame, ruling: ruling(), resolution, uncertaintyAuthority: null,
@@ -904,7 +926,7 @@ describe("Campaign Play Game Master", () => {
       model: model(), temperature: 0.2, budget,
     })).rejects.toMatchObject({
       code: "model_contract_failed",
-      modelEvidence: expect.objectContaining({ errorCode: "route_authority_rejected" }),
+      modelEvidence: expect.objectContaining({ errorCode: "mechanical_authority_rejected" }),
     });
     expect(generateObject).toHaveBeenCalledTimes(2);
     expect(String(generateObject.mock.calls[1]![0].prompt)).toContain(
@@ -918,7 +940,44 @@ describe("Campaign Play Game Master", () => {
     );
   });
 
+  it("rejects resource consumption and payment hidden inside an ordinary world event", async () => {
+    const unbackedRepair = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        eventClass: "interaction" as const,
+        summary: "The cobbler uses the last leather scraps to finish the repair, and the guard pays six copper.",
+      }],
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: unbackedRepair, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "rejected",
+          reason: "The summary consumes material and completes payment without typed resource effects.",
+        },
+        trace: trace(),
+      });
+
+    await expect(createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget,
+    })).rejects.toMatchObject({
+      code: "model_contract_failed",
+      modelEvidence: expect.objectContaining({ errorCode: "mechanical_authority_rejected" }),
+    });
+    expect(generateObject).toHaveBeenCalledTimes(2);
+    const reviewPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    expect(reviewPrompt).toContain(unbackedRepair.effects[0].summary);
+    expect(reviewPrompt).toContain('"typedResourceEffects":[]');
+    expect(reviewPrompt).toContain("A record_world_event is presentation evidence, never mechanical authority");
+  });
+
   it("persists an independent review hash for route prose accepted against typed authority", async () => {
+    const reviewReason = "The event remains within the supplied mechanical authority. ".repeat(10);
+    expect(reviewReason.length).toBeGreaterThan(500);
     const routeRuling = ruling({
       normalizedIntent: {
         originalText: "I ask whether this direct route needs a permit.",
@@ -946,7 +1005,7 @@ describe("Campaign Play Game Master", () => {
     const generateObject = vi.fn()
       .mockResolvedValueOnce({ object: grounded, trace: trace() })
       .mockResolvedValueOnce({
-        object: { verdict: "accepted", reason: "The summary matches the direct open route." },
+        object: { verdict: "accepted", reason: reviewReason },
         trace: trace(),
       });
     const candidate = await createCampaignPlayGameMaster({
@@ -956,7 +1015,7 @@ describe("Campaign Play Game Master", () => {
       model: model(), temperature: 0.2, budget,
     });
     expect(candidate.semanticReview).toEqual({
-      kind: "route_authority",
+      kind: "mechanical_authority",
       reviewHash: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
     expect(candidate.modelEvidence).toMatchObject({
@@ -2064,15 +2123,25 @@ describe("Campaign Play Game Master", () => {
   });
 
   it("does not count thinking tokens against the visible output budget", async () => {
-    const generateObject = vi.fn(async () => ({
-      object: proposal,
-      trace: trace("native_schema", {
-        inputTokens: 100,
-        outputTokens: 32_100,
-        reasoningTokens: 32_000,
-        totalTokens: 32_200,
-      }),
-    }));
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({
+        object: proposal,
+        trace: trace("native_schema", {
+          inputTokens: 100,
+          outputTokens: 32_100,
+          reasoningTokens: 32_000,
+          totalTokens: 32_200,
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: { verdict: "accepted", reason: "No resource state changes in the dialogue." },
+        trace: trace("native_schema", {
+          inputTokens: 1,
+          outputTokens: 0,
+          reasoningTokens: 0,
+          totalTokens: 1,
+        }),
+      });
     await expect(createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).plan({
