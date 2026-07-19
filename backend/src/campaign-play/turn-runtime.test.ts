@@ -1024,6 +1024,105 @@ describe("Campaign Play player-action turn runtime", () => {
     }
   });
 
+  it("gives Judge the player's depleted possession stacks as explicit mechanical facts", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening(1_000);
+    const time = fixedClock(2_050);
+    const judgeCompiler = createCampaignPlayJudge();
+    const spendJudge = {
+      judge: vi.fn(async (request: Parameters<ReturnType<typeof createCampaignPlayJudge>["judge"]>[0]) => {
+        const possession = request.frame.visibleFacts.find((fact) =>
+          fact.kind === "possession" && fact.summary.startsWith("Repair roll:"))!;
+        const ruling = judgeCompiler.compile(request.frame, request.input, {
+          kind: "attempt",
+          targets: [{ handle: possession.handle, kind: "possession" }],
+          method: "Use the final repair roll on the damaged strap.",
+          stakes: "Consume the repair roll while completing the repair.",
+          movementRouteHandle: null,
+          possessionEffectAuthority: {
+            kind: "adjust_actor_possession",
+            enforcement: "required",
+            operation: "spend",
+            possessionHandle: possession.handle,
+            quantity: 1,
+            minimumResult: "success",
+          },
+          requiredObligationEffect: { kind: "none" },
+          disposition: "deterministic",
+          citedVisibleFactHandles: [request.frame.locationHandle, possession.handle],
+          resultBounds: { minimum: "success", maximum: "success" },
+          elapsedBounds: { minimumMinutes: 1, maximumMinutes: 1 },
+          uncertainty: { kind: "none" },
+          reason: "The player has one visible repair roll available to spend.",
+          clarificationQuestion: null,
+        });
+        return { ruling, rulingHash: "f".repeat(64), modelEvidence: acceptedEvidence("test-judge") };
+      }),
+    };
+    const gameMasterCompiler = createCampaignPlayGameMaster();
+    const spendGameMaster = {
+      plan: vi.fn(async (request: Parameters<ReturnType<typeof createCampaignPlayGameMaster>["plan"]>[0]) => {
+        const playerHandle = request.frame.handleBindings.find((binding) =>
+          binding.reference.kind === "actor" && binding.reference.id === PLAYER_ID)!.handle;
+        const possessionHandle = request.ruling.possessionEffectAuthority.kind === "adjust_actor_possession"
+          ? request.ruling.possessionEffectAuthority.possessionHandle
+          : null;
+        return {
+          ...gameMasterCompiler.compile(
+            request.frame,
+            request.ruling,
+            request.resolution,
+            request.uncertaintyAuthority,
+            {
+              elapsedMinutes: 1,
+              effects: [{
+                kind: "adjust_actor_possession" as const,
+                operation: "spend" as const,
+                actorHandle: playerHandle,
+                possessionHandle: possessionHandle!,
+                name: null,
+                quantity: 1,
+                summary: "The final repair roll is consumed while the strap is repaired.",
+                affectedHandles: [],
+              }],
+            },
+          ),
+          semanticReview: { kind: "not_required" as const },
+          modelEvidence: acceptedEvidence("test-game-master"),
+        };
+      }),
+    };
+    const spendRuntime = turnRuntime(handle, time, spendJudge, spendGameMaster);
+    const spendTurn = spendRuntime.admitAction({
+      request: admissionRequest(
+        state,
+        "spend-final-repair-roll",
+        "I use my final repair roll to finish the damaged strap.",
+      ),
+      submittedAt: 2_050,
+    });
+    await advanceUntilStage(spendRuntime, time, spendTurn.turnId, "completed");
+    expect(handle.sqlite.prepare(`SELECT quantity FROM campaign_play_actor_possessions
+      WHERE campaign_id = ? AND actor_id = ? AND name = ?`).get(
+        CAMPAIGN_ID,
+        PLAYER_ID,
+        "Repair roll",
+      )).toEqual({ quantity: 0 });
+
+    const continuedState = createCampaignPlayStateRepository(handle).loadState()!;
+    const judge = judgeFixture("impossible");
+    const runtime = turnRuntime(handle, time, judge, gameMasterFixture());
+    const admitted = runtime.admitAction({
+      request: admissionRequest(continuedState, "depleted-possession-frame"),
+      submittedAt: 2_100,
+    });
+    time.advance();
+    await runtime.runNextStage(admitted.turnId);
+
+    expect(judge.judge).toHaveBeenCalledTimes(1);
+    expect(judge.judge.mock.calls[0]![0].frame.depletedPlayerPossessions)
+      .toEqual(["Repair roll"]);
+  });
+
   it("rejects invalid and stale admission before creating a turn or runtime event", async () => {
     const { handle, state } = await createReadyCampaignWithOpening();
     const runtime = turnRuntime(handle, fixedClock(2_100), judgeFixture("deterministic"), gameMasterFixture());

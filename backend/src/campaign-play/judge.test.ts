@@ -68,6 +68,7 @@ function frame(): CampaignPlayJudgeFrame {
     visibleRoutes: [{ handle: "route-reef", destinationHandle: "location-reef", travelCost: 5, state: "open" }],
     worldTimeMinutes: 120,
     sourceMoment: "The guard finishes painting a fresh white line across the gate latch.",
+    depletedPlayerPossessions: ["Spent lamp oil"],
     visibleFacts: [
       { handle: "actor-you", kind: "actor", summary: "You are standing by the gate." },
       { handle: "location-harbor", kind: "location", summary: "The harbor gate is closed." },
@@ -531,9 +532,11 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain('{"kind":"adjust_actor_possession","enforcement":"required","operation":"transform","possessionHandle":"copied visible handle","quantity":1,"minimumResult":"lowest applicable tier"}');
     expect(sentPrompt).toContain("there is no adjustment field");
     expect(sentPrompt).toContain("A positive possession entry in VISIBLE_FRAME is the only authority");
+    expect(sentPrompt).toContain("DEPLETED_PLAYER_POSSESSIONS names player-owned stacks whose exact quantity is zero");
+    expect(sentPrompt).toContain('DEPLETED_PLAYER_POSSESSIONS=["Spent lamp oil"]');
     expect(sentPrompt).toContain("A general tool possession authorizes only the tools it names");
     expect(sentPrompt).toContain("A work assignment, posted supply list, visible stock");
-    expect(sentPrompt).toContain("directly uses a tool or consumable that has no visible possession handle, classify it as impossible");
+    expect(sentPrompt).toContain("directly uses a tool or consumable that is depleted or has no visible possession handle, classify it as impossible");
     expect(sentPrompt).toContain("A plain request for an item uses permitted acquire");
     expect(sentPrompt).toContain("authorize a permitted acquire instead of assuming either transfer or refusal");
     expect(sentPrompt).toContain('Its exact shape is {"kind":"pay_actor_obligation"');

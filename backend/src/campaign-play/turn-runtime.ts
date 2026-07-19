@@ -1466,6 +1466,11 @@ export function createCampaignPlayTurnRuntime(
                   worldTimeMinutes: admission.worldTimeMinutes,
                   sourceMoment: admission.sourceNarration.displayText,
                   visibleFacts: admission.visibleFacts,
+                  depletedPlayerPossessions: current.frame.rulebookFrame.possessions
+                    .filter((possession) =>
+                      possession.actorId === admission.player.actorId
+                      && possession.quantity === 0)
+                    .map((possession) => possession.name),
                   actorContinuity: current.frame.actorContinuity,
                 }),
                 input: {
