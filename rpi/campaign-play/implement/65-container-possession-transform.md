@@ -41,3 +41,17 @@ Prompt-craft review diagnosed two missing contracts: the author prompt did not s
 - Accepted diagnostic database SHA-256: `A96AA69A16B08153738A42634B0CD74805BF2EB4A324E2F30B5B80A9AD4F7FA3`.
 
 The diagnostic clone still contains the separate `Sealed corrosion flake sample ×1` created by the earlier bad r18 action. It proves the repaired transition on the same contaminated base, not a pristine campaign. The next formal lane must start from a fresh pre-play world.
+
+## Clean r19 product proof
+
+Run `black-rain-passage-pristine-60-r19` materialized immutable template `black-rain-passage-54df81f3-20260719` at `character_required`, world/runtime version `1/1`, with zero characters and zero turns. Marta Riva was rebuilt through the rendered Character UI as an ordinary outsider, then entered through `Vesper Quay / Outsider / Just arrived / Following a lead`.
+
+Opening Planner and Narrator both accepted GLM 5.2 attempt 1. The planner ran for `440449 ms` and returned `45418` output tokens without repair, fallback, provider switch, model switch, or hidden retry. The opening placed Marta with Pia Servadio at Vesper Quay Beacon Terrace, exposed Pia's independent bracket-scraping work and loose corrosion debris, and did not make Marta the cause or designated solution of the city's pressures.
+
+Player action 1 used the rendered observation choice for fresh bracket scrape-marks. Judge, Game Master, and Narrator accepted attempt 1. The result preserved unknown causation, changed no possession or placement, and advanced one world minute.
+
+Player action 2 was freeform: Marta sealed one already-loose orange corrosion flake from the stone in her specimen jars without touching the bracket or Pia's tool. Judge, Game Master, the independent transform reviewer, and Narrator accepted attempt 1. Rulebook changed `Specimen jars ×1` into `Specimen jars with sealed orange corrosion flake ×1`; no separate sample or remainder possession exists. Review hash is `d18038e5fb088d316b5ac4e394921c2228333a7061dfc2fd9fd437a7889dffd5`. The completed turn is `turn-player-action:d12dba5669d8d9e6dae58dc16d1b34da232000d0`, final world version `17`, public packet hash `03fa713e8b36438cb7f76b1f228354e004c26e7748cafb88223980f3dae76cb5`.
+
+Rendered inventory and narration were byte-identical before and after browser reload. SQLite integrity is `ok`, foreign-key check returns no rows, and all eight Opening/action model stages are accepted strict-object attempt 1 on Z.AI GLM 5.2.
+
+Manual prose verdict is `PASS_WITH_ADVISORY`. The observation preserves evidence limits and the collection beat is readable. The collection summary and narration replace Opening's established `scraper` with newly named `pumice stone and wire brush`; this is a non-mechanical continuity invention. It does not invalidate the possession transition, but it remains a prose-quality finding for later scene-continuity work. r19 is a clean targeted product proof, not a formal sixty-action lane because its evidence bundle and signed-action ledger were not frozen before Opening.
