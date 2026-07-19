@@ -127,11 +127,13 @@ describe("Campaign Play Judge", () => {
       stakes: "A breakage creates an eight-copper debt to the guard",
       requiredObligationEffect: {
         kind: "incur_actor_obligation",
+        debtorHandle: "actor-you",
         creditorHandle: "actor-guard",
         unitKey: "copper",
         amount: 8,
         minimumResult: "setback",
       },
+      citedVisibleFactHandles: ["actor-you", "actor-guard"],
       disposition: "uncertain",
       resultBounds: { minimum: "setback", maximum: "success" },
       uncertainty: {
@@ -145,6 +147,7 @@ describe("Campaign Play Judge", () => {
 
     expect(judge.compile(frame(), input, value).requiredObligationEffect).toEqual({
       kind: "incur_actor_obligation",
+      debtorHandle: "actor-you",
       creditorHandle: "actor-guard",
       unitKey: "copper",
       amount: 8,
@@ -158,12 +161,50 @@ describe("Campaign Play Judge", () => {
       ...value,
       requiredObligationEffect: {
         kind: "incur_actor_obligation",
+        debtorHandle: "actor-you",
         creditorHandle: "actor-you",
         unitKey: "copper",
         amount: 8,
         minimumResult: "setback",
       },
       citedVisibleFactHandles: ["actor-you"],
+    })).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+  });
+
+  it("binds an unpaid completed service as a visible actor's debt to the player", () => {
+    const judge = createCampaignPlayJudge();
+    const input = {
+      originalText: "I finish repairing the guard's cracked lantern for the agreed eight copper, but he cannot pay me yet.",
+      source: "freeform" as const,
+      choiceHandle: null,
+    };
+    const value = proposal({
+      kind: "attempt",
+      targets: [{ handle: "actor-guard", kind: "actor" }],
+      method: "Complete the agreed lantern repair",
+      stakes: "The guard owes the player eight copper if the repair succeeds",
+      requiredObligationEffect: {
+        kind: "incur_actor_obligation",
+        debtorHandle: "actor-guard",
+        creditorHandle: "actor-you",
+        unitKey: "copper",
+        amount: 8,
+        minimumResult: "success",
+      },
+      citedVisibleFactHandles: ["actor-you", "actor-guard"],
+    });
+
+    expect(judge.compile(frame(), input, value).requiredObligationEffect).toEqual({
+      kind: "incur_actor_obligation",
+      debtorHandle: "actor-guard",
+      creditorHandle: "actor-you",
+      unitKey: "copper",
+      amount: 8,
+      minimumResult: "success",
+    });
+    expect(() => judge.compile(frame(), input, {
+      ...value,
+      targets: [],
     })).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
   });
 
@@ -179,17 +220,21 @@ describe("Campaign Play Judge", () => {
       stakes: "Reduce the existing debt from seven copper to five",
       requiredObligationEffect: {
         kind: "pay_actor_obligation",
+        debtorHandle: "actor-you",
+        creditorHandle: "actor-guard",
         obligationHandle: "guard-debt",
         paymentPossessionHandle: "copper-coins",
         unitKey: "copper",
         amount: 2,
         minimumResult: "success",
       },
-      citedVisibleFactHandles: ["actor-guard", "guard-debt", "copper-coins"],
+      citedVisibleFactHandles: ["actor-you", "actor-guard", "guard-debt", "copper-coins"],
     });
 
     expect(judge.compile(frame(), input, value).requiredObligationEffect).toEqual({
       kind: "pay_actor_obligation",
+      debtorHandle: "actor-you",
+      creditorHandle: "actor-guard",
       obligationHandle: "guard-debt",
       paymentPossessionHandle: "copper-coins",
       unitKey: "copper",
@@ -541,7 +586,7 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("authorize a permitted acquire instead of assuming either transfer or refusal");
     expect(sentPrompt).toContain('Its exact shape is {"kind":"pay_actor_obligation"');
     expect(sentPrompt).toContain('"paymentPossessionHandle":"copied visible possession handle"');
-    expect(sentPrompt).toContain("displayed cargo movement, or narration without that transfer does not pay debt");
+    expect(sentPrompt).toContain("A request, offer, promise, quote, cargo movement, or narration without an authoritative transfer neither incurs nor pays debt");
     expect(sentPrompt).toContain("SOURCE_MOMENT is the exact accepted player-visible scene");
     expect(sentPrompt).toContain(
       'SOURCE_MOMENT="The guard finishes painting a fresh white line across the gate latch."',

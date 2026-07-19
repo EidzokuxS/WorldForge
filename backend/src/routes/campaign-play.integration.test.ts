@@ -175,7 +175,6 @@ function openingProposal(): CampaignPlayOpeningProposal {
     const goalId = `goal-${suffix}`;
     const targets = suffix === "b"
       ? [
-          { kind: "location" as const, id: "location-b" },
           { kind: "location" as const, id: "location-a" },
           { kind: "goal" as const, id: goalId },
         ]
@@ -195,14 +194,18 @@ function openingProposal(): CampaignPlayOpeningProposal {
       actorId,
       primaryGoalId: goalId,
       cadenceMinutes: 1_440,
-      steps: [{
-        intent,
-        observableTrace: suffix === "b"
+      steps: Array.from({ length: 3 }, (_, stepIndex) => ({
+        intent: {
+          ...intent,
+          method: `${intent.method}; stage ${stepIndex + 1}`,
+        },
+        observableTrace: suffix === "b" && stepIndex === 0
           ? "Fresh sealing wax and torn binding thread mark a ledger removed in haste."
-          : "Fresh work marks show that someone acted here recently.",
+          : `Fresh work marks show stage ${stepIndex + 1} of the actor's own effort.`,
         possessionOutcome: { kind: "none" as const },
+        obligationOutcome: { kind: "none" as const },
         elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
-      }],
+      })),
     };
   });
   return {
@@ -329,6 +332,27 @@ function openingPlannerFixture() {
   };
 }
 
+function narratorActionSelections(packet: CampaignPlayNarratorPacket) {
+  const latestVisiblePerformer = [...packet.consequences].reverse().find((consequence) =>
+    consequence.performingActorHandle !== null && packet.visibleActors.some((actor) =>
+      actor.handle === consequence.performingActorHandle))?.performingActorHandle ?? null;
+  const requiredReplyIndex = latestVisiblePerformer === null
+    ? -1
+    : packet.availableIntents.findIndex((intent) => intent.kind === "contact"
+      && intent.targets.some((target) => target.kind === "actor"
+        && target.handle === latestVisiblePerformer));
+  const indexes = packet.availableIntents.map((_intent, intentIndex) => intentIndex);
+  const orderedIndexes = requiredReplyIndex < 0
+    ? indexes
+    : [requiredReplyIndex, ...indexes.filter((intentIndex) => intentIndex !== requiredReplyIndex)];
+  return orderedIndexes.slice(0, CAMPAIGN_PLAY_LIMITS.suggestedActions).map((intentIndex) => ({
+    intentIndex,
+    detail: packet.availableIntents[intentIndex]?.kind === "move"
+      ? null
+      : "the immediate situation",
+  }));
+}
+
 function openingNarratorFixture() {
   const compiler = createCampaignPlayNarrator();
   return {
@@ -339,12 +363,7 @@ function openingNarratorFixture() {
         narrationId: request.narrationId,
         packet,
         proposal: {
-          actionSelections: packet.availableIntents
-            .slice(0, CAMPAIGN_PLAY_LIMITS.suggestedActions)
-            .map((_intent, intentIndex) => ({
-              intentIndex,
-              detail: "the immediate situation",
-            })),
+          actionSelections: narratorActionSelections(packet),
           beats: [
             { purpose: "orientation", observationIndexes: [], text: "Rain rings against the signal tower as Mara reaches Bell Island." },
             { purpose: "consequence", observationIndexes: packet.newObservations.map((_entry, index) => index), text: "Signal keepers brace the route gate while warning bells gather pace." },
@@ -371,12 +390,7 @@ function playerNarratorFixture() {
         narrationId: request.narrationId,
         packet,
         proposal: {
-          actionSelections: packet.availableIntents
-            .slice(0, CAMPAIGN_PLAY_LIMITS.suggestedActions)
-            .map((_intent, intentIndex) => ({
-              intentIndex,
-              detail: "the immediate situation",
-            })),
+          actionSelections: narratorActionSelections(packet),
           beats: [
             {
               purpose: "consequence",
@@ -409,6 +423,8 @@ function judgeFixture() {
         method: target ? "Ask calmly" : "Wait and watch",
         stakes: "Learn what changes at the signal gate",
         movementRouteHandle: null,
+        possessionEffectAuthority: { kind: "none" },
+        requiredObligationEffect: { kind: "none" },
         disposition: "deterministic",
         citedVisibleFactHandles: [request.frame.locationHandle],
         resultBounds: { minimum: "success", maximum: "success" },
@@ -435,6 +451,8 @@ function gameMasterFixture() {
       if (!playerHandle) throw new Error("Game Master fixture requires the player binding.");
       const locationHandle = request.frame.visibleFacts.find((fact) =>
         fact.kind === "location")!.handle;
+      const performingActorHandle = request.ruling.normalizedIntent.targets.find((target) =>
+        target.kind === "actor")?.handle ?? null;
       return {
         ...compiler.compile(
           request.frame,
@@ -446,9 +464,14 @@ function gameMasterFixture() {
             effects: [{
               kind: "record_world_event",
               eventClass: "dialogue",
+              performingActorHandle,
               routeAccessClaims: [],
               summary: "Mara tests the signal keepers' account against the ringing tower.",
-              affectedHandles: [playerHandle, locationHandle],
+              affectedHandles: [
+                playerHandle,
+                ...(performingActorHandle === null ? [] : [performingActorHandle]),
+                locationHandle,
+              ],
             }],
           },
         ),
@@ -724,7 +747,7 @@ describe("Campaign Play mounted route", () => {
     const journalResponse = await app.request(`/${CAMPAIGN_ID}/play/journal?cursor=0&limit=20`);
     expect(journalResponse.status).toBe(200);
     const journal = campaignPlayJournalPageSchema.parse(await journalResponse.json());
-    expect(journal.entries).toHaveLength(2);
+    expect(journal.entries).toHaveLength(3);
     expect(journal.entries).toEqual(expect.arrayContaining([
       expect.objectContaining({
         title: "Your action",

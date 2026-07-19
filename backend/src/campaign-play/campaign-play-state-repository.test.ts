@@ -1239,18 +1239,20 @@ describe("Campaign Play atomic Rulebook execution", () => {
     const reloadedPublicState = repository.loadState()!.publicState.projection as {
       obligations: Array<{
         handle: string;
-        creditorHandle: string;
-        creditorName: string;
+        direction: string;
+        counterpartyHandle: string;
+        counterpartyName: string;
         unitKey: string;
         outstandingAmount: number;
       }>;
     };
     expect(reloadedPublicState.obligations).toEqual([{
       handle: deriveCampaignPlayPublicHandle("obligation", CAMPAIGN_A, obligationId),
-      creditorHandle: deriveCampaignPlayPublicHandle(
+      direction: "payable",
+      counterpartyHandle: deriveCampaignPlayPublicHandle(
         "actor", CAMPAIGN_A, obligationFrame.acceptedWorld.actors[0]!.id,
       ),
-      creditorName: obligationFrame.acceptedWorld.actors[0]!.name,
+      counterpartyName: obligationFrame.acceptedWorld.actors[0]!.name,
       unitKey: "copper",
       outstandingAmount: 1,
     }]);

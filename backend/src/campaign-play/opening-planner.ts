@@ -19,6 +19,7 @@ import {
 import { createLogger } from "../lib/index.js";
 import {
   campaignPlayActorIntentSchema,
+  campaignPlayActorObligationOutcomeSchema,
   campaignPlayActorPossessionOutcomeSchema,
   campaignPlayActorPlanSchema,
   campaignPlayActorScheduleSchema,
@@ -78,13 +79,24 @@ const openingPlanStepProposalSchema = z.object({
   intent: campaignPlayActorIntentSchema,
   observableTrace: boundedText(CAMPAIGN_PLAY_LIMITS.shortText),
   possessionOutcome: campaignPlayActorPossessionOutcomeSchema,
+  obligationOutcome: campaignPlayActorObligationOutcomeSchema,
   elapsedBounds: campaignPlayElapsedBoundsSchema,
 }).strict().superRefine((step, context) => {
-  if (step.intent.kind === "move" && step.possessionOutcome.kind !== "none") {
+  if (
+    step.intent.kind === "move"
+    && (step.possessionOutcome.kind !== "none" || step.obligationOutcome.kind !== "none")
+  ) {
     context.addIssue({
       code: "custom",
-      path: ["possessionOutcome"],
-      message: "Move steps cannot acquire possessions.",
+      path: ["obligationOutcome"],
+      message: "Move steps cannot change possessions or obligations.",
+    });
+  }
+  if (step.obligationOutcome.kind !== "none") {
+    context.addIssue({
+      code: "custom",
+      path: ["obligationOutcome"],
+      message: "Opening plans begin before actor obligations are available.",
     });
   }
 });
@@ -823,6 +835,7 @@ function compilePlans(
         intent: step.intent,
         observableTrace: step.observableTrace,
         possessionOutcome: structuredClone(step.possessionOutcome),
+        obligationOutcome: { kind: "none" as const },
         elapsedBounds: step.elapsedBounds,
       })),
       status: "active",

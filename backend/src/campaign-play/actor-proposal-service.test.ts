@@ -171,6 +171,7 @@ function planJson(
         possessionOutcome: actorId === "actor-a" && actorAAcquire
           ? { kind: "acquire", name: "Brass tally", quantity: 2 }
           : { kind: "none" },
+        obligationOutcome: { kind: "none" },
         elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 } },
       { stepId: `step-${actorId}-two`, order: 1,
         intent: { ...intent, method: move ? "Return with the route answer" : "Continue the active goal" },
@@ -178,6 +179,7 @@ function planJson(
           ? "New wheel ruts turn back from the ledger office."
           : "A second set of fresh marks continues the same work.",
         possessionOutcome: { kind: "none" },
+        obligationOutcome: { kind: "none" },
         elapsedBounds: { minimumMinutes: 1, maximumMinutes: 8 } },
     ]),
   };

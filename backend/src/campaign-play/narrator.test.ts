@@ -793,6 +793,9 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("prior narration does not put supplies in player custody");
     expect(prompt).toContain("Never suggest using, installing, spending, or transforming absent material");
     expect(prompt).toContain("choose another unresolved step");
+    expect(prompt).toContain("direction payable means the player owes the named counterparty");
+    expect(prompt).toContain("direction receivable means that counterparty owes the player");
+    expect(prompt).toContain("prose cannot create, reverse, increase, reduce, pay, or settle an obligation");
     expect(prompt).toContain("Treat the latest explicit object relation in newObservations or consequences as final");
     expect(prompt).toContain("already at that fixture or inside that container");
     expect(prompt).toContain("Never make a detail load, haul, insert, or move it there again");

@@ -173,6 +173,7 @@ function openingProposal(actorBAcquiresPossession = false): CampaignPlayOpeningP
         possessionOutcome: suffix === "b" && actorBAcquiresPossession && stepIndex === 0
           ? { kind: "acquire" as const, name: "Brass tally", quantity: 2 }
           : { kind: "none" as const },
+        obligationOutcome: { kind: "none" as const },
         elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
       })),
     };
@@ -268,7 +269,7 @@ function rulebookFrame(handle: CampaignPlayDatabaseHandle): CampaignPlayRulebook
 function createVisibilityFixture(
   routeTriggers: Array<"inspect" | "attempt" | "traverse"> = ["inspect"],
   actorBAcquiresPossession = false,
-  playerIncursObligation = false,
+  obligationDirection: "none" | "payable" | "receivable" = "none",
 ) {
   acceptPlayableWorld();
   const handle = track(openCampaignPlayDatabase(CAMPAIGN_ID));
@@ -460,8 +461,8 @@ function createVisibilityFixture(
   const tenthId = deriveCampaignPlayCommandId(CAMPAIGN_ID, "turn-opening", batchId, 9);
   const obligationId = deriveCampaignPlayObligationId(
     CAMPAIGN_ID,
-    "actor-player",
-    "actor-a",
+    obligationDirection === "receivable" ? "actor-a" : "actor-player",
+    obligationDirection === "receivable" ? "actor-player" : "actor-a",
     "copper",
   );
   const evidenceAccepted = preflightCampaignPlayRulebook({
@@ -741,7 +742,7 @@ function createVisibilityFixture(
           observableTrace: "Wet seals and a fresh thumbprint mark the office counter.",
           affectedRefs: [{ kind: "location", id: "location-a-office" }],
         },
-        ...(playerIncursObligation ? [{
+        ...(obligationDirection !== "none" ? [{
           commandId: tenthId,
           batchId,
           order: 9,
@@ -750,8 +751,14 @@ function createVisibilityFixture(
           source: { kind: "system", system: "game_master" },
           expectedWorldVersion: frame.worldVersion + 3,
           readScope: [
-            { kind: "actor", id: "actor-player" },
-            { kind: "actor", id: "actor-a" },
+            {
+              kind: "actor",
+              id: obligationDirection === "receivable" ? "actor-a" : "actor-player",
+            },
+            {
+              kind: "actor",
+              id: obligationDirection === "receivable" ? "actor-player" : "actor-a",
+            },
             { kind: "obligation", id: obligationId },
           ],
           writeScope: [{ kind: "obligation", id: obligationId }],
@@ -759,12 +766,14 @@ function createVisibilityFixture(
             mode: "projectable",
             predicates: [{ channel: "direct_perception", locationId: "location-a" }],
           },
-          debtorActorId: "actor-player",
-          creditorActorId: "actor-a",
+          debtorActorId: obligationDirection === "receivable" ? "actor-a" : "actor-player",
+          creditorActorId: obligationDirection === "receivable" ? "actor-player" : "actor-a",
           obligationId,
           unitKey: "copper",
           amount: 4,
-          summary: "Player owes Mara Venn four copper for the signal work.",
+          summary: obligationDirection === "receivable"
+            ? "Mara Venn owes the player four copper for the completed signal work."
+            : "Player owes Mara Venn four copper for the signal work.",
           affectedRefs: [
             { kind: "actor", id: "actor-player" },
             { kind: "actor", id: "actor-a" },
@@ -778,7 +787,7 @@ function createVisibilityFixture(
   }
   states.commitMechanical({
     updatedAt: 1_600,
-    worldVersionAdvance: playerIncursObligation ? 4 : 3,
+    worldVersionAdvance: obligationDirection !== "none" ? 4 : 3,
     mutate(context) {
       executeCampaignPlayRulebookBatch({
         frame,
@@ -1008,7 +1017,7 @@ describe("Campaign Play visibility service", () => {
   });
 
   it("earns valid channels while keeping sibling-scene perception and aftermath hidden", () => {
-    const fixture = createVisibilityFixture(["inspect"], false, true);
+    const fixture = createVisibilityFixture(["inspect"], false, "payable");
     expect(fixture.handle.sqlite.prepare(`SELECT location_id AS locationId
       FROM actor_placements WHERE campaign_id = ? AND actor_id = 'actor-d'`)
       .get(CAMPAIGN_ID)).toEqual({ locationId: "location-c" });
@@ -1049,6 +1058,19 @@ describe("Campaign Play visibility service", () => {
     expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
       "Player owes Mara Venn four copper for the signal work.",
     );
+    expect(result.packet.obligations).toEqual([{
+      handle: deriveCampaignPlayPublicHandle("obligation", CAMPAIGN_ID, deriveCampaignPlayObligationId(
+        CAMPAIGN_ID,
+        "actor-player",
+        "actor-a",
+        "copper",
+      )),
+      direction: "payable",
+      counterpartyHandle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-a"),
+      counterpartyName: "Mara Venn",
+      unitKey: "copper",
+      outstandingAmount: 4,
+    }]);
     expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
       "Fresh scuff marks and a snapped seal remain beside the route board.",
     );
@@ -1181,6 +1203,39 @@ describe("Campaign Play visibility service", () => {
         (SELECT count(*) FROM campaign_play_observations WHERE campaign_id = ?) AS observations,
         (SELECT count(*) FROM campaign_play_narrations WHERE campaign_id = ?) AS narrations`)
       .get(CAMPAIGN_ID, CAMPAIGN_ID, CAMPAIGN_ID)).toEqual(countsBeforeRetry);
+  });
+
+  it("projects and reloads a visible actor's debt as a player receivable", () => {
+    const fixture = createVisibilityFixture(["inspect"], false, "receivable");
+    const obligationId = deriveCampaignPlayObligationId(
+      CAMPAIGN_ID,
+      "actor-a",
+      "actor-player",
+      "copper",
+    );
+    const expected = [{
+      handle: deriveCampaignPlayPublicHandle("obligation", CAMPAIGN_ID, obligationId),
+      direction: "receivable" as const,
+      counterpartyHandle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-a"),
+      counterpartyName: "Mara Venn",
+      unitKey: "copper",
+      outstandingAmount: 4,
+    }];
+
+    const result = createCampaignPlayVisibilityService(fixture.handle).projectTurn({
+      token: fixture.visibilityToken,
+      actionContext: null,
+      sourceMoment: null,
+      committedAt: 1_650,
+      mutationId: "receivable-visibility-projected",
+    });
+
+    expect(result.packet.obligations).toEqual(expected);
+    expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
+      "Mara Venn owes the player four copper for the completed signal work.",
+    );
+    expect(createCampaignPlayStateRepository(fixture.handle).loadState()!.publicState.projection)
+      .toMatchObject({ obligations: expected });
   });
 
   it("releases the opening observable trace only for its exact actor and earned predicate", () => {

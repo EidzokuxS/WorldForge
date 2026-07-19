@@ -34,10 +34,18 @@ describe("SceneCard", () => {
         }]}
         obligations={[{
           handle: "obligation-secret",
-          creditorHandle: "actor-creditor-secret",
-          creditorName: "Orsa Pell",
+          direction: "payable",
+          counterpartyHandle: "actor-creditor-secret",
+          counterpartyName: "Orsa Pell",
           unitKey: "copper",
           outstandingAmount: 16,
+        }, {
+          handle: "receivable-secret",
+          direction: "receivable",
+          counterpartyHandle: "actor-debtor-secret",
+          counterpartyName: "Mara Venn",
+          unitKey: "copper",
+          outstandingAmount: 4,
         }]}
         consequences={[{
           observationHandle: "observation-secret",
@@ -59,7 +67,9 @@ describe("SceneCard", () => {
     expect(within(routes).getByText("Restricted")).toBeInTheDocument();
     expect(screen.getByText("The late train")).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Carrying" })).toHaveTextContent("Brass signal key×2");
-    expect(screen.getByRole("region", { name: "Owed" })).toHaveTextContent("Orsa Pell16 copper");
+    const accounts = screen.getByRole("region", { name: "Accounts" });
+    expect(accounts).toHaveTextContent("You owe Orsa Pell16 copper");
+    expect(accounts).toHaveTextContent("Mara Venn owes you4 copper");
     expect(screen.getByRole("region", { name: "What changed" })).toHaveTextContent("Route changed");
     expect(document.body.textContent?.includes("secret")).toBe(false);
   });

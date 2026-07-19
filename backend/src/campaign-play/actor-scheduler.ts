@@ -19,6 +19,8 @@ import {
   canonicalizeCampaignPlayProjection,
   deriveCampaignPlayActorReplanStageId,
   hashCampaignPlayProjection,
+  type CampaignPlayLiveActorObligation,
+  type CampaignPlayLiveActorPossession,
 } from "./campaign-play-projection.js";
 import {
   createCampaignPlayStateRepository,
@@ -156,6 +158,8 @@ export interface CampaignPlayActorFrame {
     progress: number;
     status: "active" | "resolved";
   }>;
+  possessions: CampaignPlayLiveActorPossession[];
+  obligations: CampaignPlayLiveActorObligation[];
   knownEvents: CampaignPlayActorKnownEvent[];
   authorizedRefs: CampaignPlayEntityRef[];
 }
@@ -1345,6 +1349,25 @@ export function createCampaignPlayActorScheduler(
         handle.campaignId,
         actor.id,
       ) as CampaignPlayActorFrame["conditions"];
+      const possessions = handle.sqlite.prepare(`SELECT possession_id AS possessionId,
+          actor_id AS actorId, possession_key AS possessionKey, name, quantity
+        FROM campaign_play_actor_possessions
+        WHERE campaign_id = ? AND actor_id = ? ORDER BY possession_id`).all(
+          handle.campaignId,
+          actor.id,
+        ) as CampaignPlayLiveActorPossession[];
+      const obligations = handle.sqlite.prepare(`SELECT obligation_id AS obligationId,
+          debtor_actor_id AS debtorActorId, creditor_actor_id AS creditorActorId,
+          unit_key AS unitKey, principal_amount AS principalAmount,
+          outstanding_amount AS outstandingAmount
+        FROM campaign_play_actor_obligations
+        WHERE campaign_id = ? AND outstanding_amount > 0
+          AND (debtor_actor_id = ? OR creditor_actor_id = ?)
+        ORDER BY obligation_id`).all(
+          handle.campaignId,
+          actor.id,
+          actor.id,
+        ) as CampaignPlayLiveActorObligation[];
       const topologyRoutes = handle.sqlite.prepare(`SELECT id,
         from_location_id AS fromLocationId, to_location_id AS toLocationId,
         travel_cost AS travelCost
@@ -1454,6 +1477,12 @@ export function createCampaignPlayActorScheduler(
         ]),
         ...localRoutes.map((route) => ({ kind: "route" as const, id: route.id })),
         ...knownPressures.map((pressure) => ({ kind: "pressure" as const, id: pressure.id })),
+        ...possessions.map((possession) => ({ kind: "possession" as const, id: possession.possessionId })),
+        ...obligations.flatMap((obligation) => [
+          { kind: "obligation" as const, id: obligation.obligationId },
+          { kind: "actor" as const, id: obligation.debtorActorId },
+          { kind: "actor" as const, id: obligation.creditorActorId },
+        ]),
         ...knownEvents.map((event) => ({ kind: "world_event" as const, id: event.eventId })),
         ...plan.intent.targets,
         ...plan.steps.flatMap((step) => step.intent.targets),
@@ -1474,6 +1503,8 @@ export function createCampaignPlayActorScheduler(
         conditions,
         localRoutes,
         knownPressures,
+        possessions,
+        obligations,
         knownEvents,
         authorizedRefs,
       });

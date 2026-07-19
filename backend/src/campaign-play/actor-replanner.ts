@@ -257,6 +257,28 @@ function compilationFrame(
     summary: pressure.trajectory,
     state: `${pressure.status}, progress ${pressure.progress}`,
   });
+  for (const possession of frame.possessions) entities.push({
+    handle: bind({ kind: "possession", id: possession.possessionId }),
+    kind: "possession",
+    name: possession.name,
+    summary: `Owned by ${bind({ kind: "actor", id: frame.actorId })}`,
+    state: `quantity ${possession.quantity}`,
+  });
+  for (const obligation of frame.obligations) {
+    const actorIsDebtor = obligation.debtorActorId === frame.actorId;
+    const counterpartyId = actorIsDebtor
+      ? obligation.creditorActorId
+      : obligation.debtorActorId;
+    entities.push({
+      handle: bind({ kind: "obligation", id: obligation.obligationId }),
+      kind: "obligation",
+      name: actorIsDebtor
+        ? `Debt owed to ${bind({ kind: "actor", id: counterpartyId })}`
+        : `Debt owed by ${bind({ kind: "actor", id: counterpartyId })}`,
+      summary: `${obligation.outstandingAmount} ${obligation.unitKey} outstanding`,
+      state: actorIsDebtor ? "payable" : "receivable",
+    });
+  }
   for (const known of frame.knownEvents) entities.push({
     handle: bind({ kind: "world_event", id: known.eventId }),
     kind: "world_event",
@@ -376,6 +398,51 @@ function compilePlan(
   const steps = proposal.steps.map((step, order) => {
     const resolved = resolveIntent(step.intent, stepLocationId);
     stepLocationId = resolved.destinationLocationId;
+    const obligationOutcome = (() => {
+      if (step.obligationOutcome.kind === "none") return { kind: "none" as const };
+      const creditor = compilation.refsByHandle.get(step.obligationOutcome.creditorActorHandle);
+      const targetsCreditor = resolved.intent.targets.some((target) =>
+        target.kind === "actor" && target.id === creditor?.id);
+      if (creditor?.kind !== "actor" || creditor.id === frame.actorId || !targetsCreditor) {
+        throw new CampaignPlayActorReplannerError("replan_state_invalid");
+      }
+      if (step.obligationOutcome.kind === "incur") return {
+        kind: "incur" as const,
+        creditorActorId: creditor.id,
+        unitKey: step.obligationOutcome.unitKey,
+        amount: step.obligationOutcome.amount,
+      };
+      const obligation = compilation.refsByHandle.get(step.obligationOutcome.obligationHandle);
+      const paymentPossession = compilation.refsByHandle.get(
+        step.obligationOutcome.paymentPossessionHandle,
+      );
+      const obligationRow = obligation?.kind === "obligation"
+        ? frame.obligations.find((row) => row.obligationId === obligation.id)
+        : undefined;
+      const paymentRow = paymentPossession?.kind === "possession"
+        ? frame.possessions.find((row) => row.possessionId === paymentPossession.id)
+        : undefined;
+      if (
+        obligation?.kind !== "obligation"
+        || paymentPossession?.kind !== "possession"
+        || obligationRow?.debtorActorId !== frame.actorId
+        || obligationRow.creditorActorId !== creditor.id
+        || obligationRow.unitKey !== step.obligationOutcome.unitKey
+        || obligationRow.outstandingAmount < step.obligationOutcome.amount
+        || paymentRow?.actorId !== frame.actorId
+        || paymentRow.quantity < step.obligationOutcome.amount
+      ) {
+        throw new CampaignPlayActorReplannerError("replan_state_invalid");
+      }
+      return {
+        kind: "pay" as const,
+        creditorActorId: creditor.id,
+        obligationId: obligation.id,
+        paymentPossessionId: paymentPossession.id,
+        unitKey: step.obligationOutcome.unitKey,
+        amount: step.obligationOutcome.amount,
+      };
+    })();
     return {
       stepId: stableId("actor-step", { planId, order }),
       order,
@@ -387,6 +454,7 @@ function compilePlan(
         return step.observableTrace;
       })(),
       possessionOutcome: structuredClone(step.possessionOutcome),
+      obligationOutcome,
       elapsedBounds: { ...step.elapsedBounds },
     };
   });

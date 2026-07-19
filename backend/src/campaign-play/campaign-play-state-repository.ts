@@ -882,6 +882,8 @@ function selectPublicState(
   `).all(campaignId) as Array<{ possessionId: string; name: string; quantity: number }>;
   const obligations = sqlite.prepare(`
     SELECT obligation.obligation_id AS obligationId,
+      obligation.debtor_actor_id AS debtorActorId,
+      debtor.name AS debtorName, debtor.controller AS debtorController,
       obligation.creditor_actor_id AS creditorActorId,
       creditor.name AS creditorName, obligation.unit_key AS unitKey,
       obligation.outstanding_amount AS outstandingAmount
@@ -890,11 +892,15 @@ function selectPublicState(
       AND debtor.campaign_id = obligation.campaign_id
     JOIN actors creditor ON creditor.id = obligation.creditor_actor_id
       AND creditor.campaign_id = obligation.campaign_id
-    WHERE obligation.campaign_id = ? AND debtor.controller = 'human'
+    WHERE obligation.campaign_id = ?
+      AND (debtor.controller = 'human' OR creditor.controller = 'human')
       AND obligation.outstanding_amount > 0
     ORDER BY creditor.name, obligation.unit_key, obligation.obligation_id
   `).all(campaignId) as Array<{
     obligationId: string;
+    debtorActorId: string;
+    debtorName: string;
+    debtorController: "human" | "agent";
     creditorActorId: string;
     creditorName: string;
     unitKey: "copper";
@@ -918,8 +924,17 @@ function selectPublicState(
     })),
     obligations: obligations.map((obligation) => ({
       handle: deriveCampaignPlayPublicHandle("obligation", campaignId, obligation.obligationId),
-      creditorHandle: deriveCampaignPlayPublicHandle("actor", campaignId, obligation.creditorActorId),
-      creditorName: obligation.creditorName,
+      direction: obligation.debtorController === "human" ? "payable" as const : "receivable" as const,
+      counterpartyHandle: deriveCampaignPlayPublicHandle(
+        "actor",
+        campaignId,
+        obligation.debtorController === "human"
+          ? obligation.creditorActorId
+          : obligation.debtorActorId,
+      ),
+      counterpartyName: obligation.debtorController === "human"
+        ? obligation.creditorName
+        : obligation.debtorName,
       unitKey: obligation.unitKey,
       outstandingAmount: obligation.outstandingAmount,
     })),

@@ -63,6 +63,15 @@ const text = (maximum: number) => z.string().min(1).max(maximum)
   .refine((value) => value === value.trim());
 const handle = line(CAMPAIGN_PLAY_LIMITS.handle);
 const NEW_SUPPORT_ACTOR_HANDLE = "introduced-support-actor";
+type ResourceEffectKind =
+  | "adjust_actor_possession"
+  | "incur_actor_obligation"
+  | "pay_actor_obligation";
+const ALL_RESOURCE_EFFECT_KINDS = new Set<ResourceEffectKind>([
+  "adjust_actor_possession",
+  "incur_actor_obligation",
+  "pay_actor_obligation",
+]);
 
 function createExposureProposalSchema(handleSchema: z.ZodType<string>) {
   return z.discriminatedUnion("mode", [
@@ -91,6 +100,7 @@ function createEffectProposalSchema(
   handleSchema: z.ZodType<string>,
   exposureSchema: ReturnType<typeof createExposureProposalSchema>,
   requireRouteAccessClaims = false,
+  permittedResourceEffectKinds: ReadonlySet<ResourceEffectKind> = ALL_RESOURCE_EFFECT_KINDS,
 ) {
   const effectBase = { exposure: exposureSchema };
   const routeAccessClaimsSchema = z.array(z.object({
@@ -99,33 +109,33 @@ function createEffectProposalSchema(
     accessRequirement: z.enum(["none", "required"]),
     viaLocationHandle: handleSchema.nullable(),
   }).strict()).max(CAMPAIGN_PLAY_LIMITS.suggestedActions);
-  return z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("move_actor"), actorHandle: handleSchema.nullable() }).strict(),
-  z.object({
+  const effectSchemas = [
+  { kind: "move_actor", schema: z.object({ kind: z.literal("move_actor"), actorHandle: handleSchema.nullable() }).strict() },
+  { kind: "enter_local_scene", schema: z.object({
     kind: z.literal("enter_local_scene"),
     name: line(CAMPAIGN_PLAY_LIMITS.name),
     description: text(CAMPAIGN_PLAY_LIMITS.text),
-  }).strict(),
-  z.object({ ...effectBase, kind: z.literal("set_route_state"), routeHandle: handleSchema,
-    state: z.enum(CAMPAIGN_PLAY_ROUTE_STATE_VALUES), reason: line(CAMPAIGN_PLAY_LIMITS.shortText) }).strict(),
-  z.object({ ...effectBase, kind: z.literal("set_actor_condition"), actorHandle: handleSchema,
+  }).strict() },
+  { kind: "set_route_state", schema: z.object({ ...effectBase, kind: z.literal("set_route_state"), routeHandle: handleSchema,
+    state: z.enum(CAMPAIGN_PLAY_ROUTE_STATE_VALUES), reason: line(CAMPAIGN_PLAY_LIMITS.shortText) }).strict() },
+  { kind: "set_actor_condition", schema: z.object({ ...effectBase, kind: z.literal("set_actor_condition"), actorHandle: handleSchema,
     condition: campaignPlayActorConditionSchema, operation: z.enum(["set", "clear"]),
-    summary: line(CAMPAIGN_PLAY_LIMITS.shortText) }).strict(),
-  z.object({ ...effectBase, kind: z.literal("update_actor_relation"), relationHandle: handleSchema,
-    intensity: z.number().int().min(1).max(5), summary: line(CAMPAIGN_PLAY_LIMITS.shortText) }).strict(),
-  z.object({ ...effectBase, kind: z.literal("update_actor_goal"), goalHandle: handleSchema,
-    status: campaignPlayGoalStatusSchema, summary: line(CAMPAIGN_PLAY_LIMITS.shortText) }).strict(),
-  z.object({ ...effectBase, kind: z.literal("advance_pressure"), pressureHandle: handleSchema,
+    summary: line(CAMPAIGN_PLAY_LIMITS.shortText) }).strict() },
+  { kind: "update_actor_relation", schema: z.object({ ...effectBase, kind: z.literal("update_actor_relation"), relationHandle: handleSchema,
+    intensity: z.number().int().min(1).max(5), summary: line(CAMPAIGN_PLAY_LIMITS.shortText) }).strict() },
+  { kind: "update_actor_goal", schema: z.object({ ...effectBase, kind: z.literal("update_actor_goal"), goalHandle: handleSchema,
+    status: campaignPlayGoalStatusSchema, summary: line(CAMPAIGN_PLAY_LIMITS.shortText) }).strict() },
+  { kind: "advance_pressure", schema: z.object({ ...effectBase, kind: z.literal("advance_pressure"), pressureHandle: handleSchema,
     amount: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.pressureAdvance),
-    resultStatus: campaignPlayPressureStatusSchema }).strict(),
-  z.object({ kind: z.literal("adjust_actor_possession"),
+    resultStatus: campaignPlayPressureStatusSchema }).strict() },
+  { kind: "adjust_actor_possession", schema: z.object({ kind: z.literal("adjust_actor_possession"),
     operation: z.enum(["acquire", "spend", "transform"]), actorHandle: handleSchema,
     possessionHandle: handleSchema.nullable(), name: line(CAMPAIGN_PLAY_LIMITS.name).nullable(),
     quantity: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
     summary: text(CAMPAIGN_PLAY_LIMITS.text),
     affectedHandles: z.array(handleSchema).max(CAMPAIGN_PLAY_LIMITS.affectedRefs)
-      .refine((values) => new Set(values).size === values.length) }).strict(),
-  z.object({
+      .refine((values) => new Set(values).size === values.length) }).strict() },
+  { kind: "materialize_support_actor", schema: z.object({
     kind: z.literal("materialize_support_actor"),
     actorHandle: z.literal(NEW_SUPPORT_ACTOR_HANDLE),
     name: line(CAMPAIGN_PLAY_LIMITS.name),
@@ -136,23 +146,23 @@ function createEffectProposalSchema(
     nextAction: line(CAMPAIGN_PLAY_LIMITS.shortText).optional(),
     observableTrace: line(CAMPAIGN_PLAY_LIMITS.shortText),
     cadenceMinutes: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes),
-  }).strict(),
-  z.object({ kind: z.literal("incur_actor_obligation"),
+  }).strict() },
+  { kind: "incur_actor_obligation", schema: z.object({ kind: z.literal("incur_actor_obligation"),
     debtorActorHandle: handleSchema, creditorActorHandle: handleSchema,
     unitKey: z.literal("copper"),
     amount: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
     summary: text(CAMPAIGN_PLAY_LIMITS.text),
     affectedHandles: z.array(handleSchema).max(CAMPAIGN_PLAY_LIMITS.affectedRefs)
-      .refine((values) => new Set(values).size === values.length) }).strict(),
-  z.object({ kind: z.literal("pay_actor_obligation"),
+      .refine((values) => new Set(values).size === values.length) }).strict() },
+  { kind: "pay_actor_obligation", schema: z.object({ kind: z.literal("pay_actor_obligation"),
     debtorActorHandle: handleSchema, creditorActorHandle: handleSchema,
     obligationHandle: handleSchema, paymentPossessionHandle: handleSchema,
     unitKey: z.literal("copper"),
     amount: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
     summary: text(CAMPAIGN_PLAY_LIMITS.text),
     affectedHandles: z.array(handleSchema).max(CAMPAIGN_PLAY_LIMITS.affectedRefs)
-      .refine((values) => new Set(values).size === values.length) }).strict(),
-  z.object({ kind: z.literal("record_world_event"),
+      .refine((values) => new Set(values).size === values.length) }).strict() },
+  { kind: "record_world_event", schema: z.object({ kind: z.literal("record_world_event"),
     eventClass: z.enum(["dialogue", "interaction", "discovery", "scene"]),
     performingActorHandle: handleSchema.nullable(),
     routeAccessClaims: requireRouteAccessClaims
@@ -170,19 +180,27 @@ function createEffectProposalSchema(
           message: "Dialogue and interaction require one performing actor; discovery and scene forbid one.",
         });
       }
-    }),
-  ]);
+    }) },
+  ] as const;
+  type EffectSchema = (typeof effectSchemas)[number]["schema"];
+  const selected = effectSchemas
+    .filter(({ kind }) => !ALL_RESOURCE_EFFECT_KINDS.has(kind as ResourceEffectKind)
+      || permittedResourceEffectKinds.has(kind as ResourceEffectKind))
+    .map(({ schema }) => schema) as unknown as [EffectSchema, ...EffectSchema[]];
+  return z.discriminatedUnion("kind", selected);
 }
 
 function createProposalSchema(
   handleSchema: z.ZodType<string>,
   requireRouteAccessClaims = false,
+  permittedResourceEffectKinds: ReadonlySet<ResourceEffectKind> = ALL_RESOURCE_EFFECT_KINDS,
 ) {
   const exposureSchema = createExposureProposalSchema(handleSchema);
   const effectSchema = createEffectProposalSchema(
     handleSchema,
     exposureSchema,
     requireRouteAccessClaims,
+    permittedResourceEffectKinds,
   );
   return z.object({
     elapsedMinutes: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes),
@@ -470,6 +488,7 @@ function requireRef(
 function constrainedProposalSchema(
   map: ReadonlyMap<string, CampaignPlayEntityRef>,
   requireRouteAccessClaims = false,
+  permittedResourceEffectKinds: ReadonlySet<ResourceEffectKind> = ALL_RESOURCE_EFFECT_KINDS,
 ) {
   const allowedHandles = [...map.keys(), NEW_SUPPORT_ACTOR_HANDLE];
   if (allowedHandles.length === 0) {
@@ -478,6 +497,7 @@ function constrainedProposalSchema(
   return createProposalSchema(
     z.enum(allowedHandles as [string, ...string[]]),
     requireRouteAccessClaims,
+    permittedResourceEffectKinds,
   );
 }
 
@@ -1025,7 +1045,19 @@ function compileEffect(
     case "incur_actor_obligation": {
       const debtor = requireRef(map, effect.debtorActorHandle, "actor");
       const creditor = requireRef(map, effect.creditorActorHandle, "actor");
-      if (debtor.id !== frame.authority.actorId || debtor.id === creditor.id) {
+      const counterparty = debtor.id === frame.authority.actorId ? creditor : debtor;
+      const counterpartyIsTargeted = ruling.normalizedIntent.targets.some((target) =>
+        target.kind === "actor" && target.handle === (
+          debtor.id === frame.authority.actorId
+            ? effect.creditorActorHandle
+            : effect.debtorActorHandle
+        ));
+      if (
+        debtor.id === creditor.id
+        || (debtor.id !== frame.authority.actorId && creditor.id !== frame.authority.actorId)
+        || counterparty.id === frame.authority.actorId
+        || !counterpartyIsTargeted
+      ) {
         throw new CampaignPlayGameMasterError("model_contract_failed", null);
       }
       const obligationId = deriveCampaignPlayObligationId(
@@ -1151,6 +1183,65 @@ function compileEffect(
   }
 }
 
+function normalizeReceivableCollectionAuthority(
+  frame: CampaignPlayGameMasterFrame,
+  ruling: CampaignPlayJudgeRuling,
+): CampaignPlayJudgeRuling {
+  if (
+    frame.authority.actorId === null
+    || ruling.possessionEffectAuthority.kind !== "adjust_actor_possession"
+    || ruling.possessionEffectAuthority.operation !== "acquire"
+  ) {
+    return ruling;
+  }
+  const map = bindings(frame);
+  const targetedActorIds = new Set(ruling.normalizedIntent.targets.flatMap((target) => {
+    const reference = map.get(target.handle);
+    return target.kind === "actor" && reference?.kind === "actor" ? [reference.id] : [];
+  }));
+  const citesTargetedReceivable = ruling.citedVisibleFactHandles.some((handle) => {
+    const reference = map.get(handle);
+    if (reference?.kind !== "obligation") return false;
+    const obligation = frame.rulebookFrame.obligations.find((row) =>
+      row.obligationId === reference.id) ?? null;
+    return obligation !== null
+      && obligation.creditorActorId === frame.authority.actorId
+      && obligation.debtorActorId !== frame.authority.actorId
+      && obligation.outstandingAmount > 0
+      && targetedActorIds.has(obligation.debtorActorId);
+  });
+  if (!citesTargetedReceivable) return ruling;
+  return {
+    ...ruling,
+    possessionEffectAuthority: { kind: "none" },
+  };
+}
+
+function permittedResourceEffectKinds(
+  ruling: CampaignPlayJudgeRuling,
+  resolution: CampaignPlayUncertaintyResolution,
+): ReadonlySet<ResourceEffectKind> {
+  const resultTier = CAMPAIGN_PLAY_RESULT_TIER_VALUES.indexOf(resolution.result);
+  const permitted = new Set<ResourceEffectKind>();
+  if (
+    ruling.possessionEffectAuthority.kind === "adjust_actor_possession"
+    && resultTier >= CAMPAIGN_PLAY_RESULT_TIER_VALUES.indexOf(
+      ruling.possessionEffectAuthority.minimumResult,
+    )
+  ) {
+    permitted.add("adjust_actor_possession");
+  }
+  if (
+    ruling.requiredObligationEffect.kind !== "none"
+    && resultTier >= CAMPAIGN_PLAY_RESULT_TIER_VALUES.indexOf(
+      ruling.requiredObligationEffect.minimumResult,
+    )
+  ) {
+    permitted.add(ruling.requiredObligationEffect.kind);
+  }
+  return permitted;
+}
+
 function compile(
   frame: CampaignPlayGameMasterFrame,
   rulingInput: CampaignPlayJudgeRuling,
@@ -1159,7 +1250,10 @@ function compile(
   rawProposal: unknown,
 ): Omit<CampaignPlayGameMasterCandidate, "modelEvidence" | "semanticReview"> {
   const map = bindings(frame);
-  const ruling = campaignPlayJudgeRulingSchema.parse(rulingInput);
+  const ruling = normalizeReceivableCollectionAuthority(
+    frame,
+    campaignPlayJudgeRulingSchema.parse(rulingInput),
+  );
   let resolution: CampaignPlayUncertaintyResolution;
   try {
     resolution = validateCampaignPlayUncertaintyResolution(
@@ -1278,6 +1372,7 @@ function compile(
   } else if (requiredObligationEffect.kind === "incur_actor_obligation") {
     const matchingEffects = proposal.effects.filter((effect) =>
       effect.kind === "incur_actor_obligation"
+      && effect.debtorActorHandle === requiredObligationEffect.debtorHandle
       && effect.creditorActorHandle === requiredObligationEffect.creditorHandle
       && effect.unitKey === requiredObligationEffect.unitKey
       && effect.amount === requiredObligationEffect.amount);
@@ -1287,6 +1382,8 @@ function compile(
   } else {
     const matchingEffects = proposal.effects.filter((effect) =>
       effect.kind === "pay_actor_obligation"
+      && effect.debtorActorHandle === requiredObligationEffect.debtorHandle
+      && effect.creditorActorHandle === requiredObligationEffect.creditorHandle
       && effect.obligationHandle === requiredObligationEffect.obligationHandle
       && effect.paymentPossessionHandle === requiredObligationEffect.paymentPossessionHandle
       && effect.unitKey === requiredObligationEffect.unitKey
@@ -1484,6 +1581,20 @@ function compile(
 }
 
 function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRuling, resolution: CampaignPlayUncertaintyResolution): string {
+  const effectiveRuling = normalizeReceivableCollectionAuthority(frame, ruling);
+  const resourceEffectKinds = permittedResourceEffectKinds(effectiveRuling, resolution);
+  const permittedEffectKinds = [
+    "move_actor",
+    "enter_local_scene",
+    "set_route_state",
+    "set_actor_condition",
+    "update_actor_relation",
+    "update_actor_goal",
+    "advance_pressure",
+    ...resourceEffectKinds,
+    "materialize_support_actor",
+    "record_world_event",
+  ];
   const map = bindings(frame);
   const allowedHandles = [...map.keys(), NEW_SUPPORT_ACTOR_HANDLE];
   const canonicalPersonNames = [
@@ -1550,7 +1661,7 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     "Copy every handle-valued field character-for-character from ALLOWED_HANDLES. This includes performingActorHandle, affectedHandles, and every model-authored exposure predicate anchorHandle. affectedHandles must not repeat a handle. Never put a name, ID, description, or newly invented token in a handle field.",
     "Match each handle to the field's required kind in HANDLES_BY_KIND. direct_perception and local_aftermath anchorHandle require location; route_state anchorHandle requires route; witness_report anchorHandle requires actor. actorHandle, debtorActorHandle, and creditorActorHandle require actor; routeHandle requires route; fromLocationHandle and toLocationHandle require location; relationHandle requires relation; goalHandle requires goal; pressureHandle requires pressure; obligationHandle requires obligation; and paymentPossessionHandle requires possession.",
     "Every exposure field is one object, never an array. It is exactly {\"mode\":\"protected\"} or {\"mode\":\"projectable\",\"predicates\":[...]}; predicates is the only array. Use the exact predicate fields for its channel: direct_perception has only channel and anchorHandle; local_aftermath has exactly channel, anchorHandle, and the required integer visibleForMinutes; route_state has exactly channel, anchorHandle, and the required non-empty triggers array; witness_report has only channel and anchorHandle. Never omit a required field or add one from another channel.",
-    "effects[].kind accepts exactly: move_actor, enter_local_scene, set_route_state, set_actor_condition, update_actor_relation, update_actor_goal, advance_pressure, adjust_actor_possession, incur_actor_obligation, pay_actor_obligation, materialize_support_actor, or record_world_event. Never return inspect, observe, discover, discovery, reveal, describe, dialogue, interaction, scene, or any other token as an effect kind. Code owns IDs, scopes, versions, causal links, rolls, and Rulebook authority.",
+    `effects[].kind accepts exactly: ${permittedEffectKinds.join(", ")}. Never return inspect, observe, discover, discovery, reveal, describe, dialogue, interaction, scene, or any other token as an effect kind. Code owns IDs, scopes, versions, causal links, rolls, and Rulebook authority.`,
     "set_actor_condition has exactly these fields: kind, exposure, actorHandle, condition, operation, and summary. condition must be exactly occupied, strained, or incapacitated; operation must be exactly set or clear. affectedHandles is forbidden. If none of those three conditions fits the resolved result, do not use set_actor_condition; commit the result through another authorized effect.",
     "Resolve only the exact PLAYER_INTENT. PLAYER_INTENT owns the player's method and scope. Preserve every concrete trade, material, tool, target, and explicit exclusion or refusal it states; never substitute a nearby profession or revive a rejected method to fit SOURCE_MOMENT. A generic approach, observation, or wait does not authorize an offer, transaction, repair specialty, tool use, disclosure, promise, or commitment absent from PLAYER_INTENT. Prior scene prose may explain context but cannot add a player action. Result tiers change the degree of success inside the admitted scope; they never create trust, permission, leverage, knowledge, or access. strong_success makes the scoped result more useful; it does not turn an unfamiliar actor into a fully cooperative informant.",
     "A direct question identifies the topic but never gives the speaker a reason to answer. Do not disclose a third party's identity, location, contact channel, or private case details, and do not recruit the player to find or report on that person, unless ACTOR_DIRECTIVES or VISIBLE_FACTS establish a concrete speaker-side reason: consent or already-public status, duty or authority, established trust, reciprocal value already supplied or explicitly committed in PLAYER_INTENT, or an immediate safety need. Otherwise have the speaker withhold, deflect, ask the player's purpose, or name a condition. Do not invent a quest.",
@@ -1582,15 +1693,32 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     "DESTINATION_SCENE is code-authoritative arrival context when PLAYER_MOVEMENT is non-null. Its description contains only player-visible surface facts, and every name in presentPeople is directly perceivable and identifiable in that exact scene. Ground the arrival in this context. Do not call the scene empty, move a listed person behind an unentered boundary, or contradict their presence. Do not make a listed person speak or act unless the accepted effects establish that action.",
     "record_world_event accepts exactly four eventClass values: dialogue, interaction, discovery, or scene. These are eventClass values only and must never appear in kind. Dialogue and interaction mean that a targeted nonplayer actor performs the event: set performingActorHandle to that actor and include the same handle in affectedHandles. The introduced-support-actor exception is valid only immediately after materialize_support_actor. Discovery and scene are actorless: set performingActorHandle to null, and do not use their summary to make a person speak, decide, transact, disclose information, become a contact, move, depart, arrive, follow, accompany anyone, or otherwise change location. Actor placement changes only through an accepted move_actor or materialize_support_actor effect; dialogue, intention, gesture, and SOURCE_MOMENT prose are not movement authority. When PLAYER_INTENT targets no actor, every record_world_event must be actorless unless it is the required event immediately following materialize_support_actor. A player's physical attempt that has no nonplayer performer must use its typed effect or an actorless discovery/scene result. For an observe result that changes no durable entity, return exactly one effect shaped as {\"kind\":\"record_world_event\",\"eventClass\":\"discovery\",\"performingActorHandle\":null,\"summary\":\"grounded observation\",\"affectedHandles\":[\"copied handle\"]}; do not add a second inspect, observe, discover, reveal, or describe effect. Use scene for an arrival or other directly perceived situation that is neither observation nor contact. Return a grounded summary and grounded affectedHandles. Omit exposure from record_world_event; code attaches direct perception at the player's current location at that effect's chronological position.",
     "record_world_event may quote a price, warning, request, or possible charge, but it never creates, increases, reduces, pays, or settles a binding obligation. Use the matching typed obligation effect for authoritative debt changes.",
-    "Use adjust_actor_possession whenever the resolved action gives the player a countable possession, consumes one, or durably changes what an existing possession is. This effect has exactly these fields: kind, operation, actorHandle, possessionHandle, name, quantity, summary, and affectedHandles. Put the player's copied handle in actorHandle. performingActorHandle is forbidden on adjust_actor_possession and exists only on record_world_event. For a new possession, return operation acquire, the player actor handle, null possessionHandle, its concrete name, positive quantity, a player-visible summary, and grounded affectedHandles. For more of an existing possession, use operation acquire with its visible possessionHandle and null name. To consume one, return operation spend, its visible possessionHandle, null name, and a positive quantity. When an action writes on, repairs, assembles, opens, fills, empties, or otherwise turns an existing possession into a materially different retained item, return operation transform with the source possessionHandle and the concrete resulting name. Transform consumes the requested source quantity and acquires the same quantity under the resulting name in one Rulebook batch. Do not add record_world_event for the same gain, spend, or transformation: the typed effect is the public consequence and Rulebook truth.",
+    resourceEffectKinds.has("adjust_actor_possession")
+      ? "Use adjust_actor_possession whenever the resolved action gives the player a countable possession, consumes one, or durably changes what an existing possession is. This effect has exactly these fields: kind, operation, actorHandle, possessionHandle, name, quantity, summary, and affectedHandles. Put the player's copied handle in actorHandle. performingActorHandle is forbidden on adjust_actor_possession and exists only on record_world_event. For a new possession, return operation acquire, the player actor handle, null possessionHandle, its concrete name, positive quantity, a player-visible summary, and grounded affectedHandles. For more of an existing possession, use operation acquire with its visible possessionHandle and null name. To consume one, return operation spend, its visible possessionHandle, null name, and a positive quantity. When an action writes on, repairs, assembles, opens, fills, empties, or otherwise turns an existing possession into a materially different retained item, return operation transform with the source possessionHandle and the concrete resulting name. Transform consumes the requested source quantity and acquires the same quantity under the resulting name in one Rulebook batch. Do not add record_world_event for the same gain, spend, or transformation: the typed effect is the public consequence and Rulebook truth."
+      : "",
     "Player possession is code-owned authority. Never claim that the player uses, carries, installs, spends, or transforms a tool or material unless VISIBLE_FACTS contains its positive player possession handle or this proposal first transfers it through the one Judge-required acquire effect. A general tool possession never supplies raw material, fasteners, or another consumable. A work assignment, supply list, visible stock, offer, request, dialogue, handling, transport, RULING method or stakes, and SOURCE_MOMENT prose do not establish custody. record_world_event cannot substitute for a possession transition.",
-    "possessionEffectAuthority in RULING is code-enforced Judge authority. When the resolved result meets minimumResult, match its operation, possessionHandle, and quantity. required means include exactly one matching adjust_actor_possession effect. permitted means include zero or one: use one only when the targeted person's grounded response actually transfers the item. Choose the concrete resulting name and summary from that committed outcome. When no authority applies, every adjust_actor_possession effect is forbidden. Omitting a required effect, duplicating one, or adding any unmatched possession effect invalidates the whole proposal before Rulebook execution.",
-    "Possession authority also bounds the meaning of the scene. When PLAYER_INTENT only offers or proposes a player possession and possessionEffectAuthority is none, resolve only the negotiation. The targeted actor may accept the proposed terms, reject them, counter, or ask what quantity the player means, but no item changes hands and no bargained information, service, access, or other return is delivered yet. Do not say the exchange is complete, paid, settled, square, or fulfilled. A completed exchange requires matching spend authority and its adjust_actor_possession effect in the same accepted result; record_world_event cannot substitute for that transition.",
-    "VISIBLE_FACTS possession quantity counts Rulebook stack units. Any quoted price or requested amount involving a player possession must be a positive integer no greater than that visible quantity. Never invent a smaller unit by interpreting a number, duration, volume, contents, or measure inside the possession name. A possession named Three days of travel food with quantity 1 is one indivisible Rulebook unit, not three day units. Request the whole unit or another consideration; do not request one day from that stack.",
-    "Use incur_actor_obligation only when the resolved result creates a binding debt from the player to one visible nonplayer actor. This effect has exactly these fields: kind, debtorActorHandle, creditorActorHandle, unitKey, amount, summary, and affectedHandles. Copy the player handle into debtorActorHandle and the visible creditor handle into creditorActorHandle. unitKey must be copper and amount is the exact newly incurred amount, not the running total. The summary states the concrete committed debt in player-visible language. Do not add a record_world_event that creates or repeats the same debt; the typed effect is both the public consequence and Rulebook truth. A quoted price, warning, possible charge, or payment request is not a binding debt.",
-    "Use pay_actor_obligation only when the resolved result transfers the player's visible copper possession to settle the player's visible obligation. This effect has exactly these fields: kind, debtorActorHandle, creditorActorHandle, obligationHandle, paymentPossessionHandle, unitKey, amount, summary, and affectedHandles. Copy the player, creditor, obligation, and payment-possession handles exactly. affectedHandles may contain only those same copied handles and must not repeat one. unitKey must be copper and amount is the exact payment, not the remaining balance. The summary states what was transferred and the resulting outstanding debt in concrete player-visible language. Do not add record_world_event or adjust_actor_possession for the same payment: this one typed effect atomically transfers the possession and reduces the obligation. Handling cargo, handing over an unrelated object, offering, promising, or narrating payment does not settle debt.",
-    "requiredObligationEffect in RULING is code-enforced Judge authority. When the resolved result meets its minimumResult, include exactly one matching obligation effect and no other obligation effect. For incur_actor_obligation, match creditorActorHandle, unitKey, and amount. For pay_actor_obligation, match obligationHandle, paymentPossessionHandle, unitKey, and amount. Omitting, duplicating, or changing that effect invalidates the whole proposal before Rulebook execution. Prose never creates or settles an obligation.",
-    `Every non-null adjust_actor_possession name must be at most ${CAMPAIGN_PLAY_LIMITS.name} characters. Keep the name short and put state, contents, provenance, and other details in summary.`,
+    resourceEffectKinds.has("adjust_actor_possession")
+      ? "possessionEffectAuthority in RULING is code-enforced Judge authority. Match its operation, possessionHandle, and quantity. required means include exactly one matching adjust_actor_possession effect. permitted means include zero or one: use one only when the targeted person's grounded response actually transfers the item. Choose the concrete resulting name and summary from that committed outcome. Omitting a required effect, duplicating one, or adding any unmatched possession effect invalidates the whole proposal before Rulebook execution."
+      : "No resource effect kind is available for this proposal. Leave every possession quantity and obligation balance unchanged. record_world_event may contain only a response, offer, refusal, explanation, handling, or observation that does not say or imply that payment, settlement, acquisition, spending, consumption, or another durable resource transition occurred.",
+    resourceEffectKinds.has("adjust_actor_possession")
+      ? "Possession authority also bounds the meaning of the scene. When PLAYER_INTENT only offers or proposes a player possession and no spend is authorized, resolve only the negotiation. The targeted actor may accept the proposed terms, reject them, counter, or ask what quantity the player means, but no item changes hands and no bargained information, service, access, or other return is delivered yet. Do not say the exchange is complete, paid, settled, square, or fulfilled without the matching typed transition."
+      : "",
+    resourceEffectKinds.has("adjust_actor_possession")
+      ? "VISIBLE_FACTS possession quantity counts Rulebook stack units. Any quoted price or requested amount involving a player possession must be a positive integer no greater than that visible quantity. Never invent a smaller unit by interpreting a number, duration, volume, contents, or measure inside the possession name. A possession named Three days of travel food with quantity 1 is one indivisible Rulebook unit, not three day units. Request the whole unit or another consideration; do not request one day from that stack."
+      : "",
+    resourceEffectKinds.has("incur_actor_obligation")
+      ? "Use incur_actor_obligation for the exact binding debt required by RULING between the player and one targeted visible nonplayer actor. This effect has exactly these fields: kind, debtorActorHandle, creditorActorHandle, unitKey, amount, summary, and affectedHandles. Copy both actor handles in the required direction: the actor who must pay is debtorActorHandle. unitKey must be copper and amount is the exact newly incurred amount, not the running total. The summary states who owes whom and how much. Do not add a record_world_event that creates or repeats the same debt; the typed effect is both the public consequence and Rulebook truth."
+      : "",
+    resourceEffectKinds.has("pay_actor_obligation")
+      ? "Use pay_actor_obligation for the exact payable obligation required by RULING. This effect has exactly these fields: kind, debtorActorHandle, creditorActorHandle, obligationHandle, paymentPossessionHandle, unitKey, amount, summary, and affectedHandles. Copy the player debtor, visible creditor, obligation, and payment-possession handles exactly. affectedHandles may contain only those copied handles and must not repeat one. unitKey must be copper and amount is the exact payment, not the remaining balance. The summary states what was transferred and the resulting outstanding debt. Do not add record_world_event or adjust_actor_possession for the same payment: this typed effect atomically transfers the possession and reduces the obligation."
+      : "",
+    "When PLAYER_INTENT asks a targeted nonplayer debtor to settle a cited receivable obligation, the request is contact only. Do not acquire copper, reduce or settle the debt, or say that payment changed hands. Record only that actor's current response; a later payment requires that actor's own sourced action and possession.",
+    effectiveRuling.requiredObligationEffect.kind !== "none"
+      ? "requiredObligationEffect in RULING is code-enforced Judge authority. Include exactly one matching obligation effect and no other obligation effect. Match both actor directions and every supplied handle, unit, and amount. Omitting, duplicating, reversing, or changing that effect invalidates the whole proposal before Rulebook execution. Prose never creates or settles an obligation."
+      : "",
+    resourceEffectKinds.has("adjust_actor_possession")
+      ? `Every non-null adjust_actor_possession name must be at most ${CAMPAIGN_PLAY_LIMITS.name} characters. Keep the name short and put state, contents, provenance, and other details in summary.`
+      : "",
     `Every summary must fit its schema limit: at most ${CAMPAIGN_PLAY_LIMITS.text} characters for record_world_event, materialize_support_actor, adjust_actor_possession, incur_actor_obligation, and pay_actor_obligation, and at most ${CAMPAIGN_PLAY_LIMITS.shortText} characters for condition, relation, or goal updates. Include only the committed result. Do not include planning or reasoning, and do not repeat supporting facts.`,
     "Return at least one effect. Never return an empty effects array.",
     "Return one strict schema object and no prose.",
@@ -1610,10 +1738,11 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     `ACTOR_CONTINUITY=${JSON.stringify(frame.actorContinuity)}`,
     `ACTOR_DIRECTIVES=${JSON.stringify(directives)}`,
     `CANONICAL_PEOPLE=${JSON.stringify(canonicalPersonNames)}`,
-    `PLAYER_INTENT=${JSON.stringify(ruling.normalizedIntent)}`,
-    `RULING=${JSON.stringify({ ...ruling, normalizedIntent: undefined })}`,
+    `PLAYER_INTENT=${JSON.stringify(effectiveRuling.normalizedIntent)}`,
+    `RULING=${JSON.stringify({ ...effectiveRuling, normalizedIntent: undefined })}`,
     `RESOLUTION=${JSON.stringify(resolution)}`,
-  ].join("\n");
+    `PERMITTED_RESOURCE_EFFECT_KINDS=${JSON.stringify([...resourceEffectKinds])}`,
+  ].filter((instruction) => instruction.length > 0).join("\n");
 }
 
 export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = {}) {
@@ -1645,6 +1774,10 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
         || admittedResolution.data.result === "no_effect") {
         throw new CampaignPlayGameMasterError("no_effect_ruling", null);
       }
+      const effectiveRuling = normalizeReceivableCollectionAuthority(
+        request.frame,
+        admittedRuling.data,
+      );
       const capability = resolveStructuredOutputCapability({
         metadata: getStructuredOutputModelMetadata(request.model), requestedMode: "auto",
       });
@@ -1652,19 +1785,23 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
         throw new CampaignPlayGameMasterError("structured_output_unavailable", null);
       }
       const started = Date.now();
-      const promptText = prompt(request.frame, request.ruling, request.resolution);
-      const requireRouteAccessClaims = admittedRuling.data.normalizedIntent.kind === "contact"
-        && admittedRuling.data.movementRouteHandle === null
+      const promptText = prompt(request.frame, effectiveRuling, admittedResolution.data);
+      const requireRouteAccessClaims = effectiveRuling.normalizedIntent.kind === "contact"
+        && effectiveRuling.movementRouteHandle === null
         && (
-          admittedRuling.data.normalizedIntent.targets.some((target) => target.kind === "route")
-          || admittedRuling.data.citedVisibleFactHandles.some((citedHandle) =>
+          effectiveRuling.normalizedIntent.targets.some((target) => target.kind === "route")
+          || effectiveRuling.citedVisibleFactHandles.some((citedHandle) =>
             handleMap.get(citedHandle)?.kind === "route")
         );
       let generated;
       try {
         generated = await dependencies.generateObject({
           model: request.model,
-          schema: constrainedProposalSchema(handleMap, requireRouteAccessClaims),
+          schema: constrainedProposalSchema(
+            handleMap,
+            requireRouteAccessClaims,
+            permittedResourceEffectKinds(effectiveRuling, admittedResolution.data),
+          ),
           prompt: promptText,
           temperature: request.temperature,
           maxOutputTokens: request.budget.maximumOutputTokens,
@@ -1697,15 +1834,15 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
       try {
         const compiled = compile(
             request.frame,
-            request.ruling,
-            request.resolution,
+            effectiveRuling,
+            admittedResolution.data,
             request.uncertaintyAuthority,
             generated.object,
           );
         const reviewInput = mechanicalAuthorityReviewInput(
           generated.object,
           request.frame,
-          request.ruling,
+          effectiveRuling,
         );
         if (reviewInput === null) {
           return freeze({

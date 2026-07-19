@@ -904,8 +904,9 @@ export function projectCampaignPlayPublicState(
     })), (row) => row.handle),
     obligations: sortByText(input.obligations.map((row) => ({
       handle: row.handle,
-      creditorHandle: row.creditorHandle,
-      creditorName: row.creditorName,
+      direction: row.direction,
+      counterpartyHandle: row.counterpartyHandle,
+      counterpartyName: row.counterpartyName,
       unitKey: row.unitKey,
       outstandingAmount: row.outstandingAmount,
     })), (row) => row.handle),

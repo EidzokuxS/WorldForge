@@ -339,6 +339,7 @@ function actorPlan(
     intent: planIntent,
     observableTrace,
     possessionOutcome: { kind: "none" as const },
+    obligationOutcome: { kind: "none" as const },
     elapsedBounds: { minimumMinutes: 5, maximumMinutes: 30 },
   };
   return {

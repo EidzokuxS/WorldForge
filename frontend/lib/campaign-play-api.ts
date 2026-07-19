@@ -359,10 +359,11 @@ function parseVisiblePossession(value: unknown): CampaignPlayVisiblePossession |
 function parseVisibleObligation(value: unknown): CampaignPlayVisibleObligation | null {
   if (
     !isObject(value) ||
-    !hasExactKeys(value, ["handle", "creditorHandle", "creditorName", "unitKey", "outstandingAmount"]) ||
+    !hasExactKeys(value, ["handle", "direction", "counterpartyHandle", "counterpartyName", "unitKey", "outstandingAmount"]) ||
     !isHandle(value.handle) ||
-    !isHandle(value.creditorHandle) ||
-    !isName(value.creditorName) ||
+    (value.direction !== "payable" && value.direction !== "receivable") ||
+    !isHandle(value.counterpartyHandle) ||
+    !isName(value.counterpartyName) ||
     value.unitKey !== "copper" ||
     !isPositiveInteger(value.outstandingAmount) ||
     value.outstandingAmount > CAMPAIGN_PLAY_LIMITS.possessionQuantity

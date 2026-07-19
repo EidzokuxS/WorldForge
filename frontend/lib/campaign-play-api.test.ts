@@ -178,6 +178,51 @@ describe("Campaign Play API", () => {
     });
   });
 
+  it("loads directed payable and receivable obligations from the public state", async () => {
+    const obligations = [{
+      handle: "obligation-payable",
+      direction: "payable" as const,
+      counterpartyHandle: "actor-mara",
+      counterpartyName: "Mara Venn",
+      unitKey: "copper",
+      outstandingAmount: 7,
+    }, {
+      handle: "obligation-receivable",
+      direction: "receivable" as const,
+      counterpartyHandle: "actor-oren",
+      counterpartyName: "Oren Tide",
+      unitKey: "copper",
+      outstandingAmount: 4,
+    }];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+      ...state,
+      phase: "ready",
+      character: {
+        name: "Mara",
+        monogram: "M",
+        descriptor: "Signal cartographer",
+        accent: "ember",
+      },
+      currentLocation: {
+        handle: "location-yard",
+        name: "Signal Yard",
+        description: "Rain crosses the rails.",
+      },
+      obligations,
+      narration: {
+        narrationId: "narration-one",
+        turnId: "opening-one",
+        beats: [{ beatId: "beat-one", text: "The yard waits under the rain." }],
+        displayText: "The yard waits under the rain.",
+        suggestedActions: [],
+        effects: [],
+        createdAt: 10,
+      },
+    })));
+
+    await expect(loadCampaignPlayState("campaign-one")).resolves.toMatchObject({ obligations });
+  });
+
   it("uses exact campaign-scoped endpoints, JSON bodies, and admission status contracts", async () => {
     const turnAdmission = { turnId: "turn-one", sequence: 1 };
     const addressedCampaignId = "campaign:one";

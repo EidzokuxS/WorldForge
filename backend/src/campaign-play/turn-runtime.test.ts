@@ -212,6 +212,7 @@ function openingProposal(actorCadenceMinutes = 1): CampaignPlayOpeningProposal {
             ? "Fresh sealing wax and torn binding thread mark a ledger removed in haste."
             : "Fresh work marks show that someone acted here recently.",
           possessionOutcome: { kind: "none" as const },
+          obligationOutcome: { kind: "none" as const },
           elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
         },
         {
@@ -221,6 +222,7 @@ function openingProposal(actorCadenceMinutes = 1): CampaignPlayOpeningProposal {
           },
           observableTrace: "Sorted notes and disturbed tools show that evidence was checked in place.",
           possessionOutcome: { kind: "none" as const },
+          obligationOutcome: { kind: "none" as const },
           elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
         },
         {
@@ -230,6 +232,7 @@ function openingProposal(actorCadenceMinutes = 1): CampaignPlayOpeningProposal {
           },
           observableTrace: "A fresh notation records the next grounded action in the ongoing work.",
           possessionOutcome: { kind: "none" as const },
+          obligationOutcome: { kind: "none" as const },
           elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
         },
       ],
@@ -858,6 +861,7 @@ function actorReplanProposalFromPrompt(prompt: string) {
     intent,
     observableTrace: "Fresh archive tabs mark a recently checked signal ledger.",
     possessionOutcome: { kind: "none" as const },
+    obligationOutcome: { kind: "none" as const },
     elapsedBounds: { minimumMinutes: 2, maximumMinutes: 10 },
   };
   return {

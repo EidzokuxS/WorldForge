@@ -653,7 +653,9 @@ function buildPublicAuthority(input: {
   packet.obligations.forEach((obligation) => addFact({
     handle: obligation.handle,
     kind: "obligation",
-    summary: `Owed to ${obligation.creditorName}: ${obligation.outstandingAmount} ${obligation.unitKey}`,
+    summary: obligation.direction === "payable"
+      ? `You owe ${obligation.counterpartyName}: ${obligation.outstandingAmount} ${obligation.unitKey}`
+      : `${obligation.counterpartyName} owes you: ${obligation.outstandingAmount} ${obligation.unitKey}`,
   }));
   const choiceBindings = narration.suggestedActions.map((suggestion) => {
     const available = packet.availableIntents.find((intent) =>

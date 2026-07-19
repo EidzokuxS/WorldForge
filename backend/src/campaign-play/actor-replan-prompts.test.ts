@@ -106,6 +106,7 @@ describe("campaign play actor replan prompt", () => {
         },
         observableTrace: "The wick sits square after the visitor's repair.",
         possessionOutcome: { kind: "none" as const },
+        obligationOutcome: { kind: "none" as const },
         elapsedBounds: { minimumMinutes: 5, maximumMinutes: 15 },
       }],
     };
@@ -164,6 +165,7 @@ describe("campaign play actor replan prompt", () => {
       },
       observableTrace: "Fresh chalk marks interrupt the watch rota beside the gate.",
       possessionOutcome: { kind: "none" },
+      obligationOutcome: { kind: "none" },
       elapsedBounds: { minimumMinutes: 5, maximumMinutes: 15 },
     };
     const proposal = {
@@ -228,6 +230,7 @@ describe("campaign play actor replan prompt", () => {
       },
       observableTrace: "Fresh chalk marks interrupt the watch rota beside the gate.",
       possessionOutcome: { kind: "none" },
+      obligationOutcome: { kind: "none" },
       elapsedBounds: { minimumMinutes: 5, maximumMinutes: 15 },
     };
     const proposal = {

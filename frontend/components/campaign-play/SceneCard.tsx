@@ -81,11 +81,13 @@ export function SceneCard({ location, actors, routes, pressures, possessions, ob
 
       {obligations.length > 0 ? (
         <section className="campaign-play-obligations" aria-labelledby="campaign-play-obligations-heading">
-          <h2 id="campaign-play-obligations-heading">Owed</h2>
+          <h2 id="campaign-play-obligations-heading">Accounts</h2>
           <ul>
             {obligations.map((obligation) => (
               <li key={obligation.handle}>
-                <strong>{obligation.creditorName}</strong>
+                <strong>{obligation.direction === "payable"
+                  ? `You owe ${obligation.counterpartyName}`
+                  : `${obligation.counterpartyName} owes you`}</strong>
                 <small>{obligation.outstandingAmount} {obligation.unitKey}</small>
               </li>
             ))}

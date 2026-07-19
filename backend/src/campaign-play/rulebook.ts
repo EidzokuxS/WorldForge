@@ -1214,8 +1214,10 @@ function actorJobOwns(
         || pressure.locationIds.some((locationId) => actorLocations.has(locationId)));
     }
     case "adjust_actor_possession": return command.actorId === actorId;
-    case "incur_actor_obligation": return false;
-    case "pay_actor_obligation": return false;
+    case "incur_actor_obligation": return command.debtorActorId === actorId
+      && sharesActorLocation(command.creditorActorId);
+    case "pay_actor_obligation": return command.debtorActorId === actorId
+      && sharesActorLocation(command.creditorActorId);
     case "materialize_support_actor": return false;
     case "record_world_event": return command.affectedRefs.some((reference) =>
       reference.kind === "actor" && reference.id === actorId);
@@ -1236,16 +1238,17 @@ function validateAvailability(
   const modelVisible = CAMPAIGN_PLAY_COMMAND_METADATA[command.kind].modelVisible;
   const obligationAvailable = command.kind !== "incur_actor_obligation"
     || (
-      authority.purpose === "player_action"
-      && state.human?.actorId === command.debtorActorId
-      && actor(frame, state, command.debtorActorId)?.controller === "human"
+      (authority.purpose === "player_action"
+        && state.human?.actorId !== undefined
+        && (state.human.actorId === command.debtorActorId
+          || state.human.actorId === command.creditorActorId))
+      || (authority.purpose === "actor_job"
+        && authority.actorId === command.debtorActorId)
     );
   const paymentAvailable = command.kind !== "pay_actor_obligation"
     || (
-      authority.purpose === "player_action"
+      (authority.purpose === "player_action" || authority.purpose === "actor_job")
       && authority.actorId === command.debtorActorId
-      && state.human?.actorId === command.debtorActorId
-      && actor(frame, state, command.debtorActorId)?.controller === "human"
     );
   const available = authority.purpose === "character_bootstrap"
     ? command.kind === "create_player_actor"
@@ -1473,7 +1476,7 @@ function applyCommand(
       const row = state.obligations.find((candidate) =>
         candidate.obligationId === command.obligationId);
       if (
-        debtor?.controller !== "human"
+        debtor === null
         || creditor === null
         || command.debtorActorId === command.creditorActorId
         || command.obligationId !== expectedId
@@ -1516,8 +1519,7 @@ function applyCommand(
       const paymentPossession = state.possessions.find((candidate) =>
         candidate.possessionId === command.paymentPossessionId);
       if (
-        debtor?.controller !== "human"
-        || state.human?.actorId !== command.debtorActorId
+        debtor === null
         || creditor === null
         || command.debtorActorId === command.creditorActorId
         || obligation === undefined

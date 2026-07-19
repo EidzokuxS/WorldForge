@@ -23,17 +23,46 @@ const replanIntentSchema = z.object({
   stakes: boundedLine(CAMPAIGN_PLAY_LIMITS.shortText).nullable(),
 }).strict();
 
+const replanObligationOutcomeSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("none") }).strict(),
+  z.object({
+    kind: z.literal("incur"),
+    creditorActorHandle: boundedLine(CAMPAIGN_PLAY_LIMITS.handle),
+    unitKey: z.literal("copper"),
+    amount: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  }).strict(),
+  z.object({
+    kind: z.literal("pay"),
+    creditorActorHandle: boundedLine(CAMPAIGN_PLAY_LIMITS.handle),
+    obligationHandle: boundedLine(CAMPAIGN_PLAY_LIMITS.handle),
+    paymentPossessionHandle: boundedLine(CAMPAIGN_PLAY_LIMITS.handle),
+    unitKey: z.literal("copper"),
+    amount: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  }).strict(),
+]);
+
 const replanStepSchema = z.object({
   intent: replanIntentSchema,
   observableTrace: boundedText(CAMPAIGN_PLAY_LIMITS.shortText),
   possessionOutcome: campaignPlayActorPossessionOutcomeSchema,
+  obligationOutcome: replanObligationOutcomeSchema,
   elapsedBounds: campaignPlayElapsedBoundsSchema,
 }).strict().superRefine((step, context) => {
-  if (step.intent.kind === "move" && step.possessionOutcome.kind !== "none") {
+  if (
+    step.intent.kind === "move"
+    && (step.possessionOutcome.kind !== "none" || step.obligationOutcome.kind !== "none")
+  ) {
     context.addIssue({
       code: "custom",
-      path: ["possessionOutcome"],
-      message: "Move steps cannot acquire possessions.",
+      path: ["obligationOutcome"],
+      message: "Move steps cannot change possessions or obligations.",
+    });
+  }
+  if (step.possessionOutcome.kind !== "none" && step.obligationOutcome.kind !== "none") {
+    context.addIssue({
+      code: "custom",
+      path: ["obligationOutcome"],
+      message: "One actor step cannot change a possession and an obligation separately.",
     });
   }
 });
@@ -83,7 +112,7 @@ export const campaignPlayActorPlanGroundingReviewSchema = z.object({
 
 export interface CampaignPlayActorReplanPromptEntity {
   handle: string;
-  kind: "actor" | "goal" | "location" | "route" | "relation" | "pressure" | "world_event";
+  kind: "actor" | "goal" | "location" | "route" | "relation" | "pressure" | "possession" | "obligation" | "world_event";
   name: string;
   summary: string;
   state: string | null;
@@ -166,6 +195,8 @@ Steps execute in array order as one causal chain. Each later step must begin fro
 
 Every step must include possessionOutcome. Use {"kind":"none"} unless a non-move step acquires a named, positive quantity for this actor. An acquire outcome is {"kind":"acquire","name":"...","quantity":1}; it cannot spend, transform, move, or describe cargo.
 
+Every step must include obligationOutcome. Use {"kind":"none"} unless this actor becomes the debtor for a definite new copper obligation or pays one existing debt from its own supplied copper possession. To incur its own debt, use {"kind":"incur","creditorActorHandle":"...","unitKey":"copper","amount":1}. To pay, use {"kind":"pay","creditorActorHandle":"...","obligationHandle":"...","paymentPossessionHandle":"...","unitKey":"copper","amount":1}. Copy every handle from ACTOR_FRAME. Payment amount cannot exceed either the supplied possession quantity or outstanding debt. This actor cannot create debt for another debtor, pay from another actor's possession, or declare another actor's payment. A quote, request, offer, promise, or visible handling is not an obligation transition. If obligationOutcome is not none, possessionOutcome must be none.
+
 Code owns canonical identifiers, plan versions, step identifiers, preconditions, scheduling, command scopes, visibility, and settlement.`;
 }
 
@@ -189,6 +220,7 @@ Accept only when every step stays within these rules:
 - observableTrace contains only a sensory after-state caused by the acting actor's method in that step, or a fact already established by an accepted world_event. It cannot present another actor's unaccepted action as something happening now or already completed.
 - A later step may rely on an earlier step's accepted after-state, but it cannot use that chain to invent another actor's participation.
 - A target handle proves only that the entity can be targeted. It does not prove participation or agreement.
+- A debt or payment claim requires the matching obligationOutcome. incur makes only frame.actorHandle the debtor. pay uses only a supplied obligation owed by frame.actorHandle and a supplied copper possession owned by that actor. Prose, method, stakes, or observableTrace cannot create or settle debt by themselves.
 
 Reject the plan when any step violates a rule. Report each affected step once with the closest violation kind. An accepted verdict has no violations; a rejected verdict has at least one.`;
 }

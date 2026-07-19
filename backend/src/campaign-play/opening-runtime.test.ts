@@ -193,14 +193,18 @@ function openingProposal(): CampaignPlayOpeningProposal {
       actorId,
       primaryGoalId: goalId,
       cadenceMinutes: 15,
-      steps: [{
-        intent,
-        observableTrace: suffix === "b"
+      steps: Array.from({ length: 3 }, (_, stepIndex) => ({
+        intent: {
+          ...intent,
+          method: `${intent.method}; stage ${stepIndex + 1}`,
+        },
+        observableTrace: suffix === "b" && stepIndex === 0
           ? "Fresh sealing wax and torn binding thread mark a ledger removed in haste."
-          : "Fresh work marks show that someone acted here recently.",
+          : `Fresh work marks show stage ${stepIndex + 1} of the actor's own effort.`,
         possessionOutcome: { kind: "none" as const },
+        obligationOutcome: { kind: "none" as const },
         elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
-      }],
+      })),
     };
   });
   return {
@@ -366,7 +370,9 @@ function narratorActionSelections(packet: CampaignPlayNarratorPacket) {
     : [requiredReplyIndex, ...indexes.filter((intentIndex) => intentIndex !== requiredReplyIndex)];
   return orderedIndexes.slice(0, CAMPAIGN_PLAY_LIMITS.suggestedActions).map((intentIndex) => ({
     intentIndex,
-    detail: "the immediate situation",
+    detail: packet.availableIntents[intentIndex]?.kind === "move"
+      ? null
+      : "the immediate situation",
   }));
 }
 
@@ -507,7 +513,7 @@ describe("Campaign Play opening runtime", () => {
           CAMPAIGN_ID,
           admission.turnId,
         ) as { packetJson: string }).packetJson) as CampaignPlayNarratorPacket;
-      const localTrace = "Fresh work marks show that someone acted here recently.";
+      const localTrace = "Fresh work marks show stage 1 of the actor's own effort.";
       const hiddenTrace = "Fresh sealing wax and torn binding thread mark a ledger removed in haste.";
       expect(openingPacket.turnKind).toBe("opening");
       expect(openingPacket.consequences.map((consequence) => consequence.whatChanged))

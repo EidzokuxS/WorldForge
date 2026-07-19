@@ -154,6 +154,7 @@ function replanProposalFromPrompt(prompt: string) {
       intent,
       observableTrace: "Fresh sealing wax flakes lie beside the open ledger case.",
       possessionOutcome: { kind: "none" },
+      obligationOutcome: { kind: "none" },
       elapsedBounds: { minimumMinutes: 2, maximumMinutes: 10 },
     }),
   };
@@ -198,6 +199,7 @@ function reverseMoveProposalFromPrompt(prompt: string) {
       intent,
       observableTrace: "Fresh boot prints continue along the wet stones.",
       possessionOutcome: { kind: "none" },
+      obligationOutcome: { kind: "none" },
       elapsedBounds: { minimumMinutes: 2, maximumMinutes: 10 },
     }),
   };
@@ -237,6 +239,7 @@ function remoteNonMoveProposalFromPrompt(prompt: string) {
       },
       observableTrace: "Fresh boot prints mark the remote paving.",
       possessionOutcome: { kind: "none" },
+      obligationOutcome: { kind: "none" },
       elapsedBounds: { minimumMinutes: 2, maximumMinutes: 10 },
     }),
   };
@@ -315,6 +318,7 @@ function createReplanFixture(): {
             intent,
             observableTrace: "A ledger case stands open with fresh wax flakes beside it.",
             possessionOutcome: { kind: "none" },
+            obligationOutcome: { kind: "none" },
             elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
           }]),
         );
@@ -626,7 +630,10 @@ describe("Campaign Play actor replanner", () => {
       kind: "replanned",
       jobId,
       workerEpoch: 1,
-      plan: { steps: threeStepPlan({ possessionOutcome: { kind: "none" } }) },
+      plan: { steps: threeStepPlan({
+        possessionOutcome: { kind: "none" },
+        obligationOutcome: { kind: "none" },
+      }) },
     });
     expect(generateObject).toHaveBeenCalledTimes(2);
     expect(generateObject.mock.calls[0]![0].prompt).toContain(knownScene);

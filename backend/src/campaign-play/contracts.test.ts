@@ -738,6 +738,7 @@ function actorPlanFixture() {
       },
       observableTrace: "Fresh boot prints lead from the bridge toward the market.",
       possessionOutcome: { kind: "none" as const },
+      obligationOutcome: { kind: "none" as const },
       elapsedBounds: { minimumMinutes: 10, maximumMinutes: 30 },
     }],
     status: "active" as const,

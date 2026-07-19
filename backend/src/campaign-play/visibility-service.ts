@@ -930,19 +930,30 @@ function visibleScene(
       CAMPAIGN_PLAY_LIMITS.visiblePossessions,
     ) as Array<{ possessionId: string; name: string; quantity: number }>;
   const obligations = handle.sqlite.prepare(`SELECT obligation.obligation_id AS obligationId,
+      obligation.debtor_actor_id AS debtorActorId, debtor.name AS debtorName,
       obligation.creditor_actor_id AS creditorActorId, creditor.name AS creditorName,
       obligation.unit_key AS unitKey, obligation.outstanding_amount AS outstandingAmount
     FROM campaign_play_actor_obligations obligation
+    JOIN actors debtor ON debtor.id = obligation.debtor_actor_id
+      AND debtor.campaign_id = obligation.campaign_id
     JOIN actors creditor ON creditor.id = obligation.creditor_actor_id
       AND creditor.campaign_id = obligation.campaign_id
-    WHERE obligation.campaign_id = ? AND obligation.debtor_actor_id = ?
+    WHERE obligation.campaign_id = ?
+      AND (obligation.debtor_actor_id = ? OR obligation.creditor_actor_id = ?)
       AND obligation.outstanding_amount > 0
-    ORDER BY creditor.name, obligation.unit_key, obligation.obligation_id LIMIT ?`).all(
+    ORDER BY obligation.debtor_actor_id = ? DESC,
+      CASE WHEN obligation.debtor_actor_id = ? THEN creditor.name ELSE debtor.name END,
+      obligation.unit_key, obligation.obligation_id LIMIT ?`).all(
       handle.campaignId,
+      humanActorId,
+      humanActorId,
+      humanActorId,
       humanActorId,
       CAMPAIGN_PLAY_LIMITS.visibleObligations,
     ) as Array<{
       obligationId: string;
+      debtorActorId: string;
+      debtorName: string;
       creditorActorId: string;
       creditorName: string;
       unitKey: "copper";
@@ -980,8 +991,17 @@ function visibleScene(
     })),
     obligations: obligations.map((obligation) => ({
       handle: publicHandle("obligation", handle.campaignId, obligation.obligationId),
-      creditorHandle: publicHandle("actor", handle.campaignId, obligation.creditorActorId),
-      creditorName: obligation.creditorName,
+      direction: obligation.debtorActorId === humanActorId ? "payable" as const : "receivable" as const,
+      counterpartyHandle: publicHandle(
+        "actor",
+        handle.campaignId,
+        obligation.debtorActorId === humanActorId
+          ? obligation.creditorActorId
+          : obligation.debtorActorId,
+      ),
+      counterpartyName: obligation.debtorActorId === humanActorId
+        ? obligation.creditorName
+        : obligation.debtorName,
       unitKey: obligation.unitKey,
       outstandingAmount: obligation.outstandingAmount,
     })),

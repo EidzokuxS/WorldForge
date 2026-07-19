@@ -681,8 +681,8 @@ describe("mechanical and runtime truth", () => {
         { handle: "possession-z", name: "Zinc token", quantity: 2 },
       ],
       obligations: [
-        { handle: "obligation-z", creditorHandle: "actor-z", creditorName: "Zora", unitKey: "copper", outstandingAmount: 16 },
-        { handle: "obligation-a", creditorHandle: "actor-a", creditorName: "Arden", unitKey: "copper", outstandingAmount: 8 },
+        { handle: "obligation-z", direction: "receivable", counterpartyHandle: "actor-z", counterpartyName: "Zora", unitKey: "copper", outstandingAmount: 16 },
+        { handle: "obligation-a", direction: "payable", counterpartyHandle: "actor-a", counterpartyName: "Arden", unitKey: "copper", outstandingAmount: 8 },
       ],
       consequences: [],
       journal,
@@ -704,8 +704,8 @@ describe("mechanical and runtime truth", () => {
         { handle: "possession-a", name: "Brass key", quantity: 1 },
       ],
       obligations: [
-        { handle: "obligation-a", creditorHandle: "actor-a", creditorName: "Arden", unitKey: "copper", outstandingAmount: 8 },
-        { handle: "obligation-z", creditorHandle: "actor-z", creditorName: "Zora", unitKey: "copper", outstandingAmount: 16 },
+        { handle: "obligation-a", direction: "payable", counterpartyHandle: "actor-a", counterpartyName: "Arden", unitKey: "copper", outstandingAmount: 8 },
+        { handle: "obligation-z", direction: "receivable", counterpartyHandle: "actor-z", counterpartyName: "Zora", unitKey: "copper", outstandingAmount: 16 },
       ],
       consequences: [],
       journal: [...journal].reverse(),

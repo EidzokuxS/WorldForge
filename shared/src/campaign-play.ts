@@ -253,8 +253,9 @@ export interface CampaignPlayVisiblePossession {
 
 export interface CampaignPlayVisibleObligation {
   handle: string;
-  creditorHandle: string;
-  creditorName: string;
+  direction: "payable" | "receivable";
+  counterpartyHandle: string;
+  counterpartyName: string;
   unitKey: "copper";
   outstandingAmount: number;
 }

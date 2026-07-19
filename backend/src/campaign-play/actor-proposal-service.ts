@@ -17,6 +17,7 @@ import type { CampaignPlayOpeningExposureSeed } from "./opening-planner.js";
 import type { CampaignPlayDatabaseHandle } from "./campaign-play-database.js";
 import {
   canonicalizeCampaignPlayProjection,
+  deriveCampaignPlayObligationId,
   deriveCampaignPlayPossessionId,
   deriveCampaignPlayPossessionKey,
   hashCampaignPlayProjection,
@@ -311,7 +312,87 @@ function compileProposal(
     };
   } else {
     const affectedRefs = uniqueRefs([{ kind: "actor", id: frame.actorId }, ...intent.targets]);
-    if (frame.selection.step.possessionOutcome.kind === "acquire") {
+    if (frame.selection.step.obligationOutcome.kind === "incur") {
+      const outcome = frame.selection.step.obligationOutcome;
+      const debtor = { kind: "actor" as const, id: frame.actorId };
+      const creditor = { kind: "actor" as const, id: outcome.creditorActorId };
+      const obligationId = deriveCampaignPlayObligationId(
+        frame.campaignId,
+        frame.actorId,
+        outcome.creditorActorId,
+        outcome.unitKey,
+      );
+      const obligation = { kind: "obligation" as const, id: obligationId };
+      const refs = uniqueRefs([debtor, creditor, obligation]);
+      command = {
+        commandId: deriveCampaignPlayCommandId(frame.campaignId, frame.turnId, batchId, 0),
+        batchId,
+        order: 0,
+        causalParent,
+        source,
+        expectedWorldVersion: frame.baseWorldVersion,
+        readScope: refs,
+        writeScope: [obligation],
+        exposure,
+        kind: "incur_actor_obligation",
+        debtorActorId: frame.actorId,
+        creditorActorId: outcome.creditorActorId,
+        obligationId,
+        unitKey: outcome.unitKey,
+        amount: outcome.amount,
+        summary: frame.selection.step.observableTrace,
+        affectedRefs: [debtor, creditor],
+      };
+    } else if (frame.selection.step.obligationOutcome.kind === "pay") {
+      const outcome = frame.selection.step.obligationOutcome;
+      const obligationRow = frame.obligations.find((row) =>
+        row.obligationId === outcome.obligationId
+        && row.debtorActorId === frame.actorId
+        && row.creditorActorId === outcome.creditorActorId
+        && row.unitKey === outcome.unitKey) ?? null;
+      const paymentRow = frame.possessions.find((row) =>
+        row.possessionId === outcome.paymentPossessionId
+        && row.actorId === frame.actorId) ?? null;
+      if (
+        obligationRow === null
+        || paymentRow === null
+        || obligationRow.outstandingAmount < outcome.amount
+        || paymentRow.quantity < outcome.amount
+      ) return null;
+      const debtor = { kind: "actor" as const, id: frame.actorId };
+      const creditor = { kind: "actor" as const, id: outcome.creditorActorId };
+      const obligation = { kind: "obligation" as const, id: outcome.obligationId };
+      const paymentPossession = { kind: "possession" as const, id: outcome.paymentPossessionId };
+      const creditorPossession = {
+        kind: "possession" as const,
+        id: deriveCampaignPlayPossessionId(
+          frame.campaignId,
+          outcome.creditorActorId,
+          paymentRow.possessionKey,
+        ),
+      };
+      const refs = uniqueRefs([debtor, creditor, paymentPossession, creditorPossession, obligation]);
+      command = {
+        commandId: deriveCampaignPlayCommandId(frame.campaignId, frame.turnId, batchId, 0),
+        batchId,
+        order: 0,
+        causalParent,
+        source,
+        expectedWorldVersion: frame.baseWorldVersion,
+        readScope: refs,
+        writeScope: [paymentPossession, creditorPossession, obligation],
+        exposure,
+        kind: "pay_actor_obligation",
+        debtorActorId: frame.actorId,
+        creditorActorId: outcome.creditorActorId,
+        obligationId: outcome.obligationId,
+        paymentPossessionId: outcome.paymentPossessionId,
+        unitKey: outcome.unitKey,
+        amount: outcome.amount,
+        summary: frame.selection.step.observableTrace,
+        affectedRefs: refs,
+      };
+    } else if (frame.selection.step.possessionOutcome.kind === "acquire") {
       const possessionKey = deriveCampaignPlayPossessionKey(
         frame.selection.step.possessionOutcome.name,
       );

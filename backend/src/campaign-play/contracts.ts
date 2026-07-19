@@ -455,8 +455,9 @@ export const campaignPlayVisiblePossessionSchema = z.object({
 
 export const campaignPlayVisibleObligationSchema = z.object({
   handle: handleSchema,
-  creditorHandle: handleSchema,
-  creditorName: nameSchema,
+  direction: z.enum(["payable", "receivable"]),
+  counterpartyHandle: handleSchema,
+  counterpartyName: nameSchema,
   unitKey: z.literal("copper"),
   outstandingAmount: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
 }).strict();
@@ -1808,6 +1809,7 @@ export const campaignPlayRequiredObligationEffectSchema = z.discriminatedUnion("
   z.object({ kind: z.literal("none") }).strict(),
   z.object({
     kind: z.literal("incur_actor_obligation"),
+    debtorHandle: handleSchema,
     creditorHandle: handleSchema,
     unitKey: z.literal("copper"),
     amount: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
@@ -1815,6 +1817,8 @@ export const campaignPlayRequiredObligationEffectSchema = z.discriminatedUnion("
   }).strict(),
   z.object({
     kind: z.literal("pay_actor_obligation"),
+    debtorHandle: handleSchema,
+    creditorHandle: handleSchema,
     obligationHandle: handleSchema,
     paymentPossessionHandle: handleSchema,
     unitKey: z.literal("copper"),
@@ -3048,19 +3052,48 @@ export const campaignPlayActorPossessionOutcomeSchema = z.discriminatedUnion("ki
   }).strict(),
 ]);
 
+export const campaignPlayActorObligationOutcomeSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("none") }).strict(),
+  z.object({
+    kind: z.literal("incur"),
+    creditorActorId: idSchema,
+    unitKey: z.literal("copper"),
+    amount: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  }).strict(),
+  z.object({
+    kind: z.literal("pay"),
+    creditorActorId: idSchema,
+    obligationId: idSchema,
+    paymentPossessionId: idSchema,
+    unitKey: z.literal("copper"),
+    amount: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  }).strict(),
+]);
+
 export const campaignPlayActorPlanStepSchema = z.object({
   stepId: idSchema,
   order: nonnegativeIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.planSteps - 1),
   intent: campaignPlayActorIntentSchema,
   observableTrace: shortTextSchema,
   possessionOutcome: campaignPlayActorPossessionOutcomeSchema,
+  obligationOutcome: campaignPlayActorObligationOutcomeSchema,
   elapsedBounds: campaignPlayElapsedBoundsSchema,
 }).strict().superRefine((step, context) => {
-  if (step.intent.kind === "move" && step.possessionOutcome.kind !== "none") {
+  if (
+    step.intent.kind === "move"
+    && (step.possessionOutcome.kind !== "none" || step.obligationOutcome.kind !== "none")
+  ) {
     context.addIssue({
       code: "custom",
-      path: ["possessionOutcome"],
-      message: "Move steps cannot acquire possessions.",
+      path: ["obligationOutcome"],
+      message: "Move steps cannot change possessions or obligations.",
+    });
+  }
+  if (step.possessionOutcome.kind !== "none" && step.obligationOutcome.kind !== "none") {
+    context.addIssue({
+      code: "custom",
+      path: ["obligationOutcome"],
+      message: "One actor step cannot change a possession and an obligation separately.",
     });
   }
 });
@@ -3853,6 +3886,8 @@ export type CampaignPlayActorIntent =
   z.infer<typeof campaignPlayActorIntentSchema>;
 export type CampaignPlayActorPossessionOutcome =
   z.infer<typeof campaignPlayActorPossessionOutcomeSchema>;
+export type CampaignPlayActorObligationOutcome =
+  z.infer<typeof campaignPlayActorObligationOutcomeSchema>;
 export type CampaignPlayActorPlanStep =
   z.infer<typeof campaignPlayActorPlanStepSchema>;
 export type CampaignPlayActorPlan =

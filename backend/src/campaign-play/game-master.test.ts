@@ -167,10 +167,64 @@ const proposal = {
   }],
 };
 
+function receivableCollectionFrame(): CampaignPlayGameMasterFrame {
+  const value = frame();
+  const obligationId = deriveCampaignPlayObligationId(
+    CAMPAIGN_ID,
+    "actor-guard",
+    PLAYER_ID,
+    "copper",
+  );
+  value.visibleFacts.push({
+    handle: "guard-receivable",
+    kind: "obligation",
+    summary: "Oren Tide owes you six copper.",
+  });
+  value.handleBindings.push({
+    handle: "guard-receivable",
+    reference: { kind: "obligation", id: obligationId },
+  });
+  value.rulebookFrame.obligations.push({
+    obligationId,
+    debtorActorId: "actor-guard",
+    creditorActorId: PLAYER_ID,
+    unitKey: "copper",
+    principalAmount: 6,
+    outstandingAmount: 6,
+  });
+  value.authority.authorizedRefs.push({ kind: "obligation", id: obligationId });
+  return value;
+}
+
+function receivableCollectionRuling(): CampaignPlayJudgeRuling {
+  return ruling({
+    normalizedIntent: {
+      originalText: "I ask Oren to pay the six copper he owes me.",
+      source: "suggested",
+      choiceHandle: "collect-payment",
+      kind: "contact",
+      targets: [{ handle: "guard", kind: "actor" }],
+      method: "Ask Oren to settle the recorded payment",
+      stakes: "Receive the six copper owed for completed work",
+    },
+    possessionEffectAuthority: {
+      kind: "adjust_actor_possession",
+      enforcement: "permitted",
+      operation: "acquire",
+      possessionHandle: null,
+      quantity: 6,
+      minimumResult: "success",
+    },
+    citedVisibleFactHandles: ["guard", "guard-receivable"],
+    reason: "Oren is present and the receivable is visible.",
+  });
+}
+
 describe("Campaign Play Game Master obligations", () => {
   it("compiles one Judge-required debt with code-owned identity, order, scopes, and version", () => {
     const requiredObligationEffect = {
       kind: "incur_actor_obligation" as const,
+      debtorHandle: "you",
       creditorHandle: "guard",
       unitKey: "copper" as const,
       amount: 8,
@@ -226,6 +280,51 @@ describe("Campaign Play Game Master obligations", () => {
     )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
   });
 
+  it("compiles a visible actor's unpaid service debt to the player without reversing the parties", () => {
+    const requiredObligationEffect = {
+      kind: "incur_actor_obligation" as const,
+      debtorHandle: "guard",
+      creditorHandle: "you",
+      unitKey: "copper" as const,
+      amount: 8,
+      minimumResult: "success" as const,
+    };
+    const candidate = createCampaignPlayGameMaster().compile(
+      frame(),
+      ruling({ requiredObligationEffect }),
+      resolution,
+      null,
+      {
+        elapsedMinutes: 1,
+        effects: [{
+          kind: "incur_actor_obligation",
+          debtorActorHandle: "guard",
+          creditorActorHandle: "you",
+          unitKey: "copper",
+          amount: 8,
+          summary: "Oren Tide owes the player eight copper for the completed repair.",
+          affectedHandles: ["guard", "you"],
+        }],
+      },
+    );
+    const obligationId = deriveCampaignPlayObligationId(
+      CAMPAIGN_ID,
+      "actor-guard",
+      PLAYER_ID,
+      "copper",
+    );
+
+    expect(candidate.batch.commands[1]).toMatchObject({
+      kind: "incur_actor_obligation",
+      debtorActorId: "actor-guard",
+      creditorActorId: PLAYER_ID,
+      obligationId,
+      unitKey: "copper",
+      amount: 8,
+    });
+    expect(candidate.preflight.accepted).toBe(true);
+  });
+
   it("compiles one Judge-required partial payment as an atomic possession transfer and debt reduction", () => {
     const paymentFrame = frame();
     const possessionKey = deriveCampaignPlayPossessionKey("Copper coins");
@@ -266,6 +365,8 @@ describe("Campaign Play Game Master obligations", () => {
     );
     const requiredObligationEffect = {
       kind: "pay_actor_obligation" as const,
+      debtorHandle: "you",
+      creditorHandle: "guard",
       obligationHandle: "guard-debt",
       paymentPossessionHandle: "coins",
       unitKey: "copper" as const,
@@ -344,6 +445,106 @@ describe("Campaign Play Game Master obligations", () => {
         }],
       },
     )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+  });
+
+  it("keeps collection of a nonplayer receivable as contact until the debtor acts from owned copper", () => {
+    const gameMaster = createCampaignPlayGameMaster();
+    const contactOnly = gameMaster.compile(
+      receivableCollectionFrame(),
+      receivableCollectionRuling(),
+      resolution,
+      null,
+      {
+        elapsedMinutes: 1,
+        effects: [{
+          kind: "record_world_event",
+          eventClass: "dialogue",
+          performingActorHandle: "guard",
+          routeAccessClaims: [],
+          summary: "Oren acknowledges the request but does not transfer any copper yet.",
+          affectedHandles: ["you", "guard", "guard-receivable"],
+        }],
+      },
+    );
+    expect(contactOnly.preflight.accepted).toBe(true);
+    expect(contactOnly.batch.commands).toHaveLength(2);
+    expect(contactOnly.batch.commands[1]).toMatchObject({ kind: "record_world_event" });
+    expect(() => gameMaster.compile(
+      receivableCollectionFrame(),
+      receivableCollectionRuling(),
+      resolution,
+      null,
+      {
+        elapsedMinutes: 1,
+        effects: [{
+          kind: "adjust_actor_possession",
+          operation: "acquire",
+          actorHandle: "you",
+          possessionHandle: null,
+          name: "Copper coins",
+          quantity: 6,
+          summary: "Oren pays six copper.",
+          affectedHandles: ["you", "guard", "guard-receivable"],
+        }],
+      },
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+  });
+
+  it("presents a receivable collection request to the model with acquisition authority removed", async () => {
+    const contactOnlyProposal = {
+      elapsedMinutes: 1,
+      effects: [{
+        kind: "record_world_event" as const,
+        eventClass: "dialogue" as const,
+        performingActorHandle: "guard",
+        routeAccessClaims: [],
+        summary: "Oren acknowledges the request but does not transfer any copper yet.",
+        affectedHandles: ["you", "guard", "guard-receivable"],
+      }],
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: contactOnlyProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: { verdict: "accepted", reason: "The response changes no possession or debt balance." },
+        trace: trace(),
+      });
+    await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: receivableCollectionFrame(),
+      ruling: receivableCollectionRuling(),
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      signal: new AbortController().signal,
+    });
+
+    const promptText = String(generateObject.mock.calls[0]![0].prompt);
+    expect(promptText).toContain(
+      "When PLAYER_INTENT asks a targeted nonplayer debtor to settle a cited receivable obligation",
+    );
+    expect(promptText).toContain('"possessionEffectAuthority":{"kind":"none"}');
+    expect(promptText).not.toContain('"possessionEffectAuthority":{"kind":"adjust_actor_possession"');
+    expect(promptText).toContain("PERMITTED_RESOURCE_EFFECT_KINDS=[]");
+    expect(promptText).not.toContain("Use adjust_actor_possession whenever");
+    expect(promptText).not.toContain("effects[].kind accepts exactly: move_actor, enter_local_scene, set_route_state, set_actor_condition, update_actor_relation, update_actor_goal, advance_pressure, adjust_actor_possession");
+    const requestSchema = generateObject.mock.calls[0]![0].schema;
+    expect(requestSchema.safeParse(contactOnlyProposal).success).toBe(true);
+    expect(requestSchema.safeParse({
+      elapsedMinutes: 1,
+      effects: [{
+        kind: "adjust_actor_possession",
+        operation: "acquire",
+        actorHandle: "you",
+        possessionHandle: null,
+        name: "Copper coins",
+        quantity: 6,
+        summary: "Oren pays the six copper.",
+        affectedHandles: ["you", "guard", "guard-receivable"],
+      }],
+    }).success).toBe(false);
   });
 });
 
@@ -649,14 +850,10 @@ describe("Campaign Play Game Master", () => {
     );
     expect(String(options.prompt)).toContain('"eventClass":"discovery"');
     expect(String(options.prompt)).toContain(
-      "effects[].kind accepts exactly: move_actor, enter_local_scene, set_route_state, set_actor_condition, update_actor_relation, update_actor_goal, advance_pressure, adjust_actor_possession, incur_actor_obligation, pay_actor_obligation, materialize_support_actor, or record_world_event",
+      "effects[].kind accepts exactly: move_actor, enter_local_scene, set_route_state, set_actor_condition, update_actor_relation, update_actor_goal, advance_pressure, materialize_support_actor, record_world_event",
     );
-    expect(String(options.prompt)).toContain(
-      "Use pay_actor_obligation only when the resolved result transfers the player's visible copper possession",
-    );
-    expect(String(options.prompt)).toContain(
-      "Do not add record_world_event or adjust_actor_possession for the same payment",
-    );
+    expect(String(options.prompt)).toContain("PERMITTED_RESOURCE_EFFECT_KINDS=[]");
+    expect(String(options.prompt)).not.toContain("Use pay_actor_obligation for");
     expect(String(options.prompt)).toContain(
       "set_actor_condition has exactly these fields: kind, exposure, actorHandle, condition, operation, and summary",
     );
@@ -674,31 +871,17 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("cannot establish an absolute chronology");
     expect(String(options.prompt)).toContain("without supplied expertise and reference evidence");
     expect(String(options.prompt)).toContain("Omit exposure from record_world_event");
-    expect(String(options.prompt)).toContain("Use adjust_actor_possession whenever the resolved action gives the player a countable possession, consumes one, or durably changes what an existing possession is");
-    expect(String(options.prompt)).toContain("Put the player's copied handle in actorHandle. performingActorHandle is forbidden on adjust_actor_possession and exists only on record_world_event");
-    expect(String(options.prompt)).toContain("return operation transform with the source possessionHandle and the concrete resulting name");
-    expect(String(options.prompt)).toContain("Do not add record_world_event for the same gain, spend, or transformation");
     expect(String(options.prompt)).toContain("Player possession is code-owned authority");
     expect(String(options.prompt)).toContain("A general tool possession never supplies raw material, fasteners, or another consumable");
     expect(String(options.prompt)).toContain("A work assignment, supply list, visible stock");
     expect(String(options.prompt)).toContain("record_world_event cannot substitute for a possession transition");
-    expect(String(options.prompt)).toContain("required means include exactly one matching adjust_actor_possession effect");
-    expect(String(options.prompt)).toContain("permitted means include zero or one");
-    expect(String(options.prompt)).toContain("When no authority applies, every adjust_actor_possession effect is forbidden");
-    expect(String(options.prompt)).toContain("Possession authority also bounds the meaning of the scene");
-    expect(String(options.prompt)).toContain("possessionEffectAuthority is none, resolve only the negotiation");
-    expect(String(options.prompt)).toContain("no bargained information, service, access, or other return is delivered yet");
-    expect(String(options.prompt)).toContain("possession quantity counts Rulebook stack units");
-    expect(String(options.prompt)).toContain("Never invent a smaller unit by interpreting a number, duration, volume, contents, or measure inside the possession name");
-    expect(String(options.prompt)).toContain("Three days of travel food with quantity 1 is one indivisible Rulebook unit");
-    expect(String(options.prompt)).toContain("Request the whole unit or another consideration");
-    expect(String(options.prompt)).toContain("A completed exchange requires matching spend authority");
-    expect(String(options.prompt)).toContain("record_world_event cannot substitute for that transition");
+    expect(String(options.prompt)).toContain("No resource effect kind is available for this proposal");
+    expect(String(options.prompt)).toContain("Leave every possession quantity and obligation balance unchanged");
+    expect(String(options.prompt)).not.toContain("Use adjust_actor_possession whenever");
     expect(String(options.prompt)).toContain("WORLD_TIME_AUTHORITY is code-owned");
     expect(String(options.prompt)).toContain("Any clock time, part of day, date, deadline, duration, or relative phrase");
     expect(String(options.prompt)).toContain('WORLD_TIME_AUTHORITY={"actionStart":{"totalMinutes":10,"day":1,"hour":0,"minute":10},"resultRange":{"earliest":{"totalMinutes":11,"day":1,"hour":0,"minute":11},"latest":{"totalMinutes":13,"day":1,"hour":0,"minute":13}}}');
-    expect(String(options.prompt)).toContain("Every non-null adjust_actor_possession name must be at most 120 characters");
-    expect(String(options.prompt)).toContain("put state, contents, provenance, and other details in summary");
+    expect(String(options.prompt)).not.toContain("Every non-null adjust_actor_possession name must be at most");
     expect(String(options.prompt)).toContain("Every summary must fit its schema limit: at most 1200 characters");
     expect(String(options.prompt)).toContain("Do not include planning or reasoning, and do not repeat supporting facts");
     expect(String(options.prompt)).not.toContain("actor-player");
@@ -1025,6 +1208,52 @@ describe("Campaign Play Game Master", () => {
       totalTokens: 360,
     });
     expect(generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it("offers only the Judge-authorized resource effect in the per-turn schema and prompt", async () => {
+    const acquisitionProposal = {
+      elapsedMinutes: 1,
+      effects: [{
+        kind: "adjust_actor_possession" as const,
+        operation: "acquire" as const,
+        actorHandle: "you",
+        possessionHandle: null,
+        name: "Copper chit",
+        quantity: 2,
+        summary: "Oren hands over two copper chits for the copied manifests.",
+        affectedHandles: ["you", "guard"],
+      }],
+    };
+    const generateObject = vi.fn().mockResolvedValueOnce({ object: acquisitionProposal, trace: trace() });
+    await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(),
+      ruling: ruling({
+        possessionEffectAuthority: {
+          kind: "adjust_actor_possession",
+          enforcement: "required",
+          operation: "acquire",
+          possessionHandle: null,
+          quantity: 2,
+          minimumResult: "success",
+        },
+      }),
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+    });
+
+    const options = generateObject.mock.calls[0]![0];
+    expect(options.schema.safeParse(acquisitionProposal).success).toBe(true);
+    expect(String(options.prompt)).toContain('PERMITTED_RESOURCE_EFFECT_KINDS=["adjust_actor_possession"]');
+    expect(String(options.prompt)).toContain("Use adjust_actor_possession whenever");
+    expect(String(options.prompt)).toContain("Every non-null adjust_actor_possession name must be at most 120 characters");
+    expect(String(options.prompt)).toContain("put state, contents, provenance, and other details in summary");
+    expect(String(options.prompt)).not.toContain("Use incur_actor_obligation for");
+    expect(String(options.prompt)).not.toContain("Use pay_actor_obligation for");
   });
 
   it("compiles acquisition, spending, and transformation into typed Rulebook possession effects", () => {
