@@ -1158,6 +1158,46 @@ describe("Campaign Play Game Master", () => {
     expect(reviewPrompt).toContain("A record_world_event is presentation evidence, never mechanical authority");
   });
 
+  it("keeps document procedure dialogue separate from actor resources and route access", async () => {
+    const documentProcedure = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        summary: "Oren says the defaulted passage bonds are filed for the brazier and void once stamped.",
+        affectedHandles: ["guard"],
+      }],
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: documentProcedure, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The attributed document procedure changes no actor resource, obligation, or route access state.",
+        },
+        trace: trace(),
+      });
+
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget,
+    });
+
+    expect(candidate.preflight.accepted).toBe(true);
+    expect(candidate.semanticReview.kind).toBe("mechanical_authority");
+    const reviewPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    expect(reviewPrompt).toContain(documentProcedure.effects[0].summary);
+    expect(reviewPrompt).toContain(
+      "A statement about an untracked scene document's classification, validity, filing, disposal procedure, or history",
+    );
+    expect(reviewPrompt).toContain(
+      "Words such as passage, bond, stamp, clearance, gate, permit, or contract",
+    );
+    expect(reviewPrompt).toContain('"typedResourceEffects":[]');
+    expect(reviewPrompt).toContain('"routeAccessClaims":[]');
+  });
+
   it("persists an independent review hash for route prose accepted against typed authority", async () => {
     const reviewReason = "The event remains within the supplied mechanical authority. ".repeat(10);
     expect(reviewReason.length).toBeGreaterThan(500);
