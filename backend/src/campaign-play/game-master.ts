@@ -674,7 +674,7 @@ function compileEffect(
   movement: CanonicalMovement | null,
   ruling: CampaignPlayJudgeRuling,
   perceptionLocationId: string,
-  elapsedMinutes: number,
+  localSceneElapsedMinutes: number,
 ): CommandArguments | CommandArguments[] {
   switch (effect.kind) {
     case "move_actor": {
@@ -717,10 +717,15 @@ function compileEffect(
         actor === null
         || turnId === null
         || anchor?.kind !== "persistent_sublocation"
-        || elapsedMinutes < 1
-        || elapsedMinutes > 10
       ) {
         throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
+      }
+      if (
+        effect.name.trim().toLowerCase() === anchor.name.trim().toLowerCase()
+        || localSceneElapsedMinutes < 1
+        || localSceneElapsedMinutes > 10
+      ) {
+        throw new CampaignPlayGameMasterError("model_contract_failed", null);
       }
       const ids = deriveCampaignPlayLocalSceneTopologyIds({
         campaignId: frame.rulebookFrame.campaignId,
@@ -746,7 +751,7 @@ function compileEffect(
           description: effect.description,
           outboundRouteId: ids.outboundRouteId,
           returnRouteId: ids.returnRouteId,
-          travelCost: elapsedMinutes,
+          travelCost: localSceneElapsedMinutes,
         },
         readScope: [actor, anchorRef],
         writeScope: [actor, outboundRouteRef, anchorRef, locationRef, returnRouteRef],
@@ -1187,17 +1192,23 @@ function compile(
     effect.kind === "record_world_event"
     && (effect.eventClass === "discovery" || effect.eventClass === "scene")
     && effect.performingActorHandle === null);
+  const localSceneElapsedMinutes = localSceneEffects.length === 0
+    ? 0
+    : proposal.elapsedMinutes - (movement?.travelCost ?? 0);
+  const lastMovementIndex = movementEffects.length === 0
+    ? -1
+    : Math.max(...movementEffects.map(({ index }) => index));
   if (
     (movement === null && movementEffects.length !== 0)
     || (movement !== null && playerMovementEffects.length !== 1)
     || companionMovementEffects.length > 1
     || localSceneEffects.length > 1
     || (localSceneEffects.length === 1 && (
-      movement !== null
-      || !localSceneResult
+      !localSceneResult
       || (ruling.normalizedIntent.kind !== "observe" && ruling.normalizedIntent.kind !== "attempt")
-      || proposal.elapsedMinutes < 1
-      || proposal.elapsedMinutes > 10
+      || localSceneElapsedMinutes < 1
+      || localSceneElapsedMinutes > 10
+      || localSceneEffects[0]!.index <= lastMovementIndex
       || localSceneEventIndex <= localSceneEffects[0]!.index
     ))
   ) {
@@ -1214,14 +1225,14 @@ function compile(
     const restored = routeTransitions.filter(({ effect }) =>
       effect.state === "restricted" && effect.exposure.mode === "protected");
     const firstMovementIndex = Math.min(...movementEffects.map(({ index }) => index));
-    const lastMovementIndex = Math.max(...movementEffects.map(({ index }) => index));
+    const lastRouteMovementIndex = Math.max(...movementEffects.map(({ index }) => index));
     if (
       ruling.normalizedIntent.kind !== "attempt"
       || opened.length !== 1
       || restored.length !== 1
       || routeTransitions.length !== 2
       || opened[0]!.index >= firstMovementIndex
-      || restored[0]!.index <= lastMovementIndex
+      || restored[0]!.index <= lastRouteMovementIndex
     ) {
       throw new CampaignPlayGameMasterError("model_contract_failed", null);
     }
@@ -1252,8 +1263,11 @@ function compile(
     proposal,
   }).slice(0, 32)}`;
   const argumentsList: CommandArguments[] = [];
-  if (proposal.elapsedMinutes > 0) {
-    argumentsList.push({ kind: "advance_world_time", elapsedMinutes: proposal.elapsedMinutes,
+  const initialElapsedMinutes = movement !== null && localSceneEffects.length === 1
+    ? movement.travelCost
+    : proposal.elapsedMinutes;
+  if (initialElapsedMinutes > 0) {
+    argumentsList.push({ kind: "advance_world_time", elapsedMinutes: initialElapsedMinutes,
       readScope: [], writeScope: [], exposure: { mode: "protected" } });
   }
   const playerPlacement = frame.rulebookFrame.placements.find((placement) =>
@@ -1263,6 +1277,15 @@ function compile(
   }
   let perceptionLocationId = playerPlacement.locationId;
   for (const effect of proposal.effects) {
+    if (effect.kind === "enter_local_scene" && movement !== null) {
+      argumentsList.push({
+        kind: "advance_world_time",
+        elapsedMinutes: localSceneElapsedMinutes,
+        readScope: [],
+        writeScope: [],
+        exposure: { mode: "protected" },
+      });
+    }
     const compiled = compileEffect(
       effect,
       frame,
@@ -1270,7 +1293,7 @@ function compile(
       movement,
       ruling,
       perceptionLocationId,
-      proposal.elapsedMinutes,
+      localSceneElapsedMinutes,
     );
     argumentsList.push(...(Array.isArray(compiled) ? compiled : [compiled]));
     if (effect.kind === "move_actor" && effect.actorHandle === null) {
@@ -1386,11 +1409,11 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     "For a no-travel contact whose PLAYER_INTENT targets or RULING cites a route, routeAccessClaims is required on every record_world_event and must include exactly one claim per relevant route on the dialogue or interaction; use an empty array on its other events. A general passage, clearance, stamping, permit, toll, or fee question cites every currently visible route, so answer against every supplied claim rather than preserving a generic requirement from earlier dialogue. Otherwise omit routeAccessClaims. Each claim has only routeHandle, state, accessRequirement, and viaLocationHandle. Copy routeHandle from the target or cited visible fact. Match state to VISIBLE_FACTS, use accessRequirement none for open and required for restricted or blocked, and use viaLocationHandle null for a direct route. Every route topology or access statement in summary must agree with these claims. Code rejects a missing, extra, duplicated, misplaced, or mechanically false claim before Rulebook execution.",
     "PLAYER_MOVEMENT is code-authoritative. When it is non-null, return exactly one {\"kind\":\"move_actor\",\"actorHandle\":null} effect for the player at the chronological point where travel occurs. Code binds the player actor, route, endpoints, and direct perception from this order. When PLAYER_MOVEMENT is null, never return move_actor. Do not copy PLAYER_MOVEMENT fields or exposure into an effect.",
     "PLAYER_MOVEMENT also carries the route's code-authoritative travelCost ticks. For a pure move, elapsedMinutes must equal travelCost exactly. For a compound action that includes travel, elapsedMinutes must be at least travelCost and remain within RULING.elapsedBounds. Never estimate a different route duration.",
-    "When a grounded route-less observe or attempt physically changes the player's exact position and the accepted result is limited or better, return exactly one enter_local_scene before one actorless discovery or scene event. enter_local_scene has exactly kind, name, and description. Name the newly reached perceivable scene and describe only stable sensory or publicly obvious context; do not put secrets, hidden causes, actor motives, or unresolved outcomes in its description. Code derives the scene and route IDs, endpoints, and bidirectional topology. It binds travel cost to elapsedMinutes and owns the placement transition, receipt, version, and persistence. Do not use enter_local_scene when the player only looks, searches, listens, manipulates something in place, or fails to advance.",
+    "When a grounded observe or attempt physically advances the player into a distinct directly perceivable scene and the accepted result is limited or better, return exactly one enter_local_scene before one actorless discovery or scene event. enter_local_scene has exactly kind, name, and description. Give the reached scene its own concrete local name; repeating CURRENT_EXACT_SCENE.locationName is invalid. Describe that local scene rather than the broader parent location, using only stable sensory or publicly obvious context; do not put secrets, hidden causes, actor motives, or unresolved outcomes in its description. Without PLAYER_MOVEMENT, code binds the local travel cost to all elapsedMinutes. With PLAYER_MOVEMENT, put enter_local_scene after every movement effect, make elapsedMinutes greater than travelCost, and use the remaining time for the local transition. Code owns both durations, transition order, derived topology, placement, receipt, version, and persistence. Do not use enter_local_scene when the player only looks, searches, listens, manipulates something in place, or fails to advance.",
     "WORLD_TIME_AUTHORITY is code-owned. The result occurs at actionStart.totalMinutes plus your elapsedMinutes, inside resultRange. Any clock time, part of day, date, deadline, duration, or relative phrase in a summary must agree with that result time and with every other time claim. When supplied facts do not fix a schedule, you may materialize concrete schedule values for an observation, but keep them internally consistent and omit a relation you cannot support.",
     "PLAYER_MOVEMENT.initialRouteState is code-authoritative. When it is restricted, the accepted attempt has earned passage for this traversal only. Return one protected set_route_state effect that changes the exact route to open before any movement effect. After the player and any willing companion have moved, return one protected set_route_state effect that restores the same route to restricted. Return no other state transition for that route. When a restricted attempt did not earn passage, PLAYER_MOVEMENT is null: commit the visible failed result without moving anyone or changing the route.",
     "set_route_state has exactly these fields: kind, exposure, routeHandle, state, and reason. reason is the short mechanical basis for this route transition. summary and affectedHandles are forbidden.",
-    "CURRENT_EXACT_SCENE is the Rulebook placement boundary. SOURCE_MOMENT and supplied observations may establish rooms, corridors, thresholds, floors, trails, or other local features inside it. When PLAYER_MOVEMENT is null and PLAYER_INTENT observes or attempts one established local feature without changing exact position, use an actorless discovery or scene result and do not return enter_local_scene. When the accepted action advances into a distinct directly perceivable scene, follow the enter_local_scene contract. Do not invent a feature from PLAYER_INTENT, create an internal path into another known persistent location, or place the player on a visible route destination's surfaces. Crossing into an already known Rulebook location requires PLAYER_MOVEMENT.",
+    "CURRENT_EXACT_SCENE is the Rulebook placement boundary. SOURCE_MOMENT and supplied observations may establish rooms, corridors, thresholds, floors, trails, or other local features inside it, or inside PLAYER_MOVEMENT's destination when they explicitly locate the feature there. When PLAYER_INTENT observes or attempts one established local feature without changing exact position, use an actorless discovery or scene result and do not return enter_local_scene. When the accepted action advances into a distinct directly perceivable scene, follow the enter_local_scene contract. Do not invent a feature from PLAYER_INTENT, create an internal path into another known persistent location, or place the player on a visible route destination's surfaces. Crossing into an already known Rulebook location requires PLAYER_MOVEMENT.",
     "A targeted visible agent may voluntarily travel with the player over PLAYER_MOVEMENT. First record that person's explicit agreement or willing action as an origin dialogue/interaction. After the player's move_actor effect, return at most one second move_actor effect with that targeted person's exact actorHandle. Code binds the same route and endpoints. Never move an untargeted, remote, incapacitated, non-agent, or unwilling person. If the person does not travel, omit the second effect and do not describe that person at the destination.",
     "Order movement effects as origin interaction, player move_actor with null actorHandle, optional companion move_actor with the targeted actorHandle, then arrival or destination interaction. Put any record_world_event describing the arrival after the movement effects and use eventClass scene for an actorless arrival. Every person described as present in a destination summary must already be there or have a preceding accepted move_actor effect, and their handle must appear in affectedHandles.",
     "A committed PLAYER_MOVEMENT places the player inside the destination's shared location scene. An arrival summary must not leave the player outside a door, gate, or other access boundary unless supplied route or location authority already represents that boundary. If an unnamed recipient does not answer, report only the lack of a reply; do not claim that the destination is empty or inaccessible.",

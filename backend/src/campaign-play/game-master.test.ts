@@ -1423,6 +1423,139 @@ describe("Campaign Play Game Master", () => {
         ],
       },
     )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+    expect(() => createCampaignPlayGameMaster().compile(
+      frame(),
+      localRuling,
+      resolution,
+      null,
+      {
+        elapsedMinutes: 10,
+        effects: [
+          {
+            kind: "enter_local_scene",
+            name: "North Harbor Gate",
+            description,
+          },
+          {
+            kind: "record_world_event",
+            eventClass: "discovery",
+            performingActorHandle: null,
+            summary: "The player reaches a distinct passage beyond the gate.",
+            affectedHandles: ["here"],
+          },
+        ],
+      },
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+  });
+
+  it("splits known-route travel from a destination local-scene transition", () => {
+    const compoundRuling = ruling({
+      movementRouteHandle: "passage",
+      normalizedIntent: {
+        originalText: "I cross to South Harbor and look for the stores room.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "observe",
+        targets: [{ handle: "south", kind: "location" }],
+        method: "Cross the open passage, then find the established stores room",
+        stakes: "Reach the stores room",
+      },
+      citedVisibleFactHandles: ["south", "passage"],
+      elapsedBounds: { minimumMinutes: 8, maximumMinutes: 8 },
+      reason: "The open route reaches the market, where the established room can be found.",
+    });
+    const name = "South Harbor Stores Room";
+    const description = "A narrow service room with a scarred counter and numbered shelves.";
+    const candidate = createCampaignPlayGameMaster().compile(
+      frame(),
+      compoundRuling,
+      resolution,
+      null,
+      {
+        elapsedMinutes: 8,
+        effects: [
+          { kind: "move_actor", actorHandle: null },
+          { kind: "enter_local_scene", name, description },
+          {
+            kind: "record_world_event",
+            eventClass: "discovery",
+            performingActorHandle: null,
+            summary: "A slate beside the counter lists blankets and work aprons awaiting collection.",
+            affectedHandles: ["south"],
+          },
+        ],
+      },
+    );
+    const ids = deriveCampaignPlayLocalSceneTopologyIds({
+      campaignId: CAMPAIGN_ID,
+      turnId: TURN_ID,
+      anchorLocationId: "location-b",
+      name,
+      description,
+    });
+
+    expect(candidate.preflight.accepted).toBe(true);
+    expect(candidate.batch.commands.map((command) => command.kind)).toEqual([
+      "advance_world_time",
+      "move_actor",
+      "advance_world_time",
+      "move_actor",
+      "record_world_event",
+    ]);
+    expect(candidate.batch.commands[0]).toMatchObject({
+      kind: "advance_world_time",
+      elapsedMinutes: 5,
+    });
+    expect(candidate.batch.commands[1]).toMatchObject({
+      kind: "move_actor",
+      routeId: "route-a-b",
+      fromLocationId: "location-a",
+      toLocationId: "location-b",
+    });
+    expect(candidate.batch.commands[2]).toMatchObject({
+      kind: "advance_world_time",
+      elapsedMinutes: 3,
+    });
+    expect(candidate.batch.commands[3]).toMatchObject({
+      kind: "move_actor",
+      fromLocationId: "location-b",
+      toLocationId: ids.locationId,
+      materializedLocalScene: {
+        ...ids,
+        anchorLocationId: "location-b",
+        name,
+        description,
+        travelCost: 3,
+      },
+    });
+    expect(candidate.batch.commands[4]).toMatchObject({
+      kind: "record_world_event",
+      exposure: {
+        mode: "projectable",
+        predicates: [{ channel: "direct_perception", locationId: ids.locationId }],
+      },
+    });
+
+    expect(() => createCampaignPlayGameMaster().compile(
+      frame(),
+      compoundRuling,
+      resolution,
+      null,
+      {
+        elapsedMinutes: 5,
+        effects: [
+          { kind: "move_actor", actorHandle: null },
+          { kind: "enter_local_scene", name, description },
+          {
+            kind: "record_world_event",
+            eventClass: "discovery",
+            performingActorHandle: null,
+            summary: "The route ends without enough time to enter another scene.",
+            affectedHandles: ["south"],
+          },
+        ],
+      },
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
   });
 
   it("opens, traverses, and restores a restricted route in one accepted batch", () => {

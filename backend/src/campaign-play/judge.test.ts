@@ -325,6 +325,24 @@ describe("Campaign Play Judge", () => {
     expect(ruling.movementRouteHandle).toBe("route-reef");
   });
 
+  it("keeps destination search as the primary observation after route travel", () => {
+    const ruling = createCampaignPlayJudge().compile(frame(), {
+      originalText: "I cross the reef road and look for the stores room.",
+      source: "freeform",
+      choiceHandle: null,
+    }, proposal({
+      kind: "observe",
+      targets: [{ handle: "location-reef", kind: "location" }],
+      method: "Cross the road, then look for the established stores room",
+      stakes: "Find the stores room at the destination",
+      movementRouteHandle: "route-reef",
+      elapsedBounds: { minimumMinutes: 6, maximumMinutes: 10 },
+    }));
+
+    expect(ruling.normalizedIntent.kind).toBe("observe");
+    expect(ruling.movementRouteHandle).toBe("route-reef");
+  });
+
   it("binds compound contact with an established destination presence to the route destination", () => {
     const judge = createCampaignPlayJudge();
     const input = {
@@ -498,6 +516,7 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("ACTOR_CONTINUITY outranks any conflicting earlier dialogue");
     expect(sentPrompt).toContain("movementRouteHandle is a separate mechanical decision");
     expect(sentPrompt).toContain("compound requests such as travel then contact");
+    expect(sentPrompt).toContain("never reduce it to pure move");
     expect(sentPrompt).toContain("including a route-bound attempt");
     expect(sentPrompt).toContain("Never add, remove, or change travel");
     expect(sentPrompt).toContain("A persistent location is the Rulebook placement boundary");
