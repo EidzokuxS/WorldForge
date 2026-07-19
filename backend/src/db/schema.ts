@@ -611,6 +611,11 @@ export const actors = sqliteTable(
     summary: text("summary").notNull(),
     traits: text("traits").notNull().default("[]"),
     tags: text("tags").notNull().default("[]"),
+    definitionAuthority: text("definition_authority", {
+      enum: ["accepted_world", "campaign_play"],
+    }).notNull().default("accepted_world"),
+    causalReceiptId: text("causal_receipt_id"),
+    worldVersion: integer("world_version"),
   },
   (table) => [
     // Migration-owned SQLite triggers guard the controller/kind/role tuple
@@ -620,6 +625,14 @@ export const actors = sqliteTable(
       table.campaignId,
       table.kind,
       table.role,
+    ),
+    index("idx_actors_campaign_definition_authority").on(
+      table.campaignId,
+      table.definitionAuthority,
+    ),
+    index("idx_actors_campaign_receipt").on(
+      table.campaignId,
+      table.causalReceiptId,
     ),
     uniqueIndex("actors_campaign_human_unique")
       .on(table.campaignId)

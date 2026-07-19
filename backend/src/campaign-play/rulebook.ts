@@ -17,6 +17,7 @@ import {
   deriveCampaignPlayObligationId,
   deriveCampaignPlayPossessionId,
   deriveCampaignPlayPossessionKey,
+  deriveCampaignPlaySupportActorIds,
   hashCampaignPlayProjection,
   projectCampaignPlayMechanicalTruth,
 } from "./campaign-play-projection.js";
@@ -33,6 +34,7 @@ import type {
   CampaignPlayLiveRouteState,
   CampaignPlayRuntimeLocation,
   CampaignPlayRuntimeRoute,
+  CampaignPlayRuntimeActor,
 } from "./campaign-play-projection.js";
 
 export type CampaignPlayRulebookPurpose =
@@ -50,6 +52,7 @@ export interface CampaignPlayRulebookFrame {
   worldTimeMinutes: number | null;
   human: CampaignPlayHumanMechanicalIdentity | null;
   acceptedWorld: CampaignWorldReview;
+  runtimeActors: CampaignPlayRuntimeActor[];
   runtimeLocations: CampaignPlayRuntimeLocation[];
   runtimeRoutes: CampaignPlayRuntimeRoute[];
   routeStates: CampaignPlayLiveRouteState[];
@@ -105,6 +108,7 @@ export interface CampaignPlayRulebookSimulation {
   worldVersion: number;
   worldTimeMinutes: number | null;
   human: CampaignPlayHumanMechanicalIdentity | null;
+  runtimeActors: CampaignPlayRuntimeActor[];
   runtimeLocations: CampaignPlayRuntimeLocation[];
   runtimeRoutes: CampaignPlayRuntimeRoute[];
   routeStates: CampaignPlayLiveRouteState[];
@@ -234,6 +238,7 @@ function validFrame(frame: CampaignPlayRulebookFrame): boolean {
       && frame.worldTimeMinutes >= 0
       && frame.worldTimeMinutes <= CAMPAIGN_PLAY_LIMITS.worldTimeMinutes);
   const idsUnique = [
+    frame.runtimeActors.map((row) => row.id),
     frame.runtimeLocations.map((row) => row.id),
     frame.runtimeRoutes.map((row) => row.id),
     frame.routeStates.map((row) => row.routeId),
@@ -248,7 +253,13 @@ function validFrame(frame: CampaignPlayRulebookFrame): boolean {
     frame.relations.map((row) => row.relationId),
     frame.goals.map((row) => row.goalId),
   ].every(unique);
-  const actorIds = new Set(world.actors.map((actor) => actor.id));
+  const runtimeActorIds = new Set(frame.runtimeActors.map((actor) => actor.id));
+  const allActorIdentityIds = [
+    ...world.actors.map((actor) => actor.id),
+    ...frame.runtimeActors.map((actor) => actor.id),
+    ...(frame.human ? [frame.human.actorId] : []),
+  ];
+  const actorIds = new Set(allActorIdentityIds);
   if (frame.human) actorIds.add(frame.human.actorId);
   const locationIds = new Set([
     ...world.locations.map((location) => location.id),
@@ -277,11 +288,12 @@ function validFrame(frame: CampaignPlayRulebookFrame): boolean {
     ? frame.human === null && frame.worldVersion === frame.acceptedWorldVersion
       && frame.worldTimeMinutes === null
       && frame.pressureStates.length === 0 && frame.possessions.length === 0
-      && frame.obligations.length === 0 && !playerPresent
+      && frame.obligations.length === 0 && frame.runtimeActors.length === 0 && !playerPresent
     : frame.setupPhase === "opening_required"
       ? frame.human !== null && frame.worldVersion === expectedOpeningBaseVersion
         && frame.worldTimeMinutes === null && playerPlacements.length === 0
-        && frame.pressureStates.length === 0 && openingPossessionsValid
+        && frame.pressureStates.length === 0 && frame.runtimeActors.length === 0
+        && openingPossessionsValid
       : frame.human !== null && frame.worldVersion >= expectedReadyMinimumVersion
         && frame.worldTimeMinutes !== null && playerPlacements.length === 1 && playerPresent
         && JSON.stringify(currentPressureIds) === JSON.stringify(pressureIds);
@@ -294,8 +306,23 @@ function validFrame(frame: CampaignPlayRulebookFrame): boolean {
     && frame.worldVersion >= frame.acceptedWorldVersion
     && validWorldTime
     && idsUnique
+    && unique(allActorIdentityIds)
     && (frame.human === null || validHash(frame.human.recordHash))
     && (frame.human === null || !world.actors.some((candidate) => candidate.id === frame.human!.actorId))
+    && frame.runtimeActors.every((runtimeActor) =>
+      runtimeActor.kind === "person"
+      && runtimeActor.controller === "agent"
+      && runtimeActor.role === "support"
+      && runtimeActor.name === runtimeActor.name.trim()
+      && runtimeActor.summary === runtimeActor.summary.trim()
+      && runtimeActor.name.length > 0
+      && runtimeActor.name.length <= CAMPAIGN_PLAY_LIMITS.name
+      && runtimeActor.summary.length > 0
+      && runtimeActor.summary.length <= CAMPAIGN_PLAY_LIMITS.text
+      && runtimeActor.causalReceiptId.length > 0
+      && Number.isInteger(runtimeActor.worldVersion)
+      && runtimeActor.worldVersion > frame.acceptedWorldVersion
+      && runtimeActor.worldVersion <= frame.worldVersion)
     && frame.runtimeLocations.every((location) => {
       const parent = world.locations.find((candidate) => candidate.id === location.parentLocationId);
       const outbound = frame.runtimeRoutes.find((candidate) =>
@@ -382,13 +409,17 @@ function validFrame(frame: CampaignPlayRulebookFrame): boolean {
           ? accepted.actorId === row.actorId
             && accepted.placementKind === row.placementKind
             && (row.placementKind === "present" || accepted.locationId === row.locationId)
-          : row.actorId === frame.human?.actorId && row.placementKind === "present");
+          : (row.actorId === frame.human?.actorId || runtimeActorIds.has(row.actorId))
+            && row.placementKind === "present");
     })
     && [...acceptedPlacementIds].every((placementId) =>
       frame.placements.some((row) => row.placementId === placementId))
     && unique(frame.placements
       .filter((placement) => placement.placementKind === "present")
       .map((placement) => placement.actorId))
+    && frame.runtimeActors.every((runtimeActor) =>
+      frame.placements.filter((placement) =>
+        placement.actorId === runtimeActor.id && placement.placementKind === "present").length === 1)
     && frame.relations.length === world.relations.length
     && frame.relations.every((row) => {
       const accepted = relationById.get(row.relationId);
@@ -402,14 +433,26 @@ function validFrame(frame: CampaignPlayRulebookFrame): boolean {
         && row.summary.length <= CAMPAIGN_PLAY_LIMITS.shortText
         && row.summary === row.summary.trim();
     })
-    && frame.goals.length === world.goals.length
+    && frame.goals.length === world.goals.length + frame.runtimeActors.length
     && frame.goals.every((row) => {
       const accepted = goalById.get(row.goalId);
-      return accepted?.actorId === row.actorId
-        && accepted.objective === row.objective
-        && accepted.motivation === row.motivation
-        && accepted.priority === row.priority;
+      if (accepted) {
+        return accepted.actorId === row.actorId
+          && accepted.objective === row.objective
+          && accepted.motivation === row.motivation
+          && accepted.priority === row.priority;
+      }
+      return runtimeActorIds.has(row.actorId)
+        && row.objective.length > 0
+        && row.objective.length <= CAMPAIGN_PLAY_LIMITS.shortText
+        && row.motivation.length > 0
+        && row.motivation.length <= CAMPAIGN_PLAY_LIMITS.shortText
+        && Number.isInteger(row.priority)
+        && row.priority >= 1
+        && row.priority <= 5;
     })
+    && frame.runtimeActors.every((runtimeActor) =>
+      frame.goals.filter((goal) => goal.actorId === runtimeActor.id).length === 1)
     && world.pressures.every((pressure) =>
       pressure.actorIds.length + pressure.locationIds.length > 0
       && pressure.actorIds.every((actorId) => actorIds.has(actorId))
@@ -452,6 +495,7 @@ function validateAuthority(
       authority.authorizedRefs.some((reference) =>
         reference.kind === "actor" && reference.id === actorId)
       && (frame.acceptedWorld.actors.some((candidate) => candidate.id === actorId)
+        || frame.runtimeActors.some((candidate) => candidate.id === actorId)
         || actorId === frame.human?.actorId))
   ) {
     deny("invalid_authority", "Rulebook authority does not match its purpose.");
@@ -462,7 +506,10 @@ function validateAuthority(
     }
   }
   if (authority.purpose === "actor_job") {
-    const actor = frame.acceptedWorld.actors.find((candidate) => candidate.id === authority.actorId);
+    const actor = [
+      ...frame.acceptedWorld.actors,
+      ...frame.runtimeActors,
+    ].find((candidate) => candidate.id === authority.actorId);
     if (
       frame.setupPhase !== "ready"
       || frame.worldTimeMinutes === null
@@ -480,6 +527,7 @@ function cloneSimulation(frame: CampaignPlayRulebookFrame): CampaignPlayRulebook
     worldVersion: frame.worldVersion,
     worldTimeMinutes: frame.worldTimeMinutes,
     human: frame.human ? { ...frame.human } : null,
+    runtimeActors: structuredClone(frame.runtimeActors),
     runtimeLocations: structuredClone(frame.runtimeLocations),
     runtimeRoutes: structuredClone(frame.runtimeRoutes),
     routeStates: structuredClone(frame.routeStates),
@@ -500,6 +548,8 @@ function actor(
 ) {
   const accepted = frame.acceptedWorld.actors.find((candidate) => candidate.id === actorId);
   if (accepted) return accepted;
+  const runtime = state.runtimeActors.find((candidate) => candidate.id === actorId);
+  if (runtime) return runtime;
   if (state.human?.actorId === actorId) {
     return {
       id: actorId,
@@ -620,6 +670,11 @@ function commandEntityRefs(
       ].filter((reference, index, values) =>
         values.findIndex((candidate) => refKey(candidate) === refKey(reference)) === index);
     }
+    case "materialize_support_actor": return [
+      ref("actor", command.actorId),
+      ref("location", command.locationId),
+      ref("goal", command.goalId),
+    ];
     case "record_world_event": return command.affectedRefs;
     case "create_player_actor": return [ref("actor", command.actorId)];
     case "initialize_player_placement": return [
@@ -655,6 +710,7 @@ function expectedScopes(
     case "pay_actor_obligation": return refs.length >= 5
       ? { read: refs.slice(0, 5), write: [refs[2]!, refs[3]!, refs[4]!] }
       : { read: refs, write: [] };
+    case "materialize_support_actor": return { read: [refs[1]!], write: refs };
     case "record_world_event": return { read: refs, write: [] };
     case "initialize_player_placement": return { read: refs, write: refs };
   }
@@ -774,6 +830,11 @@ function exposureGrounding(
     case "pay_actor_obligation":
       addActor(command.debtorActorId);
       addActor(command.creditorActorId);
+      break;
+    case "materialize_support_actor":
+      addActor(command.actorId);
+      locationIds.add(command.locationId);
+      addReference(ref("goal", command.goalId));
       break;
     case "record_world_event": command.affectedRefs.forEach(addReference); break;
     case "create_player_actor": addActor(command.actorId); break;
@@ -1001,17 +1062,45 @@ function validateRefsAndScopes(
       paymentPossession.possessionKey,
     )))
     : null;
+  const supportIds = command.kind === "materialize_support_actor" && authority.turnId !== null
+    ? deriveCampaignPlaySupportActorIds({
+        campaignId: frame.campaignId,
+        turnId: authority.turnId,
+        locationId: command.locationId,
+        name: command.name,
+        summary: command.summary,
+      })
+    : null;
+  const grantedSupportRefs = command.kind === "materialize_support_actor"
+    && supportIds !== null
+    && command.actorId === supportIds.actorId
+    && command.placementId === supportIds.placementId
+    && command.goalId === supportIds.goalId
+    && command.planId === supportIds.planId
+    && command.scheduleId === supportIds.scheduleId
+    ? new Set([
+        refKey(ref("actor", command.actorId)),
+        refKey(ref("goal", command.goalId)),
+      ])
+    : new Set<string>();
   const materializedEarlierInBatch = (reference: CampaignPlayEntityRef): boolean =>
     (reference.kind === "location"
       && !frame.runtimeLocations.some((row) => row.id === reference.id)
       && state.runtimeLocations.some((row) => row.id === reference.id))
     || (reference.kind === "route"
       && !frame.runtimeRoutes.some((row) => row.id === reference.id)
-      && state.runtimeRoutes.some((row) => row.id === reference.id));
+      && state.runtimeRoutes.some((row) => row.id === reference.id))
+    || (reference.kind === "actor"
+      && !frame.runtimeActors.some((row) => row.id === reference.id)
+      && state.runtimeActors.some((row) => row.id === reference.id))
+    || (reference.kind === "goal"
+      && !frame.goals.some((row) => row.goalId === reference.id)
+      && state.goals.some((row) => row.goalId === reference.id));
   if (!allRefs.every((reference) =>
     refKey(reference) === grantedPossessionRef
     || refKey(reference) === grantedObligationRef
     || refKey(reference) === grantedCreditorPossessionRef
+    || grantedSupportRefs.has(refKey(reference))
     || localSceneGrant.has(refKey(reference))
     || materializedEarlierInBatch(reference)
     || authorized.has(refKey(reference)))) {
@@ -1020,6 +1109,7 @@ function validateRefsAndScopes(
   const newPlayerRef = command.kind === "create_player_actor" ? refKey(ref("actor", command.actorId)) : null;
   if (!allRefs.every((reference) =>
     refKey(reference) === newPlayerRef
+    || grantedSupportRefs.has(refKey(reference))
     || (existingPossession === undefined && refKey(reference) === grantedPossessionRef)
     || (existingObligation === undefined && refKey(reference) === grantedObligationRef)
     || refKey(reference) === grantedCreditorPossessionRef
@@ -1126,6 +1216,7 @@ function actorJobOwns(
     case "adjust_actor_possession": return command.actorId === actorId;
     case "incur_actor_obligation": return false;
     case "pay_actor_obligation": return false;
+    case "materialize_support_actor": return false;
     case "record_world_event": return command.affectedRefs.some((reference) =>
       reference.kind === "actor" && reference.id === actorId);
     case "create_player_actor":
@@ -1479,6 +1570,95 @@ function applyCommand(
       }
       break;
     }
+    case "materialize_support_actor": {
+      const turnId = authority.turnId;
+      const playerActorId = state.human?.actorId;
+      const playerPlacement = playerActorId === undefined
+        ? undefined
+        : state.placements.find((row) =>
+            row.actorId === playerActorId && row.placementKind === "present");
+      const location = liveLocation(frame, state, command.locationId);
+      const expectedIds = turnId === null
+        ? null
+        : deriveCampaignPlaySupportActorIds({
+            campaignId: frame.campaignId,
+            turnId,
+            locationId: command.locationId,
+            name: command.name,
+            summary: command.summary,
+          });
+      const exposure = command.exposure.mode === "projectable"
+        && command.exposure.predicates.length === 1
+        && command.exposure.predicates[0]?.channel === "direct_perception"
+        ? command.exposure.predicates[0]
+        : null;
+      const nameKey = command.name.trim().toLowerCase();
+      const nameAlreadyOwned = [
+        ...frame.acceptedWorld.actors,
+        ...state.runtimeActors,
+      ].some((candidate) => candidate.name.trim().toLowerCase() === nameKey);
+      if (
+        authority.purpose !== "player_action"
+        || turnId === null
+        || playerPlacement?.locationId !== command.locationId
+        || location?.kind !== "persistent_sublocation"
+        || exposure?.locationId !== command.locationId
+        || expectedIds === null
+        || command.actorId !== expectedIds.actorId
+        || command.placementId !== expectedIds.placementId
+        || command.goalId !== expectedIds.goalId
+        || command.planId !== expectedIds.planId
+        || command.scheduleId !== expectedIds.scheduleId
+        || actor(frame, state, command.actorId) !== null
+        || state.placements.some((row) => row.placementId === command.placementId)
+        || state.goals.some((row) => row.goalId === command.goalId)
+        || state.runtimeActors.length !== frame.runtimeActors.length
+        || nameAlreadyOwned
+        || command.planIntentKind === "move"
+        || command.steps.some((step) => step.intentKind === "move")
+      ) {
+        deny(
+          "precondition_failed",
+          "Support actor materialization requires one new local person with code-owned identity and a stationary first plan.",
+          command,
+          index,
+        );
+      }
+      const resultWorldVersion = state.worldVersion + 1;
+      const causalReceiptId = deriveCampaignPlayReceiptId(
+        frame.campaignId,
+        turnId,
+        command.batchId,
+        command.order,
+      );
+      state.runtimeActors.push({
+        id: command.actorId,
+        kind: "person",
+        controller: "agent",
+        role: "support",
+        name: command.name,
+        summary: command.summary,
+        traits: [...command.traits],
+        tags: [...command.tags],
+        causalReceiptId,
+        worldVersion: resultWorldVersion,
+      });
+      state.placements.push({
+        placementId: command.placementId,
+        actorId: command.actorId,
+        locationId: command.locationId,
+        placementKind: "present",
+      });
+      state.goals.push({
+        goalId: command.goalId,
+        actorId: command.actorId,
+        status: "active",
+        priority: command.priority,
+        objective: command.goalObjective,
+        motivation: command.goalMotivation,
+      });
+      break;
+    }
     case "record_world_event": {
       if (!unique(command.affectedRefs.map(refKey))) {
         deny("precondition_failed", "World event affected references must be unique.", command, index);
@@ -1616,6 +1796,7 @@ function validateBootstrapCoverage(
 }
 
 function sortSimulation(state: CampaignPlayRulebookSimulation): void {
+  state.runtimeActors.sort((left, right) => compareText(left.id, right.id));
   state.runtimeLocations.sort((left, right) => compareText(left.id, right.id));
   state.runtimeRoutes.sort((left, right) => compareText(left.id, right.id));
   state.routeStates.sort((left, right) => compareText(left.routeId, right.routeId));
@@ -1636,6 +1817,11 @@ function snapshotSimulation(
     worldVersion: state.worldVersion,
     worldTimeMinutes: state.worldTimeMinutes,
     human: state.human === null ? null : { ...state.human },
+    runtimeActors: state.runtimeActors.map((row) => ({
+      ...row,
+      traits: [...row.traits],
+      tags: [...row.tags],
+    })),
     runtimeLocations: state.runtimeLocations.map((row) => ({ ...row, tags: [...row.tags] })),
     runtimeRoutes: state.runtimeRoutes.map((row) => ({ ...row })),
     routeStates: state.routeStates.map((row) => ({ ...row })),
@@ -1821,6 +2007,7 @@ function mechanicalHash(
     acceptedReview: frame.acceptedWorld,
     worldTimeMinutes: state.worldTimeMinutes,
     human: state.human,
+    runtimeActors: state.runtimeActors,
     runtimeLocations: state.runtimeLocations,
     runtimeRoutes: state.runtimeRoutes,
     routeStates: state.routeStates,
@@ -1846,6 +2033,7 @@ function eventKind(command: RulebookBatchCommand): string {
     case "adjust_actor_possession": return "actor_possession_adjusted";
     case "incur_actor_obligation": return "actor_obligation_incurred";
     case "pay_actor_obligation": return "actor_obligation_payment_applied";
+    case "materialize_support_actor": return "support_actor_materialized";
     case "record_world_event": return "scene_recorded";
     case "create_player_actor": return "player_actor_created";
     case "initialize_player_placement": return "player_placement_initialized";
@@ -2042,6 +2230,111 @@ function applyStoredMutation(
           command.obligationId, campaignId);
       return;
     }
+    case "materialize_support_actor": {
+      const after = input.accepted.checkpoints[command.order + 1]!;
+      if (after.worldTimeMinutes === null) {
+        throw new CampaignPlayRulebookExecutionError(
+          "execution_contract_invalid",
+          "Support actor materialization requires initialized world time.",
+        );
+      }
+      const planIntent = {
+        kind: command.planIntentKind,
+        targets: [{ kind: "location" as const, id: command.locationId }],
+        method: command.planMethod,
+        stakes: command.planStakes,
+      };
+      const planSteps = command.steps.map((step, order) => ({
+        stepId: `support-step:${hashCampaignPlayProjection({
+          domain: "campaign_play_support_actor_step",
+          planId: command.planId,
+          order,
+        }).slice(0, 32)}`,
+        order,
+        intent: {
+          kind: step.intentKind,
+          targets: [{ kind: "location" as const, id: command.locationId }],
+          method: step.method,
+          stakes: step.stakes,
+        },
+        observableTrace: step.observableTrace,
+        possessionOutcome: { kind: "none" as const },
+        elapsedBounds: step.elapsedBounds,
+      }));
+      sqlite.prepare(`INSERT INTO actors
+        (id, campaign_id, kind, controller, role, name, summary, traits, tags,
+          definition_authority, causal_receipt_id, world_version)
+        VALUES (?, ?, 'person', 'agent', 'support', ?, ?, ?, ?,
+          'campaign_play', ?, ?)`).run(
+            command.actorId,
+            campaignId,
+            command.name,
+            command.summary,
+            canonicalizeCampaignPlayProjection(command.traits),
+            canonicalizeCampaignPlayProjection(command.tags),
+            receiptId,
+            resultWorldVersion,
+          );
+      sqlite.prepare(`INSERT INTO actor_goals
+        (id, campaign_id, actor_id, objective, motivation, horizon, priority, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'active')`).run(
+          command.goalId,
+          campaignId,
+          command.actorId,
+          command.goalObjective,
+          command.goalMotivation,
+          command.goalHorizon,
+          command.priority,
+        );
+      sqlite.prepare(`INSERT INTO actor_placements
+        (id, campaign_id, actor_id, location_id, placement_kind)
+        VALUES (?, ?, ?, ?, 'present')`).run(
+          command.placementId,
+          campaignId,
+          command.actorId,
+          command.locationId,
+        );
+      sqlite.prepare(`INSERT INTO campaign_play_actor_plans (
+        plan_id, campaign_id, actor_id, goal_id, plan_version, intent_json,
+        preconditions_json, cadence_minutes, priority, steps_json, status,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 'active', ?, ?)`).run(
+        command.planId,
+        campaignId,
+        command.actorId,
+        command.goalId,
+        canonicalizeCampaignPlayProjection(planIntent),
+        canonicalizeCampaignPlayProjection([{
+          kind: "actor_at_location",
+          actorId: command.actorId,
+          locationId: command.locationId,
+        }]),
+        command.cadenceMinutes,
+        command.priority,
+        canonicalizeCampaignPlayProjection(planSteps),
+        input.createdAt,
+        input.createdAt,
+      );
+      sqlite.prepare(`INSERT INTO campaign_play_actor_schedules (
+        schedule_id, campaign_id, actor_id, plan_id,
+        next_act_at_world_time_minutes, last_act_at_world_time_minutes,
+        priority, agency_debt, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`).run(
+        command.scheduleId,
+        campaignId,
+        command.actorId,
+        command.planId,
+        Math.min(
+          CAMPAIGN_PLAY_LIMITS.worldTimeMinutes,
+          after.worldTimeMinutes + command.cadenceMinutes,
+        ),
+        after.worldTimeMinutes,
+        command.priority,
+        input.createdAt,
+        input.createdAt,
+      );
+      return;
+    }
     case "record_world_event": return;
     case "create_player_actor":
       sqlite.prepare(`INSERT INTO actors
@@ -2183,6 +2476,7 @@ export function executeCampaignPlayRulebookBatch(
       command.kind === "adjust_actor_possession"
       || command.kind === "incur_actor_obligation"
       || command.kind === "pay_actor_obligation"
+      || command.kind === "materialize_support_actor"
       || (command.kind === "move_actor" && command.materializedLocalScene !== undefined)
     );
     if (appliesBeforeEvent) {
@@ -2229,6 +2523,7 @@ export function executeCampaignPlayRulebookBatch(
       && command.kind !== "adjust_actor_possession"
       && command.kind !== "incur_actor_obligation"
       && command.kind !== "pay_actor_obligation"
+      && command.kind !== "materialize_support_actor"
       && !(command.kind === "move_actor" && command.materializedLocalScene !== undefined)
     ) {
       applyStoredMutation(input, command, receiptId, after.worldVersion);

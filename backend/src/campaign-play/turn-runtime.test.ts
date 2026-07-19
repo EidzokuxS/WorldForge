@@ -663,6 +663,79 @@ function gameMasterFixture(
   };
 }
 
+function ambientContactJudgeFixture() {
+  const compiler = createCampaignPlayJudge();
+  return {
+    judge: vi.fn(async (request: Parameters<ReturnType<typeof createCampaignPlayJudge>["judge"]>[0]) => {
+      const ruling = compiler.compile(request.frame, request.input, {
+        kind: "contact",
+        targets: [{ handle: request.frame.locationHandle, kind: "location" }],
+        method: "Offer an unnamed courier a free satchel inspection and ask their name.",
+        stakes: "Find paid repair work before the next eastbound run.",
+        movementRouteHandle: null,
+        possessionEffectAuthority: { kind: "none" },
+        requiredObligationEffect: { kind: "none" },
+        disposition: "deterministic",
+        citedVisibleFactHandles: [request.frame.locationHandle],
+        resultBounds: { minimum: "success", maximum: "success" },
+        elapsedBounds: { minimumMinutes: 2, maximumMinutes: 3 },
+        uncertainty: { kind: "none" },
+        reason: "Unnamed couriers are visibly present and can answer without creating a binding exchange.",
+        clarificationQuestion: null,
+      });
+      return { ruling, rulingHash: "f".repeat(64), modelEvidence: acceptedEvidence("test-judge") };
+    }),
+  };
+}
+
+function supportActorGameMasterFixture() {
+  const compiler = createCampaignPlayGameMaster();
+  return {
+    plan: vi.fn(async (request: Parameters<ReturnType<typeof createCampaignPlayGameMaster>["plan"]>[0]) => {
+      const playerHandle = request.frame.handleBindings.find((binding) =>
+        binding.reference.kind === "actor" && binding.reference.id === PLAYER_ID)!.handle;
+      const locationHandle = request.frame.handleBindings.find((binding) =>
+        binding.reference.kind === "location" && binding.handle === request.frame.visibleFacts.find((fact) =>
+          fact.kind === "location")?.handle)!.handle;
+      return {
+        ...compiler.compile(
+          request.frame,
+          request.ruling,
+          request.resolution,
+          request.uncertaintyAuthority,
+          {
+            elapsedMinutes: 3,
+            effects: [
+              {
+                kind: "materialize_support_actor" as const,
+                actorHandle: "introduced-support-actor",
+                name: "Dario Calvo",
+                summary: "An independent courier whose rain-softened satchel strap needs repair before an eastbound run.",
+                goal: "Have the satchel strap repaired before the next eastbound run.",
+                motivation: "Black rain has softened the stitching beside the buckle.",
+                nextIntentKind: "wait" as const,
+                nextAction: "Wait beside the open toolkit with the damaged strap extended.",
+                observableTrace: "A courier sets a weathered satchel beside the open toolkit.",
+                cadenceMinutes: 5,
+              },
+              {
+                kind: "record_world_event" as const,
+                eventClass: "dialogue" as const,
+                performingActorHandle: "introduced-support-actor",
+                routeAccessClaims: [],
+                summary: "Dario Calvo sets his satchel beside the toolkit and shows Nera the rain-softened stitching at its buckle.",
+                affectedHandles: ["introduced-support-actor", playerHandle, locationHandle],
+              },
+            ],
+          },
+        ),
+        semanticReview: { kind: "not_required" as const },
+        modelEvidence: acceptedEvidence("test-game-master"),
+      };
+    }),
+  };
+}
+
 function turnRuntime(
   handle: CampaignPlayDatabaseHandle,
   time: ReturnType<typeof fixedClock>,
@@ -1050,6 +1123,57 @@ describe("Campaign Play player-action turn runtime", () => {
       }
     },
   );
+
+  it("commits a newly contacted support actor with one receipt-backed plan and schedule", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening();
+    const time = fixedClock(2_250);
+    const runtime = turnRuntime(
+      handle,
+      time,
+      ambientContactJudgeFixture(),
+      supportActorGameMasterFixture(),
+    );
+    const admission = runtime.admitAction({
+      request: admissionRequest(
+        state,
+        "support-actor-contact",
+        "I offer the unnamed couriers a free satchel inspection and ask who leaves east next.",
+      ),
+      submittedAt: 2_250,
+    });
+
+    await advanceToPrimarySettlement(runtime, time, admission.turnId);
+
+    const actor = handle.sqlite.prepare(`SELECT id, name, definition_authority AS definitionAuthority,
+        causal_receipt_id AS causalReceiptId, world_version AS worldVersion
+      FROM actors WHERE campaign_id = ? AND definition_authority = 'campaign_play'`)
+      .get(CAMPAIGN_ID) as Record<string, unknown>;
+    expect(actor).toMatchObject({
+      name: "Dario Calvo",
+      definitionAuthority: "campaign_play",
+      causalReceiptId: expect.any(String),
+      worldVersion: state.authority.worldVersion + 2,
+    });
+    expect(handle.sqlite.prepare(`SELECT count(*) AS value FROM actor_goals
+      WHERE campaign_id = ? AND actor_id = ?`).get(CAMPAIGN_ID, actor.id)).toEqual({ value: 1 });
+    expect(handle.sqlite.prepare(`SELECT count(*) AS value FROM campaign_play_actor_plans
+      WHERE campaign_id = ? AND actor_id = ? AND status = 'active'`).get(CAMPAIGN_ID, actor.id))
+      .toEqual({ value: 1 });
+    expect(handle.sqlite.prepare(`SELECT count(*) AS value FROM campaign_play_actor_schedules
+      WHERE campaign_id = ? AND actor_id = ?`).get(CAMPAIGN_ID, actor.id)).toEqual({ value: 1 });
+
+    await advanceUntilStage(runtime, time, admission.turnId, "completed");
+    const continuedState = createCampaignPlayStateRepository(handle).loadState()!;
+    const continuedAdmission = runtime.admitAction({
+      request: admissionRequest(
+        continuedState,
+        "support-actor-continuity",
+        "I agree to mend Dario's buckle strap before his eastbound run.",
+      ),
+      submittedAt: 2_300,
+    });
+    expect(continuedAdmission.turnId).toMatch(/^turn-player-action:/);
+  });
 
   it("accepts compound contact through the exact visible route destination", async () => {
     const { handle, state } = await createReadyCampaignWithOpening();

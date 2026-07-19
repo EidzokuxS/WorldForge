@@ -569,6 +569,7 @@ function candidateBindings(
   };
   if (frame.human) add("actor", { kind: "actor", id: frame.human.actorId });
   frame.acceptedWorld.actors.forEach((actor) => add("actor", { kind: "actor", id: actor.id }));
+  frame.runtimeActors.forEach((actor) => add("actor", { kind: "actor", id: actor.id }));
   frame.acceptedWorld.locations.forEach((location) =>
     add("location", { kind: "location", id: location.id }));
   frame.acceptedWorld.routes.forEach((route) => add("route", { kind: "route", id: route.id }));

@@ -18,6 +18,7 @@ import {
   deriveCampaignPlayObligationId,
   deriveCampaignPlayPossessionId,
   deriveCampaignPlayPossessionKey,
+  deriveCampaignPlaySupportActorIds,
 } from "./campaign-play-projection.js";
 
 const CAMPAIGN_ID = "campaign-game-master";
@@ -99,6 +100,7 @@ function frame(): CampaignPlayGameMasterFrame {
       worldTimeMinutes: 10,
       human: { actorId: PLAYER_ID, recordHash: "c".repeat(64) },
       acceptedWorld: world(),
+      runtimeActors: [],
       runtimeLocations: [],
       runtimeRoutes: [],
       routeStates: [],
@@ -391,6 +393,89 @@ describe("Campaign Play Game Master", () => {
     expect(first.batch.commands[1]!.causalParent).toEqual({ kind: "command", commandId: first.batch.commands[0]!.commandId });
   });
 
+  it("materializes one contacted ambient resident with code-owned identity and an immediate reply", () => {
+    const ambientRuling = ruling({
+      normalizedIntent: {
+        originalText: "I call to the nearby workers and offer to mend a torn boot.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "contact",
+        targets: [{ handle: "here", kind: "location" }],
+        method: "Offer a practical repair to anyone within earshot",
+        stakes: "Find one resident willing to stop and answer",
+      },
+      citedVisibleFactHandles: ["here"],
+      reason: "Nearby residents can hear and choose whether to respond.",
+    });
+    const supportProfile = {
+      name: "Sella Rook",
+      summary: "A rope mender with a torn work boot and a waxed canvas tool roll.",
+    };
+    const candidate = createCampaignPlayGameMaster().compile(
+      frame(),
+      ambientRuling,
+      resolution,
+      null,
+      {
+        elapsedMinutes: 2,
+        effects: [
+          {
+            kind: "materialize_support_actor",
+            actorHandle: "introduced-support-actor",
+            ...supportProfile,
+            goal: "Earn enough before rain closes the bridge market.",
+            motivation: "Keep the family workshop supplied through the wet season.",
+            nextIntentKind: "contact",
+            observableTrace: "Sella unrolls waxed thread and tests a frayed rope by hand.",
+            cadenceMinutes: 30,
+          },
+          {
+            kind: "record_world_event",
+            eventClass: "dialogue",
+            performingActorHandle: "introduced-support-actor",
+            summary: "A woman with a torn boot stops. ‘Sella Rook. Show me your stitching first; if it holds, we can talk price.’",
+            affectedHandles: ["you", "here", "introduced-support-actor"],
+          },
+        ],
+      },
+    );
+    const ids = deriveCampaignPlaySupportActorIds({
+      campaignId: CAMPAIGN_ID,
+      turnId: TURN_ID,
+      locationId: "location-a",
+      ...supportProfile,
+    });
+
+    expect(candidate.preflight.accepted).toBe(true);
+    expect(candidate.batch.commands).toHaveLength(3);
+    expect(candidate.batch.commands[1]).toMatchObject({
+      kind: "materialize_support_actor",
+      order: 1,
+      expectedWorldVersion: 8,
+      ...ids,
+      locationId: "location-a",
+      name: supportProfile.name,
+      planIntentKind: "contact",
+      planMethod: "Earn enough before rain closes the bridge market.",
+      priority: 3,
+      steps: [{
+        intentKind: "contact",
+        method: "Earn enough before rain closes the bridge market.",
+        elapsedBounds: { minimumMinutes: 1, maximumMinutes: 10 },
+      }],
+    });
+    expect(candidate.batch.commands[2]).toMatchObject({
+      kind: "record_world_event",
+      order: 2,
+      expectedWorldVersion: 9,
+      performingActorId: ids.actorId,
+      affectedRefs: expect.arrayContaining([
+        { kind: "actor", id: ids.actorId },
+        { kind: "actor", id: PLAYER_ID },
+      ]),
+    });
+  });
+
   it("uses one strict provider/model call and keeps canonical bindings out of its prompt", async () => {
     const workerController = new AbortController();
     const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({ object: proposal, trace: trace() }));
@@ -423,10 +508,10 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("materialize each usable player-visible value in the committed summary");
     expect(String(options.prompt)).toContain("Never say that a value was read, written down, repeated, counted, or confirmed while omitting the value itself");
     expect(String(options.prompt)).toContain(
-      'ALLOWED_HANDLES=["you","guard","here","south","passage","delay","trust","guard-goal"]',
+      'ALLOWED_HANDLES=["you","guard","here","south","passage","delay","trust","guard-goal","introduced-support-actor"]',
     );
     expect(String(options.prompt)).toContain(
-      'HANDLES_BY_KIND={"actor":["you","guard"],"location":["here","south"],"route":["passage"],"pressure":["delay"],"relation":["trust"],"goal":["guard-goal"]}',
+      'HANDLES_BY_KIND={"actor":["you","guard","introduced-support-actor"],"location":["here","south"],"route":["passage"],"pressure":["delay"],"relation":["trust"],"goal":["guard-goal"]}',
     );
     expect(String(options.prompt)).toContain("This includes performingActorHandle, affectedHandles");
     expect(String(options.prompt)).toContain("affectedHandles must not repeat a handle");
@@ -468,13 +553,12 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain(
       "A successful roll resolves the player's effort; it does not create permission or cooperation",
     );
-    expect(String(options.prompt)).toContain("CANONICAL_PEOPLE is the complete person roster for this call");
+    expect(String(options.prompt)).toContain("CANONICAL_PEOPLE is the complete durable person roster at the start of this call");
     expect(String(options.prompt)).toContain("A person name outside this list does not identify an actor, even when SOURCE_MOMENT or prior prose mentions it");
-    expect(String(options.prompt)).toContain("treat any prior mention as unverified hearsay about an unnamed resident");
-    expect(String(options.prompt)).toContain("Do not offer knocking, calling, or waiting for one as the next playable step");
-    expect(String(options.prompt)).toContain("Keep a concrete offer or transaction with the targeted actor");
-    expect(String(options.prompt)).toContain("have the targeted actor state that no actionable offer exists");
-    expect(String(options.prompt)).toContain("write the targeted person's actual spoken reply, silence, gesture, or action");
+    expect(String(options.prompt)).toContain("Unless the materialize_support_actor contract below applies, an unlisted resident cannot own a job");
+    expect(String(options.prompt)).toContain("Use materialize_support_actor only for a contact with unnamed ambient residents in CURRENT_EXACT_SCENE");
+    expect(String(options.prompt)).toContain("Code derives every identity, placement, role, priority, plan step, timing bounds, scope, version, and receipt");
+    expect(String(options.prompt)).toContain("write that targeted person's actual spoken reply, silence, gesture, or action");
     expect(String(options.prompt)).toContain("Do not replace the exchange with audit labels");
     expect(String(options.prompt)).toContain(
       'ACTOR_DIRECTIVES=[{"handle":"guard","name":"Oren Tide","summary":"A guard at the northern gate.","traits":["observant"],"tags":["guard"],"conditions":[],"goals":[{"status":"active","priority":4,"objective":"Keep the route orderly.","motivation":"Protect the harbor."}],"relations":[{"direction":"from","counterpartName":"Unknown person","relationType":"association","intensity":1,"summary":"They have just met."}]}]',
@@ -514,7 +598,7 @@ describe("Campaign Play Game Master", () => {
       "When PLAYER_INTENT targets no actor, every record_world_event must be actorless",
     );
     expect(String(options.prompt)).toContain(
-      "Actor placement changes only through an accepted move_actor effect",
+      "Actor placement changes only through an accepted move_actor or materialize_support_actor effect",
     );
     expect(String(options.prompt)).toContain(
       "VISIBLE_FACTS route handles are code-authoritative topology and access state",
@@ -546,12 +630,9 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain(
       "Every route topology or access statement in summary must agree with these claims",
     );
-    expect(String(options.prompt)).toContain(
-      "leave that response for a later contact action",
-    );
     expect(String(options.prompt)).toContain('"eventClass":"discovery"');
     expect(String(options.prompt)).toContain(
-      "effects[].kind accepts exactly: move_actor, enter_local_scene, set_route_state, set_actor_condition, update_actor_relation, update_actor_goal, advance_pressure, adjust_actor_possession, incur_actor_obligation, pay_actor_obligation, or record_world_event",
+      "effects[].kind accepts exactly: move_actor, enter_local_scene, set_route_state, set_actor_condition, update_actor_relation, update_actor_goal, advance_pressure, adjust_actor_possession, incur_actor_obligation, pay_actor_obligation, materialize_support_actor, or record_world_event",
     );
     expect(String(options.prompt)).toContain(
       "Use pay_actor_obligation only when the resolved result transfers the player's visible copper possession",
@@ -630,7 +711,7 @@ describe("Campaign Play Game Master", () => {
     const promptText = String(generateObject.mock.calls[0]![0].prompt);
     const allowedLine = promptText.split("\n").find((value) => value.startsWith("ALLOWED_HANDLES="));
     expect(JSON.parse(allowedLine!.slice("ALLOWED_HANDLES=".length))).toEqual(
-      requestFrame.handleBindings.map((binding) => binding.handle),
+      [...requestFrame.handleBindings.map((binding) => binding.handle), "introduced-support-actor"],
     );
   });
 

@@ -189,6 +189,7 @@ function frameFixture(
     worldTimeMinutes: setupPhase === "ready" ? 10 : null,
     human,
     acceptedWorld: world,
+    runtimeActors: [],
     runtimeLocations: [],
     runtimeRoutes: [],
     routeStates: [],

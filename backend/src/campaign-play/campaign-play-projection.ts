@@ -87,6 +87,19 @@ export interface CampaignPlayRuntimeRoute {
   worldVersion: number;
 }
 
+export interface CampaignPlayRuntimeActor {
+  id: string;
+  kind: "person";
+  controller: "agent";
+  role: "support";
+  name: string;
+  summary: string;
+  traits: string[];
+  tags: string[];
+  causalReceiptId: string;
+  worldVersion: number;
+}
+
 export interface CampaignPlayLiveActorCondition {
   actorId: string;
   condition: "occupied" | "strained" | "incapacitated";
@@ -152,6 +165,7 @@ export interface CampaignPlayMechanicalProjectionInput {
   acceptedReview: CampaignWorldReview;
   worldTimeMinutes: number | null;
   human: CampaignPlayHumanMechanicalIdentity | null;
+  runtimeActors: readonly CampaignPlayRuntimeActor[];
   runtimeLocations: readonly CampaignPlayRuntimeLocation[];
   runtimeRoutes: readonly CampaignPlayRuntimeRoute[];
   routeStates: readonly CampaignPlayLiveRouteState[];
@@ -362,6 +376,26 @@ export function deriveCampaignPlayLocalSceneTopologyIds(input: {
     locationId: `scene:${identity}`,
     outboundRouteId: `route:${identity}:outbound`,
     returnRouteId: `route:${identity}:return`,
+  };
+}
+
+export function deriveCampaignPlaySupportActorIds(input: {
+  campaignId: string;
+  turnId: string;
+  locationId: string;
+  name: string;
+  summary: string;
+}) {
+  const digest = hashCampaignPlayProjection({
+    domain: "campaign_play_support_actor",
+    ...input,
+  }).slice(0, 32);
+  return {
+    actorId: `support-actor:${digest}`,
+    placementId: `support-placement:${digest}`,
+    goalId: `support-goal:${digest}`,
+    planId: `support-plan:${digest}`,
+    scheduleId: `support-schedule:${digest}`,
   };
 }
 
@@ -662,6 +696,7 @@ export function projectAcceptedTopologyEligibility(
 function isAcceptedMechanicalBase(input: CampaignPlayMechanicalProjectionInput): boolean {
   return input.worldTimeMinutes === null &&
     input.human === null &&
+    input.runtimeActors.length === 0 &&
     input.runtimeLocations.length === 0 &&
     input.runtimeRoutes.length === 0 &&
     input.routeStates.length === 0 &&
@@ -705,6 +740,7 @@ export function projectCampaignPlayMechanicalTruth(
     acceptedContentHash: input.acceptedReview.contentHash,
     worldTimeMinutes: input.worldTimeMinutes,
     human: input.human,
+    runtimeActors: sortByText(input.runtimeActors, (row) => row.id),
     runtimeLocations: sortByText(input.runtimeLocations, (row) => row.id),
     runtimeRoutes: sortByText(input.runtimeRoutes, (row) => row.id),
     routeStates: sortByText(input.routeStates, (row) => row.routeId),

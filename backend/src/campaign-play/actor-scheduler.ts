@@ -1298,10 +1298,22 @@ export function createCampaignPlayActorScheduler(
         throw new CampaignPlayActorSchedulerError("scheduler_frame_invalid");
       }
        const plan = planFromRow(planRow);
-      const actor = state.acceptedReview.actors.find((candidate) => candidate.id === job.actorId);
-      if (!actor || actor.controller !== "agent") {
+      const actorRow = handle.sqlite.prepare(`SELECT id, kind, controller, role, name, summary,
+          traits, tags FROM actors WHERE campaign_id = ? AND id = ?`).get(
+            handle.campaignId,
+            job.actorId,
+          ) as (Omit<CampaignWorldReview["actors"][number], "traits" | "tags"> & {
+            traits: string;
+            tags: string;
+          }) | undefined;
+      if (!actorRow || actorRow.controller !== "agent" || actorRow.kind !== "person") {
         throw new CampaignPlayActorSchedulerError("scheduler_frame_invalid");
       }
+      const actor = {
+        ...actorRow,
+        traits: JSON.parse(actorRow.traits) as string[],
+        tags: JSON.parse(actorRow.tags) as string[],
+      } as CampaignWorldReview["actors"][number];
       const placements = handle.sqlite.prepare(`SELECT id, actor_id AS actorId,
         location_id AS locationId, placement_kind AS placementKind
         FROM actor_placements WHERE campaign_id = ? AND actor_id = ? ORDER BY id`).all(
@@ -1312,25 +1324,21 @@ export function createCampaignPlayActorScheduler(
         placements.filter((placement) => placement.placementKind === "present")
           .map((placement) => placement.locationId),
       );
-      const goals = state.acceptedReview.goals.filter((goal) => goal.actorId === actor.id)
-        .map((goal) => {
-          const live = handle.sqlite.prepare(`SELECT status, priority, objective, motivation
-            FROM actor_goals WHERE campaign_id = ? AND id = ?`).get(
+      const goals = handle.sqlite.prepare(`SELECT id, actor_id AS actorId, objective,
+          motivation, horizon, priority, status FROM actor_goals
+        WHERE campaign_id = ? AND actor_id = ? ORDER BY id`).all(
+          handle.campaignId,
+          actor.id,
+        ) as CampaignWorldReview["goals"];
+      const relations = handle.sqlite.prepare(`SELECT id,
+          source_actor_id AS sourceActorId, target_actor_id AS targetActorId,
+          relation_type AS relationType, summary, intensity
+        FROM actor_relations WHERE campaign_id = ?
+          AND (source_actor_id = ? OR target_actor_id = ?) ORDER BY id`).all(
             handle.campaignId,
-            goal.id,
-          ) as Pick<typeof goal, "status" | "priority" | "objective" | "motivation"> | undefined;
-          return live ? { ...goal, ...live } : goal;
-        }).sort((left, right) => compareText(left.id, right.id));
-      const relations = state.acceptedReview.relations.filter((relation) =>
-        relation.sourceActorId === actor.id || relation.targetActorId === actor.id)
-        .map((relation) => {
-          const live = handle.sqlite.prepare(`SELECT intensity, summary FROM actor_relations
-            WHERE campaign_id = ? AND id = ?`).get(
-            handle.campaignId,
-            relation.id,
-          ) as Pick<typeof relation, "intensity" | "summary"> | undefined;
-          return live ? { ...relation, ...live } : relation;
-        }).sort((left, right) => compareText(left.id, right.id));
+            actor.id,
+            actor.id,
+          ) as CampaignWorldReview["relations"];
       const conditions = handle.sqlite.prepare(`SELECT condition, summary
         FROM campaign_play_actor_conditions
         WHERE campaign_id = ? AND actor_id = ? AND present = 1 ORDER BY condition`).all(

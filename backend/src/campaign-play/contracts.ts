@@ -104,6 +104,7 @@ export const CAMPAIGN_PLAY_COMMAND_KIND_VALUES = [
   "adjust_actor_possession",
   "incur_actor_obligation",
   "pay_actor_obligation",
+  "materialize_support_actor",
   "record_world_event",
 ] as const;
 
@@ -129,6 +130,7 @@ export const CAMPAIGN_PLAY_WORLD_EVENT_KIND_VALUES = [
   "actor_obligation_incurred",
   "actor_possession_adjusted",
   "actor_obligation_payment_applied",
+  "support_actor_materialized",
   "scene_recorded",
 ] as const;
 
@@ -2374,11 +2376,11 @@ export const recordWorldEventCommandSchema = z.object({
     .max(CAMPAIGN_PLAY_LIMITS.affectedRefs),
 }).strict().superRefine((command, context) => {
   const requiresPerformer = command.eventClass === "dialogue" || command.eventClass === "interaction";
-  if (requiresPerformer !== (command.performingActorId !== null)) {
+  if (requiresPerformer && command.performingActorId === null) {
     context.addIssue({
       code: "custom",
       path: ["performingActorId"],
-      message: "Dialogue and interaction require one performing actor; discovery and scene forbid one.",
+      message: "Dialogue and interaction require one performing actor.",
     });
   }
   if (
@@ -2393,6 +2395,38 @@ export const recordWorldEventCommandSchema = z.object({
     });
   }
 });
+
+const materializeSupportActorPlanStepSchema = z.object({
+  intentKind: worldIntentKindSchema,
+  method: shortTextSchema.nullable(),
+  stakes: shortTextSchema.nullable(),
+  observableTrace: shortTextSchema,
+  elapsedBounds: campaignPlayElapsedBoundsSchema,
+}).strict();
+
+export const materializeSupportActorCommandSchema = z.object({
+  ...campaignPlayCommandBaseShape,
+  kind: z.literal("materialize_support_actor"),
+  actorId: idSchema,
+  placementId: idSchema,
+  locationId: idSchema,
+  goalId: idSchema,
+  planId: idSchema,
+  scheduleId: idSchema,
+  name: nameSchema,
+  summary: textSchema,
+  traits: z.array(labelSchema).max(20),
+  tags: z.array(labelSchema).max(20),
+  goalHorizon: z.enum(["immediate", "ongoing"]),
+  goalObjective: shortTextSchema,
+  goalMotivation: shortTextSchema,
+  priority: z.number().int().min(1).max(5),
+  planIntentKind: worldIntentKindSchema,
+  planMethod: shortTextSchema.nullable(),
+  planStakes: shortTextSchema.nullable(),
+  cadenceMinutes: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes),
+  steps: z.array(materializeSupportActorPlanStepSchema).min(1).max(3),
+}).strict();
 
 export const createPlayerActorCommandSchema = z.object({
   ...campaignPlayCommandBaseShape,
@@ -2437,6 +2471,7 @@ export const campaignPlayCommandSchema = z.discriminatedUnion("kind", [
   adjustActorPossessionCommandSchema,
   incurActorObligationCommandSchema,
   payActorObligationCommandSchema,
+  materializeSupportActorCommandSchema,
   recordWorldEventCommandSchema,
 ]);
 
@@ -2458,6 +2493,7 @@ export const rulebookBatchCommandSchema = z.discriminatedUnion("kind", [
   adjustActorPossessionCommandSchema,
   incurActorObligationCommandSchema,
   payActorObligationCommandSchema,
+  materializeSupportActorCommandSchema,
   recordWorldEventCommandSchema,
   createPlayerActorCommandSchema,
   initializePlayerPlacementCommandSchema,
@@ -2571,6 +2607,14 @@ export const playerActorCreatedEventSchema = z.object({
   ...campaignPlayWorldEventBaseShape,
   kind: z.literal("player_actor_created"),
   actorId: idSchema,
+}).strict();
+
+export const supportActorMaterializedEventSchema = z.object({
+  ...campaignPlayWorldEventBaseShape,
+  kind: z.literal("support_actor_materialized"),
+  actorId: idSchema,
+  locationId: idSchema,
+  goalId: idSchema,
 }).strict();
 
 export const playerPlacementInitializedEventSchema = z.object({
@@ -2824,11 +2868,11 @@ export const sceneRecordedEventSchema = z.object({
   summary: textSchema,
 }).strict().superRefine((event, context) => {
   const requiresPerformer = event.eventClass === "dialogue" || event.eventClass === "interaction";
-  if (requiresPerformer !== (event.performingActorId !== null)) {
+  if (requiresPerformer && event.performingActorId === null) {
     context.addIssue({
       code: "custom",
       path: ["performingActorId"],
-      message: "Dialogue and interaction require one performing actor; discovery and scene forbid one.",
+      message: "Dialogue and interaction require one performing actor.",
     });
   }
   if (
@@ -2846,6 +2890,7 @@ export const sceneRecordedEventSchema = z.object({
 
 const campaignPlayWorldEventUnionSchema = z.union([
   playerActorCreatedEventSchema,
+  supportActorMaterializedEventSchema,
   playerPlacementInitializedEventSchema,
   worldTimeInitializedEventSchema,
   pressureInitializedEventSchema,
@@ -3645,6 +3690,7 @@ export const CAMPAIGN_PLAY_WORLD_EVENT_METADATA = {
   actor_obligation_incurred: { commandKind: "incur_actor_obligation" },
   actor_possession_adjusted: { commandKind: "adjust_actor_possession" },
   actor_obligation_payment_applied: { commandKind: "pay_actor_obligation" },
+  support_actor_materialized: { commandKind: "materialize_support_actor" },
   scene_recorded: { commandKind: "record_world_event" },
 } as const satisfies Record<
   CampaignPlayWorldEventKind,
@@ -3986,6 +4032,7 @@ export const CAMPAIGN_PLAY_COMMAND_METADATA = {
   adjust_actor_possession: { modelVisible: true, mechanicalMutation: true },
   incur_actor_obligation: { modelVisible: true, mechanicalMutation: true },
   pay_actor_obligation: { modelVisible: true, mechanicalMutation: true },
+  materialize_support_actor: { modelVisible: true, mechanicalMutation: true },
   record_world_event: { modelVisible: true, mechanicalMutation: false },
   create_player_actor: { modelVisible: false, mechanicalMutation: true },
   initialize_player_placement: { modelVisible: false, mechanicalMutation: true },

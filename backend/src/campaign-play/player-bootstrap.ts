@@ -61,6 +61,7 @@ function bootstrapFrame(state: LoadedCampaignPlayState): CampaignPlayRulebookFra
     worldTimeMinutes: null,
     human: null,
     acceptedWorld: world,
+    runtimeActors: [],
     runtimeLocations: [],
     runtimeRoutes: [],
     routeStates: [],

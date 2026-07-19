@@ -41,7 +41,7 @@ The strongest sequence is the move from Aldo's refusal into the undercity. Each 
 
 Two presentation weaknesses remain. `What changed` and `The moment` often repeat the same paragraph, and the opening event card uses the meta phrase `the player` before narration switches to `you`. Suggested local traversal also says `Try to reach Cinderwatch Undercity` while the player already occupies a child of that location, so the label is mechanically bound but spatially confusing.
 
-The fifth action exposes the next gameplay gap. Ambient patrols can supply a one-turn scenic reaction, but they are not typed support actors: no identity, relation, goal, obligation, or future continuity can attach to them. The canonical architecture already reserves actionable residents for a future typed Rulebook contract. This playtest shows that contract is necessary for ordinary work-seeking play, not merely richer simulation.
+The fifth action exposed the next gameplay gap. Ambient patrols can supply a one-turn scenic reaction, but they are not typed support actors: no identity, goal, plan, schedule, or future continuity can attach to them. The follow-up clean-world playtest in `58-support-actor-materialization-playtest.md` now implements that Rulebook contract and follows one earned resident through creation, reload, a second interaction, an actor-owned plan, and scheduling.
 
 ## Evidence
 

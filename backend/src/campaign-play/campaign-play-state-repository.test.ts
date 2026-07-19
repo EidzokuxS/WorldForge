@@ -216,6 +216,7 @@ function characterBootstrapFrame(
     worldTimeMinutes: null,
     human: null,
     acceptedWorld: world,
+    runtimeActors: [],
     runtimeLocations: [],
     runtimeRoutes: [],
     routeStates: [],

@@ -31,6 +31,7 @@ import {
   type CampaignPlayLiveRouteState,
   type CampaignPlayRuntimeLocation,
   type CampaignPlayRuntimeRoute,
+  type CampaignPlayRuntimeActor,
 } from "./campaign-play-projection.js";
 import {
   createCampaignPlayStateRepository,
@@ -364,9 +365,7 @@ function compileProposal(
         exposure,
         kind: "record_world_event",
         eventClass: recordedEventClass,
-        performingActorId: recordedEventClass === "dialogue" || recordedEventClass === "interaction"
-          ? frame.actorId
-          : null,
+        performingActorId: frame.actorId,
         summary,
         observableTrace: frame.selection.step.observableTrace,
         affectedRefs,
@@ -414,6 +413,17 @@ function loadRulebookFrame(handle: CampaignPlayDatabaseHandle): CampaignPlayRule
     WHERE a.campaign_id = ? AND a.controller = 'human'`).get(campaignId) as CampaignPlayHumanMechanicalIdentity | undefined;
   const routeStates = sqlite.prepare(`SELECT route_id AS routeId, state FROM campaign_play_route_states
     WHERE campaign_id = ? ORDER BY route_id`).all(campaignId) as CampaignPlayLiveRouteState[];
+  const runtimeActors = (sqlite.prepare(`SELECT id, kind, controller, role, name, summary,
+      traits, tags, causal_receipt_id AS causalReceiptId, world_version AS worldVersion
+    FROM actors WHERE campaign_id = ? AND definition_authority = 'campaign_play'
+    ORDER BY id`).all(campaignId) as Array<Omit<CampaignPlayRuntimeActor, "traits" | "tags"> & {
+      traits: string;
+      tags: string;
+    }>).map((row) => ({
+      ...row,
+      traits: JSON.parse(row.traits) as string[],
+      tags: JSON.parse(row.tags) as string[],
+    }));
   const runtimeLocations = (sqlite.prepare(`SELECT id, name, description, kind,
     parent_location_id AS parentLocationId, anchor_location_id AS anchorLocationId,
     tags, causal_receipt_id AS causalReceiptId, world_version AS worldVersion
@@ -459,6 +469,7 @@ function loadRulebookFrame(handle: CampaignPlayDatabaseHandle): CampaignPlayRule
     worldTimeMinutes: state.authority.worldTimeMinutes,
     human: human ?? null,
     acceptedWorld: state.acceptedReview,
+    runtimeActors,
     runtimeLocations,
     runtimeRoutes,
     routeStates,

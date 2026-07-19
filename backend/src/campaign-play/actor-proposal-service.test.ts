@@ -469,7 +469,7 @@ describe("Campaign Play actor proposal service", () => {
     expect(actorCommand).toMatchObject({
       kind: "record_world_event",
       source: { kind: "actor", actorId: "actor-b" },
-      performingActorId: null,
+      performingActorId: "actor-b",
       summary: expect.stringContaining("Wait beside the reef ledger office"),
       exposure: {
         mode: "projectable",
