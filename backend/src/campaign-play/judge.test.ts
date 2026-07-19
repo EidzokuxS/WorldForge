@@ -500,8 +500,12 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("compound requests such as travel then contact");
     expect(sentPrompt).toContain("including a route-bound attempt");
     expect(sentPrompt).toContain("Never add, remove, or change travel");
-    expect(sentPrompt).toContain("A persistent location is the complete current scene");
-    expect(sentPrompt).toContain("Do not reinterpret unmodeled traversal as a local attempt");
+    expect(sentPrompt).toContain("A persistent location is the Rulebook placement boundary");
+    expect(sentPrompt).toContain("may establish a room, corridor, threshold, floor, trail, or other local feature inside that same location");
+    expect(sentPrompt).toContain("physically traverses an already established local feature");
+    expect(sentPrompt).toContain("target the current location, keep movementRouteHandle null");
+    expect(sentPrompt).toContain("never their Rulebook placement");
+    expect(sentPrompt).toContain("PLAYER_INPUT alone cannot invent the feature");
     expect(sentPrompt).toContain("Write clarificationQuestion as a concise in-world question");
     expect(sentPrompt).toContain("Never mention models, scenes, packets, handles, typed routes, schemas, code, or game mechanics");
     expect(sentPrompt).toContain("For a pure move, elapsedBounds.minimumMinutes and elapsedBounds.maximumMinutes must both equal the selected route's travelCost");
@@ -916,6 +920,41 @@ describe("Campaign Play Judge", () => {
       disposition: "clarification_required",
       movementRouteHandle: null,
       clarificationQuestion: "Which open route do you take?",
+    });
+  });
+
+  it("keeps grounded traversal inside the current placement as a route-less attempt", () => {
+    const ruling = createCampaignPlayJudge().compile(frame(), {
+      originalText: "I follow the painted line through the gatehouse corridor until an obstacle stops me.",
+      source: "freeform",
+      choiceHandle: null,
+    }, proposal({
+      kind: "attempt",
+      targets: [{ handle: "location-harbor", kind: "location" }],
+      method: "Follow the established gatehouse corridor cautiously",
+      stakes: "Reach its far threshold or meet the first grounded obstacle",
+      movementRouteHandle: null,
+      citedVisibleFactHandles: ["location-harbor", "observation-latch"],
+      disposition: "uncertain",
+      resultBounds: { minimum: "setback", maximum: "success" },
+      elapsedBounds: { minimumMinutes: 1, maximumMinutes: 6 },
+      uncertainty: {
+        kind: "check",
+        dieSides: 20,
+        difficulty: 10,
+        modifierMinimum: -2,
+        modifierMaximum: 2,
+      },
+      reason: "The established corridor stays inside the current Rulebook placement.",
+    }));
+
+    expect(ruling).toMatchObject({
+      normalizedIntent: {
+        kind: "attempt",
+        targets: [{ handle: "location-harbor", kind: "location" }],
+      },
+      movementRouteHandle: null,
+      disposition: "uncertain",
     });
   });
 
