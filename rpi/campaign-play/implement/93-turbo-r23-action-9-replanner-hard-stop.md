@@ -4,7 +4,7 @@
 
 Run `pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r23` began from the frozen zero-turn Lowwater Ledger template on commit `8469c636`. The rendered Campaign Play UI completed one Opening and ten signed player actions with Z.AI Coding Plan `glm-5-turbo`. Every player choice was made from the visible page, and no action was submitted twice. The required restarts after actions 1 and 10 reproduced the same public state and retained history.
 
-r23 is not a Task 18 pristine promotion lane. During player action 9, the background Actor Replanner produced a proposal that the grounding review rejected for `other_actor_action_not_established`. The durable model stage is `interrupted/model_contract_invalid`, the actor job is `deferred/replan_invalid`, and no actor proposal or receipt was accepted from it. The player turn remained safe and completed, but Task 18 permits no model-contract or semantic invalidity in a pristine lane. The run therefore stops at the action-10 checkpoint.
+r23 is not a Task 18 pristine promotion lane. During player action 9, the live server log reported that the background Actor Replanner failed grounding review for `other_actor_action_not_established`. That subcode is not retained in the SQLite or session artifacts. Durable evidence classifies the model stage as `interrupted/model_contract_invalid` and the actor job as `deferred/replan_invalid`; no actor proposal or receipt was accepted from it. The player turn remained safe and completed, but Task 18 permits no model-contract or semantic invalidity in a pristine lane. The run therefore stops at the action-10 checkpoint.
 
 ## Player journey
 
@@ -23,6 +23,7 @@ Action 10 confirmed that the camp had frayed nets, rope ties, and harness stitch
 - SQLite integrity is `ok`; foreign-key violations are zero.
 - Model stages: `32` accepted and schema-valid; one interrupted and schema-invalid Actor Replanner stage. Every stage requested and used Z.AI Coding Plan `glm-5-turbo`.
 - Hard-stop stage: player action 9, worker epoch `1`, `actual_strategy=strict_object`, `duration_ms=403598`, `finish_reason=tool-calls`, `error_code=model_contract_invalid`.
+- The exact grounding-review subcode came from the live server log and cannot be independently recomputed from the retained database or session files.
 - The affected actor job has `stage=deferred` and `defer_reason=replan_invalid`; no proposal row exists for that job.
 - Restart proof after action 10 matches exactly: public-state hash `0918609c0540230ef185068715d3afa7856d78bf2790b7c317adce85269013b4`, replay hash `6e91e8707de48edd0a325b1c460e6cec69ee5047e734b668c7eae1e52b7a328a`, and checkpoint hash `6e7c295bd2419a37fca20b9d8760c8d63470e8e08143a067167a0220d960d543`.
 - Checkpoint projection hash: `17c260e54b94ce2508feed89ca5a936f71abcdb7060a5e5d1e5c4b1b68cab66a`; protected audit hash: `635aad11e200da3121fc92e76217751ad9f09d23bf5008e74dbd04b9cca241c5`.
