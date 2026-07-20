@@ -284,6 +284,7 @@ describe("campaign play actor replan prompt", () => {
 
     expect(prompt).toContain(`${reason} means`);
     expect(prompt).toContain("Priority 5 ranks highest");
+    expect(prompt).toContain("use at most 4 central targetHandles there instead of listing every target used by later steps");
     expect(prompt).toContain("Do not introduce an absent handle, identifier, state, or fact");
     expect(prompt).toContain("If the actor removes or carries away an object");
     expect(prompt).toContain("the trace must not leave that object at the location");
@@ -291,9 +292,9 @@ describe("campaign play actor replan prompt", () => {
     expect(prompt).toContain("Each later step must begin from state established by accepted events or the preceding step's observableTrace");
     expect(prompt).toContain("Every non-null method and stakes value must be at most 500 characters");
     expect(prompt).toContain("Every step must use a non-null observableTrace string of at most 500 characters");
-    expect(prompt).toContain("Every move step must use exactly one supplied route whose name starts at the actor's occupied location");
-    expect(prompt).toContain("whose state is open");
-    expect(prompt).toContain("Restricted and blocked routes do not support ordinary movement");
+    expect(prompt).toContain("Every move step must target exactly one supplied destination location and no route handle");
+    expect(prompt).toContain("Code selects the matching route");
+    expect(prompt).toContain("restricted and blocked routes do not support ordinary movement");
     expect(prompt).toContain("Every step must include possessionOutcome");
     expect(prompt).toContain("An acquire outcome is {\"kind\":\"acquire\",\"name\":\"...\",\"quantity\":1}");
     expect(prompt).toContain("Every non-move step that targets a location must target the actor's location established for that step");

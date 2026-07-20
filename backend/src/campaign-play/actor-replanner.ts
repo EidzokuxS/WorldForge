@@ -4,6 +4,7 @@ import {
   safeGenerateObject,
   type SafeGenerateTrace,
 } from "../ai/generate-object-safe.js";
+import { createLogger } from "../lib/index.js";
 import {
   campaignPlayActorPlanSchema,
   type CampaignPlayActorIntent,
@@ -35,6 +36,8 @@ import {
   type CampaignPlayActorReplanPromptFrame,
   type CampaignPlayActorReplanProposal,
 } from "./actor-replan-prompts.js";
+
+const log = createLogger("campaign-play-actor-replanner");
 
 export interface CampaignPlayActorReplanRequest {
   jobId: string;
@@ -109,6 +112,39 @@ export class CampaignPlayActorReplannerError extends Error {
     super(code, options);
     this.name = "CampaignPlayActorReplannerError";
   }
+}
+
+type CampaignPlayActorPlanRejectionReason =
+  | "active_goal_unavailable"
+  | "target_unavailable"
+  | "route_not_traversable_from_step_location"
+  | "target_outside_step_location"
+  | "obligation_transition_invalid"
+  | "observable_trace_names_actor"
+  | "compiled_plan_invalid";
+
+class CampaignPlayActorPlanRejectionError extends Error {
+  constructor(readonly reason: CampaignPlayActorPlanRejectionReason, options?: ErrorOptions) {
+    super(reason, options);
+    this.name = "CampaignPlayActorPlanRejectionError";
+  }
+}
+
+interface CampaignPlayActorPlanRejectionArtifact {
+  kind: "actor_plan_rejection";
+  phase: "compilation" | "grounding_review";
+  reason: CampaignPlayActorPlanRejectionReason | "grounding_review_rejected";
+  proposal: CampaignPlayActorReplanProposal;
+  review?: {
+    verdict: "rejected";
+    violations: Array<{
+      stepIndex: number;
+      kind:
+        | "other_actor_action_not_established"
+        | "outcome_not_established"
+        | "contradicts_accepted_frame";
+    }>;
+  };
 }
 
 interface ReplanCompilationFrame {
@@ -219,6 +255,7 @@ function compilationFrame(
   const locationIds = new Set(frame.authorizedRefs
     .filter((reference) => reference.kind === "location")
     .map((reference) => reference.id));
+  const locationNames = new Map<string, string>();
   for (const route of frame.localRoutes) {
     locationIds.add(route.fromLocationId);
     locationIds.add(route.toLocationId);
@@ -228,19 +265,23 @@ function compilationFrame(
       WHERE campaign_id = ? ORDER BY id`).all(handle.campaignId) as Array<{
       id: string; name: string; description: string;
     }>;
-    for (const row of rows) if (locationIds.has(row.id)) entities.push({
-      handle: bind({ kind: "location", id: row.id }),
-      kind: "location",
-      name: row.name,
-      summary: row.description,
-      state: frame.placements.some((placement) => placement.locationId === row.id) ? "occupied" : null,
-    });
+    for (const row of rows) if (locationIds.has(row.id)) {
+      locationNames.set(row.id, row.name);
+      entities.push({
+        handle: bind({ kind: "location", id: row.id }),
+        kind: "location",
+        name: row.name,
+        summary: row.description,
+        state: frame.placements.some((placement) => placement.locationId === row.id) ? "occupied" : null,
+      });
+    }
   }
   for (const route of frame.localRoutes) entities.push({
     handle: bind({ kind: "route", id: route.id }),
     kind: "route",
-    name: `Route from ${bind({ kind: "location", id: route.fromLocationId })} to ${bind({ kind: "location", id: route.toLocationId })}`,
-    summary: `Travel cost ${route.travelCost}`,
+    name: `Route from ${locationNames.get(route.fromLocationId) ?? route.fromLocationId} ` +
+      `to ${locationNames.get(route.toLocationId) ?? route.toLocationId}`,
+    summary: `From ${bind({ kind: "location", id: route.fromLocationId })} to ${bind({ kind: "location", id: route.toLocationId })}; travel cost ${route.travelCost}`,
     state: route.state,
   });
   for (const relation of frame.relations) entities.push({
@@ -327,7 +368,7 @@ function compilePlan(
   const goal = goalRef?.kind === "goal"
     ? frame.goals.find((candidate) => candidate.id === goalRef.id && candidate.status === "active")
     : undefined;
-  if (!goal) throw new CampaignPlayActorReplannerError("replan_state_invalid");
+  if (!goal) throw new CampaignPlayActorPlanRejectionError("active_goal_unavailable");
   const actorName = frame.actor.name.toLowerCase();
   const operative = frame.placements.find((placement) =>
     placement.placementKind === "present");
@@ -336,31 +377,39 @@ function compilePlan(
     originLocationId: string | null,
     enforceStepLocation = true,
   ): { intent: CampaignPlayActorIntent; destinationLocationId: string | null } => {
-    const targets = intent.targetHandles.map((targetHandle) => {
+    let targets = intent.targetHandles.map((targetHandle) => {
       const reference = compilation.refsByHandle.get(targetHandle);
-      if (!reference) throw new CampaignPlayActorReplannerError("replan_state_invalid");
+      if (!reference) throw new CampaignPlayActorPlanRejectionError("target_unavailable");
       return { ...reference };
     });
     let destinationLocationId: string | null = originLocationId;
     if (intent.kind === "move") {
       const routeTargets = targets.filter((target) => target.kind === "route");
       const locationTargets = targets.filter((target) => target.kind === "location");
-      const route = routeTargets.length === 1
-        ? frame.localRoutes.find((candidate) => candidate.id === routeTargets[0]!.id)
-        : undefined;
+      const destination = locationTargets.length === 1 ? locationTargets[0] : undefined;
+      const matchingRoutes = destination === undefined || originLocationId === null
+        ? []
+        : frame.localRoutes.filter((candidate) =>
+            candidate.state === "open"
+            && candidate.fromLocationId === originLocationId
+            && candidate.toLocationId === destination.id);
       if (
-        originLocationId === null || !route || route.state !== "open" ||
-        route.fromLocationId !== originLocationId || locationTargets.length > 1 ||
-        (locationTargets[0] !== undefined && locationTargets[0].id !== route.toLocationId)
+        routeTargets.length !== 0 || targets.length !== 1 || !destination
+        || matchingRoutes.length !== 1
       ) {
-        throw new CampaignPlayActorReplannerError("replan_state_invalid");
+        throw new CampaignPlayActorPlanRejectionError("route_not_traversable_from_step_location");
       }
-      destinationLocationId = route.toLocationId;
+      const route = matchingRoutes[0]!;
+      destinationLocationId = destination.id;
+      targets = [
+        { kind: "route", id: route.id },
+        { kind: "location", id: destination.id },
+      ];
     } else if (
       enforceStepLocation &&
       targets.some((target) => target.kind === "location" && target.id !== originLocationId)
     ) {
-      throw new CampaignPlayActorReplannerError("replan_state_invalid");
+      throw new CampaignPlayActorPlanRejectionError("target_outside_step_location");
     }
     return {
       intent: {
@@ -404,7 +453,7 @@ function compilePlan(
       const targetsCreditor = resolved.intent.targets.some((target) =>
         target.kind === "actor" && target.id === creditor?.id);
       if (creditor?.kind !== "actor" || creditor.id === frame.actorId || !targetsCreditor) {
-        throw new CampaignPlayActorReplannerError("replan_state_invalid");
+        throw new CampaignPlayActorPlanRejectionError("obligation_transition_invalid");
       }
       if (step.obligationOutcome.kind === "incur") return {
         kind: "incur" as const,
@@ -432,7 +481,7 @@ function compilePlan(
         || paymentRow?.actorId !== frame.actorId
         || paymentRow.quantity < step.obligationOutcome.amount
       ) {
-        throw new CampaignPlayActorReplannerError("replan_state_invalid");
+        throw new CampaignPlayActorPlanRejectionError("obligation_transition_invalid");
       }
       return {
         kind: "pay" as const,
@@ -449,7 +498,7 @@ function compilePlan(
       intent: resolved.intent,
       observableTrace: (() => {
         if (step.observableTrace.toLowerCase().includes(actorName)) {
-          throw new CampaignPlayActorReplannerError("replan_state_invalid");
+          throw new CampaignPlayActorPlanRejectionError("observable_trace_names_actor");
         }
         return step.observableTrace;
       })(),
@@ -458,19 +507,23 @@ function compilePlan(
       elapsedBounds: { ...step.elapsedBounds },
     };
   });
-  return campaignPlayActorPlanSchema.parse({
-    planId,
-    campaignId: frame.campaignId,
-    actorId: frame.actorId,
-    goalId: goal.id,
-    planVersion: version,
-    intent: planIntent,
-    preconditions,
-    cadenceMinutes: proposal.cadenceMinutes,
-    priority: proposal.priority,
-    steps,
-    status: "active",
-  });
+  try {
+    return campaignPlayActorPlanSchema.parse({
+      planId,
+      campaignId: frame.campaignId,
+      actorId: frame.actorId,
+      goalId: goal.id,
+      planVersion: version,
+      intent: planIntent,
+      preconditions,
+      cadenceMinutes: proposal.cadenceMinutes,
+      priority: proposal.priority,
+      steps,
+      status: "active",
+    });
+  } catch (cause) {
+    throw new CampaignPlayActorPlanRejectionError("compiled_plan_invalid", { cause });
+  }
 }
 
 function acceptedTrace(trace: Readonly<SafeGenerateTrace>, providerId: string, modelName: string): {
@@ -750,6 +803,7 @@ export function createCampaignPlayActorReplanner(
       requireTurnLease(handle, request.token, startedAt);
       let observedTrace: Readonly<SafeGenerateTrace> | undefined;
       let stageEvidence: ReturnType<typeof acceptedTrace> | undefined;
+      let rejectionArtifact: CampaignPlayActorPlanRejectionArtifact | undefined;
       let processStoppedAfterProviderReturn = false;
       try {
         const generated = await dependencies.generateObject({
@@ -787,7 +841,20 @@ export function createCampaignPlayActorReplanner(
         }
         const proposal = campaignPlayActorReplanProposalSchema.parse(generated.object);
         const latestFrame = scheduler.buildActorFrame(request.jobId);
-        const plan = compilePlan(handle, latestFrame, compilation, proposal);
+        let plan: CampaignPlayActorPlan;
+        try {
+          plan = compilePlan(handle, latestFrame, compilation, proposal);
+        } catch (cause) {
+          if (cause instanceof CampaignPlayActorPlanRejectionError) {
+            rejectionArtifact = {
+              kind: "actor_plan_rejection",
+              phase: "compilation",
+              reason: cause.reason,
+              proposal,
+            };
+          }
+          throw cause;
+        }
         stageEvidence = undefined;
         const reviewed = await dependencies.generateObject({
           model: request.model,
@@ -821,6 +888,16 @@ export function createCampaignPlayActorReplanner(
           throw new CampaignPlayActorReplannerError("replan_budget_exceeded");
         }
         if (reviewed.object.verdict !== "accepted") {
+          rejectionArtifact = {
+            kind: "actor_plan_rejection",
+            phase: "grounding_review",
+            reason: "grounding_review_rejected",
+            proposal,
+            review: {
+              verdict: "rejected",
+              violations: reviewed.object.violations,
+            },
+          };
           throw new CampaignPlayActorReplannerError("replan_state_invalid");
         }
         const artifactJson = canonicalizeCampaignPlayProjection(plan);
@@ -989,6 +1066,27 @@ export function createCampaignPlayActorReplanner(
             })()
           : null;
         const deferInvalidReplan = rejectedSchedule !== null;
+        if (rejectionArtifact !== undefined) {
+          log.event("actor_replan.rejected", {
+            campaignId: handle.campaignId,
+            turnId: frame.turnId,
+            jobId: request.jobId,
+            actorId: frame.actorId,
+            phase: rejectionArtifact.phase,
+            reason: rejectionArtifact.reason,
+            goalHandle: rejectionArtifact.proposal.goalHandle,
+            stepCount: rejectionArtifact.proposal.steps.length,
+            moveTargets: rejectionArtifact.proposal.steps
+              .map((step, index) => step.intent.kind === "move"
+                ? `${index}:${step.intent.targetHandles.join(",")}`
+                : null)
+              .filter((value): value is string => value !== null)
+              .join("|"),
+            reviewViolations: rejectionArtifact.review?.violations
+              .map((violation) => `${violation.stepIndex}:${violation.kind}`)
+              .join("|") ?? "",
+          });
+        }
         try {
           requireTurnLease(handle, request.token, interruptedAt);
         } catch {

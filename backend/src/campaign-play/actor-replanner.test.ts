@@ -171,6 +171,7 @@ function reverseMoveProposalFromPrompt(prompt: string) {
       handle: string;
       kind: string;
       name: string;
+      summary: string;
       state: string | null;
     }>;
   };
@@ -178,8 +179,8 @@ function reverseMoveProposalFromPrompt(prompt: string) {
   const occupied = frame.entities.find((entity) => entity.kind === "location" && entity.state === "occupied");
   const reverseRoute = occupied
     ? frame.entities.find((entity) => entity.kind === "route"
-      && entity.name.endsWith(` to ${occupied.handle}`)
-      && !entity.name.startsWith(`Route from ${occupied.handle} `))
+      && entity.summary.includes(` to ${occupied.handle};`)
+      && !entity.summary.startsWith(`From ${occupied.handle} `))
     : undefined;
   if (!goal || !occupied || !reverseRoute) {
     throw new Error("Actor replan frame requires one active goal and an incoming route.");
@@ -202,6 +203,80 @@ function reverseMoveProposalFromPrompt(prompt: string) {
       obligationOutcome: { kind: "none" },
       elapsedBounds: { minimumMinutes: 2, maximumMinutes: 10 },
     }),
+  };
+}
+
+function destinationMoveProposalFromPrompt(prompt: string) {
+  const startMarker = "ACTOR_FRAME\n";
+  const endMarker = "\nEND_ACTOR_FRAME";
+  const start = prompt.indexOf(startMarker);
+  const end = prompt.indexOf(endMarker);
+  if (start < 0 || end < 0) throw new Error("Actor frame markers are missing.");
+  const frame = JSON.parse(prompt.slice(start + startMarker.length, end)) as {
+    entities: Array<{
+      handle: string;
+      kind: string;
+      name: string;
+      summary: string;
+      state: string | null;
+    }>;
+  };
+  const goal = frame.entities.find((entity) => entity.kind === "goal" && entity.state === "active");
+  const occupied = frame.entities.find((entity) =>
+    entity.kind === "location" && entity.state === "occupied");
+  const outgoingRoute = occupied
+    ? frame.entities.find((entity) =>
+        entity.kind === "route" && entity.summary.startsWith(`From ${occupied.handle} to `))
+    : undefined;
+  const destinationHandle = outgoingRoute?.summary.match(/ to ([^;]+);/)?.[1];
+  const destination = frame.entities.find((entity) =>
+    entity.kind === "location" && entity.handle === destinationHandle);
+  if (!goal || !occupied || !outgoingRoute || !destination) {
+    throw new Error("Actor replan frame requires an active goal and an outgoing destination.");
+  }
+  const moveIntent = {
+    kind: "move" as const,
+    targetHandles: [destination.handle],
+    method: "Walk to the connected market",
+    stakes: "The next lead is there",
+  };
+  const observeIntent = {
+    kind: "observe" as const,
+    targetHandles: [destination.handle],
+    method: "Inspect the market after arriving",
+    stakes: "The lead may have gone cold",
+  };
+  return {
+    proposal: {
+      goalHandle: goal.handle,
+      cadenceMinutes: 15,
+      priority: 4,
+      intent: moveIntent,
+      steps: [
+        {
+          intent: moveIntent,
+          observableTrace: "Fresh boot prints lead into the market.",
+          possessionOutcome: { kind: "none" as const },
+          obligationOutcome: { kind: "none" as const },
+          elapsedBounds: { minimumMinutes: 1, maximumMinutes: 2 },
+        },
+        {
+          intent: observeIntent,
+          observableTrace: "Dust has been disturbed beside the market stalls.",
+          possessionOutcome: { kind: "none" as const },
+          obligationOutcome: { kind: "none" as const },
+          elapsedBounds: { minimumMinutes: 2, maximumMinutes: 4 },
+        },
+        {
+          intent: { ...observeIntent, kind: "wait" as const, method: "Wait beside the stalls" },
+          observableTrace: "A still figure remains beside the market stalls.",
+          possessionOutcome: { kind: "none" as const },
+          obligationOutcome: { kind: "none" as const },
+          elapsedBounds: { minimumMinutes: 2, maximumMinutes: 4 },
+        },
+      ],
+    },
+    routeName: outgoingRoute.name,
   };
 }
 
@@ -849,6 +924,44 @@ describe("Campaign Play actor replanner", () => {
       WHERE campaign_id = ? AND actor_id = 'actor-b' AND plan_id <> 'actor-replanner-plan'`).get(
         CAMPAIGN_ID,
       )).toEqual({ count: 0 });
+  });
+
+  it("derives the directed route from the actor-authored destination", async () => {
+    const { handle, token, jobId } = createReplanFixture();
+    let submittedRouteName = "";
+    const generateObject = vi.fn(async (request: { prompt: string }) => {
+      if (request.prompt.includes("ACTOR_PLAN_REVIEW\n")) {
+        return { object: { verdict: "accepted", violations: [] }, trace: acceptedTrace() };
+      }
+      const authored = destinationMoveProposalFromPrompt(request.prompt);
+      submittedRouteName = authored.routeName;
+      return { object: authored.proposal, trace: acceptedTrace() };
+    });
+    const replanner = createCampaignPlayActorReplanner(handle, {
+      now: () => 1_600,
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const outcome = await replanner.replan({
+      jobId,
+      token,
+      model: {} as LanguageModel,
+      temperature: 0.2,
+      maxOutputTokens: 100,
+      maximumInputTokens: 1_000,
+      maximumOutputTokens: 100,
+      maximumTotalTokens: 2_000,
+      maximumCostMicros: 10_000,
+      createdAt: 1_590,
+    });
+
+    expect(outcome.kind).toBe("replanned");
+    if (outcome.kind !== "replanned") throw new Error("Expected a compiled actor plan.");
+    expect(submittedRouteName).toMatch(/^Route from (?!location:).+ to (?!location:).+$/);
+    expect(outcome.plan.steps[0]!.intent.targets.map((target) => target.kind))
+      .toEqual(["route", "location"]);
+    expect(outcome.plan.steps[1]!.intent.targets.map((target) => target.kind))
+      .toEqual(["location"]);
   });
 
   it("defers a non-move step aimed outside the actor's current scene", async () => {
