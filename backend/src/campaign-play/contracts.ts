@@ -1387,6 +1387,20 @@ export const campaignPlayCharacterSkillSchema = z.object({
   tier: z.enum(["Novice", "Skilled", "Master"]).nullable(),
 }).strict();
 
+export const campaignPlayPlayerProfileAuthoritySchema = z.object({
+  backgroundSummary: textSchema,
+  personaSummary: textSchema,
+  traits: characterListSchema,
+  skills: z.array(campaignPlayCharacterSkillSchema)
+    .max(CAMPAIGN_PLAY_LIMITS.characterList),
+  specialties: characterListSchema,
+  motivations: characterListSchema,
+}).strict();
+
+export type CampaignPlayPlayerProfileAuthority = z.infer<
+  typeof campaignPlayPlayerProfileAuthoritySchema
+>;
+
 export const campaignPlayCharacterDraftSchema:
   z.ZodType<CampaignPlayCharacterDraft> = z.object({
     name: nameSchema,

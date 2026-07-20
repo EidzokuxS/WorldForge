@@ -1029,6 +1029,18 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(frame).toMatchObject({
       sourceTurnId: openingTurnId,
       sourceNarrationId: expect.any(String),
+      player: {
+        name: "Mara Venn",
+        profileDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+        profile: {
+          backgroundSummary: "Mara repairs instruments and follows the storm's impossible harmonics.",
+          personaSummary: "A careful mechanic following an impossible signal.",
+          traits: ["Observant", "Methodical"],
+          skills: [{ name: "Instrument repair", tier: "Master" }],
+          specialties: ["Acoustic mechanisms"],
+          motivations: ["Understand the celestial signal", "Protect vulnerable witnesses"],
+        },
+      },
       judgeInput: source === "freeform"
         ? { source: "freeform", choiceHandle: null }
         : { originalText: suggestion.label, source: "suggested", choiceHandle: suggestion.choiceHandle },
@@ -1037,6 +1049,7 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(isCanonicalHash(frame.sourcePacketHash)).toBe(true);
     expect(JSON.stringify(frame.visibleFacts)).not.toContain("location-c");
     expect(JSON.stringify(frame.visibleFacts)).not.toContain(PLAYER_ID);
+    expect(JSON.stringify(frame.visibleFacts)).not.toContain("impossible harmonics");
     if (source === "suggested") {
       expect(frame.choiceBindings).toContainEqual(expect.objectContaining({
         handle: suggestion.choiceHandle,

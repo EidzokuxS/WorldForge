@@ -64,6 +64,14 @@ function world(): CampaignWorldReview {
 function frame(): CampaignPlayGameMasterFrame {
   return {
     sourceMoment: "Oren paints a fresh white line across the passage latch.",
+    playerProfile: {
+      backgroundSummary: "Fifteen years maintaining the harbor signal bridge.",
+      personaSummary: "A careful mechanic who tests one variable at a time.",
+      traits: ["Mechanic", "Harbor resident"],
+      skills: [{ name: "Instrument repair", tier: "Master" }],
+      specialties: ["Acoustic mechanisms"],
+      motivations: ["Keep the harbor bridge sound"],
+    },
     visibleFacts: [
       { handle: "you", kind: "actor", summary: "You stand by the gate." },
       { handle: "guard", kind: "actor", summary: "A guard waits nearby." },
@@ -708,6 +716,9 @@ describe("Campaign Play Game Master", () => {
     expect(String(reviewOptions.prompt)).toContain('"typedResourceEffects":[]');
     expect(String(options.prompt)).toContain("opaque handles");
     expect(String(options.prompt)).toContain("SOURCE_MOMENT is the exact accepted player-visible scene");
+    expect(String(options.prompt)).toContain("PLAYER_PROFILE is protected authority for the player's durable identity, history, and capabilities");
+    expect(String(options.prompt)).toContain("must not assert the opposite of PLAYER_PROFILE as fact");
+    expect(String(options.prompt)).toContain('PLAYER_PROFILE={"backgroundSummary":"Fifteen years maintaining the harbor signal bridge."');
     expect(String(options.prompt)).toContain(
       'SOURCE_MOMENT="Oren paints a fresh white line across the passage latch."',
     );

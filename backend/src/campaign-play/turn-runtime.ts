@@ -22,6 +22,7 @@ import {
   campaignPlayJudgeArtifactSchema,
   campaignPlayNarrationSchema,
   campaignPlayNarratorPacketSchema,
+  campaignPlayPlayerProfileAuthoritySchema,
   campaignPlayTurnAdmissionRequestSchema,
   rulebookCommandBatchSchema,
   validateNarrationAgainstPacket,
@@ -172,6 +173,8 @@ const playerActionAdmissionFrameSchema = z.object({
     actorId: line(CAMPAIGN_PLAY_LIMITS.id),
     actorHandle: line(CAMPAIGN_PLAY_LIMITS.handle),
     name: line(CAMPAIGN_PLAY_LIMITS.name),
+    profileDigest: hashSchema,
+    profile: campaignPlayPlayerProfileAuthoritySchema,
   }).strict(),
   judgeInput: judgeInputSchema,
   visibleFacts: z.array(campaignPlayJudgeVisibleFactSchema).max(40),
@@ -232,6 +235,39 @@ const playerActionAdmissionFrameSchema = z.object({
     });
   }
 });
+
+const playerCharacterRecordProjectionSchema = z.object({
+  identity: z.object({
+    id: line(CAMPAIGN_PLAY_LIMITS.id),
+    campaignId: line(CAMPAIGN_PLAY_LIMITS.id),
+    displayName: line(CAMPAIGN_PLAY_LIMITS.name),
+    role: z.literal("player"),
+    behavioralCore: z.object({
+      motives: z.array(line(CAMPAIGN_PLAY_LIMITS.label))
+        .max(CAMPAIGN_PLAY_LIMITS.characterList),
+    }).passthrough().optional(),
+  }).passthrough(),
+  profile: z.object({
+    backgroundSummary: z.string().min(1).max(CAMPAIGN_PLAY_LIMITS.text)
+      .refine((value) => value === value.trim()),
+    personaSummary: z.string().min(1).max(CAMPAIGN_PLAY_LIMITS.text)
+      .refine((value) => value === value.trim()),
+  }).passthrough(),
+  motivations: z.object({
+    shortTermGoals: z.array(line(CAMPAIGN_PLAY_LIMITS.label))
+      .max(CAMPAIGN_PLAY_LIMITS.characterList),
+    longTermGoals: z.array(line(CAMPAIGN_PLAY_LIMITS.label))
+      .max(CAMPAIGN_PLAY_LIMITS.characterList),
+    drives: z.array(line(CAMPAIGN_PLAY_LIMITS.label))
+      .max(CAMPAIGN_PLAY_LIMITS.characterList),
+  }).passthrough(),
+  capabilities: z.object({
+    traits: z.array(line(CAMPAIGN_PLAY_LIMITS.label))
+      .max(CAMPAIGN_PLAY_LIMITS.characterList).optional(),
+    skills: campaignPlayPlayerProfileAuthoritySchema.shape.skills,
+    specialties: campaignPlayPlayerProfileAuthoritySchema.shape.specialties,
+  }).passthrough(),
+}).passthrough();
 
 export type CampaignPlayPlayerActionAdmissionFrame = z.infer<
   typeof playerActionAdmissionFrameSchema
@@ -342,6 +378,8 @@ interface HumanRow {
   controller: string;
   role: string;
   name: string;
+  profileDigest: string;
+  profile: z.infer<typeof campaignPlayPlayerProfileAuthoritySchema>;
 }
 
 interface ObservationBindingRow {
@@ -541,19 +579,81 @@ function loadCompletedPublicMoment(
 }
 
 function humanPlayer(handle: CampaignPlayDatabaseHandle): HumanRow {
-  const rows = handle.sqlite.prepare(`SELECT id AS actorId, kind, controller, role, name
-    FROM actors WHERE campaign_id = ? AND controller = 'human' ORDER BY id`).all(
+  const rows = handle.sqlite.prepare(`SELECT a.id AS actorId, a.kind, a.controller,
+      a.role, a.name, c.record_hash AS recordHash, c.record_json AS recordJson
+    FROM actors a
+    LEFT JOIN campaign_play_characters c
+      ON c.actor_id = a.id AND c.campaign_id = a.campaign_id
+    WHERE a.campaign_id = ? AND a.controller = 'human' ORDER BY a.id`).all(
       handle.campaignId,
-    ) as HumanRow[];
+    ) as Array<{
+      actorId: string;
+      kind: string;
+      controller: string;
+      role: string;
+      name: string;
+      recordHash: string | null;
+      recordJson: string | null;
+    }>;
   if (
     rows.length !== 1 || rows[0]!.kind !== "person" || rows[0]!.role !== "player"
+    || rows[0]!.recordHash === null || rows[0]!.recordJson === null
   ) {
     throw new CampaignPlayTurnRuntimeError(
       "turn_state_invalid",
       "Campaign Play action admission requires one canonical human player actor.",
     );
   }
-  return rows[0]!;
+  const row = rows[0]!;
+  let stored: unknown;
+  try {
+    stored = JSON.parse(row.recordJson!) as unknown;
+  } catch (cause) {
+    throw new CampaignPlayTurnRuntimeError(
+      "turn_state_invalid",
+      "Campaign Play action admission requires a valid human player CharacterRecord.",
+      { cause },
+    );
+  }
+  const record = playerCharacterRecordProjectionSchema.safeParse(stored);
+  if (
+    !record.success
+    || record.data.identity.id !== row.actorId
+    || record.data.identity.campaignId !== handle.campaignId
+    || record.data.identity.displayName !== row.name
+    || hashCampaignPlayProjection({
+      domain: "campaign_play_character_profile",
+      record: stored as CampaignPlayProjectionRecord,
+    }) !== row.recordHash
+  ) {
+    throw new CampaignPlayTurnRuntimeError(
+      "turn_state_invalid",
+      "Campaign Play action admission requires a canonical human player CharacterRecord.",
+      { cause: record.success ? undefined : record.error },
+    );
+  }
+  const motivations = [...new Set([
+    ...(record.data.identity.behavioralCore?.motives ?? []),
+    ...record.data.motivations.shortTermGoals,
+    ...record.data.motivations.longTermGoals,
+    ...record.data.motivations.drives,
+  ])];
+  return {
+    actorId: row.actorId,
+    kind: row.kind,
+    controller: row.controller,
+    role: row.role,
+    name: row.name,
+    profileDigest: row.recordHash!,
+    profile: campaignPlayPlayerProfileAuthoritySchema.parse({
+      backgroundSummary: record.data.profile.backgroundSummary,
+      personaSummary: record.data.profile.personaSummary,
+      traits: record.data.capabilities.traits ?? [],
+      skills: record.data.capabilities.skills,
+      specialties: record.data.capabilities.specialties,
+      motivations,
+    }),
+  };
 }
 
 function candidateBindings(
@@ -725,7 +825,13 @@ function buildPublicAuthority(input: {
     .filter((reference) => reference.kind === "world_event")
     .map((reference) => reference.id);
   return {
-    player: { actorId: human.actorId, actorHandle, name: human.name },
+    player: {
+      actorId: human.actorId,
+      actorHandle,
+      name: human.name,
+      profileDigest: human.profileDigest,
+      profile: human.profile,
+    },
     visibleFacts,
     handleBindings,
     choiceBindings,
@@ -868,7 +974,8 @@ function currentGameMasterFrame(
     mechanical.acceptedContentHash !== admission.acceptedContentHash ||
     mechanical.worldVersion !== admission.baseWorldVersion ||
     mechanical.worldTimeMinutes !== admission.worldTimeMinutes ||
-    mechanical.human?.actorId !== admission.player.actorId
+    mechanical.human?.actorId !== admission.player.actorId ||
+    mechanical.human.recordHash !== admission.player.profileDigest
   ) {
     throw new CampaignPlayTurnRuntimeError(
       "turn_artifact_invalid",
@@ -880,7 +987,15 @@ function currentGameMasterFrame(
     packet: admission.sourcePacket,
     narration: admission.sourceNarration,
     mechanicalFrame: mechanical,
-    human: humanPlayer(handle),
+    human: {
+      actorId: admission.player.actorId,
+      kind: "person",
+      controller: "human",
+      role: "player",
+      name: admission.player.name,
+      profileDigest: admission.player.profileDigest,
+      profile: admission.player.profile,
+    },
     judgeInput: admission.judgeInput,
   });
   if (
@@ -901,6 +1016,7 @@ function currentGameMasterFrame(
     admission,
     frame: {
       sourceMoment: admission.sourceNarration.displayText,
+      playerProfile: admission.player.profile,
       visibleFacts: admission.visibleFacts,
       handleBindings: admission.handleBindings,
       actorContinuity: loadCampaignPlayActorContinuity(
@@ -1467,6 +1583,7 @@ export function createCampaignPlayTurnRuntime(
                   visibleRoutes: judgeVisibleRoutes,
                   worldTimeMinutes: admission.worldTimeMinutes,
                   sourceMoment: admission.sourceNarration.displayText,
+                  playerProfile: admission.player.profile,
                   visibleFacts: admission.visibleFacts,
                   depletedPlayerPossessions: current.frame.rulebookFrame.possessions
                     .filter((possession) =>
