@@ -700,6 +700,15 @@ function publicEntry(
     title = "At the start";
     text = commandPayload.summary;
   } else if (
+    exposure.channel === "direct_perception"
+    && exposure.commandKind === "materialize_support_actor"
+    && eventSource.kind === "system"
+    && eventSource.system === "game_master"
+    && typeof commandPayload.summary === "string"
+  ) {
+    title = "Seen nearby";
+    text = commandPayload.summary;
+  } else if (
     exposure.channel === "direct_perception" && exposure.eventKind === "actor_moved" &&
     typeof commandPayload.actorId === "string" && typeof commandPayload.toLocationId === "string"
   ) {

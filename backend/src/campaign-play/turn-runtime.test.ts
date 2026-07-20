@@ -1290,6 +1290,21 @@ describe("Campaign Play player-action turn runtime", () => {
       WHERE campaign_id = ? AND actor_id = ?`).get(CAMPAIGN_ID, actor.id)).toEqual({ value: 1 });
 
     await advanceUntilStage(runtime, time, admission.turnId, "completed");
+    const materializationObservation = handle.sqlite.prepare(`SELECT observation.public_entry_json AS publicEntryJson
+      FROM campaign_play_observations observation
+      JOIN campaign_play_events event ON event.event_id = observation.event_id
+        AND event.campaign_id = observation.campaign_id
+      JOIN campaign_play_commands command ON command.command_id = event.command_id
+        AND command.campaign_id = event.campaign_id
+      WHERE event.turn_id = ? AND command.command_kind = 'materialize_support_actor'`)
+      .get(admission.turnId) as { publicEntryJson: string };
+    expect(JSON.parse(materializationObservation.publicEntryJson)).toMatchObject({
+      title: "Seen nearby",
+      text: "An independent courier whose rain-softened satchel strap needs repair before an eastbound run.",
+      consequence: {
+        whatChanged: "An independent courier whose rain-softened satchel strap needs repair before an eastbound run.",
+      },
+    });
     const continuedState = createCampaignPlayStateRepository(handle).loadState()!;
     const continuedAdmission = runtime.admitAction({
       request: admissionRequest(

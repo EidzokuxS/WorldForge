@@ -596,6 +596,9 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("copy FROZEN_CHOICE kind and every frozen target");
     expect(sentPrompt).toContain("visible nonplayer actors whose participation, consent, or reaction is material");
     expect(sentPrompt).toContain("Evaluate every visible nonplayer actor exactly once in visibleActorReactions");
+    expect(sentPrompt).toContain("visibleActorReactions length must be exactly 1");
+    expect(sentPrompt).toContain("Every entry requires a non-empty reason string");
+    expect(sentPrompt).toContain('VISIBLE_ACTOR_REACTION_HANDLES=["actor-guard"]');
     expect(sentPrompt).toContain("even when its mechanical disposition is impossible or its result is no_effect");
     expect(sentPrompt).toContain("Code will add every immediate actor to normalized targets");
     expect(sentPrompt).toContain(
