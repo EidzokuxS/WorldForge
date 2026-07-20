@@ -8,6 +8,7 @@ import {
 import {
   getSafeGenerateObjectErrorCode,
   getSafeGenerateObjectTrace,
+  isSafeGenerateObjectContractErrorCode,
   safeGenerateObject,
   type SafeGenerateErrorCode,
   type SafeGenerateTrace,
@@ -656,11 +657,9 @@ export function createCampaignPlayNarrator(
           errorCode: safeCode ?? "narration_invalid",
         } satisfies CampaignPlayNarratorModelEvidence : null;
         const code: CampaignPlayNarratorErrorCode =
-          safeCode === "schema_validation_failed" ||
-                safeCode === "invalid_structured_tool_call" ||
-                safeCode === "missing_structured_tool_call"
-              ? "model_contract_failed"
-              : "transport_interrupted";
+          isSafeGenerateObjectContractErrorCode(safeCode)
+            ? "model_contract_failed"
+            : "transport_interrupted";
         throw new CampaignPlayNarratorError(code, modelEvidence, { cause });
       }
       const modelEvidence = evidence(

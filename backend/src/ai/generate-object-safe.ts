@@ -110,6 +110,16 @@ export function getSafeGenerateObjectErrorCode(error: unknown): SafeGenerateErro
   return error instanceof SafeGenerateError ? error.code ?? null : null;
 }
 
+export function isSafeGenerateObjectContractErrorCode(
+  code: SafeGenerateErrorCode | null,
+): boolean {
+  return code === "missing_structured_tool_call"
+    || code === "invalid_structured_tool_call"
+    || code === "schema_validation_failed"
+    || code === "native_output_unavailable"
+    || code === "invalid_json";
+}
+
 export function getSafeGenerateObjectTrace(
   error: unknown,
 ): Readonly<SafeGenerateTrace> | null {

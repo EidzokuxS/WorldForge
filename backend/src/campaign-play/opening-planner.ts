@@ -8,6 +8,7 @@ import {
 import {
   getSafeGenerateObjectErrorCode,
   getSafeGenerateObjectTrace,
+  isSafeGenerateObjectContractErrorCode,
   safeGenerateObject,
   type SafeGenerateErrorCode,
   type SafeGenerateTrace,
@@ -1384,9 +1385,7 @@ export function createCampaignPlayOpeningPlanner(
         const code = getSafeGenerateObjectErrorCode(error);
         const trace = getSafeGenerateObjectTrace(error);
         const plannerCode: CampaignPlayOpeningPlannerErrorCode =
-          code === "schema_validation_failed" ||
-              code === "invalid_structured_tool_call" ||
-              code === "missing_structured_tool_call"
+          isSafeGenerateObjectContractErrorCode(code)
             ? "model_contract_failed"
             : "transport_interrupted";
         const evidence: CampaignPlayOpeningModelEvidence = {

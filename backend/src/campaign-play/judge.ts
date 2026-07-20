@@ -9,6 +9,7 @@ import {
 import {
   getSafeGenerateObjectErrorCode,
   getSafeGenerateObjectTrace,
+  isSafeGenerateObjectContractErrorCode,
   safeGenerateObject,
   type SafeGenerateErrorCode,
   type SafeGenerateTrace,
@@ -813,8 +814,7 @@ export function createCampaignPlayJudge(
         const base = trace ? evidenceFromTrace(trace, request.budget, durationMs) : null;
         const safeCode = getSafeGenerateObjectErrorCode(cause);
         const code: CampaignPlayJudgeErrorCode =
-          safeCode === "schema_validation_failed" || safeCode === "invalid_structured_tool_call" ||
-              safeCode === "missing_structured_tool_call"
+          isSafeGenerateObjectContractErrorCode(safeCode)
             ? "model_contract_failed"
             : "transport_interrupted";
         throw new CampaignPlayJudgeError(code, base ? { ...base, errorCode: safeCode ?? code } : null, { cause });

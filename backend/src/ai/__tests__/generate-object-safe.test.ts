@@ -64,6 +64,7 @@ vi.mock("../../lib/index.js", () => ({
 const {
   getSafeGenerateObjectErrorCode,
   getSafeGenerateObjectTrace,
+  isSafeGenerateObjectContractErrorCode,
   isSafeGenerateObjectError,
   safeGenerateObject,
 } = await import("../generate-object-safe.js");
@@ -664,11 +665,14 @@ describe("safeGenerateObject", () => {
       retries: 1,
       allowTextFallback: false,
       allowRepair: false,
-    })).rejects.toSatisfy((error: unknown) =>
-      isSafeGenerateObjectError(error)
-      && error instanceof Error
-      && error.message.includes("No output generated")
-    );
+    })).rejects.toSatisfy((error: unknown) => {
+      const code = getSafeGenerateObjectErrorCode(error);
+      return isSafeGenerateObjectError(error)
+        && isSafeGenerateObjectContractErrorCode(code)
+        && code === "native_output_unavailable"
+        && error instanceof Error
+        && error.message.includes("No output generated");
+    });
 
     expect(mockLogEvent).toHaveBeenCalledWith("llm.attempt", expect.objectContaining({
       success: false,
@@ -920,6 +924,18 @@ describe("safeGenerateObject", () => {
       getSafeGenerateObjectErrorCode(error) === "missing_structured_tool_call"
       && isSafeGenerateObjectError(error)
     );
+  });
+
+  it("separates strict output contract failures from transport interruptions", () => {
+    expect(([
+      "missing_structured_tool_call",
+      "invalid_structured_tool_call",
+      "schema_validation_failed",
+      "native_output_unavailable",
+      "invalid_json",
+    ] as const).every((code) => isSafeGenerateObjectContractErrorCode(code))).toBe(true);
+    expect(isSafeGenerateObjectContractErrorCode("text_fallback_disabled")).toBe(false);
+    expect(isSafeGenerateObjectContractErrorCode(null)).toBe(false);
   });
 
   it("exposes the read-only trace from a structured generation error", async () => {

@@ -4,6 +4,7 @@ import { CAMPAIGN_PLAY_LIMITS, CAMPAIGN_PLAY_ROUTE_STATE_VALUES } from "@worldfo
 import {
   getSafeGenerateObjectErrorCode,
   getSafeGenerateObjectTrace,
+  isSafeGenerateObjectContractErrorCode,
   safeGenerateObject,
   type SafeGenerateTrace,
 } from "../ai/generate-object-safe.js";
@@ -1870,8 +1871,7 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
         const trace = getSafeGenerateObjectTrace(cause);
         const value = trace ? evidence(trace, request.budget, Date.now() - started) : null;
         const code: CampaignPlayGameMasterErrorCode =
-          safeCode === "schema_validation_failed" || safeCode === "invalid_structured_tool_call" ||
-              safeCode === "missing_structured_tool_call"
+          isSafeGenerateObjectContractErrorCode(safeCode)
             ? "model_contract_failed"
             : "transport_interrupted";
         throw new CampaignPlayGameMasterError(code, value ? { ...value, errorCode: safeCode ?? code } : null, null, { cause });
@@ -1930,8 +1930,7 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
             ? modelEvidence
             : combineEvidence(modelEvidence, reviewerEvidence);
           const code: CampaignPlayGameMasterErrorCode =
-            safeCode === "schema_validation_failed" || safeCode === "invalid_structured_tool_call" ||
-                safeCode === "missing_structured_tool_call"
+            isSafeGenerateObjectContractErrorCode(safeCode)
               ? "model_contract_failed"
               : "transport_interrupted";
           throw new CampaignPlayGameMasterError(
