@@ -1143,7 +1143,9 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain("The compiler uses selectedScene.routeId");
     expect(prompt).toContain("The compiler uses selectedScene.supportActorId");
     expect(prompt).toContain("The compiler takes the hidden location, goal, and observable trace");
-    expect(prompt).toContain("route_state, exposure contains exactly channel and triggers");
+    expect(prompt).toContain(
+      'route_state, exposure contains exactly channel and triggers. Set triggers to a unique array of one to three exact literals chosen only from "inspect", "attempt", and "traverse".',
+    );
     expect(prompt).toContain("witness_report, exposure contains exactly channel");
     expect(prompt).toContain("local_aftermath, exposure contains exactly channel and validUntilWorldTimeMinutes");
     expect(prompt).toContain("Do not add validUntilWorldTimeMinutes to route_state or witness_report");
