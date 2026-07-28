@@ -37,7 +37,7 @@ export interface CampaignPlayLiveSessionManifest {
   initialRuntimeHash: string;
 }
 
-interface PendingManualDecision {
+export interface PendingManualDecision {
   playerActionNumber: number;
   control: "choice" | "freeform";
   chosenText: string;
@@ -46,6 +46,15 @@ interface PendingManualDecision {
   chooser: string;
   signedAt: number;
   decisionNote: string;
+}
+
+export interface CampaignPlayCancelledDecision {
+  runId: string;
+  campaignId: string;
+  pendingDecision: PendingManualDecision;
+  reason: string;
+  cancelledAt: number;
+  publicProjectionHash: string;
 }
 
 function sha256(value: string): string {
@@ -85,6 +94,13 @@ function verifyTemplateWorldSource(
 
 function writeJson(filePath: string, value: unknown): void {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function writeJsonExclusive(filePath: string, value: unknown): void {
+  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, {
+    encoding: "utf8",
+    flag: "wx",
+  });
 }
 
 function readJson<T>(filePath: string): T {
@@ -435,6 +451,88 @@ export function bindCampaignPlayManualDecision(
   } finally {
     handle.close();
   }
+}
+
+export async function cancelCampaignPlayManualDecision(input: {
+  runConfig: CampaignPlayRunConfig;
+  reason: string;
+  cancelledAt?: number;
+}): Promise<CampaignPlayCancelledDecision> {
+  const config = assertLiveConfig(input.runConfig);
+  const root = campaignPlayLiveSessionRoot(config);
+  const manifest = sessionManifest(config);
+  assertSessionOwnership(config, manifest);
+  const reason = input.reason.trim();
+  if (!reason) throw new Error("A cancellation reason is required.");
+  const cancelledAt = input.cancelledAt ?? Date.now();
+  if (!Number.isSafeInteger(cancelledAt) || cancelledAt < 0) {
+    throw new Error("Cancellation time must be a nonnegative safe integer.");
+  }
+
+  const pendingPath = path.join(root, "pending-decision.json");
+  if (!fs.existsSync(pendingPath)) {
+    throw new Error("No signed manual decision is awaiting cancellation.");
+  }
+  const pending = readJson<PendingManualDecision>(pendingPath);
+  if (
+    !Number.isSafeInteger(pending.playerActionNumber)
+    || pending.playerActionNumber < 1
+    || !Number.isFinite(pending.signedAt)
+  ) {
+    throw new Error("The pending manual decision has invalid action numbering or signature time.");
+  }
+
+  const actions = readJsonLines<CampaignPlayBrowserActionEvidence>(
+    path.join(root, "browser-actions.jsonl"),
+  ).map((record) => campaignPlayBrowserActionEvidenceSchema.parse(record));
+  if (actions.some((action, index) => action.playerActionNumber !== index + 1)) {
+    throw new Error("Bound browser actions are not numbered contiguously.");
+  }
+  if (pending.playerActionNumber !== actions.length + 1) {
+    throw new Error("The pending manual decision is not the next action.");
+  }
+
+  const state = await loadPublicState(config.campaignId);
+  if (
+    state.phase !== "ready"
+    || typeof state.projectionHash !== "string"
+    || state.projectionHash.length === 0
+    || state.activeTurn !== null
+  ) {
+    throw new Error("A pending manual decision can only be cancelled from ready state without an active turn.");
+  }
+
+  const handle = openCampaignPlayDatabase(config.campaignId);
+  try {
+    const captured = captureCampaignPlayReplay(handle);
+    const playerTurns = captured.report.tables.turns.filter((row) => row.turn_kind === "player_action");
+    if (playerTurns.length !== actions.length) {
+      throw new Error("A pending manual decision cannot be cancelled after an unbound durable player turn.");
+    }
+    if (captured.report.publicState.hash !== state.projectionHash) {
+      throw new Error("The live API projection hash does not match SQLite public-state authority.");
+    }
+  } finally {
+    handle.close();
+  }
+
+  const cancellation: CampaignPlayCancelledDecision = {
+    runId: config.runId,
+    campaignId: config.campaignId,
+    pendingDecision: pending,
+    reason,
+    cancelledAt,
+    publicProjectionHash: state.projectionHash,
+  };
+  const cancellationRoot = path.join(root, "cancelled-decisions");
+  const cancellationPath = path.join(
+    cancellationRoot,
+    `action-${pending.playerActionNumber}-signed-${pending.signedAt}.json`,
+  );
+  fs.mkdirSync(cancellationRoot, { recursive: true });
+  writeJsonExclusive(cancellationPath, cancellation);
+  fs.rmSync(pendingPath);
+  return cancellation;
 }
 
 interface CampaignPlayReloadCapture {

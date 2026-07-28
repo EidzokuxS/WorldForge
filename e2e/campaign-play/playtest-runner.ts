@@ -13,6 +13,7 @@ import {
   bindCampaignPlayManualDecision,
   captureCampaignPlayReloadBoundary,
   captureCampaignPlaySubscriptionQuota,
+  cancelCampaignPlayManualDecision,
   loadCampaignPlayLiveSession,
   prepareCampaignPlayLiveSession,
   stageCampaignPlayManualDecision,
@@ -147,6 +148,16 @@ async function runLiveLane(config: CampaignPlayRunConfig, phase: string): Promis
       process.stdout.write(`${JSON.stringify({ phase, evidence })}\n`);
       return;
     }
+    case "cancel-decision": {
+      const reason = argumentValue("--reason");
+      if (reason === null) throw new Error("--reason is required for cancel-decision.");
+      const cancellation = await cancelCampaignPlayManualDecision({
+        runConfig: config,
+        reason,
+      });
+      process.stdout.write(`${JSON.stringify({ phase, cancellation })}\n`);
+      return;
+    }
     case "reload-before":
     case "reload-after": {
       const boundary = phase === "reload-before" ? "before" : "after";
@@ -223,7 +234,7 @@ async function runLiveLane(config: CampaignPlayRunConfig, phase: string): Promis
       return;
     }
     default:
-      throw new Error("--live-phase must be prepare, decide, bind, reload-before, reload-after, or finalize.");
+      throw new Error("--live-phase must be prepare, decide, bind, cancel-decision, reload-before, reload-after, or finalize.");
   }
 }
 

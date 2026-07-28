@@ -22,12 +22,15 @@ The first playable bundle requires:
 
 `live-session.ts` owns the evidence staging boundary. `prepare` freezes accepted provenance and topology before character creation. `decide` records the human choice, its visible-state hash, and the reason for choosing it before submission. `bind` accepts that decision only when the next and only next durable player turn completed with the exact same input. A second pending decision, a mismatched control or text, a post-submission signature, or more than one unbound turn fails closed.
 
+`cancel-decision` archives one unsubmitted pending decision with an operator reason and the current public projection before clearing its pending slot; it fails closed once any corresponding durable player turn exists.
+
 The supported runner phases are:
 
 ```powershell
 node --import tsx e2e/campaign-play/playtest-runner.ts --lane first-playable --run-config <config> --live-phase prepare
 node --import tsx e2e/campaign-play/playtest-runner.ts --lane first-playable --run-config <config> --live-phase decide --control freeform --chosen-text <text> --decision-note <note>
 node --import tsx e2e/campaign-play/playtest-runner.ts --lane first-playable --run-config <config> --live-phase bind
+node --import tsx e2e/campaign-play/playtest-runner.ts --lane first-playable --run-config <config> --live-phase cancel-decision --reason <reason>
 node --import tsx e2e/campaign-play/playtest-runner.ts --lane first-playable --run-config <config> --live-phase reload-before
 node --import tsx e2e/campaign-play/playtest-runner.ts --lane first-playable --run-config <config> --live-phase reload-after
 node --import tsx e2e/campaign-play/playtest-runner.ts --lane first-playable --run-config <config>
@@ -55,6 +58,7 @@ Metered runs derive each stage cost from the exact pricing frozen in that turn's
 ## Verification so far
 
 - Live session regressions prove pre-character eligibility freeze, one pending-decision boundary, exact freeform binding, and duplicate rejection.
+- Four focused cancellation regressions prove immutable archival, same-action restaging, required reasons, ready-state and numbering checks, and refusal after an unbound durable player turn. Standalone strict typechecking for `live-session.ts` and backend typechecking pass. Main humanizer/deslop review kept the runner contract concrete and preserved the distinction between cancelling an unsubmitted evidence record and changing campaign state.
 - Bundle regressions prove signed browser evidence, manual notes, screenshots, and reload probes merge into a promotion-eligible first-playable bundle.
 - Deterministic replay regressions remain byte-identical after extracting the shared read-only report capture.
 - E2E typecheck, focused live/bundle/replay tests, capture-script syntax, and diff check pass.

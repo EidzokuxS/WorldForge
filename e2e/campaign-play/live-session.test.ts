@@ -11,6 +11,7 @@ import { CAMPAIGN_PLAY_EVIDENCE_VERSION, type CampaignPlayRunConfig } from "./co
 import { createDefaultSettings } from "@worldforge/shared";
 import {
   bindCampaignPlayManualDecision,
+  cancelCampaignPlayManualDecision,
   captureCampaignPlayReloadBoundary,
   captureCampaignPlaySubscriptionQuota,
   campaignPlayLiveSessionRoot,
@@ -21,6 +22,7 @@ import {
   createSeededAcceptedCampaign,
   runAcceptedCampaignPlayReplay,
 } from "./seeded-replay.js";
+import { captureCampaignPlayReplay } from "./replay-report.js";
 
 const roots: string[] = [];
 
@@ -98,6 +100,32 @@ function subscriptionConfig(outputRoot: string, campaignId: string): CampaignPla
     restartAfterPlayerActions: [],
     operators: { runner: "runner", player: "manual-player", auditor: "auditor" },
   };
+}
+
+function writeLiveSessionFixture(
+  config: CampaignPlayRunConfig,
+  replay: ReturnType<typeof captureCampaignPlayReplay>,
+): string {
+  const sessionRoot = campaignPlayLiveSessionRoot(config);
+  fs.mkdirSync(sessionRoot, { recursive: true });
+  fs.writeFileSync(path.join(sessionRoot, "browser-actions.jsonl"), "", "utf8");
+  fs.writeFileSync(path.join(sessionRoot, "manifest.json"), `${JSON.stringify({
+    evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
+    runId: config.runId,
+    campaignId: config.campaignId,
+    worldSource: config.worldSource,
+    commit: "0000000",
+    dirty: true,
+    startedAt: 1,
+    acceptedSnapshotHash: replay.report.acceptedSnapshotHash,
+    acceptedContentHash: replay.report.acceptedContentHash,
+    eligibilityHash: replay.report.eligibility.hash,
+    initialWorldVersion: replay.report.authority.worldVersion,
+    initialWorldHash: replay.report.authority.worldHash,
+    initialRuntimeRevision: replay.report.authority.runtimeRevision,
+    initialRuntimeHash: replay.report.authority.runtimeHash,
+  })}\n`, "utf8");
+  return sessionRoot;
 }
 
 describe("Campaign Play live evidence session", () => {
@@ -416,5 +444,270 @@ describe("Campaign Play live evidence session", () => {
       control: "choice",
       choiceHandle: document.request.choiceHandle,
     });
+  });
+
+  it("archives one unsubmitted decision with the current projection and permits restaging", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "worldforge-live-cancel-"));
+    roots.push(root);
+    process.env.GSD_CAMPAIGNS_ROOT = root;
+    const campaignId = "d16b0000-0000-4000-8000-000000000005";
+    createSeededAcceptedCampaign(root, campaignId);
+    const replay = (() => {
+      const handle = openCampaignPlayDatabase(campaignId);
+      try {
+        createCampaignPlayStateRepository(handle).createState({
+          eventId: "cancel-session-created",
+          createdAt: 1_000,
+        });
+        return captureCampaignPlayReplay(handle);
+      } finally {
+        handle.close();
+      }
+    })();
+    const config = liveConfig(path.join(root, "evidence"), campaignId, 1);
+    const sessionRoot = writeLiveSessionFixture(config, replay);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      phase: "ready",
+      activeTurn: null,
+      projectionHash: replay.report.publicState.hash,
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+
+    const pending = await stageCampaignPlayManualDecision({
+      runConfig: config,
+      control: "freeform",
+      chosenText: "I watch the signal gate from the visible edge.",
+      choiceHandle: null,
+      decisionNote: "The visible pressure supports observing before acting.",
+      signedAt: 1_200,
+    });
+    const pendingPath = path.join(sessionRoot, "pending-decision.json");
+    const cancellation = await cancelCampaignPlayManualDecision({
+      runConfig: config,
+      reason: "The operator selected a different visible route before submission.",
+      cancelledAt: 1_300,
+    });
+
+    expect(cancellation).toEqual({
+      runId: config.runId,
+      campaignId,
+      pendingDecision: pending,
+      reason: "The operator selected a different visible route before submission.",
+      cancelledAt: 1_300,
+      publicProjectionHash: replay.report.publicState.hash,
+    });
+    expect(fs.existsSync(pendingPath)).toBe(false);
+    const cancellationDirectory = path.join(sessionRoot, "cancelled-decisions");
+    const cancellationFiles = fs.readdirSync(cancellationDirectory);
+    expect(cancellationFiles).toEqual(["action-1-signed-1200.json"]);
+    expect(JSON.parse(fs.readFileSync(
+      path.join(cancellationDirectory, cancellationFiles[0]!),
+      "utf8",
+    ))).toEqual(cancellation);
+
+    const restaged = await stageCampaignPlayManualDecision({
+      runConfig: config,
+      control: "freeform",
+      chosenText: "I move toward the lit platform once the route is clear.",
+      choiceHandle: null,
+      decisionNote: "The next choice follows the same current visible state.",
+      signedAt: 1_400,
+    });
+    expect(restaged.playerActionNumber).toBe(1);
+    expect(restaged.signedAt).toBe(1_400);
+  });
+
+  it("refuses to overwrite an immutable cancellation artifact", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "worldforge-live-cancel-immutable-"));
+    roots.push(root);
+    process.env.GSD_CAMPAIGNS_ROOT = root;
+    const campaignId = "d16b0000-0000-4000-8000-000000000007";
+    createSeededAcceptedCampaign(root, campaignId);
+    const replay = (() => {
+      const handle = openCampaignPlayDatabase(campaignId);
+      try {
+        createCampaignPlayStateRepository(handle).createState({
+          eventId: "cancel-immutable-session-created",
+          createdAt: 1_000,
+        });
+        return captureCampaignPlayReplay(handle);
+      } finally {
+        handle.close();
+      }
+    })();
+    const config = liveConfig(path.join(root, "evidence"), campaignId, 1);
+    const sessionRoot = writeLiveSessionFixture(config, replay);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      phase: "ready",
+      activeTurn: null,
+      projectionHash: replay.report.publicState.hash,
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+
+    await stageCampaignPlayManualDecision({
+      runConfig: config,
+      control: "freeform",
+      chosenText: "I wait at the visible boundary.",
+      choiceHandle: null,
+      decisionNote: "The route remains legible but not urgent.",
+      signedAt: 1_200,
+    });
+    await cancelCampaignPlayManualDecision({
+      runConfig: config,
+      reason: "The first visible route was superseded before submission.",
+      cancelledAt: 1_300,
+    });
+
+    await stageCampaignPlayManualDecision({
+      runConfig: config,
+      control: "freeform",
+      chosenText: "I wait at the visible boundary again.",
+      choiceHandle: null,
+      decisionNote: "The evidence is unchanged, so the choice is restaged for review.",
+      signedAt: 1_200,
+    });
+    const pendingPath = path.join(sessionRoot, "pending-decision.json");
+    const pendingBytes = fs.readFileSync(pendingPath, "utf8");
+    await expect(cancelCampaignPlayManualDecision({
+      runConfig: config,
+      reason: "This must not replace the first cancellation record.",
+      cancelledAt: 1_400,
+    })).rejects.toThrow(/EEXIST|already exists/i);
+    expect(fs.readFileSync(pendingPath, "utf8")).toBe(pendingBytes);
+  });
+
+  it("fails closed for blank reasons, non-ready or active state, and inconsistent numbering", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "worldforge-live-cancel-boundaries-"));
+    roots.push(root);
+    process.env.GSD_CAMPAIGNS_ROOT = root;
+    const campaignId = "d16b0000-0000-4000-8000-000000000008";
+    createSeededAcceptedCampaign(root, campaignId);
+    const replay = (() => {
+      const handle = openCampaignPlayDatabase(campaignId);
+      try {
+        createCampaignPlayStateRepository(handle).createState({
+          eventId: "cancel-boundaries-session-created",
+          createdAt: 1_000,
+        });
+        return captureCampaignPlayReplay(handle);
+      } finally {
+        handle.close();
+      }
+    })();
+    const config = liveConfig(path.join(root, "evidence"), campaignId, 1);
+    const sessionRoot = writeLiveSessionFixture(config, replay);
+    const projectionHash = replay.report.publicState.hash;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      phase: "ready",
+      activeTurn: null,
+      projectionHash,
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    await stageCampaignPlayManualDecision({
+      runConfig: config,
+      control: "freeform",
+      chosenText: "I keep the signal in sight.",
+      choiceHandle: null,
+      decisionNote: "A visible boundary is enough for this signed observation.",
+      signedAt: 1_200,
+    });
+    const pendingPath = path.join(sessionRoot, "pending-decision.json");
+    const originalBytes = fs.readFileSync(pendingPath, "utf8");
+
+    await expect(cancelCampaignPlayManualDecision({
+      runConfig: config,
+      reason: "   ",
+      cancelledAt: 1_300,
+    })).rejects.toThrow("reason");
+    expect(fs.readFileSync(pendingPath, "utf8")).toBe(originalBytes);
+
+    for (const state of [
+      { phase: "opening_required", activeTurn: null },
+      { phase: "ready", activeTurn: { turnId: "turn-live", status: "processing" } },
+    ]) {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+        ...state,
+        projectionHash,
+      }), { status: 200, headers: { "content-type": "application/json" } })));
+      await expect(cancelCampaignPlayManualDecision({
+        runConfig: config,
+        reason: "The operator has a valid reason but the state is not cancellable.",
+        cancelledAt: 1_300,
+      })).rejects.toThrow("ready state");
+      expect(fs.readFileSync(pendingPath, "utf8")).toBe(originalBytes);
+    }
+
+    fs.writeFileSync(pendingPath, `${JSON.stringify({
+      ...JSON.parse(originalBytes),
+      playerActionNumber: 2,
+    })}\n`, "utf8");
+    const inconsistentBytes = fs.readFileSync(pendingPath, "utf8");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      phase: "ready",
+      activeTurn: null,
+      projectionHash,
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    await expect(cancelCampaignPlayManualDecision({
+      runConfig: config,
+      reason: "The pending action number is intentionally inconsistent.",
+      cancelledAt: 1_300,
+    })).rejects.toThrow("not the next action");
+    expect(fs.readFileSync(pendingPath, "utf8")).toBe(inconsistentBytes);
+  });
+
+  it("refuses cancellation when a failed durable player turn exists", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "worldforge-live-cancel-failed-"));
+    roots.push(root);
+    process.env.GSD_CAMPAIGNS_ROOT = root;
+    const campaignId = "d16b0000-0000-4000-8000-000000000009";
+    createSeededAcceptedCampaign(root, campaignId);
+    const replay = (() => {
+      const handle = openCampaignPlayDatabase(campaignId);
+      try {
+        createCampaignPlayStateRepository(handle).createState({
+          eventId: "cancel-failed-session-created",
+          createdAt: 1_000,
+        });
+        handle.sqlite.prepare(`INSERT INTO campaign_play_turns (
+              id, campaign_id, turn_kind, input_json, input_hash, idempotency_key,
+              expected_world_version, expected_runtime_revision, base_world_version,
+              stage, frame_hash, next_event_sequence, worker_epoch, model_selection_json,
+              resume_eligible, mutation_audit_json, submitted_at, updated_at,
+              final_world_version, error_code, completed_at
+            ) VALUES (?, ?, 'player_action', ?, ?, ?, 1, 1, 1, 'failed', ?, 1, 0, '{}', 0, '{}',
+              2_000, 2_000, 1, 'invalid_input', 2_001)`)
+          .run(
+            "turn-failed",
+            campaignId,
+            JSON.stringify({ turnKind: "player_action", request: {}, frame: {} }),
+            "a".repeat(64),
+            "idempotency-failed",
+            "b".repeat(64),
+          );
+        return captureCampaignPlayReplay(handle);
+      } finally {
+        handle.close();
+      }
+    })();
+    const config = liveConfig(path.join(root, "evidence"), campaignId, 1);
+    const sessionRoot = writeLiveSessionFixture(config, replay);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+        phase: "ready",
+        activeTurn: null,
+        projectionHash: replay.report.publicState.hash,
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    await stageCampaignPlayManualDecision({
+      runConfig: config,
+      control: "freeform",
+      chosenText: "I keep watching from the visible edge.",
+      choiceHandle: null,
+      decisionNote: "The current durable state is evidence for refusal, not submission.",
+      signedAt: 1_200,
+    });
+    const pendingPath = path.join(sessionRoot, "pending-decision.json");
+    const pendingBytes = fs.readFileSync(pendingPath, "utf8");
+    await expect(cancelCampaignPlayManualDecision({
+      runConfig: config,
+      reason: "A durable player turn already corresponds to this action number.",
+      cancelledAt: 1_300,
+    })).rejects.toThrow("unbound durable player turn");
+    expect(fs.readFileSync(pendingPath, "utf8")).toBe(pendingBytes);
   });
 });
