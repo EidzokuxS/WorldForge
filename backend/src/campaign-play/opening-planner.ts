@@ -45,6 +45,7 @@ import {
   isActorPresentAtScene,
   isSceneInMacroRegion,
 } from "./opening-location.js";
+import { recordCampaignPlayOpeningNoObjectDiagnostics } from "./opening-diagnostics.js";
 import { deriveCampaignPlayCommandId } from "./rulebook.js";
 
 const OPENING_MAX_ELIGIBLE_ACTORS = 20;
@@ -1384,6 +1385,7 @@ export function createCampaignPlayOpeningPlanner(
       } catch (error) {
         const code = getSafeGenerateObjectErrorCode(error);
         const trace = getSafeGenerateObjectTrace(error);
+        recordCampaignPlayOpeningNoObjectDiagnostics(log, error, code, trace);
         const plannerCode: CampaignPlayOpeningPlannerErrorCode =
           isSafeGenerateObjectContractErrorCode(code)
             ? "model_contract_failed"
