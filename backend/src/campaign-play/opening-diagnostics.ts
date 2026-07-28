@@ -51,15 +51,18 @@ function contentBoundaries(text: string): {
 
 export function recordCampaignPlayOpeningNoObjectDiagnostics(
   logger: OpeningDiagnosticsLogger,
-  error: unknown,
+  _error: unknown,
   code: SafeGenerateErrorCode | null,
   trace: Readonly<SafeGenerateTrace> | null,
 ): void {
+  const isNativeJsonFailure = trace?.strategy === "native_json"
+    || (
+      trace?.strategy === "full_retry"
+      && trace.primaryStrategy === "native_json"
+    );
   if (
     code !== "native_output_unavailable"
-    || trace?.strategy !== "native_json"
-    || !(error instanceof Error)
-    || !error.message.includes("NoObjectGeneratedError:")
+    || !isNativeJsonFailure
   ) {
     return;
   }
