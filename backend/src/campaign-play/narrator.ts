@@ -466,31 +466,74 @@ function assertProposalForPacket(
       "iu",
     ).test(text);
   };
-  const identifiesActor = (beatText: string, actorName: string): boolean =>
+  const matchedActorAlias = (beatText: string, actorName: string): string | null =>
     [actorName, actorName.split(/\s+/u)[0] ?? actorName]
       .filter((alias) => alias.length >= 3)
-      .some((alias) => {
+      .find((alias) => {
         const normalizedAlias = alias.toLocaleLowerCase("en-US");
         if (aliasOwners.get(normalizedAlias)?.size !== 1) return false;
         if (visiblePlaceNames.some((placeName) => containsAlias(placeName, alias))) return false;
         return containsAlias(beatText, alias);
-      });
-  for (const beat of proposal.beats) {
+      }) ?? null;
+  for (const [beatIndex, beat] of proposal.beats.entries()) {
     if (beat.observationIndexes.length === 0) continue;
     const attributedActorNames = new Set<string>();
+    const allowedActors = new Map<string, {
+      canonicalId: string;
+      canonicalName: string;
+    }>();
+    const sourceObservationPerformers: Array<{
+      observationIndex: number;
+      canonicalId: string | null;
+      canonicalName: string | null;
+    }> = [];
     beat.observationIndexes.forEach((observationIndex) => {
       const observation = packet.newObservations[observationIndex];
       if (!observation) return;
+      sourceObservationPerformers.push({
+        observationIndex,
+        canonicalId: observation.consequence?.performingActorHandle ?? null,
+        canonicalName: observation.consequence?.performingActorName ?? null,
+      });
       if (observation.consequence?.performingActorName !== null
         && observation.consequence?.performingActorName !== undefined) {
         attributedActorNames.add(observation.consequence.performingActorName);
+        if (observation.consequence.performingActorHandle !== null) {
+          allowedActors.set(observation.consequence.performingActorHandle, {
+            canonicalId: observation.consequence.performingActorHandle,
+            canonicalName: observation.consequence.performingActorName,
+          });
+        }
       }
       subjectBindings.get(observation.observationHandle)?.forEach((actor) => {
         attributedActorNames.add(actor.name);
+        allowedActors.set(actor.handle, {
+          canonicalId: actor.handle,
+          canonicalName: actor.name,
+        });
       });
     });
-    if (packet.visibleActors.some((actor) =>
-      identifiesActor(beat.text, actor.name) && !attributedActorNames.has(actor.name))) {
+    const mismatch = packet.visibleActors
+      .map((actor) => ({
+        actor,
+        matchedAlias: matchedActorAlias(beat.text, actor.name),
+      }))
+      .find(({ actor, matchedAlias }) =>
+        matchedAlias !== null && !attributedActorNames.has(actor.name));
+    if (mismatch) {
+      log.warn("narrator_visible_actor_observation_mismatch", {
+        diagnostic: "narrator_visible_actor_observation_mismatch",
+        beatIndex,
+        fieldPath: `beats[${beatIndex}].text`,
+        observationIndexes: [...beat.observationIndexes],
+        matchedActor: {
+          canonicalId: mismatch.actor.handle,
+          canonicalName: mismatch.actor.name,
+          matchedAlias: mismatch.matchedAlias,
+        },
+        allowedActors: [...allowedActors.values()],
+        sourceObservationPerformers,
+      });
       throw new CampaignPlayNarratorError("narration_invalid", null);
     }
   }

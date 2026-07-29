@@ -18,6 +18,18 @@ import {
   type CampaignPlayNarratorProposal,
 } from "./narrator.js";
 
+const narratorWarn = vi.hoisted(() => vi.fn());
+
+vi.mock("../lib/index.js", () => ({
+  createLogger: (tag: string) => ({
+    info: vi.fn(),
+    warn: tag === "campaign-play-narrator" ? narratorWarn : vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    event: vi.fn(),
+  }),
+}));
+
 function packetFixture(): CampaignPlayNarratorPacket {
   return {
     campaignId: "campaign-harbor",
@@ -94,6 +106,82 @@ function proposalFixture(): CampaignPlayNarratorProposal {
         text: "Mara Venn braces her signal ledger against the wind, close enough for you to study it.",
       },
     ],
+  };
+}
+
+function r45ActorAttributionPacket(): CampaignPlayNarratorPacket {
+  const packet = packetFixture();
+  const drenConsequence = {
+    observationHandle: "observation_dren_supply_quote",
+    performingActorHandle: "actor_dren_vask",
+    performingActorName: "Dren Vask",
+    whatChanged: "Dren Vask says, \"Ask Vedris if you need more.\"",
+    whereOrRoute: "Salt Harbor",
+    worldTimeLabel: "Day 1, 00:31",
+    causalCue: "direct_perception" as const,
+  };
+  const vedrisConsequence = {
+    observationHandle: "observation_vedris_checks_jars",
+    performingActorHandle: "actor_vedris_kast",
+    performingActorName: "Vedris Kast",
+    whatChanged: "Vedris Kast checks the remaining jars.",
+    whereOrRoute: "Salt Harbor",
+    worldTimeLabel: "Day 1, 00:31",
+    causalCue: "direct_perception" as const,
+  };
+
+  return {
+    ...packet,
+    turnId: "turn-r45-shaped-attribution",
+    turnKind: "player_action",
+    openingContext: null,
+    sourceMoment: "Dren Vask and Vedris Kast stand near Mara Venn in Salt Harbor.",
+    actionContext: {
+      submittedText: "Ask about the remaining supplies.",
+      intentKind: "observe",
+      disposition: "deterministic",
+      result: "success",
+      clarificationQuestion: null,
+    },
+    visibleActors: [
+      {
+        ...packet.visibleActors[0]!,
+        handle: "actor_dren_vask",
+        name: "Dren Vask",
+        monogram: "DV",
+      },
+      {
+        ...packet.visibleActors[0]!,
+        handle: "actor_vedris_kast",
+        name: "Vedris Kast",
+        monogram: "VK",
+      },
+      packet.visibleActors[0]!,
+    ],
+    newObservations: [
+      {
+        observationHandle: drenConsequence.observationHandle,
+        title: "Seen nearby",
+        text: drenConsequence.whatChanged,
+        whereOrRoute: drenConsequence.whereOrRoute,
+        worldTimeLabel: drenConsequence.worldTimeLabel,
+        consequence: drenConsequence,
+      },
+      {
+        observationHandle: vedrisConsequence.observationHandle,
+        title: "Seen nearby",
+        text: vedrisConsequence.whatChanged,
+        whereOrRoute: vedrisConsequence.whereOrRoute,
+        worldTimeLabel: vedrisConsequence.worldTimeLabel,
+        consequence: vedrisConsequence,
+      },
+    ],
+    consequences: [drenConsequence, vedrisConsequence],
+    availableIntents: [{
+      ...packet.availableIntents[0]!,
+      label: "Ask about supplies",
+      targets: [{ handle: "actor_dren_vask", kind: "actor" }],
+    }],
   };
 }
 
@@ -476,6 +564,141 @@ describe("Campaign Play narrator", () => {
       },
       createdAt: 1_000,
     })).not.toThrow();
+  });
+
+  it("records stable coordinates for an r45-shaped split visible-actor reference", () => {
+    const packet = r45ActorAttributionPacket();
+    const proposal: CampaignPlayNarratorProposal = {
+      actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+      beats: [
+        {
+          purpose: "consequence",
+          observationIndexes: [0],
+          text: "Dren Vask says, \"Ask Vedris if you need more.\" secret-split-beat",
+        },
+        {
+          purpose: "moment",
+          observationIndexes: [1],
+          text: "Vedris Kast checks the remaining jars.",
+        },
+      ],
+    };
+    narratorWarn.mockClear();
+
+    expect(() => createCampaignPlayNarrator().compile({
+      narrationId: "narration-r45-shaped-split-reference",
+      packet,
+      proposal,
+      createdAt: 1_000,
+    })).toThrowError(expect.objectContaining({
+      code: "narration_invalid",
+      modelEvidence: null,
+    }));
+    expect(narratorWarn).toHaveBeenCalledOnce();
+    expect(narratorWarn).toHaveBeenCalledWith(
+      "narrator_visible_actor_observation_mismatch",
+      {
+        diagnostic: "narrator_visible_actor_observation_mismatch",
+        beatIndex: 0,
+        fieldPath: "beats[0].text",
+        observationIndexes: [0],
+        matchedActor: {
+          canonicalId: "actor_vedris_kast",
+          canonicalName: "Vedris Kast",
+          matchedAlias: "Vedris",
+        },
+        allowedActors: [{
+          canonicalId: "actor_dren_vask",
+          canonicalName: "Dren Vask",
+        }],
+        sourceObservationPerformers: [{
+          observationIndex: 0,
+          canonicalId: "actor_dren_vask",
+          canonicalName: "Dren Vask",
+        }],
+      },
+    );
+    const recorded = JSON.stringify(narratorWarn.mock.calls);
+    expect(recorded).not.toContain("secret-split-beat");
+    expect(recorded).not.toContain(packet.newObservations[0]!.text);
+    expect(recorded).not.toContain("proposal");
+  });
+
+  it("accepts a combined observation reference without actor diagnostics", () => {
+    const packet = r45ActorAttributionPacket();
+    narratorWarn.mockClear();
+
+    expect(() => createCampaignPlayNarrator().compile({
+      narrationId: "narration-r45-shaped-combined-reference",
+      packet,
+      proposal: {
+        actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+        beats: [{
+          purpose: "consequence",
+          observationIndexes: [0, 1],
+          text: "Dren Vask says to ask Vedris as Vedris Kast checks the remaining jars.",
+        }],
+      },
+      createdAt: 1_000,
+    })).not.toThrow();
+    expect(narratorWarn).not.toHaveBeenCalled();
+  });
+
+  it("keeps false attribution rejected and records only stable actor coordinates", () => {
+    const packet = r45ActorAttributionPacket();
+    narratorWarn.mockClear();
+
+    expect(() => createCampaignPlayNarrator().compile({
+      narrationId: "narration-false-attribution-diagnostic",
+      packet,
+      proposal: {
+        actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+        beats: [
+          {
+            purpose: "consequence",
+            observationIndexes: [0],
+            text: "Mara claims the remaining jars. secret-false-attribution-beat",
+          },
+          {
+            purpose: "moment",
+            observationIndexes: [1],
+            text: "Vedris Kast checks the remaining jars.",
+          },
+        ],
+      },
+      createdAt: 1_000,
+    })).toThrowError(expect.objectContaining({
+      code: "narration_invalid",
+      modelEvidence: null,
+    }));
+    expect(narratorWarn).toHaveBeenCalledOnce();
+    expect(narratorWarn).toHaveBeenCalledWith(
+      "narrator_visible_actor_observation_mismatch",
+      {
+        diagnostic: "narrator_visible_actor_observation_mismatch",
+        beatIndex: 0,
+        fieldPath: "beats[0].text",
+        observationIndexes: [0],
+        matchedActor: {
+          canonicalId: "actor_public_keeper",
+          canonicalName: "Mara Venn",
+          matchedAlias: "Mara",
+        },
+        allowedActors: [{
+          canonicalId: "actor_dren_vask",
+          canonicalName: "Dren Vask",
+        }],
+        sourceObservationPerformers: [{
+          observationIndex: 0,
+          canonicalId: "actor_dren_vask",
+          canonicalName: "Dren Vask",
+        }],
+      },
+    );
+    const recorded = JSON.stringify(narratorWarn.mock.calls);
+    expect(recorded).not.toContain("secret-false-attribution-beat");
+    expect(recorded).not.toContain(packet.newObservations[0]!.text);
+    expect(recorded).not.toContain("proposal");
   });
 
   it("requires typed observation attribution before naming a visible actor", () => {
