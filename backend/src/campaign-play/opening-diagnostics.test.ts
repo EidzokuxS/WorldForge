@@ -1,6 +1,10 @@
+import { z } from "zod";
 import { describe, expect, it, vi } from "vitest";
 import type { SafeGenerateTrace } from "../ai/generate-object-safe.js";
-import { recordCampaignPlayOpeningNoObjectDiagnostics } from "./opening-diagnostics.js";
+import {
+  recordCampaignPlayOpeningNoObjectDiagnostics,
+  recordCampaignPlayOpeningSchemaIssueDiagnostics,
+} from "./opening-diagnostics.js";
 
 const noObjectError = new Error(
   "safeGenerateObject native JSON output was unavailable: "
@@ -161,5 +165,54 @@ describe("Opening no-object diagnostics", () => {
     );
 
     expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+describe("Opening schema-issue diagnostics", () => {
+  it("records safe paths, codes, and structural metadata without rejected values", () => {
+    const warn = vi.fn();
+    const rejectedValue = "private-opening-narration";
+    const result = z.object({
+      start: z.object({ role: z.string() }).strict(),
+    }).strict().safeParse({ start: rejectedValue });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+
+    expect(recordCampaignPlayOpeningSchemaIssueDiagnostics({ warn }, result.error)).toBe(true);
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(
+      "Opening proposal failed schema validation.",
+      {
+        diagnostic: "opening_proposal_schema_invalid",
+        issueCount: 1,
+        issues: [{
+          index: 0,
+          path: ["start"],
+          code: "invalid_type",
+          expected: "object",
+        }],
+      },
+    );
+    const serialized = JSON.stringify(warn.mock.calls);
+    expect(serialized).not.toContain(rejectedValue);
+    expect(serialized).not.toContain("private");
+    expect(serialized).not.toContain("message");
+  });
+
+  it("does not classify valid or native-output failures as schema issues", () => {
+    const warn = vi.fn();
+
+    expect(recordCampaignPlayOpeningSchemaIssueDiagnostics({ warn }, undefined)).toBe(false);
+    recordCampaignPlayOpeningNoObjectDiagnostics(
+      { warn },
+      noObjectError,
+      "native_output_unavailable",
+      failureTrace("private provider text"),
+    );
+
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn.mock.calls[0]?.[0]).toBe("Opening native JSON output was not generated.");
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("opening_proposal_schema_invalid");
   });
 });

@@ -1154,6 +1154,81 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain("Do not name the hidden actor");
   });
 
+  it("records one redacted schema diagnostic for a parsed invalid proposal", async () => {
+    const warn = vi.fn();
+    const invalidProposal = structuredClone(proposalFixture()) as unknown as {
+      start: { role: unknown; immediateSituation: string };
+      rejectedArtifact: string;
+    };
+    invalidProposal.start.role = 42;
+    invalidProposal.start.immediateSituation = "private-opening-narration";
+    invalidProposal.rejectedArtifact = "private-rejected-artifact";
+    const generateObject = vi.fn(async () => ({
+      object: invalidProposal,
+      trace: trace(),
+    }));
+    const planner = createCampaignPlayOpeningPlanner({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+      diagnosticsLogger: { warn },
+    });
+
+    await expect(planner.plan({
+      frame: frameFixture(),
+      startingConditions: chosenConditions,
+      model: structuredModel(),
+      temperature: 0.4,
+      maxOutputTokens: 4_096,
+    })).rejects.toMatchObject({ code: "opening_proposal_invalid" });
+
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(
+      "Opening proposal failed schema validation.",
+      expect.objectContaining({
+        diagnostic: "opening_proposal_schema_invalid",
+        issues: expect.arrayContaining([
+          expect.objectContaining({
+            index: expect.any(Number),
+            path: ["start", "role"],
+            code: "invalid_type",
+            expected: "string",
+          }),
+          expect.objectContaining({
+            code: "unrecognized_keys",
+            path: [],
+            keys: ["rejectedArtifact"],
+          }),
+        ]),
+      }),
+    );
+    const serialized = JSON.stringify(warn.mock.calls);
+    expect(serialized).not.toContain("private-opening-narration");
+    expect(serialized).not.toContain("private-rejected-artifact");
+    expect(serialized).not.toContain("OPENING_DATA");
+    expect(serialized).not.toContain("message");
+  });
+
+  it("does not add a schema diagnostic for a valid Opening proposal", async () => {
+    const warn = vi.fn();
+    const generateObject = vi.fn(async () => ({
+      object: proposalFixture(),
+      trace: trace(),
+    }));
+    const planner = createCampaignPlayOpeningPlanner({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+      diagnosticsLogger: { warn },
+    });
+
+    await expect(planner.plan({
+      frame: frameFixture(),
+      startingConditions: chosenConditions,
+      model: structuredModel(),
+      temperature: 0.4,
+      maxOutputTokens: 4_096,
+    })).resolves.toMatchObject({ artifact: expect.any(Object) });
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   it("retains successful model evidence when semantic compilation rejects a proposal", async () => {
     const invalidProposal = proposalFixture();
     invalidProposal.scene.candidateId = "opening-scene:unknown";

@@ -45,7 +45,11 @@ import {
   isActorPresentAtScene,
   isSceneInMacroRegion,
 } from "./opening-location.js";
-import { recordCampaignPlayOpeningNoObjectDiagnostics } from "./opening-diagnostics.js";
+import {
+  recordCampaignPlayOpeningNoObjectDiagnostics,
+  recordCampaignPlayOpeningSchemaIssueDiagnostics,
+  type OpeningDiagnosticsLogger,
+} from "./opening-diagnostics.js";
 import { deriveCampaignPlayCommandId } from "./rulebook.js";
 
 const OPENING_MAX_ELIGIBLE_ACTORS = 20;
@@ -383,6 +387,7 @@ export interface CampaignPlayOpeningPlanRequest {
 
 interface CampaignPlayOpeningPlannerDependencies {
   generateObject: typeof safeGenerateObject;
+  diagnosticsLogger?: OpeningDiagnosticsLogger;
 }
 
 type OpeningBootstrapInput<T = CampaignPlayOpeningCommand> =
@@ -1385,7 +1390,12 @@ export function createCampaignPlayOpeningPlanner(
       } catch (error) {
         const code = getSafeGenerateObjectErrorCode(error);
         const trace = getSafeGenerateObjectTrace(error);
-        recordCampaignPlayOpeningNoObjectDiagnostics(log, error, code, trace);
+        recordCampaignPlayOpeningNoObjectDiagnostics(
+          dependencies.diagnosticsLogger ?? log,
+          error,
+          code,
+          trace,
+        );
         const plannerCode: CampaignPlayOpeningPlannerErrorCode =
           isSafeGenerateObjectContractErrorCode(code)
             ? "model_contract_failed"
@@ -1411,15 +1421,26 @@ export function createCampaignPlayOpeningPlanner(
           modelEvidence,
         );
       } catch (cause) {
-        log.warn("Opening proposal failed semantic compilation.", {
-          code: cause instanceof CampaignPlayOpeningPlannerError ? cause.code : null,
-          stack: cause instanceof Error ? cause.stack : String(cause),
-        });
-        if (cause instanceof CampaignPlayOpeningPlannerError) {
+        const plannerError = cause instanceof CampaignPlayOpeningPlannerError
+          ? cause
+          : null;
+        const schemaIssueLogged = plannerError
+          ? recordCampaignPlayOpeningSchemaIssueDiagnostics(
+            dependencies.diagnosticsLogger ?? log,
+            plannerError.cause,
+          )
+          : false;
+        if (!schemaIssueLogged) {
+          log.warn("Opening proposal failed semantic compilation.", {
+            code: plannerError?.code ?? null,
+            stack: cause instanceof Error ? cause.stack : String(cause),
+          });
+        }
+        if (plannerError) {
           throw new CampaignPlayOpeningPlannerError(
-            cause.code,
+            plannerError.code,
             modelEvidence,
-            { cause },
+            { cause: plannerError },
           );
         }
         throw cause;
