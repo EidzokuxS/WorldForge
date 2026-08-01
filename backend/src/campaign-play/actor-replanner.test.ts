@@ -128,6 +128,11 @@ function threeStepPlan<T>(step: T): [T, T, T] {
   return [step, step, step];
 }
 
+function singleStepProposalFromPrompt(prompt: string) {
+  const proposal = replanProposalFromPrompt(prompt);
+  return { ...proposal, steps: [proposal.steps[0]! ] };
+}
+
 function replanProposalFromPrompt(prompt: string) {
   const startMarker = "ACTOR_FRAME\n";
   const endMarker = "\nEND_ACTOR_FRAME";
@@ -677,8 +682,8 @@ describe("Campaign Play actor replanner", () => {
           trace: acceptedTrace(),
         }
       : {
-          object: replanProposalFromPrompt(request.prompt),
-          trace: acceptedTrace(1_025, 1_000),
+          object: singleStepProposalFromPrompt(request.prompt),
+          trace: acceptedTrace(35, 0),
         });
     const replanner = createCampaignPlayActorReplanner(handle, {
       now: () => now,
@@ -705,15 +710,21 @@ describe("Campaign Play actor replanner", () => {
       kind: "replanned",
       jobId,
       workerEpoch: 1,
-      plan: { steps: threeStepPlan({
+      plan: { steps: [{
         possessionOutcome: { kind: "none" },
         obligationOutcome: { kind: "none" },
-      }) },
+      }] },
     });
     expect(generateObject).toHaveBeenCalledTimes(2);
     expect(generateObject.mock.calls[0]![0].prompt).toContain(knownScene);
     expect(generateObject.mock.calls[0]![0].prompt).toContain(
       "occurred at world time 0; learned at world time 0",
+    );
+    expect(generateObject.mock.calls[0]![0].prompt).toContain(
+      "observableTrace may evidence only the actor's own attempt or a physical trace caused by it; it must not assert an unestablished outcome.",
+    );
+    expect(generateObject.mock.calls[0]![0].prompt).toContain(
+      "Every non-move target must be present at the actor's location established for that step.",
     );
     const submitted = replanProposalFromPrompt(generateObject.mock.calls[0]![0].prompt);
     const submittedSchema = generateObject.mock.calls[0]![0].schema;
@@ -733,6 +744,10 @@ describe("Campaign Play actor replanner", () => {
         intent: { ...submitted.steps[0]!.intent, targetHandles: ["location:foreign"] },
       }],
     }).success).toBe(false);
+    expect(submittedSchema.safeParse({
+      ...submitted,
+      steps: [submitted.steps[0]!],
+    }).success).toBe(true);
     expect(generateObject.mock.calls[0]![0]).toMatchObject({
       allowRepair: false,
       allowTextFallback: false,
@@ -752,6 +767,12 @@ describe("Campaign Play actor replanner", () => {
     });
     expect(generateObject.mock.calls[1]![0].prompt).toContain("ACTOR_PLAN_REVIEW");
     expect(generateObject.mock.calls[1]![0].prompt).toContain("Fresh sealing wax flakes");
+    expect(generateObject.mock.calls[1]![0].prompt).toContain(
+      "It cannot assert an unestablished outcome",
+    );
+    expect(generateObject.mock.calls[1]![0].prompt).toContain(
+      "Every non-move target must be present at the actor's established step location.",
+    );
     expect(createCampaignPlayActorScheduler(handle).listTurnJobs("turn-player")[0])
       .toMatchObject({
         stage: "claimed",

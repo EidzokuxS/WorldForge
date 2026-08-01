@@ -7,7 +7,8 @@ import {
   CAMPAIGN_PLAY_LIMITS,
   type CampaignPlayActionContext,
   type CampaignPlayJournalEntry,
-  type CampaignPlayNarration,
+  type CampaignPlayNarrationOperation,
+  type CampaignPlayNarrationRecoveryRequest,
   type CampaignPlayNarratorPacket,
   type CampaignPlayTurnAdmissionRequest,
   type CampaignPlayTurnAdmissionResponse,
@@ -15,7 +16,10 @@ import {
 import { createLogger } from "../lib/index.js";
 import {
   CAMPAIGN_PLAY_COMMAND_METADATA,
+  campaignPlayActionExecutionRouteSchema,
   campaignPlayActionContextSchema,
+  campaignPlayCertifiedMoveSchema,
+  campaignPlayCertifiedWaitSchema,
   campaignPlayEntityRefSchema,
   campaignPlayGameMasterArtifactSchema,
   campaignPlayJournalEntrySchema,
@@ -23,10 +27,14 @@ import {
   campaignPlayNarrationSchema,
   campaignPlayNarratorPacketSchema,
   campaignPlayPlayerProfileAuthoritySchema,
+  campaignPlaySuggestedActionSchema,
+  campaignPlaySuggestedActionLabelPrefix,
   campaignPlayTurnAdmissionRequestSchema,
   rulebookCommandBatchSchema,
   validateNarrationAgainstPacket,
   type CampaignPlayEntityRef,
+  type CampaignPlayCertifiedMove,
+  type CampaignPlayCertifiedWait,
   type CampaignPlayGameMasterArtifact,
   type CampaignPlayJudgeArtifact,
   type CampaignPlayJudgeRuling,
@@ -112,6 +120,10 @@ import {
   createCampaignPlayVisibilityService,
   type CampaignPlayVisibilityService,
 } from "./visibility-service.js";
+import {
+  createCampaignPlayNarrationOperationRepository,
+  type CampaignPlayNarrationAttemptToken,
+} from "./narration-operation-repository.js";
 
 const log = createLogger("campaign-play-turn-runtime");
 
@@ -152,6 +164,16 @@ const handleBindingSchema = z.object({
   reference: campaignPlayEntityRefSchema,
 }).strict();
 
+const publicMomentSchema = z.object({
+  kind: z.enum(["proper_scene", "concise_result"]),
+  momentId: line(CAMPAIGN_PLAY_LIMITS.id),
+  turnId: line(CAMPAIGN_PLAY_LIMITS.id),
+  displayText: z.string().min(1).max(CAMPAIGN_PLAY_LIMITS.narrationText),
+  suggestedActions: z.array(campaignPlaySuggestedActionSchema)
+    .max(CAMPAIGN_PLAY_LIMITS.suggestedActions),
+  createdAt: z.number().int().safe().nonnegative(),
+}).strict();
+
 const MAXIMUM_VISIBLE_WORLD_EVENTS =
   CAMPAIGN_PLAY_LIMITS.newObservations + CAMPAIGN_PLAY_LIMITS.continuityEntries;
 
@@ -164,10 +186,10 @@ const playerActionAdmissionFrameSchema = z.object({
   baseRuntimeRevision: z.number().int().safe().positive(),
   worldTimeMinutes: z.number().int().safe().min(0).max(CAMPAIGN_PLAY_LIMITS.worldTimeMinutes),
   sourceTurnId: line(CAMPAIGN_PLAY_LIMITS.id),
-  sourceNarrationId: line(CAMPAIGN_PLAY_LIMITS.id),
-  sourceNarrationHash: hashSchema,
+  sourceMomentId: line(CAMPAIGN_PLAY_LIMITS.id),
+  sourceMomentHash: hashSchema,
   sourcePacketHash: hashSchema,
-  sourceNarration: campaignPlayNarrationSchema,
+  sourceMoment: publicMomentSchema,
   sourcePacket: campaignPlayNarratorPacketSchema,
   player: z.object({
     actorId: line(CAMPAIGN_PLAY_LIMITS.id),
@@ -185,21 +207,23 @@ const playerActionAdmissionFrameSchema = z.object({
     witnessActorIds: z.array(line(CAMPAIGN_PLAY_LIMITS.id)).max(8),
     knownWorldEventIds: z.array(line(CAMPAIGN_PLAY_LIMITS.id)).max(MAXIMUM_VISIBLE_WORLD_EVENTS),
   }).strict(),
+  executionRoute: campaignPlayActionExecutionRouteSchema.optional()
+    .default({ kind: "full_authority" }),
 }).strict().superRefine((frame, context) => {
   if (
     frame.sourcePacket.campaignId !== frame.campaignId ||
     frame.sourcePacket.turnId !== frame.sourceTurnId ||
-    frame.sourceNarration.turnId !== frame.sourceTurnId ||
-    frame.sourceNarration.narrationId !== frame.sourceNarrationId ||
+    frame.sourceMoment.turnId !== frame.sourceTurnId ||
+    frame.sourceMoment.momentId !== frame.sourceMomentId ||
     frame.sourcePacket.acceptedWorldVersion !== frame.acceptedWorldVersion ||
     frame.sourcePacket.worldVersion !== frame.baseWorldVersion ||
     frame.sourcePacketHash !== hashCampaignPlayNarratorPacket(
       frame.sourceTurnId,
       frame.sourcePacket as unknown as CampaignPlayProjectionRecord,
     ) ||
-    frame.sourceNarrationHash !== hashCampaignPlayProjection({
-      domain: "campaign_play_source_narration",
-      narration: frame.sourceNarration,
+    frame.sourceMomentHash !== hashCampaignPlayProjection({
+      domain: "campaign_play_source_moment",
+      moment: frame.sourceMoment,
     })
   ) {
     context.addIssue({
@@ -316,9 +340,12 @@ export interface CreateCampaignPlayTurnRuntimeInput {
   owner: string;
   leaseDurationMs: number;
   heartbeatIntervalMs: number;
+  externalOperationDeadlineMs?: number;
+  actorCriticalPathReplanLimit?: number;
   uncertaintySeedKey: string;
   judgeModel: CampaignPlayTurnRuntimeStageModel;
   gameMasterModel: CampaignPlayTurnRuntimeStageModel;
+  certifiedGameMasterModel?: CampaignPlayTurnRuntimeStageModel;
   actorReplannerModel: CampaignPlayTurnRuntimeStageModel;
   narratorModel: CampaignPlayTurnRuntimeStageModel;
   clock?: CampaignPlayTurnServiceClock;
@@ -343,6 +370,13 @@ export interface CampaignPlayTurnRuntime {
   runNextStage(turnId: string): Promise<CampaignPlayTurnServiceResult>;
   recoverActiveTurn(): Promise<CampaignPlayTurnServiceResult | null>;
   resumeInterruptedStage(input: ResumeCampaignPlayTurnInput): Promise<CampaignPlayTurnServiceResult>;
+  runNarration(
+    turnId: string,
+    claimedToken?: CampaignPlayNarrationAttemptToken,
+  ): Promise<CampaignPlayNarrationOperation | null>;
+  prepareNarrationRecovery(
+    request: CampaignPlayNarrationRecoveryRequest,
+  ): CampaignPlayNarrationAttemptToken;
   loadTurn(turnId: string): LoadedCampaignPlayTurn | null;
   loadTelemetry(turnId: string): CampaignPlayTurnTelemetry;
 }
@@ -353,15 +387,9 @@ interface CompletedPublicMomentRow {
   sourceTurnPacketHash: string | null;
   terminalReason: string;
   narrationId: string;
-  narrationStatus: string;
   packetHash: string;
   packetJson: string;
-  beatsJson: string | null;
-  displayText: string | null;
-  suggestedActionsJson: string | null;
-  effectsJson: string | null;
   narrationCreatedAt: number;
-  narrationCompletedAt: number | null;
 }
 
 interface PendingNarrationRow {
@@ -509,34 +537,39 @@ function selection(input: CreateCampaignPlayTurnRuntimeInput): CampaignPlayTurnM
   };
 }
 
+function selectionForRoute(
+  base: CampaignPlayTurnModelSelection,
+  routeKind: "full_authority" | "certified_move" | "certified_wait",
+): CampaignPlayTurnModelSelection {
+  if (base.turnKind !== "player_action") return base;
+  return { ...base, routeKind };
+}
+
 function loadCompletedPublicMoment(
   handle: CampaignPlayDatabaseHandle,
-): { packet: CampaignPlayNarratorPacket; narration: CampaignPlayNarration; row: CompletedPublicMomentRow } {
+): { packet: CampaignPlayNarratorPacket; moment: z.infer<typeof publicMomentSchema>; row: CompletedPublicMomentRow } {
   const row = handle.sqlite.prepare(`SELECT
       turn.id AS sourceTurnId, turn.stage AS sourceTurnStage,
       turn.public_packet_hash AS sourceTurnPacketHash,
       result.terminal_reason AS terminalReason,
-      narration.narration_id AS narrationId, narration.status AS narrationStatus,
+      narration.narration_id AS narrationId,
       narration.packet_hash AS packetHash, narration.packet_json AS packetJson,
-      narration.beats_json AS beatsJson, narration.display_text AS displayText,
-      narration.suggested_actions_json AS suggestedActionsJson,
-      narration.effects_json AS effectsJson,
-      narration.created_at AS narrationCreatedAt,
-      narration.completed_at AS narrationCompletedAt
+      narration.created_at AS narrationCreatedAt
     FROM campaign_play_turns turn
     JOIN campaign_play_turn_results result
       ON result.campaign_id = turn.campaign_id AND result.turn_id = turn.id
     JOIN campaign_play_narrations narration
       ON narration.campaign_id = turn.campaign_id AND narration.turn_id = turn.id
-    WHERE turn.campaign_id = ? AND turn.stage = 'completed' AND narration.status = 'complete'
-    ORDER BY narration.completed_at DESC, turn.id DESC LIMIT 1`).get(
+    JOIN campaign_play_runtime_events runtime_event
+      ON runtime_event.campaign_id = turn.campaign_id AND runtime_event.turn_id = turn.id
+      AND runtime_event.kind = 'turn_completed'
+    WHERE turn.campaign_id = ? AND turn.stage = 'completed'
+    ORDER BY runtime_event.sequence DESC LIMIT 1`).get(
       handle.campaignId,
     ) as CompletedPublicMomentRow | undefined;
   if (
-    !row || row.sourceTurnStage !== "completed" || row.narrationStatus !== "complete" ||
-    row.narrationCompletedAt === null || row.sourceTurnPacketHash !== row.packetHash ||
-    row.beatsJson === null || row.displayText === null ||
-    row.suggestedActionsJson === null || row.effectsJson === null
+    !row || row.sourceTurnStage !== "completed" ||
+    row.sourceTurnPacketHash !== row.packetHash
   ) {
     throw new CampaignPlayTurnRuntimeError(
       "turn_public_context_invalid",
@@ -544,19 +577,74 @@ function loadCompletedPublicMoment(
     );
   }
   let packet: CampaignPlayNarratorPacket;
-  let narration: CampaignPlayNarration;
+  let moment: z.infer<typeof publicMomentSchema>;
   try {
     const parsedPacket = JSON.parse(row.packetJson) as unknown;
     packet = campaignPlayNarratorPacketSchema.parse(parsedPacket);
-    narration = campaignPlayNarrationSchema.parse({
-      narrationId: row.narrationId,
-      turnId: row.sourceTurnId,
-      beats: JSON.parse(row.beatsJson) as unknown,
-      displayText: row.displayText,
-      suggestedActions: JSON.parse(row.suggestedActionsJson) as unknown,
-      effects: JSON.parse(row.effectsJson) as unknown,
-      createdAt: row.narrationCreatedAt,
-    });
+    const properScene = handle.sqlite.prepare(`SELECT narration_id AS narrationId,
+        display_text AS displayText, suggested_actions_json AS suggestedActionsJson,
+        created_at AS createdAt
+      FROM campaign_play_proper_scenes
+      WHERE campaign_id = ? AND turn_id = ? AND packet_hash = ?`).get(
+        handle.campaignId,
+        row.sourceTurnId,
+        row.packetHash,
+      ) as {
+        narrationId: string;
+        displayText: string;
+        suggestedActionsJson: string;
+        createdAt: number;
+      } | undefined;
+    const legacyScene = properScene ? undefined : handle.sqlite.prepare(`SELECT
+        narration_id AS narrationId, display_text AS displayText,
+        suggested_actions_json AS suggestedActionsJson, created_at AS createdAt
+      FROM campaign_play_narrations
+      WHERE campaign_id = ? AND turn_id = ? AND packet_hash = ? AND status = 'complete'`).get(
+        handle.campaignId,
+        row.sourceTurnId,
+        row.packetHash,
+      ) as {
+        narrationId: string;
+        displayText: string;
+        suggestedActionsJson: string;
+        createdAt: number;
+      } | undefined;
+    const concise = properScene || legacyScene ? undefined : handle.sqlite.prepare(`SELECT
+        result_id AS resultId, concise_display_text AS displayText,
+        concise_suggested_actions_json AS suggestedActionsJson, created_at AS createdAt
+      FROM campaign_play_narration_operations
+      WHERE campaign_id = ? AND turn_id = ? AND packet_hash = ?`).get(
+        handle.campaignId,
+        row.sourceTurnId,
+        row.packetHash,
+      ) as {
+        resultId: string;
+        displayText: string;
+        suggestedActionsJson: string;
+        createdAt: number;
+      } | undefined;
+    const scene = properScene ?? legacyScene;
+    if (scene) {
+      moment = publicMomentSchema.parse({
+        kind: "proper_scene",
+        momentId: scene.narrationId,
+        turnId: row.sourceTurnId,
+        displayText: scene.displayText,
+        suggestedActions: JSON.parse(scene.suggestedActionsJson) as unknown,
+        createdAt: scene.createdAt,
+      });
+    } else if (concise) {
+      moment = publicMomentSchema.parse({
+        kind: "concise_result",
+        momentId: concise.resultId,
+        turnId: row.sourceTurnId,
+        displayText: concise.displayText,
+        suggestedActions: JSON.parse(concise.suggestedActionsJson) as unknown,
+        createdAt: concise.createdAt,
+      });
+    } else {
+      throw new Error("missing public moment presentation");
+    }
     if (
       canonicalizeCampaignPlayProjection(packet) !== row.packetJson ||
       packet.campaignId !== handle.campaignId || packet.turnId !== row.sourceTurnId ||
@@ -567,7 +655,32 @@ function loadCompletedPublicMoment(
     ) {
       throw new Error("public moment identity");
     }
-    validateNarrationAgainstPacket(narration, packet);
+    if (moment.kind === "proper_scene") {
+      const narration = handle.sqlite.prepare(`SELECT beats_json AS beatsJson,
+          effects_json AS effectsJson FROM campaign_play_proper_scenes
+        WHERE campaign_id = ? AND turn_id = ? AND narration_id = ?
+        UNION ALL SELECT beats_json AS beatsJson, effects_json AS effectsJson
+        FROM campaign_play_narrations
+        WHERE campaign_id = ? AND turn_id = ? AND narration_id = ? AND status = 'complete'
+        LIMIT 1`).get(
+          handle.campaignId,
+          row.sourceTurnId,
+          moment.momentId,
+          handle.campaignId,
+          row.sourceTurnId,
+          moment.momentId,
+        ) as { beatsJson: string; effectsJson: string } | undefined;
+      if (!narration) throw new Error("missing proper scene artifact");
+      validateNarrationAgainstPacket(campaignPlayNarrationSchema.parse({
+        narrationId: moment.momentId,
+        turnId: row.sourceTurnId,
+        beats: JSON.parse(narration.beatsJson) as unknown,
+        displayText: moment.displayText,
+        suggestedActions: moment.suggestedActions,
+        effects: JSON.parse(narration.effectsJson) as unknown,
+        createdAt: moment.createdAt,
+      }), packet);
+    }
   } catch (cause) {
     throw new CampaignPlayTurnRuntimeError(
       "turn_public_context_invalid",
@@ -575,7 +688,7 @@ function loadCompletedPublicMoment(
       { cause },
     );
   }
-  return { packet, narration, row };
+  return { packet, moment, row };
 }
 
 function humanPlayer(handle: CampaignPlayDatabaseHandle): HumanRow {
@@ -702,13 +815,13 @@ function candidateBindings(
 function buildPublicAuthority(input: {
   handle: CampaignPlayDatabaseHandle;
   packet: CampaignPlayNarratorPacket;
-  narration: CampaignPlayNarration;
+  moment: z.infer<typeof publicMomentSchema>;
   mechanicalFrame: CampaignPlayRulebookFrame;
   human: HumanRow;
   judgeInput: CampaignPlayJudgeInput;
 }): Pick<CampaignPlayPlayerActionAdmissionFrame,
   "player" | "visibleFacts" | "handleBindings" | "choiceBindings" | "authority"> {
-  const { handle, packet, narration, mechanicalFrame, human, judgeInput } = input;
+  const { handle, packet, moment, mechanicalFrame, human, judgeInput } = input;
   const candidates = candidateBindings(handle, mechanicalFrame);
   const visibleFacts: CampaignPlayJudgeFrame["visibleFacts"] = [];
   const factByHandle = new Map<string, CampaignPlayJudgeFrame["visibleFacts"][number]>();
@@ -757,7 +870,7 @@ function buildPublicAuthority(input: {
       ? `You owe ${obligation.counterpartyName}: ${obligation.outstandingAmount} ${obligation.unitKey}`
       : `${obligation.counterpartyName} owes you: ${obligation.outstandingAmount} ${obligation.unitKey}`,
   }));
-  const choiceBindings = narration.suggestedActions.map((suggestion) => {
+  const choiceBindings = moment.suggestedActions.map((suggestion) => {
     const available = packet.availableIntents.find((intent) =>
       intent.handle === suggestion.choiceHandle);
     if (!available) {
@@ -842,7 +955,7 @@ function buildPublicAuthority(input: {
 function resolveJudgeInput(
   request: CampaignPlayTurnAdmissionRequest,
   packet: CampaignPlayNarratorPacket,
-  narration: CampaignPlayNarration,
+  moment: z.infer<typeof publicMomentSchema>,
 ): CampaignPlayJudgeInput {
   if (request.source === "freeform") {
     return judgeInputSchema.parse({
@@ -851,7 +964,7 @@ function resolveJudgeInput(
       choiceHandle: null,
     });
   }
-  const suggestion = narration.suggestedActions.find((action) =>
+  const suggestion = moment.suggestedActions.find((action) =>
     action.choiceHandle === request.choiceHandle);
   const available = packet.availableIntents.find((intent) =>
     intent.handle === request.choiceHandle);
@@ -865,6 +978,245 @@ function resolveJudgeInput(
     originalText: suggestion.label,
     source: "suggested",
     choiceHandle: suggestion.choiceHandle,
+  });
+}
+
+function certifiedMoveHash(certificate: CampaignPlayCertifiedMove): string {
+  return hashCampaignPlayProjection({
+    domain: "campaign_play_certified_move",
+    certificate,
+  });
+}
+
+function certifiedWaitHash(certificate: CampaignPlayCertifiedWait): string {
+  return hashCampaignPlayProjection({
+    domain: "campaign_play_certified_wait",
+    certificate,
+  });
+}
+
+function isCertifiedRoute(
+  route: CampaignPlayPlayerActionAdmissionFrame["executionRoute"],
+): route is Exclude<CampaignPlayPlayerActionAdmissionFrame["executionRoute"], { kind: "full_authority" }> {
+  return route.kind === "certified_move" || route.kind === "certified_wait";
+}
+
+function certifyPureRenderedMove(input: {
+  campaignId: string;
+  turnId: string;
+  acceptedWorldVersion: number;
+  baseWorldVersion: number;
+  baseRuntimeRevision: number;
+  sourceTurnId: string;
+  sourceMomentId: string;
+  sourceMomentHash: string;
+  sourcePacketHash: string;
+  packet: CampaignPlayNarratorPacket;
+  moment: z.infer<typeof publicMomentSchema>;
+  mechanicalFrame: CampaignPlayRulebookFrame;
+  publicAuthority: Pick<CampaignPlayPlayerActionAdmissionFrame,
+    "player" | "visibleFacts" | "handleBindings" | "choiceBindings" | "authority">;
+  judgeInput: CampaignPlayJudgeInput;
+}): CampaignPlayCertifiedMove | null {
+  const { judgeInput, packet, moment, mechanicalFrame, publicAuthority } = input;
+  if (judgeInput.source !== "suggested" || judgeInput.choiceHandle === null) return null;
+  const suggestion = moment.suggestedActions.find((candidate) =>
+    candidate.choiceHandle === judgeInput.choiceHandle);
+  const intent = packet.availableIntents.find((candidate) =>
+    candidate.handle === judgeInput.choiceHandle);
+  const choice = publicAuthority.choiceBindings.find((candidate) =>
+    candidate.handle === judgeInput.choiceHandle);
+  if (
+    !suggestion || !intent || !choice || intent.kind !== "move" ||
+    suggestion.label !== judgeInput.originalText ||
+    suggestion.label !== campaignPlaySuggestedActionLabelPrefix(packet, intent) ||
+    canonicalizeCampaignPlayProjection(choice) !== canonicalizeCampaignPlayProjection({
+      ...intent,
+      label: suggestion.label,
+    })
+  ) return null;
+  const routeTargets = intent.targets.filter((target) => target.kind === "route");
+  if (intent.targets.length !== 1 || routeTargets.length !== 1) return null;
+  const routeHandle = routeTargets[0]!.handle;
+  const visibleRoute = packet.visibleRoutes.find((candidate) =>
+    candidate.handle === routeHandle);
+  if (!visibleRoute || visibleRoute.state !== "open") return null;
+  const destinationHandle = visibleRoute.destinationHandle;
+  const routeBinding = publicAuthority.handleBindings.find((binding) =>
+    binding.handle === routeHandle && binding.reference.kind === "route");
+  const destinationBinding = publicAuthority.handleBindings.find((binding) =>
+    binding.handle === destinationHandle && binding.reference.kind === "location");
+  const currentLocationBinding = publicAuthority.handleBindings.find((binding) =>
+    binding.handle === packet.currentLocation.handle && binding.reference.kind === "location");
+  if (!routeBinding || !destinationBinding || !currentLocationBinding) return null;
+  const canonicalRoute = mechanicalFrame.runtimeRoutes.find((candidate) =>
+    candidate.id === routeBinding.reference.id)
+    ?? mechanicalFrame.acceptedWorld.routes.find((candidate) =>
+      candidate.id === routeBinding.reference.id);
+  const liveRouteState = mechanicalFrame.routeStates.find((candidate) =>
+    candidate.routeId === routeBinding.reference.id)?.state ?? "open";
+  const playerPlacement = mechanicalFrame.placements.find((placement) =>
+    placement.actorId === publicAuthority.player.actorId &&
+    placement.placementKind === "present");
+  const playerHasActiveCondition = mechanicalFrame.actorConditions.some((condition) =>
+    condition.actorId === publicAuthority.player.actorId && condition.present);
+  const authorized = (kind: CampaignPlayEntityRef["kind"], id: string) =>
+    publicAuthority.authority.authorizedRefs.some((reference) =>
+      reference.kind === kind && reference.id === id);
+  if (
+    !canonicalRoute || liveRouteState !== "open" ||
+    canonicalRoute.fromLocationId !== currentLocationBinding.reference.id ||
+    canonicalRoute.toLocationId !== destinationBinding.reference.id ||
+    playerPlacement?.locationId !== canonicalRoute.fromLocationId ||
+    playerHasActiveCondition ||
+    !authorized("actor", publicAuthority.player.actorId) ||
+    !authorized("route", canonicalRoute.id) ||
+    !authorized("location", canonicalRoute.fromLocationId) ||
+    !authorized("location", canonicalRoute.toLocationId)
+  ) return null;
+  return campaignPlayCertifiedMoveSchema.parse({
+    actionSchemaVersion: 1,
+    resolver: "game_master",
+    campaignId: input.campaignId,
+    turnId: input.turnId,
+    sourceTurnId: input.sourceTurnId,
+    sourceMomentId: input.sourceMomentId,
+    sourceMomentHash: input.sourceMomentHash,
+    sourcePacketHash: input.sourcePacketHash,
+    acceptedWorldVersion: input.acceptedWorldVersion,
+    baseWorldVersion: input.baseWorldVersion,
+    baseRuntimeRevision: input.baseRuntimeRevision,
+    actorId: publicAuthority.player.actorId,
+    actorHandle: publicAuthority.player.actorHandle,
+    choiceHandle: intent.handle,
+    label: suggestion.label,
+    routeHandle,
+    routeId: canonicalRoute.id,
+    fromLocationId: canonicalRoute.fromLocationId,
+    destinationHandle,
+    destinationLocationId: canonicalRoute.toLocationId,
+    travelCost: canonicalRoute.travelCost,
+    ruling: {
+      disposition: "deterministic",
+      normalizedIntent: {
+        originalText: suggestion.label,
+        source: "suggested",
+        choiceHandle: intent.handle,
+        kind: "move",
+        targets: intent.targets,
+        method: null,
+        stakes: null,
+      },
+      movementRouteHandle: routeHandle,
+      possessionEffectAuthority: { kind: "none" },
+      requiredObligationEffect: { kind: "none" },
+      citedVisibleFactHandles: [routeHandle, destinationHandle],
+      resultBounds: { minimum: "success", maximum: "success" },
+      elapsedBounds: {
+        minimumMinutes: canonicalRoute.travelCost,
+        maximumMinutes: canonicalRoute.travelCost,
+      },
+      uncertainty: { kind: "none" },
+      reason: "Current rendered move is fully determined by the open canonical route.",
+      clarificationQuestion: null,
+    },
+    resolution: { kind: "deterministic", result: "success" },
+    publicResult: {
+      intentKind: "move",
+      disposition: "deterministic",
+      result: "success",
+      clarificationQuestion: null,
+    },
+  });
+}
+
+function certifyPureRenderedWait(input: {
+  campaignId: string;
+  turnId: string;
+  acceptedWorldVersion: number;
+  baseWorldVersion: number;
+  baseRuntimeRevision: number;
+  sourceTurnId: string;
+  sourceMomentId: string;
+  sourceMomentHash: string;
+  sourcePacketHash: string;
+  packet: CampaignPlayNarratorPacket;
+  moment: z.infer<typeof publicMomentSchema>;
+  publicAuthority: Pick<CampaignPlayPlayerActionAdmissionFrame,
+    "player" | "visibleFacts" | "handleBindings" | "choiceBindings" | "authority">;
+  judgeInput: CampaignPlayJudgeInput;
+}): CampaignPlayCertifiedWait | null {
+  const { judgeInput, packet, moment, publicAuthority } = input;
+  if (judgeInput.source !== "suggested" || judgeInput.choiceHandle === null) return null;
+  const suggestion = moment.suggestedActions.find((candidate) =>
+    candidate.choiceHandle === judgeInput.choiceHandle);
+  const intent = packet.availableIntents.find((candidate) =>
+    candidate.handle === judgeInput.choiceHandle);
+  const choice = publicAuthority.choiceBindings.find((candidate) =>
+    candidate.handle === judgeInput.choiceHandle);
+  const match = suggestion?.label.match(/^Wait ([1-9][0-9]*) minutes?$/);
+  if (!match) return null;
+  const waitMinutes = Number(match[1]);
+  if (
+    !suggestion || !intent || !choice || intent.kind !== "wait" ||
+    intent.targets.length !== 0 || suggestion.label !== judgeInput.originalText ||
+    suggestion.label !== `Wait ${CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES} minutes` ||
+    waitMinutes !== CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES ||
+    !Number.isSafeInteger(waitMinutes) || waitMinutes > CAMPAIGN_PLAY_LIMITS.elapsedMinutes ||
+    canonicalizeCampaignPlayProjection(choice) !== canonicalizeCampaignPlayProjection({
+      ...intent,
+      label: suggestion.label,
+    })
+  ) return null;
+  const authorized = (kind: CampaignPlayEntityRef["kind"], id: string) =>
+    publicAuthority.authority.authorizedRefs.some((reference) =>
+      reference.kind === kind && reference.id === id);
+  if (!authorized("actor", publicAuthority.player.actorId)) return null;
+  return campaignPlayCertifiedWaitSchema.parse({
+    actionSchemaVersion: 1,
+    resolver: "game_master",
+    campaignId: input.campaignId,
+    turnId: input.turnId,
+    sourceTurnId: input.sourceTurnId,
+    sourceMomentId: input.sourceMomentId,
+    sourceMomentHash: input.sourceMomentHash,
+    sourcePacketHash: input.sourcePacketHash,
+    acceptedWorldVersion: input.acceptedWorldVersion,
+    baseWorldVersion: input.baseWorldVersion,
+    baseRuntimeRevision: input.baseRuntimeRevision,
+    actorId: publicAuthority.player.actorId,
+    actorHandle: publicAuthority.player.actorHandle,
+    choiceHandle: intent.handle,
+    label: suggestion.label,
+    waitMinutes,
+    ruling: {
+      disposition: "deterministic",
+      normalizedIntent: {
+        originalText: suggestion.label,
+        source: "suggested",
+        choiceHandle: intent.handle,
+        kind: "wait",
+        targets: [],
+        method: null,
+        stakes: null,
+      },
+      movementRouteHandle: null,
+      possessionEffectAuthority: { kind: "none" },
+      requiredObligationEffect: { kind: "none" },
+      citedVisibleFactHandles: [],
+      resultBounds: { minimum: "success", maximum: "success" },
+      elapsedBounds: { minimumMinutes: waitMinutes, maximumMinutes: waitMinutes },
+      uncertainty: { kind: "none" },
+      reason: "Current rendered wait has one exact public duration and no targets.",
+      clarificationQuestion: null,
+    },
+    resolution: { kind: "deterministic", result: "success" },
+    publicResult: {
+      intentKind: "wait",
+      disposition: "deterministic",
+      result: "success",
+      clarificationQuestion: null,
+    },
   });
 }
 
@@ -897,16 +1249,16 @@ function buildAdmissionFrame(input: {
   }
   const mechanicalFrame = loadCampaignPlayRulebookFrame(input.handle);
   const human = humanPlayer(input.handle);
-  const judgeInput = resolveJudgeInput(input.request, moment.packet, moment.narration);
+  const judgeInput = resolveJudgeInput(input.request, moment.packet, moment.moment);
   const publicAuthority = buildPublicAuthority({
     handle: input.handle,
     packet: moment.packet,
-    narration: moment.narration,
+    moment: moment.moment,
     mechanicalFrame,
     human,
     judgeInput,
   });
-  return playerActionAdmissionFrameSchema.parse({
+  const baseFrame = {
     campaignId: input.handle.campaignId,
     turnId: input.turnId,
     acceptedWorldVersion: state.authority.acceptedWorldVersion,
@@ -915,16 +1267,63 @@ function buildAdmissionFrame(input: {
     baseRuntimeRevision: state.authority.runtimeRevision,
     worldTimeMinutes: state.authority.worldTimeMinutes,
     sourceTurnId: moment.row.sourceTurnId,
-    sourceNarrationId: moment.row.narrationId,
-    sourceNarrationHash: hashCampaignPlayProjection({
-      domain: "campaign_play_source_narration",
-      narration: moment.narration,
+    sourceMomentId: moment.moment.momentId,
+    sourceMomentHash: hashCampaignPlayProjection({
+      domain: "campaign_play_source_moment",
+      moment: moment.moment,
     }),
     sourcePacketHash: moment.row.packetHash,
-    sourceNarration: moment.narration,
+    sourceMoment: moment.moment,
     sourcePacket: moment.packet,
     judgeInput,
     ...publicAuthority,
+  };
+  const moveCertificate = certifyPureRenderedMove({
+    campaignId: baseFrame.campaignId,
+    turnId: baseFrame.turnId,
+    acceptedWorldVersion: baseFrame.acceptedWorldVersion,
+    baseWorldVersion: baseFrame.baseWorldVersion,
+    baseRuntimeRevision: baseFrame.baseRuntimeRevision,
+    sourceTurnId: baseFrame.sourceTurnId,
+    sourceMomentId: baseFrame.sourceMomentId,
+    sourceMomentHash: baseFrame.sourceMomentHash,
+    sourcePacketHash: baseFrame.sourcePacketHash,
+    packet: baseFrame.sourcePacket,
+    moment: baseFrame.sourceMoment,
+    mechanicalFrame,
+    publicAuthority,
+    judgeInput,
+  });
+  const waitCertificate = moveCertificate === null ? certifyPureRenderedWait({
+    campaignId: baseFrame.campaignId,
+    turnId: baseFrame.turnId,
+    acceptedWorldVersion: baseFrame.acceptedWorldVersion,
+    baseWorldVersion: baseFrame.baseWorldVersion,
+    baseRuntimeRevision: baseFrame.baseRuntimeRevision,
+    sourceTurnId: baseFrame.sourceTurnId,
+    sourceMomentId: baseFrame.sourceMomentId,
+    sourceMomentHash: baseFrame.sourceMomentHash,
+    sourcePacketHash: baseFrame.sourcePacketHash,
+    packet: baseFrame.sourcePacket,
+    moment: baseFrame.sourceMoment,
+    publicAuthority,
+    judgeInput,
+  }) : null;
+  return playerActionAdmissionFrameSchema.parse({
+    ...baseFrame,
+    executionRoute: moveCertificate !== null
+      ? {
+          kind: "certified_move",
+          certificate: moveCertificate,
+          certificateHash: certifiedMoveHash(moveCertificate),
+        }
+      : waitCertificate !== null
+        ? {
+            kind: "certified_wait",
+            certificate: waitCertificate,
+            certificateHash: certifiedWaitHash(waitCertificate),
+          }
+        : { kind: "full_authority" },
   });
 }
 
@@ -985,7 +1384,7 @@ function currentGameMasterFrame(
   const rebuilt = buildPublicAuthority({
     handle,
     packet: admission.sourcePacket,
-    narration: admission.sourceNarration,
+    moment: admission.sourceMoment,
     mechanicalFrame: mechanical,
     human: {
       actorId: admission.player.actorId,
@@ -1015,7 +1414,7 @@ function currentGameMasterFrame(
   return {
     admission,
     frame: {
-      sourceMoment: admission.sourceNarration.displayText,
+      sourceMoment: admission.sourceMoment.displayText,
       playerProfile: admission.player.profile,
       visibleFacts: admission.visibleFacts,
       handleBindings: admission.handleBindings,
@@ -1032,6 +1431,79 @@ function currentGameMasterFrame(
       authority: rulebookAuthority(turn.turnId, admission),
     },
   };
+}
+
+function revalidateCertifiedRoute(
+  handle: CampaignPlayDatabaseHandle,
+  turn: LoadedCampaignPlayTurn,
+): CampaignPlayCertifiedMove | CampaignPlayCertifiedWait {
+  const current = currentGameMasterFrame(handle, turn);
+  const admission = current.admission;
+  if (!isCertifiedRoute(admission.executionRoute)) {
+    throw new CampaignPlayTurnRuntimeError(
+      "turn_artifact_invalid",
+      "Campaign Play turn has no certified route authority.",
+    );
+  }
+  const fresh = admission.executionRoute.kind === "certified_move"
+    ? certifyPureRenderedMove({
+    campaignId: admission.campaignId,
+    turnId: admission.turnId,
+    acceptedWorldVersion: admission.acceptedWorldVersion,
+    baseWorldVersion: admission.baseWorldVersion,
+    baseRuntimeRevision: admission.baseRuntimeRevision,
+    sourceTurnId: admission.sourceTurnId,
+    sourceMomentId: admission.sourceMomentId,
+    sourceMomentHash: admission.sourceMomentHash,
+    sourcePacketHash: admission.sourcePacketHash,
+    packet: admission.sourcePacket,
+    moment: admission.sourceMoment,
+    mechanicalFrame: current.frame.rulebookFrame,
+    publicAuthority: {
+      player: admission.player,
+      visibleFacts: admission.visibleFacts,
+      handleBindings: admission.handleBindings,
+      choiceBindings: admission.choiceBindings,
+      authority: admission.authority,
+    },
+    judgeInput: admission.judgeInput,
+    })
+    : certifyPureRenderedWait({
+      campaignId: admission.campaignId,
+      turnId: admission.turnId,
+      acceptedWorldVersion: admission.acceptedWorldVersion,
+      baseWorldVersion: admission.baseWorldVersion,
+      baseRuntimeRevision: admission.baseRuntimeRevision,
+      sourceTurnId: admission.sourceTurnId,
+      sourceMomentId: admission.sourceMomentId,
+      sourceMomentHash: admission.sourceMomentHash,
+      sourcePacketHash: admission.sourcePacketHash,
+      packet: admission.sourcePacket,
+      moment: admission.sourceMoment,
+      publicAuthority: {
+        player: admission.player,
+        visibleFacts: admission.visibleFacts,
+        handleBindings: admission.handleBindings,
+        choiceBindings: admission.choiceBindings,
+        authority: admission.authority,
+      },
+      judgeInput: admission.judgeInput,
+    });
+  const hash = fresh === null ? null : admission.executionRoute.kind === "certified_move"
+    ? certifiedMoveHash(fresh as CampaignPlayCertifiedMove)
+    : certifiedWaitHash(fresh as CampaignPlayCertifiedWait);
+  if (
+    fresh === null ||
+    hash !== admission.executionRoute.certificateHash ||
+    canonicalizeCampaignPlayProjection(fresh) !==
+      canonicalizeCampaignPlayProjection(admission.executionRoute.certificate)
+  ) {
+    throw new CampaignPlayTurnRuntimeError(
+      "turn_artifact_invalid",
+      "Campaign Play certified route no longer matches current authority.",
+    );
+  }
+  return fresh;
 }
 
 function assertSuggestedRuling(
@@ -1274,6 +1746,23 @@ function playerActionContext(
   repository: ReturnType<typeof createCampaignPlayTurnRepository>,
 ): CampaignPlayActionContext {
   const admission = loadCampaignPlayPlayerActionAdmissionFrame(turn);
+  if (isCertifiedRoute(admission.executionRoute)) {
+    if (
+      (admission.executionRoute.kind === "certified_move"
+        ? certifiedMoveHash(admission.executionRoute.certificate)
+        : certifiedWaitHash(admission.executionRoute.certificate)) !== admission.executionRoute.certificateHash ||
+      repository.loadAcceptedModelArtifact(turn.turnId, "judge") !== null
+    ) {
+      throw new CampaignPlayTurnRuntimeError(
+        "turn_artifact_invalid",
+        "Campaign Play visibility rejected invalid certified route authority.",
+      );
+    }
+    return campaignPlayActionContextSchema.parse({
+      submittedText: admission.judgeInput.originalText,
+      ...admission.executionRoute.certificate.publicResult,
+    });
+  }
   const storedJudge = repository.loadAcceptedModelArtifact(turn.turnId, "judge");
   if (!storedJudge) {
     throw new CampaignPlayTurnRuntimeError(
@@ -1399,6 +1888,7 @@ export function createCampaignPlayTurnRuntime(
 ): CampaignPlayTurnRuntime {
   assertRuntimeModel(input.judgeModel);
   assertRuntimeModel(input.gameMasterModel);
+  if (input.certifiedGameMasterModel) assertRuntimeModel(input.certifiedGameMasterModel);
   assertRuntimeModel(input.actorReplannerModel);
   assertRuntimeModel(input.narratorModel);
   if (
@@ -1436,7 +1926,23 @@ export function createCampaignPlayTurnRuntime(
   const actorReplanner = input.actorReplanner ?? createCampaignPlayActorReplanner(input.handle);
   const narrator = input.narrator ?? createCampaignPlayNarrator();
   const visibility = input.visibility ?? createCampaignPlayVisibilityService(input.handle);
+  const narrationOperations = createCampaignPlayNarrationOperationRepository(input.handle);
   const frozenSelection = selection(input);
+  const certifiedGameMasterModel = input.certifiedGameMasterModel ?? input.gameMasterModel;
+  const externalOperationDeadlineMs = input.externalOperationDeadlineMs ?? 90_000;
+  const actorCriticalPathReplanLimit = input.actorCriticalPathReplanLimit ?? 1;
+  if (!Number.isSafeInteger(externalOperationDeadlineMs) || externalOperationDeadlineMs <= 0) {
+    throw new CampaignPlayTurnRuntimeError(
+      "turn_state_invalid",
+      "Campaign Play player-action provider deadline is invalid.",
+    );
+  }
+  if (!Number.isSafeInteger(actorCriticalPathReplanLimit) || actorCriticalPathReplanLimit < 0) {
+    throw new CampaignPlayTurnRuntimeError(
+      "turn_state_invalid",
+      "Campaign Play actor critical-path replan limit is invalid.",
+    );
+  }
 
   const acceptedActorReplanCount = (turnId: string): number =>
     (input.handle.sqlite.prepare(`SELECT count(*) AS count
@@ -1526,11 +2032,122 @@ export function createCampaignPlayTurnRuntime(
     });
   };
 
+  const claimNarration = (turnId: string): CampaignPlayNarrationAttemptToken | null => {
+    const claimedAt = now();
+    const leaseExpiresAt = claimedAt + input.leaseDurationMs;
+    if (!Number.isSafeInteger(leaseExpiresAt)) {
+      throw new CampaignPlayTurnRuntimeError(
+        "turn_state_invalid",
+        "Campaign Play narration lease exceeds the timestamp range.",
+      );
+    }
+    return narrationOperations.claim({
+      turnId,
+      owner: input.owner,
+      requested: input.narratorModel.requested,
+      claimedAt,
+      leaseExpiresAt,
+    });
+  };
+
+  const executeNarration = async (
+    initialToken: CampaignPlayNarrationAttemptToken,
+  ): Promise<CampaignPlayNarrationOperation> => {
+    let token = initialToken;
+    let providerReturned = false;
+    let heartbeatStopped = false;
+    const controller = new AbortController();
+    const heartbeat = (async () => {
+      while (!heartbeatStopped) {
+        try {
+          await waitForHeartbeat(input.heartbeatIntervalMs, controller.signal);
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          throw error;
+        }
+        if (heartbeatStopped) return;
+        const renewedAt = now();
+        const leaseExpiresAt = renewedAt + input.leaseDurationMs;
+        if (!Number.isSafeInteger(leaseExpiresAt)) {
+          throw new CampaignPlayTurnRuntimeError(
+            "turn_state_invalid",
+            "Campaign Play narration lease renewal exceeds the timestamp range.",
+          );
+        }
+        token = narrationOperations.renew(token, renewedAt, leaseExpiresAt);
+      }
+    })();
+    const heartbeatFailure = new Promise<never>((_resolve, reject) => {
+      void heartbeat.catch(reject);
+    });
+    const startedAt = now();
+    try {
+      const turn = repository.loadTurn(token.turnId);
+      if (!turn || turn.stage !== "completed" || turn.turnKind !== "player_action") {
+        throw new CampaignPlayTurnRuntimeError(
+          "turn_state_invalid",
+          "Campaign Play narration operation requires its committed player result.",
+        );
+      }
+      const pending = pendingPlayerNarration(input.handle, turn, repository);
+      if (
+        pending.narrationId !== token.narrationId || pending.packetHash !== token.packetHash ||
+        pending.packetJson !== token.packetJson
+      ) {
+        throw new CampaignPlayTurnRuntimeError(
+          "turn_artifact_invalid",
+          "Campaign Play narration operation disagrees with its immutable visible packet.",
+        );
+      }
+      const request = narrator.narrate({
+        narrationId: token.narrationId,
+        packetBytes: token.packetJson,
+        createdAt: token.createdAt,
+        model: input.narratorModel.languageModel,
+        temperature: input.narratorModel.temperature,
+        budget: modelBudget(input.narratorModel),
+        signal: controller.signal,
+      });
+      void request.catch(() => undefined);
+      const candidate = await Promise.race([request, heartbeatFailure]);
+      validateNarrationAgainstPacket(candidate.narration, pending.packet);
+      const evidence = acceptedNarratorEvidence(
+        input.narratorModel.requested,
+        candidate.modelEvidence,
+      );
+      providerReturned = true;
+      input.injectNarratorFault?.("after_provider_return");
+      const acceptedAt = now();
+      input.injectNarratorFault?.("during_terminal_commit");
+      return narrationOperations.accept({
+        token,
+        narration: candidate.narration,
+        evidence,
+        acceptedAt,
+      });
+    } catch (cause) {
+      if (providerReturned) throw cause;
+      const interruption = cause instanceof CampaignPlayExternalStageInterruption
+        ? cause
+        : narratorInterruption(input.narratorModel.requested, cause, now() - startedAt);
+      return narrationOperations.failAttempt({
+        token,
+        evidence: interruption.evidence,
+        failedAt: now(),
+      });
+    } finally {
+      heartbeatStopped = true;
+      controller.abort();
+      await heartbeat.catch(() => undefined);
+    }
+  };
+
   const service: CampaignPlayTurnService = createCampaignPlayTurnService({
     handle: input.handle,
     owner: input.owner,
     leaseDurationMs: input.leaseDurationMs,
     heartbeatIntervalMs: input.heartbeatIntervalMs,
+    externalOperationDeadlineMs,
     clock: input.clock,
     resolveStage({ turn, stage, artifacts }) {
       if (turn.turnKind !== "player_action") return null;
@@ -1539,9 +2156,73 @@ export function createCampaignPlayTurnRuntime(
           kind: "external",
           async execute(context) {
             const startedAt = now();
+            let routeKind: "full_authority" | "certified_move" | "certified_wait" = "full_authority";
             try {
               const admission = loadCampaignPlayPlayerActionAdmissionFrame(context.turn);
+              routeKind = admission.executionRoute.kind;
               const current = currentGameMasterFrame(input.handle, context.turn);
+              if (isCertifiedRoute(admission.executionRoute)) {
+                const certificate = revalidateCertifiedRoute(input.handle, context.turn);
+                const candidate = await gameMaster.plan({
+                  frame: current.frame,
+                  ruling: certificate.ruling,
+                  resolution: certificate.resolution,
+                  uncertaintyAuthority: null,
+                  model: certifiedGameMasterModel.languageModel,
+                  temperature: certifiedGameMasterModel.temperature,
+                  budget: modelBudget(certifiedGameMasterModel),
+                  signal: context.signal,
+                });
+                const artifact = campaignPlayGameMasterArtifactSchema.parse({
+                  ...(admission.executionRoute.kind === "certified_move"
+                    ? { certifiedMoveHash: admission.executionRoute.certificateHash }
+                    : { certifiedWaitHash: admission.executionRoute.certificateHash }),
+                  batch: candidate.batch,
+                  batchHash: candidate.batchHash,
+                  semanticReview: candidate.semanticReview,
+                });
+                if (hashCampaignPlayProjection(artifact.batch) !== artifact.batchHash) {
+                  throw new CampaignPlayTurnRuntimeError(
+                    "turn_game_master_invalid",
+                    "Campaign Play Game Master candidate has an invalid batch hash.",
+                  );
+                }
+                const evidence = acceptedEvidence(
+                  input.gameMasterModel.requested,
+                  candidate.modelEvidence,
+                );
+                return {
+                  commit({ token, completedAt }) {
+                    try {
+                      repository.acceptModelArtifact({
+                        token,
+                        artifact,
+                        evidence,
+                        mutationDomain: "runtime",
+                        acceptedAt: completedAt,
+                        mutationId: runtimeId("game-master-accepted", {
+                          turnId: token.turnId,
+                          epoch: token.epoch,
+                        }),
+                      });
+                    } catch (cause) {
+                      if (cause instanceof CampaignPlayTurnRepositoryError) throw cause;
+                      throw new CampaignPlayExternalStageInterruption(
+                        interruptionEvidence({
+                          requested: input.gameMasterModel.requested,
+                          evidence: candidate.modelEvidence,
+                          durationMs: candidate.modelEvidence.durationMs,
+                          errorCode: "persistence_failed",
+                          schemaOutcome: "transport_error",
+                        }),
+                        "Campaign Play Game Master artifact persistence requires explicit resume.",
+                        { cause },
+                      );
+                    }
+                    return undefined;
+                  },
+                };
+              }
               const frozenChoice = admission.judgeInput.source === "suggested"
                 ? admission.choiceBindings.find((choice) =>
                     choice.handle === admission.judgeInput.choiceHandle)
@@ -1582,7 +2263,7 @@ export function createCampaignPlayTurnRuntime(
                   locationHandle: admission.sourcePacket.currentLocation.handle,
                   visibleRoutes: judgeVisibleRoutes,
                   worldTimeMinutes: admission.worldTimeMinutes,
-                  sourceMoment: admission.sourceNarration.displayText,
+                  sourceMoment: admission.sourceMoment.displayText,
                   playerProfile: admission.player.profile,
                   visibleFacts: admission.visibleFacts,
                   depletedPlayerPossessions: current.frame.rulebookFrame.possessions
@@ -1642,6 +2323,13 @@ export function createCampaignPlayTurnRuntime(
               };
             } catch (cause) {
               if (cause instanceof CampaignPlayExternalStageInterruption) throw cause;
+              if (routeKind !== "full_authority") {
+                throw gameMasterInterruption(
+                  input.gameMasterModel.requested,
+                  cause,
+                  now() - startedAt,
+                );
+              }
               log.warn("Judge stage failed before artifact acceptance.", {
                 code: cause instanceof CampaignPlayJudgeError ? cause.code : null,
                 stack: cause instanceof Error ? cause.stack : String(cause),
@@ -1749,7 +2437,11 @@ export function createCampaignPlayTurnRuntime(
       if (stage === "planned") {
         return {
           kind: "deterministic",
-          ready: () => {
+          ready: ({ turn: currentTurn }) => {
+            const admission = loadCampaignPlayPlayerActionAdmissionFrame(currentTurn);
+            if (isCertifiedRoute(admission.executionRoute)) {
+              return artifacts.load("judge") === null && artifacts.load("game_master") !== null;
+            }
             const storedJudge = artifacts.load("judge");
             if (!storedJudge) return false;
             const artifact = parseJudgeArtifact(storedJudge.artifact);
@@ -1758,33 +2450,55 @@ export function createCampaignPlayTurnRuntime(
           execute(context) {
             let deterministicCommitStarted = false;
             try {
-              const storedJudge = context.artifacts.load("judge");
-              if (!storedJudge) throw new Error("missing judge artifact");
-              const acceptedJudge = parseJudgeArtifact(storedJudge.artifact);
+              const admission = loadCampaignPlayPlayerActionAdmissionFrame(context.turn);
               const committedAt = now();
-              if (acceptedJudge.primaryPlan.kind === "no_effect") {
-                if (context.artifacts.load("game_master") !== null) {
-                  throw new Error("no-effect turn has a Game Master artifact");
-                }
-                deterministicCommitStarted = true;
-                repository.commitDeterministic({
-                  token: context.token,
-                  transition: "primary_settled",
-                  worldVersionAdvance: 0,
-                  committedAt,
-                  mutationId: runtimeId("primary-settled", {
-                    turnId: context.turn.turnId,
-                    epoch: context.token.epoch,
-                    branch: acceptedJudge.primaryPlan.reason,
-                  }),
-                });
-                return;
-              }
               const storedGameMaster = context.artifacts.load("game_master");
-              if (!storedGameMaster) throw new Error("missing game master artifact");
-              const acceptedGameMaster = parseGameMasterArtifact(storedGameMaster.artifact);
-              if (acceptedGameMaster.judgeArtifactHash !== storedJudge.artifactHash) {
-                throw new Error("game master references another judge artifact");
+              let acceptedGameMaster: CampaignPlayGameMasterArtifact;
+              if (isCertifiedRoute(admission.executionRoute)) {
+                if (context.artifacts.load("judge") !== null || !storedGameMaster) {
+                  throw new Error("certified route has invalid model authority evidence");
+                }
+                const certificate = revalidateCertifiedRoute(input.handle, context.turn);
+                acceptedGameMaster = parseGameMasterArtifact(storedGameMaster.artifact);
+                if (
+                  (admission.executionRoute.kind === "certified_move"
+                    ? !("certifiedMoveHash" in acceptedGameMaster) ||
+                      acceptedGameMaster.certifiedMoveHash !== certifiedMoveHash(certificate as CampaignPlayCertifiedMove)
+                    : !("certifiedWaitHash" in acceptedGameMaster) ||
+                      acceptedGameMaster.certifiedWaitHash !== certifiedWaitHash(certificate as CampaignPlayCertifiedWait))
+                ) {
+                  throw new Error("game master references another certified route");
+                }
+              } else {
+                const storedJudge = context.artifacts.load("judge");
+                if (!storedJudge) throw new Error("missing judge artifact");
+                const acceptedJudge = parseJudgeArtifact(storedJudge.artifact);
+                if (acceptedJudge.primaryPlan.kind === "no_effect") {
+                  if (storedGameMaster !== null) {
+                    throw new Error("no-effect turn has a Game Master artifact");
+                  }
+                  deterministicCommitStarted = true;
+                  repository.commitDeterministic({
+                    token: context.token,
+                    transition: "primary_settled",
+                    worldVersionAdvance: 0,
+                    committedAt,
+                    mutationId: runtimeId("primary-settled", {
+                      turnId: context.turn.turnId,
+                      epoch: context.token.epoch,
+                      branch: acceptedJudge.primaryPlan.reason,
+                    }),
+                  });
+                  return;
+                }
+                if (!storedGameMaster) throw new Error("missing game master artifact");
+                acceptedGameMaster = parseGameMasterArtifact(storedGameMaster.artifact);
+                if (
+                  !("judgeArtifactHash" in acceptedGameMaster) ||
+                  acceptedGameMaster.judgeArtifactHash !== storedJudge.artifactHash
+                ) {
+                  throw new Error("game master references another judge artifact");
+                }
               }
               const current = currentGameMasterFrame(input.handle, context.turn);
               const preflight = preflightCampaignPlayRulebook({
@@ -1885,6 +2599,31 @@ export function createCampaignPlayTurnRuntime(
           async execute(context) {
             const dueSet = actorScheduler.loadDueSet(context.turn.turnId);
             if (!dueSet) {
+              const admission = loadCampaignPlayPlayerActionAdmissionFrame(context.turn);
+              if (!isCertifiedRoute(admission.executionRoute)) {
+                const storedJudge = context.artifacts.load("judge");
+                if (!storedJudge) {
+                  throw new CampaignPlayTurnRuntimeError(
+                    "turn_artifact_invalid",
+                    "Campaign Play actor scheduling requires the accepted Judge artifact.",
+                  );
+                }
+                const acceptedJudge = parseJudgeArtifact(storedJudge.artifact);
+                if (acceptedJudge.primaryPlan.kind === "no_effect") {
+                  repository.commitDeterministic({
+                    token: context.token,
+                    transition: "actors_settled",
+                    worldVersionAdvance: 0,
+                    committedAt: now(),
+                    mutationId: runtimeId("actors-settled", {
+                      turnId: context.turn.turnId,
+                      epoch: context.token.epoch,
+                      noEffectReason: acceptedJudge.primaryPlan.reason,
+                    }),
+                  });
+                  return;
+                }
+              }
               const state = createCampaignPlayStateRepository(input.handle).loadState();
               if (!state || state.authority.worldTimeMinutes === null) {
                 throw new CampaignPlayTurnRuntimeError(
@@ -1980,7 +2719,7 @@ export function createCampaignPlayTurnRuntime(
               );
             }
             if (outcome.kind === "replan_required") {
-              if (acceptedActorReplanCount(context.turn.turnId) >= 1) {
+              if (acceptedActorReplanCount(context.turn.turnId) >= actorCriticalPathReplanLimit) {
                 const deferred = actorProposalService.deferReplan({
                   jobId: outcome.jobId,
                   token: context.token,
@@ -2012,13 +2751,18 @@ export function createCampaignPlayTurnRuntime(
       if (stage === "actors_settled") {
         return {
           kind: "deterministic",
-          ready: () => artifacts.load("judge") !== null,
+          ready: ({ turn: currentTurn }) => {
+            const admission = loadCampaignPlayPlayerActionAdmissionFrame(currentTurn);
+            return isCertifiedRoute(admission.executionRoute)
+              ? artifacts.load("judge") === null && artifacts.load("game_master") !== null
+              : artifacts.load("judge") !== null;
+          },
           execute(context) {
             visibility.projectTurn({
               token: context.token,
               actionContext: playerActionContext(context.turn, repository),
               sourceMoment: loadCampaignPlayPlayerActionAdmissionFrame(context.turn)
-                .sourceNarration.displayText,
+                .sourceMoment.displayText,
               committedAt: now(),
               mutationId: runtimeId("player-visibility-projected", {
                 turnId: context.turn.turnId,
@@ -2135,12 +2879,17 @@ export function createCampaignPlayTurnRuntime(
       });
       const replay = repository.loadTurn(turnId);
       if (replay) {
+        const replayFrame = loadCampaignPlayPlayerActionAdmissionFrame(replay);
+        const expectedSelection = replay.modelSelection.turnKind === "player_action" &&
+            replay.modelSelection.routeKind === undefined
+          ? frozenSelection
+          : selectionForRoute(frozenSelection, replayFrame.executionRoute.kind);
         if (
           replay.turnKind !== "player_action" || replay.document.turnKind !== "player_action" ||
           canonicalizeCampaignPlayProjection(replay.document.request) !==
             canonicalizeCampaignPlayProjection(request) ||
           canonicalizeCampaignPlayProjection(replay.modelSelection) !==
-            canonicalizeCampaignPlayProjection(frozenSelection)
+            canonicalizeCampaignPlayProjection(expectedSelection)
         ) {
           throw new CampaignPlayTurnRuntimeError(
             "turn_idempotency_conflict",
@@ -2157,6 +2906,7 @@ export function createCampaignPlayTurnRuntime(
         });
       }
       const frame = buildAdmissionFrame({ handle: input.handle, turnId, request });
+      const modelSelection = selectionForRoute(frozenSelection, frame.executionRoute.kind);
       return repository.admitTurn({
         turnId,
         supersedesTurnId: null,
@@ -2165,18 +2915,47 @@ export function createCampaignPlayTurnRuntime(
           request,
           frame: frame as unknown as CampaignPlayProjectionRecord,
         },
-        modelSelection: frozenSelection,
+        modelSelection,
         mutationId: runtimeId("player-action-admitted", { turnId }),
         submittedAt: admission.submittedAt,
       });
     },
     async runNextStage(turnId) {
       interruptExpiredActorReplanner();
+      const current = repository.loadTurn(turnId);
+      if (current?.turnKind === "player_action" && current.stage === "visibility_projected") {
+        narrationOperations.commitVisibleResult(turnId, now());
+        const completed = repository.loadTurn(turnId)!;
+        return {
+          turn: completed,
+          recovery: repository.loadRecoveryState(turnId, now()),
+          telemetry: {
+            turnId,
+            stage: "visibility_projected",
+            progress: "narrating",
+            workerEpoch: current.workerEpoch,
+            attempt: null,
+            queueTimeMs: 0,
+            stageTimeMs: completed.completedAt! - current.updatedAt,
+            leaseRenewals: 0,
+            outcome: "advanced",
+          },
+        };
+      }
       return service.runNextStage(turnId);
     },
     async recoverActiveTurn() {
       interruptExpiredActorReplanner();
       const active = repository.loadActiveTurn();
+      if (active?.turnKind === "player_action" && active.stage === "visibility_projected") {
+        narrationOperations.commitVisibleResult(active.turnId, now());
+        const completed = repository.loadTurn(active.turnId)!;
+        return {
+          turn: completed,
+          recovery: repository.loadRecoveryState(active.turnId, now()),
+          telemetry: null,
+        };
+      }
       if (active?.stage === "primary_settled") {
         const next = actorScheduler.listTurnJobs(active.turnId).find((job) =>
           ["queued", "claimed", "proposed"].includes(job.stage));
@@ -2305,6 +3084,21 @@ export function createCampaignPlayTurnRuntime(
         recovery: repository.loadRecoveryState(turn.turnId, now()),
         telemetry: null,
       };
+    },
+    async runNarration(turnId, claimedToken) {
+      const token = claimedToken ?? claimNarration(turnId);
+      return token ? executeNarration(token) : narrationOperations.loadByTurn(turnId);
+    },
+    prepareNarrationRecovery(request) {
+      const operation = narrationOperations.prepareRecovery(request, now());
+      const token = claimNarration(operation.turnId);
+      if (!token) {
+        throw new CampaignPlayTurnRuntimeError(
+          "turn_state_invalid",
+          "Campaign Play narration recovery could not claim its new attempt.",
+        );
+      }
+      return token;
     },
     loadTurn: (turnId) => repository.loadTurn(turnId),
     loadTelemetry: (turnId) => repository.loadTurnTelemetry(turnId),

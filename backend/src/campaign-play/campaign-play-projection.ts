@@ -225,6 +225,7 @@ export interface CampaignPlayPublicProjectionInput {
   consequences: readonly CampaignPlayConsequence[];
   journal: readonly CampaignPlayPublicJournalEntry[];
   narration: CampaignPlayProjectionRecord | null;
+  narrationOperation?: CampaignPlayProjectionRecord | null;
 }
 
 export interface CampaignPlayPublicJournalEntry {
@@ -918,5 +919,6 @@ export function projectCampaignPlayPublicState(
       )
       .map((row) => publicJournalEntry(row.entry)),
     narration: input.narration,
+    narrationOperation: input.narrationOperation ?? null,
   });
 }

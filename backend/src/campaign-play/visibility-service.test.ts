@@ -140,44 +140,7 @@ function modelEvidence() {
   };
 }
 
-function openingProposal(actorBAcquiresPossession = false): CampaignPlayOpeningProposal {
-  const actorPlans = ["a", "b", "c", "d", "e", "f"].map((suffix) => {
-    const actorId = `actor-${suffix}`;
-    const goalId = `goal-${suffix}`;
-    const targets = suffix === "b"
-      ? [
-          { kind: "location" as const, id: "location-a" },
-          { kind: "goal" as const, id: goalId },
-        ]
-      : suffix === "c"
-        ? [
-            { kind: "location" as const, id: "location-c" },
-            { kind: "goal" as const, id: goalId },
-          ]
-        : [{ kind: "goal" as const, id: goalId }];
-    const intent = {
-      kind: "attempt" as const,
-      targets,
-      method: `Advance ${goalId} from the current situation`,
-      stakes: "The actor's own objective",
-    };
-    return {
-      actorId,
-      primaryGoalId: goalId,
-      cadenceMinutes: 15,
-      steps: Array.from({ length: 3 }, (_, stepIndex) => ({
-        intent,
-        observableTrace: suffix === "b" && stepIndex === 0
-          ? "Fresh sealing wax and torn binding thread mark a ledger removed in haste."
-          : "Fresh work marks show that someone acted here recently.",
-        possessionOutcome: suffix === "b" && actorBAcquiresPossession && stepIndex === 0
-          ? { kind: "acquire" as const, name: "Brass tally", quantity: 2 }
-          : { kind: "none" as const },
-        obligationOutcome: { kind: "none" as const },
-        elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
-      })),
-    };
-  });
+function openingProposal(_actorBAcquiresPossession = false): CampaignPlayOpeningProposal {
   return {
     start: {
       role: "A visitor on Bell Island",
@@ -197,17 +160,8 @@ function openingProposal(actorBAcquiresPossession = false): CampaignPlayOpeningP
       motivationIndex: 0,
       anchor: "openingActor",
       eventClass: "dialogue",
-      summary: "The signal keeper asks the player what brought them to the failing route.",
+      summary: "The signal keeper asks Mara what she has learned about the impossible signal.",
       routeRestriction: null,
-    },
-    actorPlans,
-    hiddenConsequence: {
-      actorId: "actor-b",
-      summary: "A courier changes which ledger reaches the reef.",
-      exposure: {
-        channel: "local_aftermath",
-        validUntilWorldTimeMinutes: 4,
-      },
     },
   };
 }
@@ -950,70 +904,31 @@ describe("Campaign Play visibility service", () => {
       .toThrow("A directly perceived autonomous actor event requires its persisted observable trace.");
   });
 
-  it("renders a visible actor acquisition from its persisted summary", () => {
-    const fixture = createVisibilityFixture(["inspect"], true);
-    expect(fixture.actorAcquisition).not.toBeNull();
-    if (fixture.actorAcquisition === null) return;
-    const { summary } = fixture.actorAcquisition;
-    expect(fixture.actorAcquisition.exposure).toEqual({
-      mode: "projectable",
-      predicates: [{ channel: "direct_perception", locationId: "location-a" }],
-    });
-    const storedAcquisition = fixture.handle.sqlite.prepare(`SELECT event.after_payload_json AS afterPayloadJson,
+  it("reloads a visible actor event from its persisted summary", () => {
+    const fixture = createVisibilityFixture();
+    const stored = fixture.handle.sqlite.prepare(`SELECT command.protected_payload_json AS payloadJson,
         exposure.channel, exposure.location_id AS locationId
       FROM campaign_play_commands command
       JOIN campaign_play_events event ON event.command_id = command.command_id
         AND event.campaign_id = command.campaign_id
       JOIN campaign_play_event_exposures exposure ON exposure.event_id = event.event_id
         AND exposure.campaign_id = event.campaign_id
-      WHERE command.campaign_id = ? AND command.command_kind = 'adjust_actor_possession'
+      WHERE command.campaign_id = ?
+        AND command.command_kind = 'record_world_event'
+        AND json_extract(command.protected_payload_json, '$.performingActorId') = 'actor-a'
       ORDER BY event.rowid DESC LIMIT 1`).get(CAMPAIGN_ID) as {
-        afterPayloadJson: string;
+        payloadJson: string;
         channel: string;
         locationId: string | null;
       } | undefined;
-    expect(storedAcquisition).toMatchObject({ channel: "direct_perception", locationId: "location-a" });
-    expect(storedAcquisition?.afterPayloadJson).toContain('"actor-player"');
-    expect(storedAcquisition?.afterPayloadJson).toContain('"location-a"');
-    const possessionKey = deriveCampaignPlayPossessionKey("Brass tally");
-    const possessionId = deriveCampaignPlayPossessionId(CAMPAIGN_ID, "actor-b", possessionKey);
-    expect(fixture.handle.sqlite.prepare(`SELECT possession.actor_id AS actorId,
-        possession.possession_id AS possessionId, possession.possession_key AS possessionKey,
-        possession.name, possession.quantity, possession.causal_receipt_id AS causalReceiptId,
-        receipt.command_kind AS commandKind, receipt.outcome
-      FROM campaign_play_actor_possessions possession
-      JOIN campaign_play_receipts receipt
-        ON receipt.receipt_id = possession.causal_receipt_id
-        AND receipt.campaign_id = possession.campaign_id
-      WHERE possession.campaign_id = ? AND possession.actor_id = ?
-        AND possession.possession_key = ?`)
-      .get(CAMPAIGN_ID, "actor-b", possessionKey)).toEqual({
-        actorId: "actor-b",
-        possessionId,
-        possessionKey,
-        name: "Brass tally",
-        quantity: 2,
-        causalReceiptId: expect.stringMatching(/^receipt:/),
-        commandKind: "adjust_actor_possession",
-        outcome: "applied",
-      });
 
-    const result = createCampaignPlayVisibilityService(fixture.handle).projectTurn({
-      token: fixture.visibilityToken,
-      actionContext: null,
-      sourceMoment: null,
-      committedAt: 1_650,
-      mutationId: "visible-actor-possession-projected",
+    expect(stored).toMatchObject({
+      channel: "direct_perception",
+      locationId: "location-a",
     });
-    const observation = result.packet.newObservations.find((entry) => entry.text === summary);
-    expect(observation).toMatchObject({
-      title: "Seen nearby",
-      consequence: {
-        whatChanged: summary,
-        performingActorHandle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-b"),
-      },
-    });
-    expect(observation?.text).not.toBe("You witnessed a change nearby.");
+    expect(stored?.payloadJson).toContain(
+      "Mara Venn says the signal lantern has failed while Oren Tide listens nearby.",
+    );
   });
 
   it("earns valid channels while keeping sibling-scene perception and aftermath hidden", () => {
@@ -1047,7 +962,7 @@ describe("Campaign Play visibility service", () => {
     expect(result.packet.newObservations).toHaveLength(8);
     expect(result.packet.consequences).toHaveLength(8);
     expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
-      "The signal keeper asks the player what brought them to the failing route.",
+      "The signal keeper asks Mara what she has learned about the impossible signal.",
     );
     expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
       "Mara Venn says the signal lantern has failed while Oren Tide listens nearby.",
@@ -1114,7 +1029,7 @@ describe("Campaign Play visibility service", () => {
         }],
       });
     const premise = result.packet.consequences.find((entry) =>
-      entry.whatChanged === "The signal keeper asks the player what brought them to the failing route.");
+      entry.whatChanged === "The signal keeper asks Mara what she has learned about the impossible signal.");
     expect(premise).toMatchObject({
       performingActorHandle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-c"),
     });
@@ -1239,21 +1154,16 @@ describe("Campaign Play visibility service", () => {
   });
 
   it("releases the opening observable trace only for its exact actor and earned predicate", () => {
-    const proposal = openingProposal();
-    const sourcePlan = proposal.actorPlans.find((plan) =>
-      plan.actorId === proposal.hiddenConsequence.actorId)!;
     const seed: CampaignPlayOpeningExposureSeed = {
-      sourceActorId: proposal.hiddenConsequence.actorId,
-      sourceGoalId: sourcePlan.primaryGoalId,
+      sourceActorId: "actor-b",
+      sourceGoalId: "goal-b",
       sourceLocationId: "location-a",
-      summary: proposal.hiddenConsequence.summary,
-      observableTrace: sourcePlan.steps[0]!.observableTrace,
+      summary: "A courier changes which ledger reaches the reef.",
+      observableTrace: "Fresh sealing wax and torn binding thread mark a ledger removed in haste.",
       predicate: {
         channel: "local_aftermath",
         locationId: "location-a",
-        validUntilWorldTimeMinutes: proposal.hiddenConsequence.exposure.channel === "local_aftermath"
-          ? proposal.hiddenConsequence.exposure.validUntilWorldTimeMinutes
-          : 4,
+        validUntilWorldTimeMinutes: 4,
       },
       discoverableWithinPlayerActions: 2,
     };

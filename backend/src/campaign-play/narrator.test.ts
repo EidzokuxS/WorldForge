@@ -13,6 +13,7 @@ import {
   canonicalizeCampaignPlayProjection,
 } from "./campaign-play-projection.js";
 import {
+  CAMPAIGN_PLAY_OPENING_NARRATOR_MAX_BEATS,
   CampaignPlayNarratorError,
   createCampaignPlayNarrator,
   type CampaignPlayNarratorProposal,
@@ -371,7 +372,7 @@ describe("Campaign Play narrator", () => {
       beats,
       actionSelections: [1, 0, 2, 3].map((intentIndex) => ({
         intentIndex,
-        detail: intentIndex === 2
+        detail: intentIndex === 2 || intentIndex === 3
           ? null
           : intentIndex === 1
             ? "accept the uncertain share"
@@ -386,7 +387,7 @@ describe("Campaign Play narrator", () => {
         beats,
         actionSelections: [0, 2, 3, 1].map((intentIndex) => ({
           intentIndex,
-          detail: intentIndex === 2
+          detail: intentIndex === 2 || intentIndex === 3
             ? null
             : intentIndex === 1
               ? "accept the uncertain share"
@@ -440,8 +441,9 @@ describe("Campaign Play narrator", () => {
     expect(String(options.prompt)).toContain(
       "merely accepting the exchange cannot stand in for that missing disclosure",
     );
-    expect(String(options.prompt)).toContain("Set detail to null for move");
-    expect(String(options.prompt)).toContain("An ordinary move has no model-authored detail");
+    expect(String(options.prompt)).toContain("Set detail to null for move and wait");
+    expect(String(options.prompt)).toContain("Move and wait always set detail to null");
+    expect(String(options.prompt)).not.toContain("wait uses a base-form verb phrase");
   });
 
   it("publishes ordinary moves as exact code-owned destinations", () => {
@@ -1151,7 +1153,8 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Never add a moment beat to repeat sourceMoment");
     expect(prompt).toContain("Each actionSelection contains exactly intentIndex and detail");
     expect(prompt).toContain("includesTravel belongs only to the input catalog");
-    expect(prompt).toContain("wait uses a base-form verb phrase");
+    expect(prompt).toContain("Move and wait always set detail to null");
+    expect(prompt).not.toContain("wait uses a base-form verb phrase");
     expect(prompt).toContain("Code fixes includesTravel for each entry");
     expect(prompt).toContain("When it is false, the whole action must finish in currentLocation");
     expect(prompt).toContain("Never describe departure in a false entry or remove travel from a true entry");
@@ -1180,8 +1183,8 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("it must not call that cause recent maintenance, a repair, tampering, or restored function");
     expect(prompt).toContain("Preserve the condition in actionable grammar");
     expect(prompt).toContain('Do not use possessive or definite wording such as "your sister\'s passage terms"');
-    expect(prompt).toContain("Set detail to null for move");
-    expect(prompt).toContain("code publishes the exact route destination as the complete action");
+    expect(prompt).toContain("Set detail to null for move and wait");
+    expect(prompt).toContain("code publishes their complete rendered action");
     expect(prompt).toContain("Every concrete claim in a beat must be supported");
     expect(prompt).toContain("When evidence is only consistent with maintenance, repair, tampering, restored function");
     expect(prompt).toContain('never turn it into "someone did" that act or claim that the purpose succeeded');
@@ -1223,6 +1226,38 @@ describe("Campaign Play narrator", () => {
     expect(prompt).not.toContain('"monogram"');
     expect(prompt).not.toContain("amber-7");
     expect(prompt).not.toContain("records every signal before acting");
+  });
+
+  it("bounds an opening model proposal to the two beats its scene contract can use", async () => {
+    const compactProposal = {
+      ...proposalFixture(),
+      beats: [proposalFixture().beats[0]!, proposalFixture().beats[2]!],
+    };
+    const generateObject = vi.fn(async (
+      options: Parameters<typeof safeGenerateObject>[0],
+    ) => {
+      const schema = options.schema as {
+        safeParse(value: unknown): { success: boolean };
+      };
+      expect(schema.safeParse(compactProposal).success).toBe(true);
+      expect(schema.safeParse(proposalFixture()).success).toBe(false);
+      return { object: compactProposal, trace: trace() };
+    });
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const result = await narrator.narrate({
+      narrationId: "narration-compact-opening",
+      packetBytes: canonicalizeCampaignPlayProjection(packetFixture()),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+    });
+
+    expect(result.narration.beats).toHaveLength(CAMPAIGN_PLAY_OPENING_NARRATOR_MAX_BEATS);
+    expect(generateObject).toHaveBeenCalledOnce();
   });
 
   it("does not treat macro placement as immediate-scene custody", () => {

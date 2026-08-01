@@ -199,6 +199,7 @@ export {
   CAMPAIGN_PLAY_PUBLIC_ERROR_CODE_VALUES,
   CAMPAIGN_PLAY_SSE_EVENT_TYPE_VALUES,
   CAMPAIGN_PLAY_CHARACTER_SOURCE_VALUES,
+  CAMPAIGN_PLAY_NARRATION_OPERATION_STATUS_VALUES,
 } from "./campaign-play.js";
 
 export type {
@@ -238,11 +239,16 @@ export type {
   CampaignPlaySuggestedAction,
   CampaignPlayStageEffect,
   CampaignPlayNarration,
+  CampaignPlayNarrationOperationStatus,
+  CampaignPlayConciseResult,
+  CampaignPlayNarrationOperation,
   CampaignPlayPublicCharacter,
   CampaignPlayOpeningDetailOption,
   CampaignPlayOpeningLocationOption,
   CampaignPlayPublicTurn,
   CampaignPlayState,
+  CampaignPlayNarrationRecoveryRequest,
+  CampaignPlayNarrationRecoveryResponse,
   CampaignPlayJournalPage,
   CampaignPlayVersionExpectation,
   CampaignPlayTurnAdmissionRequest,

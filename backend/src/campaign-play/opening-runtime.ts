@@ -32,6 +32,7 @@ import {
   type CampaignPlayResolvedStartingConditions,
 } from "./opening-planner.js";
 import {
+  CAMPAIGN_PLAY_OPENING_NARRATOR_MAX_OUTPUT_TOKENS,
   CampaignPlayNarratorError,
   createCampaignPlayNarrator,
   type CampaignPlayNarrator,
@@ -150,6 +151,7 @@ export interface CreateCampaignPlayOpeningRuntimeInput {
   owner: string;
   leaseDurationMs: number;
   heartbeatIntervalMs: number;
+  externalOperationDeadlineMs?: number;
   openingPlannerModel: CampaignPlayOpeningRuntimeModel;
   narratorModel: CampaignPlayOpeningNarratorRuntimeModel;
   clock?: CampaignPlayTurnServiceClock;
@@ -239,10 +241,17 @@ function assertNarratorModel(model: CampaignPlayOpeningNarratorRuntimeModel): vo
 function narratorBudget(
   model: CampaignPlayOpeningNarratorRuntimeModel,
 ): CampaignPlayNarratorBudget {
+  const maximumOutputTokens = Math.min(
+    model.maximumOutputTokens,
+    CAMPAIGN_PLAY_OPENING_NARRATOR_MAX_OUTPUT_TOKENS,
+  );
   return {
     maximumInputTokens: model.maximumInputTokens,
-    maximumOutputTokens: model.maximumOutputTokens,
-    maximumTotalTokens: model.maximumTotalTokens,
+    maximumOutputTokens,
+    maximumTotalTokens: Math.min(
+      model.maximumTotalTokens,
+      model.maximumInputTokens + maximumOutputTokens,
+    ),
     maximumCostMicros: model.maximumCostMicros,
     inputCostMicrosPerMillionTokens: model.requested.pricing.inputCostMicros,
     outputCostMicrosPerMillionTokens: model.requested.pricing.outputCostMicros,
@@ -553,6 +562,13 @@ export function createCampaignPlayOpeningRuntime(
 ): CampaignPlayOpeningRuntime {
   assertModel(input.openingPlannerModel);
   assertNarratorModel(input.narratorModel);
+  const externalOperationDeadlineMs = input.externalOperationDeadlineMs ?? 90_000;
+  if (!Number.isSafeInteger(externalOperationDeadlineMs) || externalOperationDeadlineMs <= 0) {
+    throw new CampaignPlayOpeningRuntimeError(
+      "opening_state_invalid",
+      "Campaign Play opening requires a positive external operation deadline.",
+    );
+  }
   const repository = createCampaignPlayTurnRepository(input.handle);
   const stateRepository = createCampaignPlayStateRepository(input.handle);
   const scheduler = input.actorScheduler ?? createCampaignPlayActorScheduler(input.handle);
@@ -672,6 +688,7 @@ export function createCampaignPlayOpeningRuntime(
     owner: input.owner,
     leaseDurationMs: input.leaseDurationMs,
     heartbeatIntervalMs: input.heartbeatIntervalMs,
+    externalOperationDeadlineMs,
     clock: input.clock,
     resolveStage({ turn, stage, artifacts }) {
       if (turn.turnKind !== "opening") return null;
@@ -825,7 +842,10 @@ export function createCampaignPlayOpeningRuntime(
         return {
           kind: "deterministic",
           ready: ({ turn: currentTurn }) => {
-            if (artifacts.load("opening_planner") === null) return false;
+            const stored = artifacts.load("opening_planner");
+            if (stored === null) return false;
+            const artifact = campaignPlayOpeningArtifactSchema.parse(stored.artifact);
+            if (artifact.actorPlans.length === 0) return true;
             const dueSet = scheduler.loadDueSet(currentTurn.turnId);
             if (!dueSet) return true;
             const jobs = scheduler.listTurnJobs(currentTurn.turnId);
@@ -839,6 +859,28 @@ export function createCampaignPlayOpeningRuntime(
             const artifact = campaignPlayOpeningArtifactSchema.parse(
               context.artifacts.load("opening_planner")?.artifact,
             );
+            if (artifact.actorPlans.length === 0) {
+              const committedAt = now();
+              repository.commitDeterministic({
+                token: context.token,
+                transition: "actors_settled",
+                worldVersionAdvance: 0,
+                committedAt,
+                mutationId: runtimeId("opening-actors-deferred", {
+                  turnId: context.turn.turnId,
+                  epoch: context.token.epoch,
+                }),
+                mutate(mutationContext) {
+                  scheduler.validateOpeningActors({
+                    plans: artifact.actorPlans,
+                    schedules: artifact.actorSchedules,
+                    turnId: context.turn.turnId,
+                    context: mutationContext,
+                  });
+                },
+              });
+              return;
+            }
             const dueSet = scheduler.loadDueSet(context.turn.turnId);
             if (!dueSet) {
               const state = stateRepository.loadState();

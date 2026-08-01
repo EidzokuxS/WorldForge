@@ -309,6 +309,34 @@
       "when": 1784455200000,
       "tag": "0043_campaign_play_support_actor_event_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "6",
+      "when": 1785384000000,
+      "tag": "0044_campaign_play_narration_operations",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "6",
+      "when": 1785470400000,
+      "tag": "0045_campaign_play_certified_move_results",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "6",
+      "when": 1785556800000,
+      "tag": "0046_campaign_play_certified_wait_results",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "6",
+      "when": 1785643200000,
+      "tag": "0047_campaign_play_lazy_actor_plans",
+      "breakpoints": true
     }
   ]
 }

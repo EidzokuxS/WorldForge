@@ -14,6 +14,7 @@ import {
   type CampaignPlayVisibleRoute,
 } from "@worldforge/shared";
 import {
+  campaignPlayActionExecutionRouteSchema,
   campaignPlayActionContextSchema,
   campaignPlayJudgeArtifactSchema,
   campaignPlayJournalEntrySchema,
@@ -506,7 +507,7 @@ function knownEventEvidence(
 }
 
 export function resolveCampaignPlayOpeningObservableTrace(
-  seed: CampaignPlayOpeningExposureSeed,
+  seed: CampaignPlayOpeningExposureSeed | null,
   exposure: {
     openingTurnId: string;
     eventTurnId: string | null;
@@ -519,6 +520,7 @@ export function resolveCampaignPlayOpeningObservableTrace(
     observableTrace: unknown;
   },
 ): string | null {
+  if (seed === null) return null;
   if (
     exposure.eventTurnId !== exposure.openingTurnId
     || exposure.sourceActorId !== seed.sourceActorId
@@ -609,7 +611,7 @@ function publicEntry(
   humanActorId: string,
   currentTurnId: string,
   openingTurnId: string,
-  openingExposureSeed: CampaignPlayOpeningExposureSeed,
+  openingExposureSeed: CampaignPlayOpeningExposureSeed | null,
 ): CampaignPlayJournalEntry {
   const exposure = candidate.exposure;
   const location = exposure.locationId
@@ -1023,7 +1025,7 @@ export function availableIntents(
   actionContext: CampaignPlayActionContext | null,
   scene: ReturnType<typeof visibleScene>,
   humanActorId: string,
-  openingExposureSeed: CampaignPlayOpeningExposureSeed,
+  openingExposureSeed: CampaignPlayOpeningExposureSeed | null,
   worldTimeMinutes: number,
 ): CampaignPlayAvailableIntent[] {
   const campaignId = handle.campaignId;
@@ -1090,9 +1092,10 @@ function preferredOpeningExposureRoute(
   handle: CampaignPlayDatabaseHandle,
   scene: ReturnType<typeof visibleScene>,
   humanActorId: string,
-  seed: CampaignPlayOpeningExposureSeed,
+  seed: CampaignPlayOpeningExposureSeed | null,
   worldTimeMinutes: number,
 ): CampaignPlayVisibleRoute | undefined {
+  if (seed === null) return undefined;
   if (seed.predicate.channel !== "local_aftermath") return undefined;
   if (seed.predicate.validUntilWorldTimeMinutes < worldTimeMinutes) return undefined;
 
@@ -1237,6 +1240,30 @@ function actionContextForTurn(
       "visibility_turn_invalid",
       "Player-action visibility found a submitted action outside its frozen admission.",
     );
+  }
+  if (frame.executionRoute !== undefined) {
+    const executionRoute = campaignPlayActionExecutionRouteSchema.parse(frame.executionRoute);
+    if (executionRoute.kind === "certified_move" || executionRoute.kind === "certified_wait") {
+      const domain = executionRoute.kind === "certified_move"
+        ? "campaign_play_certified_move"
+        : "campaign_play_certified_wait";
+      if (
+        executionRoute.certificateHash !== hashCampaignPlayProjection({
+          domain,
+          certificate: executionRoute.certificate,
+        }) ||
+        turnRepository.loadAcceptedModelArtifact(turn.turnId, "judge") !== null
+      ) {
+        throw new CampaignPlayVisibilityError(
+          "visibility_turn_invalid",
+          "Player-action visibility rejected invalid certified route authority.",
+        );
+      }
+      return campaignPlayActionContextSchema.parse({
+        submittedText,
+        ...executionRoute.certificate.publicResult,
+      });
+    }
   }
   const acceptedJudge = turnRepository.loadAcceptedModelArtifact(turn.turnId, "judge");
   if (!acceptedJudge) {

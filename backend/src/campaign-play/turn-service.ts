@@ -126,6 +126,12 @@ export interface CreateCampaignPlayTurnServiceInput {
   owner: string;
   leaseDurationMs: number;
   heartbeatIntervalMs: number;
+  /**
+   * A hard deadline for one provider-backed stage. The durable lease may be
+   * renewed while a healthy call is in progress, but it must not turn a
+   * single operation into an unbounded wait for the player.
+   */
+  externalOperationDeadlineMs?: number;
   resolveStage: CampaignPlayTurnStageResolver;
   clock?: CampaignPlayTurnServiceClock;
 }
@@ -233,11 +239,13 @@ export function createCampaignPlayTurnService(
     input.owner.length === 0 ||
     !isSafePositiveInteger(input.leaseDurationMs) ||
     !isSafePositiveInteger(input.heartbeatIntervalMs) ||
-    input.heartbeatIntervalMs >= input.leaseDurationMs
+    input.heartbeatIntervalMs >= input.leaseDurationMs ||
+    (input.externalOperationDeadlineMs !== undefined &&
+      !isSafePositiveInteger(input.externalOperationDeadlineMs))
   ) {
     throw new CampaignPlayTurnServiceError(
       "turn_service_invalid",
-      "Campaign Play turn service requires a worker owner and a heartbeat shorter than its lease.",
+      "Campaign Play turn service requires a worker owner, a heartbeat shorter than its lease, and a positive external deadline when configured.",
     );
   }
   const repository = createCampaignPlayTurnRepository(input.handle);
@@ -434,6 +442,14 @@ export function createCampaignPlayTurnService(
     const heartbeatFailure = new Promise<never>((_resolve, reject) => {
       void heartbeat.catch(reject);
     });
+    const deadline = input.externalOperationDeadlineMs === undefined
+      ? null
+      : clock.wait(input.externalOperationDeadlineMs, controller.signal)
+        .then(() => ({ kind: "deadline" as const }))
+        .catch((error) => {
+          if (controller.signal.aborted) return { kind: "cancelled" as const };
+          throw error;
+        });
     const execution = Promise.resolve().then(() => handler.execute({
       turn,
       token: initialToken,
@@ -442,9 +458,15 @@ export function createCampaignPlayTurnService(
     }));
     void execution.catch(() => undefined);
 
-    let completion: CampaignPlayExternalStageCompletion;
+    let race: { kind: "completion"; completion: CampaignPlayExternalStageCompletion }
+      | { kind: "deadline" }
+      | { kind: "cancelled" };
     try {
-      completion = await Promise.race([execution, heartbeatFailure]);
+      race = await Promise.race([
+        execution.then((completion) => ({ kind: "completion" as const, completion })),
+        heartbeatFailure,
+        ...(deadline === null ? [] : [deadline]),
+      ]);
     } catch (error) {
       heartbeatStopped = true;
       controller.abort();
@@ -463,6 +485,27 @@ export function createCampaignPlayTurnService(
       }
       throw error;
     }
+
+    if (race.kind === "deadline") {
+      heartbeatStopped = true;
+      controller.abort();
+      await heartbeat.catch(() => undefined);
+      return interrupt(
+        token,
+        attemptStartedAt,
+        interruptionEvidence("stage_timeout", now() - attemptStartedAt),
+        queueTimeMs,
+        renewalCount,
+        attempt,
+      );
+    }
+    if (race.kind === "cancelled") {
+      throw new CampaignPlayTurnServiceError(
+        "turn_service_invalid",
+        "Campaign Play external deadline was cancelled before the stage settled.",
+      );
+    }
+    const completion = race.completion;
 
     heartbeatStopped = true;
     controller.abort();

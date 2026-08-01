@@ -66,6 +66,7 @@ function stateFixture(): CampaignPlayState {
     possessions: [],
     obligations: [],
     narration: null,
+    narrationOperation: null,
     consequences: [],
     activeTurn: null,
     journalCursor: 0,
@@ -100,6 +101,7 @@ function turnFixture(): CampaignPlayTurnReadResponse {
         effects: [{ kind: "fade", beatId: "beat-one" }],
         createdAt: 1_090,
       },
+      narrationOperation: null,
       consequences: [],
       journalCursor: 0,
     },
@@ -145,6 +147,12 @@ function applicationFixture() {
     admitOpening: vi.fn(() => ({ turnId: "turn-one", sequence: 1 })),
     admitTurn: vi.fn(() => ({ turnId: "turn-two", sequence: 1 })),
     resumeTurn: vi.fn(() => ({ turnId: "turn-one", sequence: 3 })),
+    recoverNarration: vi.fn(() => ({
+      operationId: "narration-operation-one",
+      attemptId: "narration-attempt-one",
+      attempt: 2,
+      status: "running" as const,
+    })),
     recoverCampaign: vi.fn(async () => undefined),
     waitForIdle: vi.fn(async () => undefined),
   };
@@ -237,6 +245,30 @@ describe("Campaign Play routes", () => {
     expect(resume.status).toBe(202);
     expect(campaignPlayTurnAdmissionResponseSchema.parse(await resume.json()))
       .toEqual({ turnId: "turn-one", sequence: 3 });
+
+    const recoveryRequest = {
+      operationId: "narration-operation-one",
+      resultId: "result-one",
+      narrationId: "narration-one",
+      packetHash: "b".repeat(64),
+      receiptIds: ["receipt-one"],
+    };
+    const recovery = await app.request(
+      `/${CAMPAIGN_ID}/play/turns/turn-one/narration/recover`,
+      jsonRequest("POST", recoveryRequest),
+    );
+    expect(recovery.status).toBe(202);
+    expect(await recovery.json()).toEqual({
+      operationId: "narration-operation-one",
+      attemptId: "narration-attempt-one",
+      attempt: 2,
+      status: "running",
+    });
+    expect(fixture.application.recoverNarration).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      "turn-one",
+      recoveryRequest,
+    );
 
     const journal = await app.request(`/${CAMPAIGN_ID}/play/journal?cursor=0&limit=20`);
     expect(campaignPlayJournalPageSchema.parse(await journal.json())).toMatchObject({ entries: [] });

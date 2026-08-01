@@ -25,6 +25,7 @@ import {
   loadCampaignPlayJournal,
   loadCampaignPlayState,
   loadCampaignPlayTurn,
+  recoverCampaignPlayNarration,
   resumeCampaignPlayTurn,
   streamCampaignPlayTurnEvents,
 } from "@/lib/campaign-play-api";
@@ -310,6 +311,7 @@ export function CampaignPlayPage({
   const [pendingOperation, setPendingOperation] = useState<PendingOperation | null>(null);
   const [openingSelection, setOpeningSelection] = useState<OpeningSelection | null>(null);
   const [journalOpenCampaignId, setJournalOpenCampaignId] = useState<string | null>(null);
+  const [recoveringNarrationId, setRecoveringNarrationId] = useState<string | null>(null);
   const operationRef = useRef<PendingOperation | null>(null);
   const progressRef = useRef<HTMLDivElement>(null);
   const narrationFocusRef = useRef<HTMLElement>(null);
@@ -486,6 +488,26 @@ export function CampaignPlayPage({
     return () => controller.abort();
   }, [campaignId, followedTurn, reconnectDelayMilliseconds, recordSequence, refreshAuthority]);
 
+  useEffect(() => {
+    const operation = campaignState?.narrationOperation;
+    if (!operation || (operation.status !== "pending" && operation.status !== "running")) return;
+    const controller = new AbortController();
+    void (async () => {
+      while (!controller.signal.aborted) {
+        await waitForReconnect(reconnectDelayMilliseconds, controller.signal);
+        if (controller.signal.aborted) return;
+        try {
+          const authority = await refreshAuthority(operation.turnId);
+          const status = authority.state.narrationOperation?.status;
+          if (status !== "pending" && status !== "running") return;
+        } catch {
+          // The committed result remains playable while narration status is temporarily unavailable.
+        }
+      }
+    })();
+    return () => controller.abort();
+  }, [campaignState?.narrationOperation, reconnectDelayMilliseconds, refreshAuthority]);
+
   const beginFollowing = useCallback((turnId: string, sequence: number) => {
     setTurnRead(null);
     setEventProgress(null);
@@ -620,6 +642,31 @@ export function CampaignPlayPage({
     }
   }, [beginFollowing, campaignId, campaignState, campaignTurnRead, reconcileRequestFailure]);
 
+  const recoverNarration = useCallback(async () => {
+    const operation = campaignState?.narrationOperation;
+    if (!operation || operation.status !== "failed" || recoveringNarrationId !== null) return;
+    setRecoveringNarrationId(operation.operationId);
+    setRequestError(null);
+    try {
+      await recoverCampaignPlayNarration(campaignId, operation.turnId, {
+        operationId: operation.operationId,
+        resultId: operation.resultId,
+        narrationId: operation.narrationId,
+        packetHash: operation.packetHash,
+        receiptIds: operation.receiptIds,
+      });
+      await refreshAuthority(operation.turnId);
+    } catch (error) {
+      if (mountedRef.current && campaignIdRef.current === campaignId) {
+        setRequestError({ campaignId, code: errorCode(error) });
+      }
+    } finally {
+      if (mountedRef.current && campaignIdRef.current === campaignId) {
+        setRecoveringNarrationId(null);
+      }
+    }
+  }, [campaignId, campaignState?.narrationOperation, recoveringNarrationId, refreshAuthority]);
+
   if (loading || (state !== null && campaignState === null)) {
     return <section aria-live="polite" className="grid min-h-dvh place-items-center">Loading campaign</section>;
   }
@@ -716,7 +763,9 @@ export function CampaignPlayPage({
       ) : null}
 
       <CampaignPlayStage
+        narrationRecoveryPending={recoveringNarrationId !== null}
         narrationFocusRef={narrationFocusRef}
+        onRecoverNarration={() => void recoverNarration()}
         state={campaignState}
       >
         {campaignState.phase === "opening_required" && !followsCurrentCampaign ? (
@@ -744,7 +793,8 @@ export function CampaignPlayPage({
           onSubmitSuggested={(choiceHandle) => void submitAction({ source: "suggested", choiceHandle })}
           pendingAdmission={campaignPendingOperation?.kind === "admission"}
           statusSlot={activeTurn !== null || followsCurrentCampaign ? turnProgress : undefined}
-          suggestedActions={campaignState.narration?.suggestedActions ?? []}
+          suggestedActions={campaignState.narration?.suggestedActions ??
+            campaignState.narrationOperation?.conciseResult.suggestedActions ?? []}
           suggestionsHeadingRef={suggestionsHeadingRef}
           textareaRef={actionTextareaRef}
         />

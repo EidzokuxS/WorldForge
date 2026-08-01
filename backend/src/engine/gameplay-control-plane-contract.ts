@@ -510,6 +510,9 @@ export const CAMPAIGN_PLAY_SQLITE_TABLES = [
   "campaign_play_turn_events",
   "campaign_play_model_stages",
   "campaign_play_narrations",
+  "campaign_play_narration_operations",
+  "campaign_play_narration_attempts",
+  "campaign_play_proper_scenes",
   "campaign_play_commands",
   "campaign_play_receipts",
   "campaign_play_events",
@@ -532,6 +535,9 @@ const CAMPAIGN_PLAY_EVIDENCE_SQLITE_TABLES = new Set<string>([
   "campaign_play_turn_events",
   "campaign_play_model_stages",
   "campaign_play_narrations",
+  "campaign_play_narration_operations",
+  "campaign_play_narration_attempts",
+  "campaign_play_proper_scenes",
 ]);
 
 const CAMPAIGN_PLAY_DERIVED_SQLITE_TABLES = new Set<string>([

@@ -18,6 +18,7 @@ import {
   campaignPlayGeneratePlayerDraftRequestSchema,
   campaignPlayJournalPageSchema,
   campaignPlayOpeningAdmissionRequestSchema,
+  campaignPlayNarrationRecoveryRequestSchema,
   campaignPlayParsePlayerCardRequestSchema,
   campaignPlayPutPlayerRequestSchema,
   campaignPlayPutPlayerResponseSchema,
@@ -397,6 +398,31 @@ export function createCampaignPlayRoutes(
         turnId,
         expected: parsed.data,
       });
+    }
+  });
+
+  app.post("/:id/play/turns/:turnId/narration/recover", async (c) => {
+    const context: ErrorContext = { campaignId: c.req.param("id"), turnId: c.req.param("turnId") };
+    try {
+      const campaign = await requireCampaign(c, dependencies, context.campaignId);
+      if (campaign instanceof Response) return campaign;
+      const body = await parseBody(
+        c,
+        campaignPlayNarrationRecoveryRequestSchema,
+        dependencies,
+        { ...context, invalidCode: "turn_not_resumable" },
+      );
+      if (body instanceof Response) return body;
+      return c.json(
+        dependencies.application.recoverNarration(
+          context.campaignId,
+          context.turnId!,
+          body,
+        ),
+        202,
+      );
+    } catch (error) {
+      return errorResponse(c, dependencies, error, context);
     }
   });
 

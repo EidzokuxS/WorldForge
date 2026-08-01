@@ -14,6 +14,7 @@ const api = vi.hoisted(() => ({
   admitOpening: vi.fn(),
   admitTurn: vi.fn(),
   resumeTurn: vi.fn(),
+  recoverNarration: vi.fn(),
   streamEvents: vi.fn(),
 }));
 
@@ -34,6 +35,7 @@ vi.mock("@/lib/campaign-play-api", () => ({
   admitCampaignPlayOpening: api.admitOpening,
   admitCampaignPlayTurn: api.admitTurn,
   resumeCampaignPlayTurn: api.resumeTurn,
+  recoverCampaignPlayNarration: api.recoverNarration,
   streamCampaignPlayTurnEvents: api.streamEvents,
 }));
 
@@ -83,6 +85,7 @@ function state(
       effects: [],
       createdAt: 90,
     } : null,
+    narrationOperation: null,
     consequences: [],
     activeTurn,
     journalCursor: 0,
@@ -135,6 +138,7 @@ function turnRead(
                 effects: [],
                 createdAt: 200,
               },
+              narrationOperation: null,
               consequences: [],
               journalCursor: 1,
             },
@@ -186,9 +190,59 @@ beforeEach(() => {
   window.history.replaceState({}, "");
   vi.stubGlobal("crypto", { randomUUID: vi.fn(() => "request-1") });
   api.streamEvents.mockImplementation(() => new Promise(() => {}));
+  api.recoverNarration.mockResolvedValue({
+    operationId: "narration-operation-1",
+    attemptId: "narration-attempt-2",
+    attempt: 2,
+    status: "running",
+  });
 });
 
 describe("CampaignPlayPage durable state", () => {
+  it("keeps actions usable after narration failure and recovers the exact visible result", async () => {
+    const fallback = state("ready");
+    fallback.narration = null;
+    fallback.narrationOperation = {
+      operationId: "narration-operation-1",
+      resultId: "result-1",
+      turnId: "turn-1",
+      narrationId: "narration-1",
+      packetHash: "b".repeat(64),
+      receiptIds: ["receipt-1"],
+      status: "failed",
+      attemptId: "narration-attempt-1",
+      attempt: 1,
+      conciseResult: {
+        displayText: "The north signal answers, and the gate opens.",
+        suggestedActions: [{ choiceHandle: "choice-follow", label: "Follow the north signal" }],
+      },
+      createdAt: 200,
+      completedAt: null,
+    };
+    api.loadState.mockResolvedValue(fallback);
+    api.loadTurn.mockResolvedValue(turnRead("completed"));
+    render(<CampaignPlayPage campaignId="campaign-1" />);
+
+    expect(await screen.findByText(fallback.narrationOperation.conciseResult.displayText))
+      .toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Your action" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Follow the north signal/ })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Restore the telling" }));
+
+    await waitFor(() => expect(api.recoverNarration).toHaveBeenCalledWith(
+      "campaign-1",
+      "turn-1",
+      {
+        operationId: "narration-operation-1",
+        resultId: "result-1",
+        narrationId: "narration-1",
+        packetHash: "b".repeat(64),
+        receiptIds: ["receipt-1"],
+      },
+    ));
+    expect(screen.getByRole("textbox", { name: "Your action" })).toBeEnabled();
+  });
+
   it("offers a working retry when the initial state load fails", async () => {
     api.loadState
       .mockRejectedValueOnce(new CampaignPlayApiError(

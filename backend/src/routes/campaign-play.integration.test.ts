@@ -2,6 +2,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { LanguageModel } from "ai";
+import {
+  safeGenerateObject,
+  type SafeGenerateTrace,
+} from "../ai/generate-object-safe.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   CAMPAIGN_PLAY_LIMITS,
@@ -49,6 +53,7 @@ import {
   type CampaignPlayModelEvidence,
 } from "../campaign-play/judge.js";
 import { createCampaignPlayGameMaster } from "../campaign-play/game-master.js";
+import { createCampaignPlayActorReplanner } from "../campaign-play/actor-replanner.js";
 import {
   CampaignPlayTurnRuntimeError,
   createCampaignPlayTurnRuntime,
@@ -170,44 +175,6 @@ function playerDraft(): CampaignPlayCharacterDraft {
 }
 
 function openingProposal(): CampaignPlayOpeningProposal {
-  const actorPlans = ["a", "b", "c", "d", "e", "f"].map((suffix) => {
-    const actorId = `actor-${suffix}`;
-    const goalId = `goal-${suffix}`;
-    const targets = suffix === "b"
-      ? [
-          { kind: "location" as const, id: "location-a" },
-          { kind: "goal" as const, id: goalId },
-        ]
-      : suffix === "c"
-        ? [
-            { kind: "location" as const, id: "location-c" },
-            { kind: "goal" as const, id: goalId },
-          ]
-        : [{ kind: "goal" as const, id: goalId }];
-    const intent = {
-      kind: "attempt" as const,
-      targets,
-      method: `Advance ${goalId} from the current situation`,
-      stakes: "The actor's own objective",
-    };
-    return {
-      actorId,
-      primaryGoalId: goalId,
-      cadenceMinutes: 1_440,
-      steps: Array.from({ length: 3 }, (_, stepIndex) => ({
-        intent: {
-          ...intent,
-          method: `${intent.method}; stage ${stepIndex + 1}`,
-        },
-        observableTrace: suffix === "b" && stepIndex === 0
-          ? "Fresh sealing wax and torn binding thread mark a ledger removed in haste."
-          : `Fresh work marks show stage ${stepIndex + 1} of the actor's own effort.`,
-        possessionOutcome: { kind: "none" as const },
-        obligationOutcome: { kind: "none" as const },
-        elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
-      })),
-    };
-  });
   return {
     start: {
       role: "A visitor on Bell Island",
@@ -229,15 +196,6 @@ function openingProposal(): CampaignPlayOpeningProposal {
       eventClass: "dialogue",
       summary: "The signal keeper asks Mara what she has learned about the impossible signal.",
       routeRestriction: null,
-    },
-    actorPlans,
-    hiddenConsequence: {
-      actorId: "actor-b",
-      summary: "A courier changes which ledger reaches the reef.",
-      exposure: {
-        channel: "local_aftermath",
-        validUntilWorldTimeMinutes: 4,
-      },
     },
   };
 }
@@ -420,13 +378,24 @@ function judgeFixture() {
       const ruling = compiler.compile(request.frame, request.input, {
         kind: target ? "contact" : "wait",
         targets: target ? [{ handle: target.handle, kind: "actor" }] : [],
+        visibleActorReactions: request.frame.visibleFacts
+          .filter((fact) => fact.kind === "actor" && fact.handle !== request.frame.playerActorHandle)
+          .map((fact) => ({
+            actorHandle: fact.handle,
+            reaction: "none" as const,
+            supportingVisibleFactHandle: null,
+            reason: "No additional material reaction is under test.",
+          })),
         method: target ? "Ask calmly" : "Wait and watch",
         stakes: "Learn what changes at the signal gate",
         movementRouteHandle: null,
         possessionEffectAuthority: { kind: "none" },
         requiredObligationEffect: { kind: "none" },
         disposition: "deterministic",
-        citedVisibleFactHandles: [request.frame.locationHandle],
+        citedVisibleFactHandles: [
+          request.frame.locationHandle,
+          ...(target ? [target.handle] : []),
+        ],
         resultBounds: { minimum: "success", maximum: "success" },
         elapsedBounds: { minimumMinutes: 1, maximumMinutes: 2 },
         uncertainty: { kind: "none" },
@@ -519,6 +488,64 @@ function openingRuntime(handle: CampaignPlayDatabaseHandle, clock: CampaignPlayT
   });
 }
 
+function actorReplanModelObjectFromPrompt(prompt: string) {
+  if (prompt.includes("ACTOR_PLAN_REVIEW\n")) {
+    return { verdict: "accepted" as const, violations: [] };
+  }
+  const startMarker = "ACTOR_FRAME\n";
+  const endMarker = "\nEND_ACTOR_FRAME";
+  const start = prompt.indexOf(startMarker);
+  const end = prompt.indexOf(endMarker);
+  if (start < 0 || end < 0) throw new Error("Actor frame markers are missing.");
+  const frame = JSON.parse(prompt.slice(start + startMarker.length, end)) as {
+    entities: Array<{ handle: string; kind: string; state: string | null }>;
+  };
+  const goal = frame.entities.find((entity) => entity.kind === "goal" && entity.state === "active");
+  if (!goal) throw new Error("Actor replan frame requires one active goal.");
+  const intent = {
+    kind: "attempt" as const,
+    targetHandles: [goal.handle],
+    method: "Check the local signal record",
+    stakes: "The route remains uncertain",
+  };
+  const step = {
+    intent,
+    observableTrace: "Fresh archive tabs mark a recently checked signal ledger.",
+    possessionOutcome: { kind: "none" as const },
+    obligationOutcome: { kind: "none" as const },
+    elapsedBounds: { minimumMinutes: 2, maximumMinutes: 10 },
+  };
+  return {
+    goalHandle: goal.handle,
+    cadenceMinutes: 15,
+    priority: 4,
+    intent,
+    steps: [step, step, step],
+  };
+}
+
+function actorReplanTrace(): SafeGenerateTrace {
+  return {
+    text: "private actor plan",
+    cleanedText: "private actor plan",
+    requestedMode: "auto",
+    strategy: "native_schema",
+    primaryStrategy: "native_schema",
+    capability: {
+      requestedMode: "auto",
+      primaryStrategy: "native_schema",
+      fallbackStrategy: "text_fallback",
+      actualMode: "native_schema",
+      reason: "test capability",
+      providerId: "playtest",
+      model: "playtest-actor-replanner",
+    },
+    usage: { inputTokens: 40, outputTokens: 25, totalTokens: 65 },
+    response: { modelId: "playtest-actor-replanner" },
+    finishReason: "stop",
+  };
+}
+
 function turnRuntime(handle: CampaignPlayDatabaseHandle, clock: CampaignPlayTurnServiceClock) {
   const stageModel = (model: string) => ({
     languageModel: {} as LanguageModel,
@@ -547,6 +574,13 @@ function turnRuntime(handle: CampaignPlayDatabaseHandle, clock: CampaignPlayTurn
     narratorModel: stageModel("playtest-narrator"),
     judge: judgeFixture(),
     gameMaster: gameMasterFixture(),
+    actorReplanner: createCampaignPlayActorReplanner(handle, {
+      now: clock.now,
+      generateObject: (async (request: { prompt: string }) => ({
+        object: actorReplanModelObjectFromPrompt(request.prompt),
+        trace: actorReplanTrace(),
+      })) as unknown as typeof safeGenerateObject,
+    }),
     narrator: playerNarratorFixture(),
   });
 }

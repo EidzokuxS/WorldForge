@@ -17,6 +17,7 @@ import {
   parseCampaignPlayPlayerCard,
   putCampaignPlayPlayer,
   researchCampaignPlayPlayer,
+  recoverCampaignPlayNarration,
   resumeCampaignPlayTurn,
   streamCampaignPlayTurnEvents,
 } from "./campaign-play-api";
@@ -73,6 +74,7 @@ const state = {
   possessions: [],
   obligations: [],
   narration: null,
+  narrationOperation: null,
   consequences: [],
   activeTurn: null,
   journalCursor: 0,
@@ -250,6 +252,12 @@ describe("Campaign Play API", () => {
         result: { status: "processing" },
       }))
       .mockResolvedValueOnce(jsonResponse(turnAdmission, 202))
+      .mockResolvedValueOnce(jsonResponse({
+        operationId: "narration-operation-one",
+        attemptId: "narration-attempt-two",
+        attempt: 2,
+        status: "running",
+      }, 202))
       .mockResolvedValueOnce(jsonResponse({ ...versions, campaignId: addressedCampaignId, entries: [], nextCursor: null }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -277,6 +285,13 @@ describe("Campaign Play API", () => {
       expectedRuntimeRevision: 2,
     };
     const resumeRequest = { expectedWorldVersion: 2, expectedRuntimeRevision: 3 };
+    const narrationRecoveryRequest = {
+      operationId: "narration-operation-one",
+      resultId: "result-one",
+      narrationId: "narration-one",
+      packetHash: "b".repeat(64),
+      receiptIds: ["receipt-one"],
+    };
 
     await loadCampaignPlayState(addressedCampaignId);
     await parseCampaignPlayPlayerCard(addressedCampaignId, cardRequest);
@@ -287,6 +302,11 @@ describe("Campaign Play API", () => {
     await admitCampaignPlayTurn(addressedCampaignId, turnRequest);
     await loadCampaignPlayTurn(addressedCampaignId, "turn-one");
     await resumeCampaignPlayTurn(addressedCampaignId, "turn-one", resumeRequest);
+    await recoverCampaignPlayNarration(
+      addressedCampaignId,
+      "turn-one",
+      narrationRecoveryRequest,
+    );
     await loadCampaignPlayJournal(addressedCampaignId, { cursor: 0, limit: 20 });
 
     const base = "http://localhost:3001/api/campaigns/campaign%3Aone/play";
@@ -313,7 +333,12 @@ describe("Campaign Play API", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(9, `${base}/turns/turn-one/resume`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(resumeRequest),
     });
-    expect(fetchMock).toHaveBeenNthCalledWith(10, `${base}/journal?cursor=0&limit=20`, { method: "GET" });
+    expect(fetchMock).toHaveBeenNthCalledWith(10, `${base}/turns/turn-one/narration/recover`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(narrationRecoveryRequest),
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(11, `${base}/journal?cursor=0&limit=20`, { method: "GET" });
   });
 
   it("requires strict public errors and exact 202 admission responses", async () => {

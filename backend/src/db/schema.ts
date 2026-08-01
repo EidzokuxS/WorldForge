@@ -238,6 +238,20 @@ export const campaignPlayNarrationStatusValues = [
   "invalid",
 ] as const;
 
+export const campaignPlayNarrationOperationStatusValues = [
+  "pending",
+  "running",
+  "failed",
+  "complete",
+] as const;
+
+export const campaignPlayNarrationAttemptStatusValues = [
+  "running",
+  "failed",
+  "accepted",
+  "stale",
+] as const;
+
 export const campaignPlayCommandKindValues = [
   "advance_world_time",
   "move_actor",
@@ -2686,6 +2700,229 @@ export const campaignPlayNarrations = sqliteTable(
   ],
 );
 
+export const campaignPlayNarrationOperations = sqliteTable(
+  "campaign_play_narration_operations",
+  {
+    operationId: text("operation_id").primaryKey(),
+    campaignId: text("campaign_id").notNull()
+      .references(() => campaignPlayStates.campaignId, { onDelete: "cascade" }),
+    turnId: text("turn_id").notNull()
+      .references(() => campaignPlayTurns.id, { onDelete: "cascade" }),
+    resultId: text("result_id").notNull(),
+    narrationId: text("narration_id").notNull()
+      .references(() => campaignPlayNarrations.narrationId, { onDelete: "cascade" }),
+    packetHash: text("packet_hash").notNull(),
+    receiptIdsJson: text("receipt_ids_json").notNull(),
+    conciseDisplayText: text("concise_display_text").notNull(),
+    conciseSuggestedActionsJson: text("concise_suggested_actions_json").notNull(),
+    status: text("status", { enum: campaignPlayNarrationOperationStatusValues }).notNull(),
+    currentAttempt: integer("current_attempt").notNull().default(0),
+    currentAttemptId: text("current_attempt_id"),
+    errorCode: text("error_code"),
+    leaseOwner: text("lease_owner"),
+    leaseEpoch: integer("lease_epoch").notNull().default(0),
+    leaseExpiresAt: integer("lease_expires_at", { mode: "number" }),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "number" }).notNull(),
+    completedAt: integer("completed_at", { mode: "number" }),
+  },
+  (table) => [
+    uniqueIndex("campaign_play_narration_operations_turn_unique").on(table.turnId),
+    uniqueIndex("campaign_play_narration_operations_result_unique").on(table.resultId),
+    uniqueIndex("campaign_play_narration_operations_narration_unique").on(table.narrationId),
+    index("idx_campaign_play_narration_operations_campaign_status").on(
+      table.campaignId,
+      table.status,
+    ),
+    check(
+      "campaign_play_narration_operations_payload_valid",
+      sql`length(${table.operationId}) > 0
+        AND length(${table.resultId}) > 0
+        AND length(${table.packetHash}) = 64
+        AND json_valid(${table.receiptIdsJson})
+        AND json_type(${table.receiptIdsJson}) = 'array'
+        AND length(${table.conciseDisplayText}) > 0
+        AND json_valid(${table.conciseSuggestedActionsJson})
+        AND json_type(${table.conciseSuggestedActionsJson}) = 'array'
+        AND ${table.currentAttempt} >= 0
+        AND ${table.leaseEpoch} >= 0`,
+    ),
+    check(
+      "campaign_play_narration_operations_status_valid",
+      sql`${table.status} IN ('pending', 'running', 'failed', 'complete')`,
+    ),
+    check(
+      "campaign_play_narration_operations_state_consistent",
+      sql`(
+          ${table.status} = 'pending'
+          AND ${table.currentAttemptId} IS NULL
+          AND ${table.errorCode} IS NULL
+          AND ${table.leaseOwner} IS NULL
+          AND ${table.leaseExpiresAt} IS NULL
+          AND ${table.completedAt} IS NULL
+        ) OR (
+          ${table.status} = 'running'
+          AND ${table.currentAttempt} > 0
+          AND ${table.currentAttemptId} IS NOT NULL
+          AND ${table.errorCode} IS NULL
+          AND ${table.leaseOwner} IS NOT NULL
+          AND ${table.leaseEpoch} > 0
+          AND ${table.leaseExpiresAt} IS NOT NULL
+          AND ${table.completedAt} IS NULL
+        ) OR (
+          ${table.status} = 'failed'
+          AND ${table.currentAttempt} > 0
+          AND ${table.currentAttemptId} IS NOT NULL
+          AND ${table.errorCode} IS NOT NULL
+          AND ${table.leaseOwner} IS NULL
+          AND ${table.leaseExpiresAt} IS NULL
+          AND ${table.completedAt} IS NULL
+        ) OR (
+          ${table.status} = 'complete'
+          AND ${table.currentAttempt} > 0
+          AND ${table.currentAttemptId} IS NOT NULL
+          AND ${table.errorCode} IS NULL
+          AND ${table.leaseOwner} IS NULL
+          AND ${table.leaseExpiresAt} IS NULL
+          AND ${table.completedAt} IS NOT NULL
+        )`,
+    ),
+  ],
+);
+
+export const campaignPlayNarrationAttempts = sqliteTable(
+  "campaign_play_narration_attempts",
+  {
+    attemptId: text("attempt_id").primaryKey(),
+    operationId: text("operation_id").notNull()
+      .references(() => campaignPlayNarrationOperations.operationId, { onDelete: "cascade" }),
+    campaignId: text("campaign_id").notNull()
+      .references(() => campaignPlayStates.campaignId, { onDelete: "cascade" }),
+    turnId: text("turn_id").notNull()
+      .references(() => campaignPlayTurns.id, { onDelete: "cascade" }),
+    attempt: integer("attempt").notNull(),
+    status: text("status", { enum: campaignPlayNarrationAttemptStatusValues }).notNull(),
+    workerEpoch: integer("worker_epoch").notNull(),
+    requestedProviderId: text("requested_provider_id").notNull(),
+    requestedModel: text("requested_model").notNull(),
+    requestedStrategy: text("requested_strategy").notNull(),
+    actualProviderId: text("actual_provider_id"),
+    actualModel: text("actual_model"),
+    actualStrategy: text("actual_strategy"),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    durationMs: integer("duration_ms"),
+    finishReason: text("finish_reason"),
+    schemaOutcome: text("schema_outcome").notNull(),
+    artifactHash: text("artifact_hash"),
+    errorCode: text("error_code"),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+    completedAt: integer("completed_at", { mode: "number" }),
+  },
+  (table) => [
+    uniqueIndex("campaign_play_narration_attempts_operation_attempt_unique").on(
+      table.operationId,
+      table.attempt,
+    ),
+    uniqueIndex("campaign_play_narration_attempts_operation_epoch_unique").on(
+      table.operationId,
+      table.workerEpoch,
+    ),
+    uniqueIndex("campaign_play_narration_attempts_running_unique")
+      .on(table.operationId)
+      .where(sql`${table.status} = 'running'`),
+    uniqueIndex("campaign_play_narration_attempts_accepted_unique")
+      .on(table.operationId)
+      .where(sql`${table.status} = 'accepted'`),
+    index("idx_campaign_play_narration_attempts_campaign_turn").on(
+      table.campaignId,
+      table.turnId,
+      table.attempt,
+    ),
+    check(
+      "campaign_play_narration_attempts_identity_valid",
+      sql`${table.attempt} > 0
+        AND ${table.workerEpoch} > 0
+        AND length(${table.requestedProviderId}) > 0
+        AND length(${table.requestedModel}) > 0
+        AND ${table.requestedStrategy} = 'strict_object'
+        AND (${table.actualStrategy} IS NULL OR ${table.actualStrategy} = 'strict_object')`,
+    ),
+    check(
+      "campaign_play_narration_attempts_status_valid",
+      sql`${table.status} IN ('running', 'failed', 'accepted', 'stale')
+        AND ${table.schemaOutcome} IN ('pending', 'valid', 'invalid', 'transport_error')`,
+    ),
+    check(
+      "campaign_play_narration_attempts_state_consistent",
+      sql`(
+          ${table.status} = 'running'
+          AND ${table.schemaOutcome} = 'pending'
+          AND ${table.actualProviderId} IS NULL
+          AND ${table.durationMs} IS NULL
+          AND ${table.artifactHash} IS NULL
+          AND ${table.errorCode} IS NULL
+          AND ${table.completedAt} IS NULL
+        ) OR (
+          ${table.status} = 'accepted'
+          AND ${table.schemaOutcome} = 'valid'
+          AND ${table.actualProviderId} IS NOT NULL
+          AND ${table.actualModel} IS NOT NULL
+          AND ${table.actualStrategy} = 'strict_object'
+          AND ${table.inputTokens} IS NOT NULL
+          AND ${table.outputTokens} IS NOT NULL
+          AND ${table.durationMs} IS NOT NULL
+          AND ${table.finishReason} IS NOT NULL
+          AND length(${table.artifactHash}) = 64
+          AND ${table.errorCode} IS NULL
+          AND ${table.completedAt} IS NOT NULL
+        ) OR (
+          ${table.status} IN ('failed', 'stale')
+          AND ${table.schemaOutcome} IN ('invalid', 'transport_error')
+          AND ${table.durationMs} IS NOT NULL
+          AND ${table.artifactHash} IS NULL
+          AND ${table.errorCode} IS NOT NULL
+          AND ${table.completedAt} IS NOT NULL
+        )`,
+    ),
+  ],
+);
+
+export const campaignPlayProperScenes = sqliteTable(
+  "campaign_play_proper_scenes",
+  {
+    narrationId: text("narration_id").primaryKey(),
+    operationId: text("operation_id").notNull()
+      .references(() => campaignPlayNarrationOperations.operationId, { onDelete: "cascade" }),
+    campaignId: text("campaign_id").notNull()
+      .references(() => campaignPlayStates.campaignId, { onDelete: "cascade" }),
+    turnId: text("turn_id").notNull()
+      .references(() => campaignPlayTurns.id, { onDelete: "cascade" }),
+    packetHash: text("packet_hash").notNull(),
+    attemptId: text("attempt_id").notNull()
+      .references(() => campaignPlayNarrationAttempts.attemptId, { onDelete: "restrict" }),
+    beatsJson: text("beats_json").notNull(),
+    displayText: text("display_text").notNull(),
+    suggestedActionsJson: text("suggested_actions_json").notNull(),
+    effectsJson: text("effects_json").notNull(),
+    artifactHash: text("artifact_hash").notNull(),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("campaign_play_proper_scenes_operation_unique").on(table.operationId),
+    uniqueIndex("campaign_play_proper_scenes_turn_unique").on(table.turnId),
+    check(
+      "campaign_play_proper_scenes_payload_valid",
+      sql`length(${table.packetHash}) = 64
+        AND json_valid(${table.beatsJson})
+        AND length(${table.displayText}) > 0
+        AND json_valid(${table.suggestedActionsJson})
+        AND json_valid(${table.effectsJson})
+        AND length(${table.artifactHash}) = 64`,
+    ),
+  ],
+);
+
 export const campaignPlayCommands = sqliteTable(
   "campaign_play_commands",
   {
@@ -3339,7 +3576,7 @@ export const campaignPlayActorSchedules = sqliteTable(
       .references(() => campaignPlayStates.campaignId, { onDelete: "cascade" }),
     actorId: text("actor_id").notNull()
       .references(() => actors.id, { onDelete: "cascade" }),
-    planId: text("plan_id").notNull()
+    planId: text("plan_id")
       .references(() => campaignPlayActorPlans.planId, { onDelete: "restrict" }),
     nextActAtWorldTimeMinutes: integer("next_act_at_world_time_minutes").notNull(),
     lastActAtWorldTimeMinutes: integer("last_act_at_world_time_minutes"),
@@ -3401,9 +3638,9 @@ export const campaignPlayActorJobs = sqliteTable(
       .references(() => campaignPlayTurns.id, { onDelete: "cascade" }),
     actorId: text("actor_id").notNull()
       .references(() => actors.id, { onDelete: "cascade" }),
-    admittedPlanId: text("admitted_plan_id").notNull()
+    admittedPlanId: text("admitted_plan_id")
       .references(() => campaignPlayActorPlans.planId, { onDelete: "restrict" }),
-    planId: text("plan_id").notNull()
+    planId: text("plan_id")
       .references(() => campaignPlayActorPlans.planId, { onDelete: "restrict" }),
     dueReason: text("due_reason", { enum: campaignPlayActorJobDueReasonValues }).notNull(),
     frozenBaseWorldVersion: integer("frozen_base_world_version").notNull(),

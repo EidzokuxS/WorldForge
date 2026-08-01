@@ -6,6 +6,7 @@ import {
   CAMPAIGN_PLAY_EFFECT_KIND_VALUES,
   CAMPAIGN_PLAY_INTENT_SOURCE_VALUES,
   CAMPAIGN_PLAY_LIMITS,
+  CAMPAIGN_PLAY_NARRATION_OPERATION_STATUS_VALUES,
   CAMPAIGN_PLAY_PHASE_VALUES,
   CAMPAIGN_PLAY_PUBLIC_ERROR_CODE_VALUES,
   CAMPAIGN_PLAY_PUBLIC_PROGRESS_VALUES,
@@ -27,6 +28,9 @@ import {
   type CampaignPlayJournalPage,
   type CampaignPlayJournalRequest,
   type CampaignPlayNarration,
+  type CampaignPlayNarrationOperation,
+  type CampaignPlayNarrationRecoveryRequest,
+  type CampaignPlayNarrationRecoveryResponse,
   type CampaignPlayNarratorPacket,
   type CampaignPlayOpeningAdmissionRequest,
   type CampaignPlayOpeningDetailOption,
@@ -797,6 +801,63 @@ export const campaignPlayNarrationSchema: z.ZodType<CampaignPlayNarration> =
     });
   });
 
+export const campaignPlayNarrationOperationSchema:
+  z.ZodType<CampaignPlayNarrationOperation> = z.object({
+    operationId: idSchema,
+    resultId: idSchema,
+    turnId: idSchema,
+    narrationId: idSchema,
+    packetHash: hashSchema,
+    receiptIds: z.array(idSchema).max(CAMPAIGN_PLAY_LIMITS.commandsPerBatch),
+    status: z.enum(CAMPAIGN_PLAY_NARRATION_OPERATION_STATUS_VALUES),
+    attemptId: idSchema.nullable(),
+    attempt: nonnegativeIntegerSchema,
+    conciseResult: z.object({
+      displayText: narrationTextSchema,
+      suggestedActions: z.array(campaignPlaySuggestedActionSchema)
+        .max(CAMPAIGN_PLAY_LIMITS.suggestedActions),
+    }).strict(),
+    createdAt: timestampSchema,
+    completedAt: timestampSchema.nullable(),
+  }).strict().superRefine((operation, context) => {
+    const attemptIdentityValid = operation.status === "pending"
+      ? operation.attemptId === null
+      : operation.attempt > 0 && operation.attemptId !== null;
+    if (!attemptIdentityValid) {
+      context.addIssue({
+        code: "custom",
+        path: ["attemptId"],
+        message: "Narration operation attempt identity must match its status.",
+      });
+    }
+    if ((operation.status === "complete") !== (operation.completedAt !== null)) {
+      context.addIssue({
+        code: "custom",
+        path: ["completedAt"],
+        message: "Only a proper completed scene has narration completion time.",
+      });
+    }
+  });
+
+export const campaignPlayNarrationRecoveryRequestSchema:
+  z.ZodType<CampaignPlayNarrationRecoveryRequest> = z.object({
+    operationId: idSchema,
+    resultId: idSchema,
+    narrationId: idSchema,
+    packetHash: hashSchema,
+    receiptIds: z.array(idSchema).max(CAMPAIGN_PLAY_LIMITS.commandsPerBatch),
+  }).strict().superRefine((request, context) => {
+    addDuplicateIssue(request.receiptIds, context, ["receiptIds"], "Narration receipt ids");
+  });
+
+export const campaignPlayNarrationRecoveryResponseSchema:
+  z.ZodType<CampaignPlayNarrationRecoveryResponse> = z.object({
+    operationId: idSchema,
+    attemptId: idSchema,
+    attempt: positiveIntegerSchema,
+    status: z.literal("running"),
+  }).strict();
+
 function playerFacingName(value: string): string {
   return value.replace(/[-_]+/g, " ").replace(/(^|\s)(\p{L})/gu, (_match, space: string, letter: string) =>
     `${space}${letter.toUpperCase()}`);
@@ -808,7 +869,7 @@ export function campaignPlaySuggestedActionLabelPrefix(
 ): string {
   switch (intent.kind) {
     case "observe": return "Examine ";
-    case "wait": return `Wait ${CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES} minutes and `;
+    case "wait": return `Wait ${CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES} minutes`;
     case "attempt": {
       const routeHandle = intent.targets.find((target) => target.kind === "route")?.handle;
       if (routeHandle === undefined) return "Try to ";
@@ -852,11 +913,11 @@ export function buildCampaignPlaySuggestedActionLabel(
   detail: string | null,
 ): string {
   const prefix = campaignPlaySuggestedActionLabelPrefix(packet, intent);
-  if (intent.kind === "move") {
+  if (intent.kind === "move" || intent.kind === "wait") {
     if (detail !== null) {
       throw new CampaignPlayContractError(
         "narration_invalid",
-        "Move action label must use only its frozen route destination.",
+        "Code-owned action labels cannot include model-authored detail.",
       );
     }
     return prefix;
@@ -900,7 +961,7 @@ export function validateNarrationAgainstPacket(
     const prefix = available
       ? campaignPlaySuggestedActionLabelPrefix(packet, available)
       : null;
-    const hasExactBinding = available?.kind === "move"
+    const hasExactBinding = available?.kind === "move" || available?.kind === "wait"
       ? action.label === prefix
       : prefix !== null && action.label.startsWith(prefix) && action.label.length > prefix.length;
     if (!available || available.handle !== action.choiceHandle || !hasExactBinding) {
@@ -1050,6 +1111,7 @@ const campaignPlayStateBaseSchema = campaignPlayPublicVersionsBaseSchema.extend(
   obligations: z.array(campaignPlayVisibleObligationSchema)
     .max(CAMPAIGN_PLAY_LIMITS.visibleObligations),
   narration: campaignPlayNarrationSchema.nullable(),
+  narrationOperation: campaignPlayNarrationOperationSchema.nullable(),
   consequences: z.array(campaignPlayConsequenceSchema)
     .max(CAMPAIGN_PLAY_LIMITS.newObservations),
   activeTurn: campaignPlayPublicTurnSchema.nullable(),
@@ -1091,6 +1153,7 @@ export const campaignPlayStateSchema: z.ZodType<CampaignPlayState> =
       if (
         state.currentLocation !== null ||
         state.narration !== null ||
+        state.narrationOperation !== null ||
         state.visibleActors.length > 0 ||
         state.visibleRoutes.length > 0 ||
         state.visiblePressures.length > 0 ||
@@ -1152,7 +1215,7 @@ export const campaignPlayStateSchema: z.ZodType<CampaignPlayState> =
       if (
         state.character === null ||
         state.currentLocation === null ||
-        state.narration === null ||
+        (state.narration === null && state.narrationOperation === null) ||
         state.activeTurn !== null
       ) {
         context.addIssue({
@@ -1194,6 +1257,30 @@ export const campaignPlayStateSchema: z.ZodType<CampaignPlayState> =
           code: "custom",
           path: ["activeTurn"],
           message: "Narration phase requires active or resumable narrator work.",
+        });
+      }
+    }
+    if (state.narrationOperation !== null) {
+      if (
+        state.narrationOperation.status === "complete" &&
+        (state.narration === null ||
+          state.narration.narrationId !== state.narrationOperation.narrationId ||
+          state.narration.turnId !== state.narrationOperation.turnId)
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["narration"],
+          message: "Completed narration operation requires its exact proper scene.",
+        });
+      }
+      if (
+        state.narrationOperation.status !== "complete" &&
+        state.narration?.turnId === state.narrationOperation.turnId
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["narration"],
+          message: "Concise result must not be labeled as a proper scene.",
         });
       }
     }
@@ -1286,7 +1373,8 @@ export const campaignPlayTurnPublicResultSchema =
     }).strict(),
     z.object({
       status: z.literal("completed"),
-      narration: campaignPlayNarrationSchema,
+      narration: campaignPlayNarrationSchema.nullable(),
+      narrationOperation: campaignPlayNarrationOperationSchema.nullable(),
       consequences: z.array(campaignPlayConsequenceSchema)
         .max(CAMPAIGN_PLAY_LIMITS.newObservations),
       journalCursor: nonnegativeIntegerSchema,
@@ -1320,12 +1408,15 @@ export const campaignPlayTurnReadResponseSchema:
     }
     if (
       response.result.status === "completed" &&
-      response.result.narration.turnId !== response.turn.turnId
+      ((response.result.narration !== null &&
+        response.result.narration.turnId !== response.turn.turnId) ||
+        (response.result.narrationOperation !== null &&
+          response.result.narrationOperation.turnId !== response.turn.turnId))
     ) {
       context.addIssue({
         code: "custom",
-        path: ["result", "narration", "turnId"],
-        message: "Turn narration must belong to the requested durable turn.",
+        path: ["result"],
+        message: "Turn narration result must belong to the requested durable turn.",
       });
     }
     if (
@@ -2116,6 +2207,127 @@ export const campaignPlayJudgeArtifactSchema = z.object({
   }
 });
 
+export const campaignPlayCertifiedMoveSchema = z.object({
+  actionSchemaVersion: z.literal(1),
+  resolver: z.literal("game_master"),
+  campaignId: idSchema,
+  turnId: idSchema,
+  sourceTurnId: idSchema,
+  sourceMomentId: idSchema,
+  sourceMomentHash: hashSchema,
+  sourcePacketHash: hashSchema,
+  acceptedWorldVersion: positiveIntegerSchema,
+  baseWorldVersion: positiveIntegerSchema,
+  baseRuntimeRevision: positiveIntegerSchema,
+  actorId: idSchema,
+  actorHandle: handleSchema,
+  choiceHandle: handleSchema,
+  label: labelSchema,
+  routeHandle: handleSchema,
+  routeId: idSchema,
+  fromLocationId: idSchema,
+  destinationHandle: handleSchema,
+  destinationLocationId: idSchema,
+  travelCost: positiveIntegerSchema.max(10),
+  ruling: campaignPlayJudgeRulingSchema,
+  resolution: campaignPlayUncertaintyResolutionSchema,
+  publicResult: campaignPlayJudgePublicResultSchema,
+}).strict().superRefine((certificate, context) => {
+  const intent = certificate.ruling.normalizedIntent;
+  if (
+    certificate.ruling.disposition !== "deterministic" ||
+    intent.source !== "suggested" || intent.kind !== "move" ||
+    intent.choiceHandle !== certificate.choiceHandle ||
+    intent.originalText !== certificate.label ||
+    certificate.ruling.movementRouteHandle !== certificate.routeHandle ||
+    certificate.ruling.possessionEffectAuthority.kind !== "none" ||
+    certificate.ruling.requiredObligationEffect.kind !== "none" ||
+    certificate.ruling.uncertainty.kind !== "none" ||
+    certificate.ruling.resultBounds.minimum !== "success" ||
+    certificate.ruling.resultBounds.maximum !== "success" ||
+    certificate.ruling.elapsedBounds.minimumMinutes !== certificate.travelCost ||
+    certificate.ruling.elapsedBounds.maximumMinutes !== certificate.travelCost ||
+    certificate.resolution.kind !== "deterministic" ||
+    certificate.resolution.result !== "success" ||
+    certificate.publicResult.intentKind !== "move" ||
+    certificate.publicResult.disposition !== "deterministic" ||
+    certificate.publicResult.result !== "success" ||
+    certificate.publicResult.clarificationQuestion !== null
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["ruling"],
+      message: "Certified move authority must describe one deterministic successful move.",
+    });
+  }
+});
+
+export const campaignPlayCertifiedWaitSchema = z.object({
+  actionSchemaVersion: z.literal(1),
+  resolver: z.literal("game_master"),
+  campaignId: idSchema,
+  turnId: idSchema,
+  sourceTurnId: idSchema,
+  sourceMomentId: idSchema,
+  sourceMomentHash: hashSchema,
+  sourcePacketHash: hashSchema,
+  acceptedWorldVersion: positiveIntegerSchema,
+  baseWorldVersion: positiveIntegerSchema,
+  baseRuntimeRevision: positiveIntegerSchema,
+  actorId: idSchema,
+  actorHandle: handleSchema,
+  choiceHandle: handleSchema,
+  label: labelSchema,
+  waitMinutes: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes),
+  ruling: campaignPlayJudgeRulingSchema,
+  resolution: campaignPlayUncertaintyResolutionSchema,
+  publicResult: campaignPlayJudgePublicResultSchema,
+}).strict().superRefine((certificate, context) => {
+  const intent = certificate.ruling.normalizedIntent;
+  if (
+    certificate.ruling.disposition !== "deterministic" ||
+    intent.source !== "suggested" || intent.kind !== "wait" ||
+    intent.choiceHandle !== certificate.choiceHandle ||
+    intent.originalText !== certificate.label || intent.targets.length !== 0 ||
+    intent.method !== null || intent.stakes !== null ||
+    certificate.ruling.movementRouteHandle !== null ||
+    certificate.ruling.possessionEffectAuthority.kind !== "none" ||
+    certificate.ruling.requiredObligationEffect.kind !== "none" ||
+    certificate.ruling.citedVisibleFactHandles.length !== 0 ||
+    certificate.ruling.uncertainty.kind !== "none" ||
+    certificate.ruling.resultBounds.minimum !== "success" ||
+    certificate.ruling.resultBounds.maximum !== "success" ||
+    certificate.ruling.elapsedBounds.minimumMinutes !== certificate.waitMinutes ||
+    certificate.ruling.elapsedBounds.maximumMinutes !== certificate.waitMinutes ||
+    certificate.resolution.kind !== "deterministic" ||
+    certificate.resolution.result !== "success" ||
+    certificate.publicResult.intentKind !== "wait" ||
+    certificate.publicResult.disposition !== "deterministic" ||
+    certificate.publicResult.result !== "success" ||
+    certificate.publicResult.clarificationQuestion !== null
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["ruling"],
+      message: "Certified wait authority must describe one exact deterministic public wait.",
+    });
+  }
+});
+
+export const campaignPlayActionExecutionRouteSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("full_authority") }).strict(),
+  z.object({
+    kind: z.literal("certified_move"),
+    certificate: campaignPlayCertifiedMoveSchema,
+    certificateHash: hashSchema,
+  }).strict(),
+  z.object({
+    kind: z.literal("certified_wait"),
+    certificate: campaignPlayCertifiedWaitSchema,
+    certificateHash: hashSchema,
+  }).strict(),
+]);
+
 export const campaignPlayEntityRefSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("actor"), id: idSchema }).strict(),
   z.object({ kind: z.literal("location"), id: idSchema }).strict(),
@@ -2588,15 +2800,29 @@ export const rulebookCommandBatchSchema = z.object({
   });
 });
 
-export const campaignPlayGameMasterArtifactSchema = z.object({
-  judgeArtifactHash: hashSchema,
+const campaignPlayGameMasterArtifactBaseShape = {
   batch: rulebookCommandBatchSchema,
   batchHash: hashSchema,
   semanticReview: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("not_required") }).strict(),
     z.object({ kind: z.literal("mechanical_authority"), reviewHash: hashSchema }).strict(),
   ]),
-}).strict();
+};
+
+export const campaignPlayGameMasterArtifactSchema = z.union([
+  z.object({
+    judgeArtifactHash: hashSchema,
+    ...campaignPlayGameMasterArtifactBaseShape,
+  }).strict(),
+  z.object({
+    certifiedMoveHash: hashSchema,
+    ...campaignPlayGameMasterArtifactBaseShape,
+  }).strict(),
+  z.object({
+    certifiedWaitHash: hashSchema,
+    ...campaignPlayGameMasterArtifactBaseShape,
+  }).strict(),
+]);
 
 function entityRefKey(reference: z.infer<typeof campaignPlayEntityRefSchema>): string {
   return `${reference.kind}\u0000${reference.id}`;
@@ -3149,7 +3375,7 @@ export const campaignPlayActorScheduleSchema = z.object({
   scheduleId: idSchema,
   campaignId: idSchema,
   actorId: idSchema,
-  planId: idSchema,
+  planId: idSchema.nullable(),
   nextActAtWorldTimeMinutes: worldTimeSchema,
   lastActAtWorldTimeMinutes: worldTimeSchema.nullable(),
   priority: z.number().int().min(1).max(5),
@@ -3160,7 +3386,7 @@ const campaignPlayActorDueDecisionBaseShape = {
   dueOrder: nonnegativeIntegerSchema,
   actorId: idSchema,
   scheduleId: idSchema,
-  planId: idSchema,
+  planId: idSchema.nullable(),
   nextActAtWorldTimeMinutes: worldTimeSchema,
   priority: z.number().int().min(1).max(5),
   agencyDebt: nonnegativeIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.agencyDebt),
@@ -3241,8 +3467,8 @@ export const campaignPlayActorJobSchema = z.object({
   campaignId: idSchema,
   turnId: idSchema,
   actorId: idSchema,
-  admittedPlanId: idSchema,
-  planId: idSchema,
+  admittedPlanId: idSchema.nullable(),
+  planId: idSchema.nullable(),
   dueReason: z.enum(["scheduled", "agency_debt", "plan_retry"]),
   frozenBaseWorldVersion: positiveIntegerSchema,
   workerEpoch: nonnegativeIntegerSchema,
@@ -3876,6 +4102,12 @@ export type CampaignPlayJudgePrimaryPlan =
   z.infer<typeof campaignPlayJudgePrimaryPlanSchema>;
 export type CampaignPlayJudgeArtifact =
   z.infer<typeof campaignPlayJudgeArtifactSchema>;
+export type CampaignPlayCertifiedMove =
+  z.infer<typeof campaignPlayCertifiedMoveSchema>;
+export type CampaignPlayCertifiedWait =
+  z.infer<typeof campaignPlayCertifiedWaitSchema>;
+export type CampaignPlayActionExecutionRoute =
+  z.infer<typeof campaignPlayActionExecutionRouteSchema>;
 export type CampaignPlayGameMasterArtifact =
   z.infer<typeof campaignPlayGameMasterArtifactSchema>;
 export type CampaignPlayEntityRef =

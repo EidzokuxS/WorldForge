@@ -154,7 +154,7 @@ interface ReplanCompilationFrame {
 
 interface ScheduleRow {
   scheduleId: string;
-  planId: string;
+  planId: string | null;
   nextActAtWorldTimeMinutes: number;
   lastActAtWorldTimeMinutes: number | null;
   cadenceMinutes: number;
@@ -333,13 +333,15 @@ function compilationFrame(
     method: intent.method,
     stakes: intent.stakes,
   });
-  const settledStepCount = (handle.sqlite.prepare(`SELECT count(*) AS count
-    FROM campaign_play_actor_jobs WHERE campaign_id = ? AND actor_id = ?
-      AND plan_id = ? AND stage = 'settled'`).get(
-    handle.campaignId,
-    frame.actorId,
-    frame.plan.planId,
-  ) as { count: number }).count;
+  const settledStepCount = frame.plan === null
+    ? 0
+    : (handle.sqlite.prepare(`SELECT count(*) AS count
+        FROM campaign_play_actor_jobs WHERE campaign_id = ? AND actor_id = ?
+          AND plan_id = ? AND stage = 'settled'`).get(
+        handle.campaignId,
+        frame.actorId,
+        frame.plan.planId,
+      ) as { count: number }).count;
   return {
     refsByHandle,
     promptFrame: {
@@ -347,12 +349,14 @@ function compilationFrame(
       worldTimeMinutes: frame.worldTimeMinutes,
       reason: frame.selection.reason,
       failedPreconditionIndexes: [...frame.selection.failedPreconditionIndexes],
-      priorPlan: {
-        goalHandle: bind({ kind: "goal", id: frame.plan.goalId }),
-        intent: toPromptIntent(frame.plan.intent),
-        completedStepCount: settledStepCount,
-        stepCount: frame.plan.steps.length,
-      },
+      priorPlan: frame.plan === null
+        ? null
+        : {
+            goalHandle: bind({ kind: "goal", id: frame.plan.goalId }),
+            intent: toPromptIntent(frame.plan.intent),
+            completedStepCount: settledStepCount,
+            stepCount: frame.plan.steps.length,
+          },
       entities,
     },
   };
@@ -957,7 +961,7 @@ export function createCampaignPlayActorReplanner(
               request.token.expiresAt,
             );
             if (!fenced) throw new CampaignPlayActorReplannerError("replan_epoch_lost");
-            if (latestFrame.plan.status === "active") {
+            if (latestFrame.plan?.status === "active") {
               const priorPlan = context.sqlite.prepare(`UPDATE campaign_play_actor_plans SET status = ?, updated_at = ?
                 WHERE plan_id = ? AND campaign_id = ? AND status = 'active'`).run(
                 latestFrame.selection.kind === "replan_required"
@@ -1044,15 +1048,16 @@ export function createCampaignPlayActorReplanner(
                 s.plan_id AS planId,
                 s.next_act_at_world_time_minutes AS nextActAtWorldTimeMinutes,
                 s.last_act_at_world_time_minutes AS lastActAtWorldTimeMinutes,
-                s.agency_debt AS agencyDebt, p.cadence_minutes AS cadenceMinutes
+                s.agency_debt AS agencyDebt,
+                COALESCE(p.cadence_minutes, (6 - s.priority) * 5) AS cadenceMinutes
                 FROM campaign_play_actor_schedules s
-                JOIN campaign_play_actor_plans p
+                LEFT JOIN campaign_play_actor_plans p
                   ON p.campaign_id = s.campaign_id AND p.plan_id = s.plan_id
                 WHERE s.campaign_id = ? AND s.actor_id = ?`).get(
                   handle.campaignId,
                   frame.actorId,
                 ) as ScheduleRow | undefined;
-              if (!row || row.planId !== frame.plan.planId) return null;
+              if (!row || row.planId !== (frame.plan?.planId ?? null)) return null;
               return {
                 row,
                 transition: calculateCampaignPlayActorNextDueTime({
@@ -1151,7 +1156,7 @@ export function createCampaignPlayActorReplanner(
               const scheduleUpdate = context.sqlite.prepare(`UPDATE campaign_play_actor_schedules SET
                 next_act_at_world_time_minutes = ?, last_act_at_world_time_minutes = ?,
                 agency_debt = ?, updated_at = ?
-                WHERE schedule_id = ? AND campaign_id = ? AND actor_id = ? AND plan_id = ?`).run(
+                WHERE schedule_id = ? AND campaign_id = ? AND actor_id = ? AND plan_id IS ?`).run(
                   rejectedSchedule.transition.nextActAtWorldTimeMinutes,
                   rejectedSchedule.transition.lastActAtWorldTimeMinutes,
                   rejectedSchedule.transition.agencyDebt,

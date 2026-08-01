@@ -404,7 +404,7 @@ function settleRulebookCommand(
 }
 
 describe("Campaign Play core and Rulebook storage", () => {
-  it("migrates fresh campaign databases with the twenty-four Campaign Play tables", () => {
+  it("migrates fresh campaign databases with the twenty-seven Campaign Play tables", () => {
     const databasePath = createMigratedCampaign(root, CAMPAIGN_A);
     const sqlite = new Database(databasePath);
     try {
@@ -428,9 +428,12 @@ describe("Campaign Play core and Rulebook storage", () => {
         { name: "campaign_play_event_exposures" },
         { name: "campaign_play_events" },
         { name: "campaign_play_model_stages" },
+        { name: "campaign_play_narration_attempts" },
+        { name: "campaign_play_narration_operations" },
         { name: "campaign_play_narrations" },
         { name: "campaign_play_observations" },
         { name: "campaign_play_pressure_states" },
+        { name: "campaign_play_proper_scenes" },
         { name: "campaign_play_receipts" },
         { name: "campaign_play_route_states" },
         { name: "campaign_play_runtime_events" },
@@ -745,7 +748,19 @@ describe("Campaign Play core and Rulebook storage", () => {
       .get() as { sql: string };
     expect(after.sql).toContain("job.defer_reason = 'actor_capacity'");
     expect(opened.sqlite.prepare(`SELECT max(created_at) AS latest
-      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_784_421_942_006 });
+      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_785_643_200_000 });
+    expect((opened.sqlite.pragma("table_info('campaign_play_actor_schedules')") as Array<{
+      name: string;
+      notnull: number;
+    }>).find((column) => column.name === "plan_id")).toMatchObject({ notnull: 0 });
+    expect((opened.sqlite.pragma("table_info('campaign_play_actor_jobs')") as Array<{
+      name: string;
+      notnull: number;
+    }>).filter((column) => ["admitted_plan_id", "plan_id"].includes(column.name)))
+      .toEqual([
+        expect.objectContaining({ name: "admitted_plan_id", notnull: 0 }),
+        expect.objectContaining({ name: "plan_id", notnull: 0 }),
+      ]);
   });
 
   it("adds core play storage to an accepted Campaign World without changing provenance", () => {

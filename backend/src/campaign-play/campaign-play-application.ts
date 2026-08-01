@@ -5,6 +5,8 @@ import type {
   CampaignPlayCharacterResearchResponse,
   CampaignPlayGeneratePlayerDraftRequest,
   CampaignPlayJournalPage,
+  CampaignPlayNarrationRecoveryRequest,
+  CampaignPlayNarrationRecoveryResponse,
   CampaignPlayOpeningAdmissionRequest,
   CampaignPlayParsePlayerCardRequest,
   CampaignPlayPutPlayerRequest,
@@ -29,6 +31,8 @@ import {
 import {
   campaignPlayCharacterDraftResponseSchema,
   campaignPlayOpeningAdmissionRequestSchema,
+  campaignPlayNarrationRecoveryRequestSchema,
+  campaignPlayNarrationRecoveryResponseSchema,
   campaignPlayPutPlayerRequestSchema,
   campaignPlayPutPlayerResponseSchema,
   campaignPlayResumeTurnRequestSchema,
@@ -68,6 +72,11 @@ import {
   type CampaignPlayTurnRuntime,
   type CampaignPlayTurnRuntimeStageModel,
 } from "./turn-runtime.js";
+import {
+  createCampaignPlayNarrationOperationRepository,
+  CampaignPlayNarrationOperationError,
+  type CampaignPlayNarrationAttemptToken,
+} from "./narration-operation-repository.js";
 import {
   canonicalizeCampaignPlayProjection,
   deriveCampaignPlayPublicHandle,
@@ -169,6 +178,11 @@ export interface CampaignPlayApplication {
     turnId: string,
     request: CampaignPlayResumeTurnRequest,
   ): CampaignPlayTurnAdmissionResponse;
+  recoverNarration(
+    campaignId: string,
+    turnId: string,
+    request: CampaignPlayNarrationRecoveryRequest,
+  ): CampaignPlayNarrationRecoveryResponse;
   recoverCampaign(campaignId: string): Promise<void>;
   waitForIdle(campaignId: string): Promise<void>;
 }
@@ -381,6 +395,15 @@ function mapFailure(error: unknown): never {
     }
     return fail("service_unavailable", "Campaign Play action failed.", error);
   }
+  if (error instanceof CampaignPlayNarrationOperationError) {
+    if (
+      error.code === "operation_not_found" || error.code === "operation_stale" ||
+      error.code === "operation_not_recoverable" || error.code === "operation_fence_lost"
+    ) {
+      return fail("turn_not_resumable", "The proper scene can no longer be restored.", error);
+    }
+    return fail("service_unavailable", "Campaign Play narration operation is unavailable.", error);
+  }
   return fail("service_unavailable", "Campaign Play service is unavailable.", error);
 }
 
@@ -407,6 +430,7 @@ export function createCampaignPlayApplication(
     ...overrides,
   };
   const drivers = new Map<string, { turnId: string; promise: Promise<void> }>();
+  const narrationDrivers = new Map<string, { turnId: string; promise: Promise<void> }>();
   const recoveryWakeups = new Map<
     string,
     { expiresAt: number; timer: ReturnType<typeof setTimeout> }
@@ -496,10 +520,15 @@ export function createCampaignPlayApplication(
         gameMasterRequested,
         dependencies.createModel(generator.provider, { role: "generator" }),
       ),
+      certifiedGameMasterModel: stageModel(
+        generator,
+        gameMasterRequested,
+        dependencies.createModel(generator.provider, { role: "generator", reasoningMode: "bypass" }),
+      ),
       actorReplannerModel: stageModel(
         actorGenerator,
         actorRequested,
-        dependencies.createModel(actorGenerator.provider, { role: "generator" }),
+        dependencies.createModel(actorGenerator.provider, { role: "generator", reasoningMode: "bypass" }),
       ),
       narratorModel: stageModel(
         storyteller,
@@ -601,6 +630,9 @@ export function createCampaignPlayApplication(
             })
           : await runtime.runNextStage(turnId);
         pendingResume = null;
+        if (result.recovery.kind === "completed" && result.turn.turnKind === "player_action") {
+          scheduleNarration(campaignId, result.turn.turnId);
+        }
         if (
           result.recovery.kind === "completed" ||
           result.recovery.kind === "terminal_failure" ||
@@ -618,6 +650,40 @@ export function createCampaignPlayApplication(
       }
     }
   };
+
+  const driveNarration = async (
+    campaignId: string,
+    turnId: string,
+    token: CampaignPlayNarrationAttemptToken | null,
+  ): Promise<void> => {
+    const handle = dependencies.openDatabase(campaignId);
+    try {
+      const turn = createCampaignPlayTurnRepository(handle).loadTurn(turnId);
+      if (!turn || turn.turnKind !== "player_action" || turn.stage !== "completed") return;
+      const runtime = runtimeFactory.createTurn(handle, turn.modelSelection);
+      await runtime.runNarration(turnId, token ?? undefined);
+    } finally {
+      handle.close();
+    }
+  };
+
+  function scheduleNarration(
+    campaignId: string,
+    turnId: string,
+    token: CampaignPlayNarrationAttemptToken | null = null,
+  ): void {
+    const current = narrationDrivers.get(campaignId);
+    if (current?.turnId === turnId && token === null) return;
+    const running = (current?.promise ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => driveNarration(campaignId, turnId, token))
+      .catch(() => undefined);
+    const entry = { turnId, promise: running };
+    narrationDrivers.set(campaignId, entry);
+    void running.finally(() => {
+      if (narrationDrivers.get(campaignId) === entry) narrationDrivers.delete(campaignId);
+    });
+  }
 
   const schedule = (
     campaignId: string,
@@ -660,7 +726,28 @@ export function createCampaignPlayApplication(
       try {
         const repository = createCampaignPlayTurnRepository(handle);
         const active = repository.loadActiveTurn();
-        if (!active) return;
+        if (!active) {
+          const narrationRepository = createCampaignPlayNarrationOperationRepository(handle);
+          narrationRepository.interruptExpired(dependencies.now());
+          const runningNarration = handle.sqlite.prepare(`SELECT lease_expires_at AS leaseExpiresAt
+            FROM campaign_play_narration_operations
+            WHERE campaign_id = ? AND status = 'running'
+            ORDER BY lease_expires_at, operation_id LIMIT 1`).get(
+              campaignId,
+            ) as { leaseExpiresAt: number } | undefined;
+          if (runningNarration) {
+            scheduleRecoveryWakeup(runningNarration.leaseExpiresAt);
+            return;
+          }
+          const pendingNarration = handle.sqlite.prepare(`SELECT turn_id AS turnId
+            FROM campaign_play_narration_operations
+            WHERE campaign_id = ? AND status = 'pending'
+            ORDER BY created_at DESC, operation_id DESC LIMIT 1`).get(
+              campaignId,
+            ) as { turnId: string } | undefined;
+          if (pendingNarration) scheduleNarration(campaignId, pendingNarration.turnId);
+          return;
+        }
         const runtime = runtimeForTurn(handle, active);
         const result = await runtime.recoverActiveTurn();
         if (!result) return;
@@ -909,13 +996,52 @@ export function createCampaignPlayApplication(
         handle.close();
       }
     },
+    recoverNarration(campaignId, turnId, requestValue) {
+      const request = campaignPlayNarrationRecoveryRequestSchema.parse(requestValue);
+      const { handle } = openState(campaignId);
+      try {
+        const turn = createCampaignPlayTurnRepository(handle).loadTurn(turnId);
+        if (!turn || turn.turnKind !== "player_action" || turn.stage !== "completed") {
+          return fail("turn_not_found", "Committed player result was not found.");
+        }
+        const operation = createCampaignPlayNarrationOperationRepository(handle).loadByTurn(turnId);
+        if (!operation || operation.operationId !== request.operationId) {
+          throw new CampaignPlayNarrationOperationError(
+            "operation_stale",
+            "Narration operation does not belong to the requested turn.",
+          );
+        }
+        const runtime = runtimeFactory.createTurn(handle, turn.modelSelection);
+        const token = runtime.prepareNarrationRecovery(request);
+        if (token.turnId !== turnId) {
+          throw new CampaignPlayNarrationOperationError(
+            "operation_stale",
+            "Narration operation does not belong to the requested turn.",
+          );
+        }
+        scheduleNarration(campaignId, turnId, token);
+        return campaignPlayNarrationRecoveryResponseSchema.parse({
+          operationId: token.operationId,
+          attemptId: token.attemptId,
+          attempt: token.attempt,
+          status: "running",
+        });
+      } catch (error) {
+        return mapFailure(error);
+      } finally {
+        handle.close();
+      }
+    },
     recoverCampaign,
     async waitForIdle(campaignId) {
       while (true) {
-        const entry = drivers.get(campaignId);
-        if (!entry) return;
-        await entry.promise;
-        if (drivers.get(campaignId) === entry) return;
+        const mechanics = drivers.get(campaignId);
+        const narration = narrationDrivers.get(campaignId);
+        if (!mechanics && !narration) return;
+        await Promise.all([
+          mechanics?.promise ?? Promise.resolve(),
+          narration?.promise ?? Promise.resolve(),
+        ]);
       }
     },
   };

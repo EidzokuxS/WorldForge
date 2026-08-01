@@ -317,6 +317,7 @@ function stateFixture(): CampaignPlayState {
     possessions: packet.possessions,
     obligations: packet.obligations,
     narration: narrationFixture(),
+    narrationOperation: null,
     consequences: packet.consequences,
     activeTurn: {
       turnId: packet.turnId,
@@ -1202,6 +1203,7 @@ describe("Campaign Play shared public contracts", () => {
         result: {
           status: "completed",
           narration,
+          narrationOperation: null,
           consequences: packet.consequences,
           journalCursor: 9,
         },

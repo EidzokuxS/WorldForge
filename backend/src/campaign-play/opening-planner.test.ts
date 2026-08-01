@@ -315,41 +315,6 @@ function frameFixture(world = worldFixture()): CampaignPlayOpeningFrame {
   };
 }
 
-function intent(targets: Array<{ kind: "goal" | "location" | "route" | "actor"; id: string }>) {
-  return {
-    kind: "attempt" as const,
-    targets,
-    method: "Advance the active goal through grounded action.",
-    stakes: "The world pressure changes if the attempt fails.",
-  };
-}
-
-function actorPlan(
-  actorId: string,
-  primaryGoalId: string,
-  goalIds: string[],
-  extraTargets: Array<{ kind: "location" | "route" | "actor"; id: string }> = [],
-  observableTrace = "Fresh work marks show that someone acted here recently.",
-) {
-  const planIntent = intent([
-    ...goalIds.map((id) => ({ kind: "goal" as const, id })),
-    ...extraTargets,
-  ]);
-  const step = {
-    intent: planIntent,
-    observableTrace,
-    possessionOutcome: { kind: "none" as const },
-    obligationOutcome: { kind: "none" as const },
-    elapsedBounds: { minimumMinutes: 5, maximumMinutes: 30 },
-  };
-  return {
-    actorId,
-    primaryGoalId,
-    cadenceMinutes: 30,
-    steps: Array.from({ length: 3 }, () => structuredClone(step)),
-  };
-}
-
 function proposalFixture(): CampaignPlayOpeningProposal {
   return {
     start: {
@@ -372,37 +337,6 @@ function proposalFixture(): CampaignPlayOpeningProposal {
       eventClass: "dialogue",
       summary: "Oren Tide asks Ilya what the impossible signal has changed in the harbor instruments.",
       routeRestriction: null,
-    },
-    actorPlans: [
-      actorPlan(
-        "actor-keeper",
-        "goal-keeper-map",
-        ["goal-keeper-map", "goal-keeper-ledger"],
-      ),
-      actorPlan(
-        "actor-courier",
-        "goal-courier-deliver",
-        ["goal-courier-deliver"],
-        [{ kind: "location", id: "scene-harbor-docks" }],
-      ),
-      actorPlan(
-        "actor-bell-tender",
-        "goal-bells-explain",
-        ["goal-bells-explain"],
-        [{ kind: "location", id: "scene-bells-tower" }],
-        "The storm bell's fresh strike pattern conflicts with the clear horizon.",
-      ),
-      actorPlan("actor-background", "goal-background-clear", ["goal-background-clear"]),
-      actorPlan("actor-council", "goal-council-control", ["goal-council-control"]),
-      actorPlan("actor-scout", "goal-scout-chart", ["goal-scout-chart"]),
-    ],
-    hiddenConsequence: {
-      actorId: "actor-bell-tender",
-      summary: "A false storm signal changes how Bell Island receives travelers.",
-      exposure: {
-        channel: "local_aftermath",
-        validUntilWorldTimeMinutes: 720,
-      },
     },
   };
 }
@@ -453,7 +387,7 @@ function trace(strategy: SafeGenerateTrace["strategy"] = "native_schema"): SafeG
 }
 
 describe("Campaign Play opening planner", () => {
-  it("compiles a chosen start into deterministic bootstrap, actor, exposure, and narrator artifacts", () => {
+  it("compiles a compact proposal into deterministic player bootstrap and lazy actor schedules", () => {
     const planner = createCampaignPlayOpeningPlanner();
     const first = planner.compile(frameFixture(), chosenConditions, proposalFixture());
     const second = planner.compile(
@@ -465,21 +399,21 @@ describe("Campaign Play opening planner", () => {
     expect(first.canonicalBytes).toBe(second.canonicalBytes);
     expect(first.hash).toBe(second.hash);
     expect(first.artifact).toEqual(second.artifact);
-    expect(first.artifact.actorPlans).toHaveLength(6);
+    expect(first.artifact.actorPlans).toEqual([]);
+    expect(first.artifact.exposureSeed).toBeNull();
     expect(first.artifact.actorSchedules).toHaveLength(6);
-    expect(first.artifact.actorPlans.some((plan) =>
-      plan.actorId === "actor-background")).toBe(true);
-    expect(first.artifact.actorPlans.some((plan) =>
-      plan.actorId === "actor-council")).toBe(true);
-    expect(first.artifact.actorSchedules.find((schedule) =>
-      schedule.actorId === "actor-bell-tender")?.nextActAtWorldTimeMinutes).toBe(0);
-    expect(first.artifact.actorSchedules.find((schedule) =>
-      schedule.actorId === "actor-courier")?.nextActAtWorldTimeMinutes).toBe(0);
-    expect(first.artifact.exposureSeed.discoverableWithinPlayerActions).toBe(4);
-    expect(first.artifact.exposureSeed.sourceGoalId).toBe("goal-bells-explain");
-    expect(first.artifact.exposureSeed.observableTrace).toBe(
-      "The storm bell's fresh strike pattern conflicts with the clear horizon.",
-    );
+    expect(first.artifact.actorSchedules.map((schedule) => ({
+      actorId: schedule.actorId,
+      planId: schedule.planId,
+      dueAt: schedule.nextActAtWorldTimeMinutes,
+    }))).toEqual([
+      { actorId: "actor-courier", planId: null, dueAt: 0 },
+      { actorId: "actor-background", planId: null, dueAt: 5 },
+      { actorId: "actor-bell-tender", planId: null, dueAt: 10 },
+      { actorId: "actor-council", planId: null, dueAt: 15 },
+      { actorId: "actor-keeper", planId: null, dueAt: 20 },
+      { actorId: "actor-scout", planId: null, dueAt: 25 },
+    ]);
     expect(first.artifact.bootstrapCommands.map((command) => command.kind)).toEqual([
       "initialize_player_placement",
       "initialize_world_time",
@@ -506,21 +440,8 @@ describe("Campaign Play opening planner", () => {
         predicates: [{ channel: "direct_perception", locationId: "scene-harbor-docks" }],
       },
     });
-    expect(first.artifact.bootstrapCommands.every((command) =>
-      command.source.kind === "system"
-      && command.source.system === "opening_bootstrap")).toBe(true);
-    expect(first.artifact.bootstrapCommands[0]!.causalParent).toEqual({
-      kind: "turn",
-      turnId: TURN_ID,
-    });
-    first.artifact.bootstrapCommands.slice(1).forEach((command, index) => {
-      expect(command.causalParent).toEqual({
-        kind: "command",
-        commandId: first.artifact.bootstrapCommands[index]!.commandId,
-      });
-    });
     expect(Object.isFrozen(first.artifact)).toBe(true);
-    expect(Object.isFrozen(first.artifact.actorPlans)).toBe(true);
+    expect(Object.isFrozen(first.artifact.actorSchedules)).toBe(true);
 
     const narratorJson = JSON.stringify(first.artifact.narratorFacts);
     expect(narratorJson).toContain("North Harbor");
@@ -528,6 +449,20 @@ describe("Campaign Play opening planner", () => {
     expect(narratorJson).not.toContain("Sel Bell");
     expect(narratorJson).not.toContain("goal-bells-explain");
     expect(narratorJson).not.toContain("Lantern Council");
+  });
+
+  it("keeps the provider contract compact and rejects removed actor material", () => {
+    const proposal = proposalFixture();
+    expect(campaignPlayOpeningProposalSchema.safeParse(proposal).success).toBe(true);
+    expect(Object.keys(proposal).sort()).toEqual(["playerPremise", "scene", "start"]);
+    expect(campaignPlayOpeningProposalSchema.safeParse({
+      ...proposal,
+      actorPlans: [],
+    }).success).toBe(false);
+    expect(campaignPlayOpeningProposalSchema.safeParse({
+      ...proposal,
+      hiddenConsequence: {},
+    }).success).toBe(false);
   });
 
   it("commits a hard opening passage condition as typed restricted route state", () => {
@@ -558,7 +493,7 @@ describe("Campaign Play opening planner", () => {
     });
   });
 
-  it("requires a premise only when the CharacterRecord supplies motivations", () => {
+  it("requires a premise exactly when the CharacterRecord supplies motivations", () => {
     const emptyFrame = frameFixture();
     emptyFrame.player.motivations = [];
     const emptyProposal = proposalFixture();
@@ -589,477 +524,58 @@ describe("Campaign Play opening planner", () => {
     )).toThrowError(expect.objectContaining({ code: "opening_proposal_invalid" }));
   });
 
-  it("rejects a macro region as an actor's mechanical location target", () => {
-    const proposal = proposalFixture();
-    const openingPlan = proposal.actorPlans.find((plan) =>
-      plan.actorId === "actor-courier"
-    )!;
-    openingPlan.steps[0]!.intent.targets = [{
-      kind: "location",
-      id: "location-harbor",
-    }];
-
-    expect(() => createCampaignPlayOpeningPlanner().compile(
-      frameFixture(),
-      chosenConditions,
-      proposal,
-    )).toThrowError(expect.objectContaining({ code: "opening_proposal_invalid" }));
-  });
-
-  it("freezes copied artifact data without mutating the proposal fixture", () => {
-    const proposal = proposalFixture();
-    const result = createCampaignPlayOpeningPlanner().compile(
-      frameFixture(), chosenConditions, proposal,
-    );
-    expect(Object.isFrozen(proposal)).toBe(false);
-    expect(Object.isFrozen(proposal.start)).toBe(false);
-    expect(result.artifact.start).not.toBe(proposal.start);
-    expect(result.artifact.exposureSeed.predicate)
-      .not.toBe(proposal.hiddenConsequence.exposure);
-  });
-
-  it("accepts a delegated start selected by the planner", () => {
-    const result = createCampaignPlayOpeningPlanner().compile(
+  it("accepts delegated starts and rejects scenes outside accepted topology", () => {
+    const delegated = createCampaignPlayOpeningPlanner().compile(
       frameFixture(),
       { mode: "delegate" },
       proposalFixture(),
     );
-    expect(result.artifact.start.sceneLocationId).toBe("scene-harbor-docks");
-  });
+    expect(delegated.artifact.start.sceneLocationId).toBe("scene-harbor-docks");
 
-  it("requires a chosen start to be copied exactly", () => {
-    const proposal = proposalFixture();
-    proposal.start.role = "Central hero";
+    const invalid = proposalFixture();
+    invalid.scene.candidateId = "candidate-not-accepted";
     expect(() => createCampaignPlayOpeningPlanner().compile(
       frameFixture(),
       chosenConditions,
-      proposal,
+      invalid,
     )).toThrowError(expect.objectContaining({ code: "opening_proposal_invalid" }));
   });
 
-  it("requires the selected opening actor to act at the exact start location", () => {
-    const proposal = proposalFixture();
-    const openingPlan = proposal.actorPlans.find((plan) =>
-      plan.actorId === "actor-courier"
-    )!;
-    openingPlan.steps[0]!.intent.targets = openingPlan.steps[0]!.intent.targets
-      .filter((target) => target.kind !== "location");
-
-    expect(() => createCampaignPlayOpeningPlanner().compile(
-      frameFixture(), chosenConditions, proposal,
-    )).toThrowError(expect.objectContaining({ code: "opening_proposal_invalid" }));
-  });
-
-  it("requires one plan for every agent person", () => {
-    const missing = proposalFixture();
-    missing.actorPlans.pop();
-    expect(() => createCampaignPlayOpeningPlanner().compile(
-      frameFixture(), chosenConditions, missing,
-    )).toThrow(CampaignPlayOpeningPlannerError);
-
-    const extra = proposalFixture();
-    extra.actorPlans.push(actorPlan("actor-council", "goal-council-control", ["goal-council-control"]));
-    expect(() => createCampaignPlayOpeningPlanner().compile(
-      frameFixture(), chosenConditions, extra,
-    )).toThrow(CampaignPlayOpeningPlannerError);
-  });
-
-  it("keeps additional active goals available beyond the primary opening plan", () => {
-    const proposal = proposalFixture();
-    proposal.actorPlans[0] = actorPlan(
-      "actor-keeper",
-      "goal-keeper-map",
-      ["goal-keeper-map"],
-    );
-    expect(() => createCampaignPlayOpeningPlanner().compile(
-      frameFixture(), chosenConditions, proposal,
-    )).not.toThrow();
-  });
-
-  it("uses the concrete opening step as the active plan intent", () => {
-    const proposal = proposalFixture();
-    proposal.actorPlans[0]!.steps[0]!.intent = intent([
-      { kind: "location", id: "scene-reef-quay" },
-    ]);
-
-    const artifact = createCampaignPlayOpeningPlanner().compile(
-      frameFixture(), chosenConditions, proposal,
-    ).artifact;
-    const keeperPlan = artifact.actorPlans.find((plan) =>
-      plan.actorId === "actor-keeper"
-    )!;
-
-    expect(keeperPlan.intent).toEqual(
-      keeperPlan.steps[0]!.intent,
-    );
-  });
-
-  it("requires and preserves a typed opening possession outcome", () => {
-    const proposal = proposalFixture();
-    const openingPlan = proposal.actorPlans.find((plan) => plan.actorId === "actor-keeper")!;
-    openingPlan.steps[0]!.possessionOutcome = {
-      kind: "acquire",
-      name: "Brass tally",
-      quantity: 2,
-    };
-
-    const artifact = createCampaignPlayOpeningPlanner().compile(
-      frameFixture(), chosenConditions, proposal,
-    ).artifact;
-    expect(artifact.actorPlans.find((plan) => plan.actorId === "actor-keeper")?.steps[0])
-      .toMatchObject({ possessionOutcome: { kind: "acquire", name: "Brass tally", quantity: 2 } });
-    expect(campaignPlayOpeningProposalSchema.safeParse({
-      ...proposal,
-      actorPlans: proposal.actorPlans.map((plan) => plan.actorId === "actor-keeper"
-        ? {
-            ...plan,
-            steps: plan.steps.map((step, index) => index === 0
-              ? { ...step, possessionOutcome: undefined }
-              : step),
-          }
-        : plan),
-    }).success).toBe(false);
-  });
-
-  it("requires three to eight opening plan steps", () => {
-    const tooShort = proposalFixture();
-    tooShort.actorPlans[0]!.steps = tooShort.actorPlans[0]!.steps.slice(0, 2);
-    expect(() => createCampaignPlayOpeningPlanner().compile(
-      frameFixture(), chosenConditions, tooShort,
-    )).toThrow(CampaignPlayOpeningPlannerError);
-
-    const tooLong = proposalFixture();
-    while (tooLong.actorPlans[0]!.steps.length < 9) {
-      tooLong.actorPlans[0]!.steps.push(
-        structuredClone(tooLong.actorPlans[0]!.steps[0]!),
-      );
-    }
-    expect(() => createCampaignPlayOpeningPlanner().compile(
-      frameFixture(), chosenConditions, tooLong,
-    )).toThrow(CampaignPlayOpeningPlannerError);
-  });
-
-  it("compiles sequential movement through directed routes", () => {
-    const proposal = proposalFixture();
-    const keeperPlan = proposal.actorPlans.find((plan) => plan.actorId === "actor-keeper")!;
-    keeperPlan.steps[0]!.intent = {
-      ...intent([
-        { kind: "route", id: "route-reef-market" },
-        { kind: "location", id: "scene-reef-market" },
-      ]),
-      kind: "move",
-    };
-    keeperPlan.steps[1]!.intent = intent([
-      { kind: "location", id: "scene-reef-market" },
-    ]);
-    keeperPlan.steps[2]!.intent = {
-      ...intent([
-        { kind: "route", id: "route-reef-bells" },
-        { kind: "location", id: "scene-bells-tower" },
-      ]),
-      kind: "move",
-    };
-
-    const compiled = createCampaignPlayOpeningPlanner().compile(
-      frameFixture(), chosenConditions, proposal,
-    ).artifact.actorPlans.find((plan) => plan.actorId === "actor-keeper")!;
-    expect(compiled.steps.map((step) => step.intent.kind)).toEqual([
-      "move",
-      "attempt",
-      "move",
-    ]);
-  });
-
-  it("rejects movement through a route that does not start at the step location", () => {
-    const proposal = proposalFixture();
-    const keeperPlan = proposal.actorPlans.find((plan) => plan.actorId === "actor-keeper")!;
-    keeperPlan.steps[0]!.intent = {
-      ...intent([{ kind: "route", id: "route-reef-bells" }]),
-      kind: "move",
-    };
-
-    expect(() => createCampaignPlayOpeningPlanner().compile(
-      frameFixture(), chosenConditions, proposal,
-    )).toThrowError(expect.objectContaining({ code: "opening_proposal_invalid" }));
-  });
-
-  it("rejects a non-move step at a location left by an earlier move", () => {
-    const proposal = proposalFixture();
-    const keeperPlan = proposal.actorPlans.find((plan) => plan.actorId === "actor-keeper")!;
-    keeperPlan.steps[0]!.intent = {
-      ...intent([{ kind: "route", id: "route-reef-market" }]),
-      kind: "move",
-    };
-    keeperPlan.steps[1]!.intent = intent([
-      { kind: "location", id: "scene-reef-quay" },
-    ]);
-
-    expect(() => createCampaignPlayOpeningPlanner().compile(
-      frameFixture(), chosenConditions, proposal,
-    )).toThrowError(expect.objectContaining({ code: "opening_proposal_invalid" }));
-  });
-
-  it("rejects unknown model-authored targets", () => {
-    const proposal = proposalFixture();
-    proposal.actorPlans[0]!.steps[0]!.intent.targets.push({
-      kind: "actor",
-      id: "actor-invented",
-    });
-    expect(() => createCampaignPlayOpeningPlanner().compile(
-      frameFixture(), chosenConditions, proposal,
-    )).toThrow(CampaignPlayOpeningPlannerError);
-  });
-
-  it("rejects a scene candidate that was not derived from accepted topology", () => {
-    const proposal = proposalFixture();
-    proposal.scene.candidateId = "opening-scene:unknown";
-    expect(() => createCampaignPlayOpeningPlanner().compile(
-      frameFixture(), chosenConditions, proposal,
-    )).toThrow(CampaignPlayOpeningPlannerError);
-  });
-
-  it("omits a canonical start without support while retaining delegated viable scenes", () => {
-    const world = worldFixture();
-    world.placements = world.placements.filter((placement) =>
-      placement.actorId !== "actor-courier");
-
-    const delegated = buildCampaignPlayOpeningSceneCandidates(
-      frameFixture(world),
-      { mode: "delegate" },
-    );
-    const chosen = buildCampaignPlayOpeningSceneCandidates(
-      frameFixture(world),
-      chosenConditions,
-    );
-
-    expect(chosen).toEqual([]);
-    expect(delegated.length).toBeGreaterThan(0);
-    expect(delegated.every((candidate) =>
-      candidate.sceneLocationId === "scene-bells-tower"
-      && candidate.supportActorId === "actor-bell-tender"
-    )).toBe(true);
-  });
-
-  it("does not treat a support person in a sibling establishment as present", () => {
-    const world = worldFixture();
-    const courierPlacement = world.placements.find((placement) =>
-      placement.actorId === "actor-courier"
-    )!;
-    courierPlacement.locationId = "scene-harbor-tower";
-
-    expect(buildCampaignPlayOpeningSceneCandidates(
-      frameFixture(world),
-      chosenConditions,
-    )).toEqual([]);
-  });
-
-  it("excludes direct perception from the hidden opening consequence schema", () => {
-    const fixture = proposalFixture();
-    const proposal = {
-      ...fixture,
-      hiddenConsequence: {
-        ...fixture.hiddenConsequence,
-        exposure: {
-          channel: "direct_perception",
-          locationId: "location-bells",
-        },
-      },
-    };
-
-    expect(campaignPlayOpeningProposalSchema.safeParse(proposal).success).toBe(false);
-  });
-
-  it("rejects removed duplicated hidden consequence fields", () => {
-    const fixture = proposalFixture();
-    const proposal = {
-      ...fixture,
-      hiddenConsequence: {
-        ...fixture.hiddenConsequence,
-        locationId: "location-bells",
-        goalId: fixture.actorPlans[2]!.primaryGoalId,
-        observableTrace: fixture.actorPlans[2]!.steps[0]!.observableTrace,
-      },
-    };
-
-    expect(campaignPlayOpeningProposalSchema.safeParse(proposal).success).toBe(false);
-  });
-
-  it("rejects a hidden consequence without a directed exposure path", () => {
-    const world = worldFixture();
-    world.routes = world.routes.filter((route) => route.id !== "route-reef-bells");
-    expect(() => createCampaignPlayOpeningPlanner().compile(
-      frameFixture(world), chosenConditions, proposalFixture(),
-    )).toThrow(CampaignPlayOpeningPlannerError);
-  });
-
-  it("rejects a local aftermath that expires before the shortest directed trip", () => {
-    const proposal = proposalFixture();
-    if (proposal.hiddenConsequence.exposure.channel !== "local_aftermath") {
-      throw new Error("fixture requires local aftermath");
-    }
-    proposal.hiddenConsequence.exposure.validUntilWorldTimeMinutes = 4;
-    expect(() => createCampaignPlayOpeningPlanner().compile(
-      frameFixture(), chosenConditions, proposal,
-    )).toThrowError(expect.objectContaining({ code: "opening_proposal_invalid" }));
-  });
-
-  it("rejects an observable trace that reveals the hidden actor by name", () => {
-    const proposal = proposalFixture();
-    proposal.actorPlans[2]!.steps[0]!.observableTrace =
-      "Sel Bell left a fresh storm notation beside the bell rope.";
-    expect(() => createCampaignPlayOpeningPlanner().compile(
-      frameFixture(), chosenConditions, proposal,
-    )).toThrowError(expect.objectContaining({ code: "opening_proposal_invalid" }));
-  });
-
-  it("derives the hidden goal from the selected actor plan", () => {
-    const world = worldFixture();
-    world.goals.push({
-      id: "goal-bells-maintain",
-      actorId: "actor-bell-tender",
-      objective: "Maintain the storm bell through winter.",
-      motivation: "The island needs a reliable warning signal.",
-      horizon: "ongoing",
-      priority: 2,
-      status: "active",
-    });
-    const proposal = proposalFixture();
-    proposal.actorPlans[2] = actorPlan(
-      "actor-bell-tender",
-      "goal-bells-maintain",
-      ["goal-bells-maintain"],
-      [{ kind: "location", id: "scene-bells-tower" }],
-    );
-
-    const result = createCampaignPlayOpeningPlanner().compile(
-      frameFixture(world), chosenConditions, proposal,
-    );
-    expect(result.artifact.exposureSeed.sourceGoalId).toBe("goal-bells-maintain");
-  });
-
-  it("keeps a person's home placement without changing their present plan", () => {
-    const world = worldFixture();
-    world.placements.push({
-      id: "placement-council-influence",
-      actorId: "actor-council",
-      locationId: "scene-bells-archive",
-      placementKind: "home",
-    });
-    world.routes = world.routes.filter((route) => route.id !== "route-bells-harbor");
-    const proposal = proposalFixture();
-    const result = createCampaignPlayOpeningPlanner().compile(
-      frameFixture(world), chosenConditions, proposal,
-    );
-    expect(result.artifact.actorPlans.some((plan) =>
-      plan.actorId === "actor-council")).toBe(true);
-  });
-
-  it("accepts a route-state exposure tied to the hidden actor's first step", () => {
-    const proposal = proposalFixture();
-    proposal.actorPlans[2] = actorPlan(
-      "actor-bell-tender",
-      "goal-bells-explain",
-      ["goal-bells-explain"],
-      [{ kind: "route", id: "route-harbor-reef" }],
-      proposal.actorPlans[2]!.steps[0]!.observableTrace,
-    );
-    proposal.hiddenConsequence.exposure = {
-      channel: "route_state",
-      triggers: ["inspect", "attempt", "traverse"],
-    };
-    const result = createCampaignPlayOpeningPlanner().compile(
-      frameFixture(), chosenConditions, proposal,
-    );
-    expect(result.artifact.exposureSeed.discoverableWithinPlayerActions).toBe(2);
-  });
-
-  it("accepts a visible-support witness path tied to the hidden actor's first step", () => {
-    const proposal = proposalFixture();
-    proposal.actorPlans[2] = actorPlan(
-      "actor-bell-tender",
-      "goal-bells-explain",
-      ["goal-bells-explain"],
-      [{ kind: "actor", id: "actor-courier" }],
-      proposal.actorPlans[2]!.steps[0]!.observableTrace,
-    );
-    proposal.hiddenConsequence.exposure = {
-      channel: "witness_report",
-    };
-    const result = createCampaignPlayOpeningPlanner().compile(
-      frameFixture(), chosenConditions, proposal,
-    );
-    expect(result.artifact.exposureSeed.discoverableWithinPlayerActions).toBe(2);
-  });
-
-  it("rejects a scalar or mismatched accepted-world frame", () => {
+  it("rejects malformed or mismatched accepted-world frames", () => {
     const world = worldFixture();
     world.status = "review";
     world.acceptedAt = null;
     expect(() => createCampaignPlayOpeningPlanner().compile(
-      frameFixture(world), chosenConditions, proposalFixture(),
-    )).toThrowError(expect.objectContaining({ code: "opening_frame_invalid" }));
-  });
-
-  it("requires exactly one canonical macro start and bounded unique player labels", () => {
-    const world = worldFixture();
-    world.locations[1]!.isStarting = true;
-    expect(() => createCampaignPlayOpeningPlanner().compile(
-      frameFixture(world), chosenConditions, proposalFixture(),
-    )).toThrowError(expect.objectContaining({ code: "opening_frame_invalid" }));
-
-    const frame = frameFixture();
-    frame.player.tags = ["traveler", "traveler"];
-    expect(() => createCampaignPlayOpeningPlanner().compile(
-      frame, chosenConditions, proposalFixture(),
-    )).toThrowError(expect.objectContaining({ code: "opening_frame_invalid" }));
-  });
-
-  it("rejects malformed starting conditions before a model call", async () => {
-    const generateObject = vi.fn();
-    const planner = createCampaignPlayOpeningPlanner({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
-    });
-    await expect(planner.plan({
-      frame: frameFixture(),
-      startingConditions: {
-        ...chosenConditions,
-        unknown: true,
-      } as typeof chosenConditions,
-      model: structuredModel(),
-      temperature: 0.4,
-      maxOutputTokens: 4_096,
-    })).rejects.toMatchObject({ code: "opening_proposal_invalid" });
-    expect(generateObject).not.toHaveBeenCalled();
-  });
-
-  it("gives the opening model only each actor's present location", () => {
-    const world = worldFixture();
-    world.placements.push({
-      id: "placement-council-home",
-      actorId: "actor-council",
-      locationId: "scene-bells-archive",
-      placementKind: "home",
-    });
-    const frame = frameFixture(world);
-    const prompt = buildCampaignPlayOpeningPrompt(
-      frame,
+      frameFixture(world),
       chosenConditions,
-      buildCampaignPlayOpeningSceneCandidates(frame, chosenConditions),
-    );
+      proposalFixture(),
+    )).toThrowError(expect.objectContaining({ code: "opening_frame_invalid" }));
 
-    expect(prompt).toContain(
-      '"actorId":"actor-council","actorKind":"person","actorRole":"background","activeGoalIds":["goal-council-control"],"actorLocationIds":["scene-reef-market"]',
-    );
-    expect(prompt).not.toContain(
-      '"actorLocationIds":["scene-reef-market","scene-bells-archive"]',
-    );
+    const duplicateStart = worldFixture();
+    duplicateStart.locations[1]!.isStarting = true;
+    expect(() => createCampaignPlayOpeningPlanner().compile(
+      frameFixture(duplicateStart),
+      chosenConditions,
+      proposalFixture(),
+    )).toThrowError(expect.objectContaining({ code: "opening_frame_invalid" }));
   });
 
-  it("uses exactly one strict structured model attempt", async () => {
-    const workerController = new AbortController();
-    const generateObject = vi.fn(async (
-      _options: Parameters<typeof safeGenerateObject>[0],
-    ) => ({
+  it("builds a bounded opening prompt without the world actor roster or plan instructions", () => {
+    const frame = frameFixture();
+    const candidates = buildCampaignPlayOpeningSceneCandidates(frame, chosenConditions);
+    const prompt = buildCampaignPlayOpeningPrompt(frame, chosenConditions, candidates);
+    expect(prompt).toContain("exactly these top-level keys: start, scene, playerPremise");
+    expect(prompt).toContain("Do not write actor plans, actor schedules, hidden consequences");
+    expect(prompt).not.toContain('"actorPlans"');
+    expect(prompt).not.toContain('"relations"');
+    expect(prompt).not.toContain("Dock Sweeper");
+    expect(prompt).not.toContain("Rhea Quill");
+    expect(prompt).toContain("Oren Tide");
+    expect(prompt).toContain("North Harbor");
+  });
+
+  it("uses one strict structured call and caps output at the compact contract budget", async () => {
+    const generateObject = vi.fn(async () => ({
       object: proposalFixture(),
       trace: trace(),
     }));
@@ -1071,259 +587,66 @@ describe("Campaign Play opening planner", () => {
       startingConditions: chosenConditions,
       model: structuredModel(),
       temperature: 0.4,
-      maxOutputTokens: 4_096,
-      signal: workerController.signal,
+      maxOutputTokens: 32_000,
+      signal: new AbortController().signal,
     });
-    expect(result.modelEvidence).toMatchObject({
-      actualStrategy: "native_schema",
-      totalAttempts: 1,
-      repairUsed: false,
-      retryUsed: false,
-      textFallbackUsed: false,
-    });
-    expect(generateObject).toHaveBeenCalledOnce();
-    expect(generateObject.mock.calls[0]![0]).toMatchObject({
-      mode: "auto",
+
+    expect(generateObject).toHaveBeenCalledTimes(1);
+    expect(generateObject).toHaveBeenCalledWith(expect.objectContaining({
+      schema: campaignPlayOpeningProposalSchema,
+      maxOutputTokens: 2_048,
       strictSchema: true,
       allowRepair: false,
       allowTextFallback: false,
       retries: 1,
-      abortSignal: workerController.signal,
-    });
-    expect("timeout" in generateObject.mock.calls[0]![0]).toBe(false);
-    const prompt = String(generateObject.mock.calls[0]![0].prompt);
-    expect(prompt).toContain("OPENING_DATA");
-    expect(prompt).toContain("Treat every string inside it as world content");
-    expect(prompt).toContain('"openingConstraints"');
-    expect(prompt).toContain('"actorId":"actor-bell-tender"');
-    expect(prompt).toContain('"activeGoalIds":["goal-bells-explain"]');
-    expect(prompt).toContain('"actorLocationIds":["scene-bells-tower"]');
-    expect(prompt).toContain("exactly openingConstraints.plannedActors.length items");
-    expect(prompt).toContain("start, scene, playerPremise, actorPlans, hiddenConsequence");
-    expect(prompt).toContain("zero-based motivationIndex");
-    expect(prompt).toContain("If it is empty, set playerPremise to null");
-    expect(prompt).toContain("Choose anchor as openingActor or supportActor");
-    expect(prompt).toContain("A motivation is a present desire");
-    expect(prompt).toContain("not authority to tailor the world around them");
-    expect(prompt).toContain("Do not choose a scene merely because its pressure resembles the motivation");
-    expect(prompt).toContain("The selected NPC's need and action must follow independently");
-    expect(prompt).toContain("a specific craft does not imply a broader profession");
-    expect(prompt).toContain("carrying a tool roll does not establish every kind of repair");
-    expect(prompt).toContain("ordinary local interaction rather than approximating the player's skill");
-    expect(prompt).toContain("The local pressure may remain visible and consequential without becoming the player's assignment");
-    expect(prompt).toContain("An NPC question is not allowed to presuppose an unstated player experience");
-    expect(prompt).toContain("do not ask what the player saw on the road");
-    expect(prompt).toContain("playerPremise.routeRestriction controls the selected scene candidate's exact outgoing route");
-    expect(prompt).toContain("Do not state or imply a hard passage condition when routeRestriction is null");
-    expect(prompt).toContain("Every listed person receives a plan regardless of role");
-    expect(prompt).toContain("at least 3 and at most 8 causal steps");
-    expect(prompt).toContain("Actor Replanner takes over only when the plan is exhausted");
-    expect(prompt).toContain("Each step's method is an action by that actor alone");
-    expect(prompt).toContain("cannot require, narrate, or settle that actor's response");
-    expect(prompt).toContain("A later step cannot assume that a contact answered");
-    expect(prompt).toContain("Do not invent an unnamed clerk, guard, patrol member");
-    expect(prompt).toContain("A move step changes only the acting person's location");
-    expect(prompt).toContain("Every move step must target exactly one directed route");
-    expect(prompt).toContain("Every non-move step that targets a location");
-    expect(prompt).toContain("Every step must include possessionOutcome");
-    expect(prompt).toContain("An acquire outcome is {\"kind\":\"acquire\",\"name\":\"...\",\"quantity\":1}");
-    expect(prompt).toContain("observableTrace");
-    expect(prompt).toContain("do not label the trace by an administrative meaning");
-    expect(prompt).toContain("hidden category, or inferred function");
-    expect(prompt).toContain('"sceneCandidates"');
-    expect(prompt).toContain('"candidateId":"opening-scene:');
-    expect(prompt).toContain('"openingActorId":"actor-');
-    expect(prompt).toContain('"openingActorName":');
-    expect(prompt).toContain("copy only its candidateId into scene.candidateId");
-    expect(prompt).toContain("A delegated immediateSituation describes only the player's current physical or social circumstance");
-    expect(prompt).toContain("openingActorId is the person whose first step creates the immediate local situation");
-    expect(prompt).toContain('{"kind":"location","id":selectedScene.sceneLocationId}');
-    expect(prompt).toContain("Do not turn this into a tour of the place");
-    expect(prompt).toContain("single actorLocationId differs from selectedScene.sceneLocationId");
-    expect(prompt).toContain("The compiler uses selectedScene.routeId");
-    expect(prompt).toContain("The compiler uses selectedScene.supportActorId");
-    expect(prompt).toContain("The compiler takes the hidden location, goal, and observable trace");
-    expect(prompt).toContain(
-      'route_state, exposure contains exactly channel and triggers. Set triggers to a unique array of one to three exact literals chosen only from "inspect", "attempt", and "traverse".',
-    );
-    expect(prompt).toContain("witness_report, exposure contains exactly channel");
-    expect(prompt).toContain("local_aftermath, exposure contains exactly channel and validUntilWorldTimeMinutes");
-    expect(prompt).toContain("Do not add validUntilWorldTimeMinutes to route_state or witness_report");
-    expect(prompt).toContain('{"kind":"location","id":the hidden actor\'s single actorLocationId}');
-    expect(prompt).toContain("The compiler uses that step's observableTrace as concrete evidence");
-    expect(prompt).toContain("Do not name the hidden actor");
-  });
-
-  it("records one redacted schema diagnostic for a parsed invalid proposal", async () => {
-    const warn = vi.fn();
-    const invalidProposal = structuredClone(proposalFixture()) as unknown as {
-      start: { role: unknown; immediateSituation: string };
-      rejectedArtifact: string;
-    };
-    invalidProposal.start.role = 42;
-    invalidProposal.start.immediateSituation = "private-opening-narration";
-    invalidProposal.rejectedArtifact = "private-rejected-artifact";
-    const generateObject = vi.fn(async () => ({
-      object: invalidProposal,
-      trace: trace(),
     }));
-    const planner = createCampaignPlayOpeningPlanner({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
-      diagnosticsLogger: { warn },
-    });
-
-    await expect(planner.plan({
-      frame: frameFixture(),
-      startingConditions: chosenConditions,
-      model: structuredModel(),
-      temperature: 0.4,
-      maxOutputTokens: 4_096,
-    })).rejects.toMatchObject({ code: "opening_proposal_invalid" });
-
-    expect(warn).toHaveBeenCalledOnce();
-    expect(warn).toHaveBeenCalledWith(
-      "Opening proposal failed schema validation.",
-      expect.objectContaining({
-        diagnostic: "opening_proposal_schema_invalid",
-        issues: expect.arrayContaining([
-          expect.objectContaining({
-            index: expect.any(Number),
-            path: ["start", "role"],
-            code: "invalid_type",
-            expected: "string",
-          }),
-          expect.objectContaining({
-            code: "unrecognized_keys",
-            path: [],
-            keys: ["rejectedArtifact"],
-          }),
-        ]),
-      }),
-    );
-    const serialized = JSON.stringify(warn.mock.calls);
-    expect(serialized).not.toContain("private-opening-narration");
-    expect(serialized).not.toContain("private-rejected-artifact");
-    expect(serialized).not.toContain("OPENING_DATA");
-    expect(serialized).not.toContain("message");
-  });
-
-  it("does not add a schema diagnostic for a valid Opening proposal", async () => {
-    const warn = vi.fn();
-    const generateObject = vi.fn(async () => ({
-      object: proposalFixture(),
-      trace: trace(),
-    }));
-    const planner = createCampaignPlayOpeningPlanner({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
-      diagnosticsLogger: { warn },
-    });
-
-    await expect(planner.plan({
-      frame: frameFixture(),
-      startingConditions: chosenConditions,
-      model: structuredModel(),
-      temperature: 0.4,
-      maxOutputTokens: 4_096,
-    })).resolves.toMatchObject({ artifact: expect.any(Object) });
-
-    expect(warn).not.toHaveBeenCalled();
-  });
-
-  it("retains successful model evidence when semantic compilation rejects a proposal", async () => {
-    const invalidProposal = proposalFixture();
-    invalidProposal.scene.candidateId = "opening-scene:unknown";
-    const generateObject = vi.fn(async () => ({
-      object: invalidProposal,
-      trace: trace(),
-    }));
-    const planner = createCampaignPlayOpeningPlanner({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
-    });
-
-    await expect(planner.plan({
-      frame: frameFixture(),
-      startingConditions: chosenConditions,
-      model: structuredModel(),
-      temperature: 0.4,
-      maxOutputTokens: 4_096,
-    })).rejects.toMatchObject({
-      code: "opening_proposal_invalid",
-      modelEvidence: {
-        actualStrategy: "native_schema",
-        responseModel: "test-model",
-        finishReason: "stop",
-      },
+    expect(result.artifact.actorPlans).toEqual([]);
+    expect(result.modelEvidence).toMatchObject({
+      actualStrategy: "native_schema",
+      inputTokens: 100,
+      outputTokens: 50,
+      totalTokens: 150,
     });
   });
 
-  it.each(["repair", "full_retry", "text_fallback"] as const)(
-    "rejects a model result produced through %s",
-    async (strategy) => {
-      const generateObject = vi.fn(async () => ({
-        object: proposalFixture(),
-        trace: trace(strategy),
-      }));
-      const planner = createCampaignPlayOpeningPlanner({
-        generateObject: generateObject as unknown as typeof safeGenerateObject,
-      });
-      await expect(planner.plan({
-        frame: frameFixture(),
-        startingConditions: chosenConditions,
-        model: structuredModel(),
-        temperature: 0.4,
-        maxOutputTokens: 4_096,
-      })).rejects.toMatchObject({
-        code: "model_contract_failed",
-        modelEvidence: {
-          actualStrategy: strategy,
-          repairUsed: strategy === "repair",
-          retryUsed: strategy === "full_retry",
-          textFallbackUsed: strategy === "text_fallback",
-        },
-      });
-      expect(generateObject).toHaveBeenCalledOnce();
-    },
-  );
-
-  it("rejects a model without a registered strict-output strategy before generation", async () => {
+  it("rejects malformed starting conditions before a model call", async () => {
     const generateObject = vi.fn();
     const planner = createCampaignPlayOpeningPlanner({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     });
     await expect(planner.plan({
       frame: frameFixture(),
-      startingConditions: chosenConditions,
-      model: {} as LanguageModel,
-      temperature: 0.4,
-      maxOutputTokens: 4_096,
-    })).rejects.toMatchObject({
-      code: "structured_output_unavailable",
-      modelEvidence: {
-        totalAttempts: 0,
-        errorCode: "structured_output_unavailable",
-      },
-    });
+      startingConditions: { mode: "delegate", extra: true } as never,
+      model: structuredModel(),
+      temperature: 0,
+      maxOutputTokens: 2_048,
+      signal: new AbortController().signal,
+    })).rejects.toMatchObject({ code: "opening_proposal_invalid" });
     expect(generateObject).not.toHaveBeenCalled();
   });
 
-  it("rejects a structured strategy that differs from the registered primary strategy", async () => {
-    const mismatched = trace("native_json");
-    const generateObject = vi.fn(async () => ({
-      object: proposalFixture(),
-      trace: mismatched,
-    }));
+  it("retains successful model evidence when semantic compilation rejects a proposal", async () => {
+    const invalid = proposalFixture();
+    invalid.scene.candidateId = "candidate-not-accepted";
     const planner = createCampaignPlayOpeningPlanner({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
+      generateObject: vi.fn(async () => ({ object: invalid, trace: trace() })) as unknown as
+        typeof safeGenerateObject,
     });
+
     await expect(planner.plan({
       frame: frameFixture(),
       startingConditions: chosenConditions,
       model: structuredModel(),
-      temperature: 0.4,
-      maxOutputTokens: 4_096,
+      temperature: 0,
+      maxOutputTokens: 2_048,
+      signal: new AbortController().signal,
     })).rejects.toMatchObject({
-      code: "model_contract_failed",
-      modelEvidence: { actualStrategy: "native_json" },
+      code: "opening_proposal_invalid",
+      modelEvidence: expect.objectContaining({
+        actualStrategy: "native_schema",
+        inputTokens: 100,
+        outputTokens: 50,
+      }),
     });
   });
 });

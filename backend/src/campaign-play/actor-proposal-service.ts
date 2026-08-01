@@ -59,7 +59,7 @@ export type CampaignPlayActorProposalOutcome =
   | { kind: "settled"; jobId: string; proposalId: string; receiptIds: string[]; resultWorldVersion: number }
   | { kind: "rejected"; jobId: string; proposalId: string | null; reason: CampaignPlayActorProposalRejectionReason }
   | { kind: "deferred"; jobId: string; reason: "replan_capacity" }
-  | { kind: "replan_required"; jobId: string; reason: "plan_inactive" | "plan_exhausted" | "precondition_failed" | "world_advanced"; failedPreconditionIndexes: number[] };
+  | { kind: "replan_required"; jobId: string; reason: "plan_missing" | "plan_inactive" | "plan_exhausted" | "precondition_failed" | "world_advanced"; failedPreconditionIndexes: number[] };
 
 type CampaignPlayActorProposalRejectionReason =
   | "stale_world_version"
@@ -73,7 +73,7 @@ export interface ProcessCampaignPlayActorProposalsInput {
   turnId: string;
   token: CampaignPlayWorkerLeaseToken;
   createdAt: number;
-  openingExposureSeed: CampaignPlayOpeningExposureSeed;
+  openingExposureSeed: CampaignPlayOpeningExposureSeed | null;
   beforeSettlement?: (proposal: CampaignPlayActorProposal) => void;
   injectFault?: (
     point: "after_job_claim" | "after_proposal_persisted" | "before_proposal_commit",
@@ -109,7 +109,7 @@ interface CampaignPlayActorProposalServiceDependencies {
 
 interface ScheduleRow {
   scheduleId: string;
-  planId: string;
+  planId: string | null;
   nextActAtWorldTimeMinutes: number;
   lastActAtWorldTimeMinutes: number | null;
   priority: number;
@@ -186,7 +186,7 @@ function exposureRefs(exposure: CampaignPlayExposurePolicy): CampaignPlayEntityR
 
 function projectableExposure(
   frame: CampaignPlayActorFrame,
-  seed: CampaignPlayOpeningExposureSeed,
+  seed: CampaignPlayOpeningExposureSeed | null,
   humanLocationId: string | null,
   directLocationIds: readonly string[],
   aftermathLocationId: string | null,
@@ -197,7 +197,7 @@ function projectableExposure(
       predicates: [{ channel: "direct_perception", locationId: humanLocationId }],
     };
   }
-  if (frame.plan.planVersion === 1
+  if (seed !== null && frame.plan !== null && frame.plan.planVersion === 1
     && seed.sourceActorId === frame.actorId && seed.sourceGoalId === frame.plan.goalId
     && frame.selection.kind === "step" && frame.selection.settledStepCount === 0) {
     return { mode: "projectable", predicates: [structuredClone(seed.predicate)] };
@@ -218,7 +218,7 @@ function projectableExposure(
   return { mode: "protected" };
 }
 
-function eventClass(intent: CampaignPlayActorFrame["plan"]["intent"]): "dialogue" | "interaction" | "discovery" | "scene" {
+function eventClass(intent: NonNullable<CampaignPlayActorFrame["plan"]>["intent"]): "dialogue" | "interaction" | "discovery" | "scene" {
   switch (intent.kind) {
     case "observe": return "discovery";
     case "contact": return "dialogue";
@@ -230,10 +230,10 @@ function eventClass(intent: CampaignPlayActorFrame["plan"]["intent"]): "dialogue
 
 function compileProposal(
   frame: CampaignPlayActorFrame,
-  seed: CampaignPlayOpeningExposureSeed,
+  seed: CampaignPlayOpeningExposureSeed | null,
   humanLocationId: string | null,
 ): CampaignPlayActorProposal | null {
-  if (frame.selection.kind !== "step") {
+  if (frame.selection.kind !== "step" || frame.plan === null) {
     throw new CampaignPlayActorProposalServiceError("proposal_state_invalid");
   }
   const batchId = stableId("actor-batch", {
@@ -426,12 +426,12 @@ function compileProposal(
         affectedRefs,
       };
     } else {
-      const ownsOpeningConsequence = frame.plan.planVersion === 1
+      const ownsOpeningConsequence = seed !== null && frame.plan.planVersion === 1
         && seed.sourceActorId === frame.actorId
         && seed.sourceGoalId === frame.plan.goalId
         && frame.selection.settledStepCount === 0;
       const summary = ownsOpeningConsequence && exposure.mode === "projectable"
-        ? seed.summary
+        ? seed!.summary
         : `${frame.actor.name}: ${intent.method ?? intent.kind}${intent.stakes ? `. ${intent.stakes}` : ""}`;
       const recordedEventClass = eventClass(intent);
       command = {
@@ -674,8 +674,11 @@ function scheduleRow(handle: CampaignPlayDatabaseHandle, actorId: string): Sched
   const row = handle.sqlite.prepare(`SELECT s.schedule_id AS scheduleId, s.plan_id AS planId,
     s.next_act_at_world_time_minutes AS nextActAtWorldTimeMinutes,
     s.last_act_at_world_time_minutes AS lastActAtWorldTimeMinutes, s.priority,
-    s.agency_debt AS agencyDebt, p.cadence_minutes AS cadenceMinutes
-    FROM campaign_play_actor_schedules s JOIN campaign_play_actor_plans p ON p.plan_id = s.plan_id
+    s.agency_debt AS agencyDebt,
+    COALESCE(p.cadence_minutes, (6 - s.priority) * 5) AS cadenceMinutes
+    FROM campaign_play_actor_schedules s
+    LEFT JOIN campaign_play_actor_plans p ON p.plan_id = s.plan_id
+      AND p.campaign_id = s.campaign_id AND p.actor_id = s.actor_id
     WHERE s.campaign_id = ? AND s.actor_id = ?`).get(handle.campaignId, actorId) as ScheduleRow | undefined;
   if (!row) throw new CampaignPlayActorProposalServiceError("proposal_state_invalid");
   return row;
@@ -698,7 +701,7 @@ function transitionSchedule(
   });
   const updated = context.sqlite.prepare(`UPDATE campaign_play_actor_schedules SET
     next_act_at_world_time_minutes = ?, last_act_at_world_time_minutes = ?, agency_debt = ?, updated_at = ?
-    WHERE schedule_id = ? AND campaign_id = ? AND actor_id = ? AND plan_id = ?`).run(
+    WHERE schedule_id = ? AND campaign_id = ? AND actor_id = ? AND plan_id IS ?`).run(
     transition.nextActAtWorldTimeMinutes,
     transition.lastActAtWorldTimeMinutes,
     transition.agencyDebt,
@@ -1033,7 +1036,8 @@ export function createCampaignPlayActorProposalService(
             throw new CampaignPlayActorProposalServiceError("proposal_state_invalid");
           }
           transitionSchedule(context, schedule, job.actorId, current.authority.worldTimeMinutes!, "settled", committedAt);
-          if (latestFrame.selection.kind === "step"
+          if (latestFrame.plan !== null
+            && latestFrame.selection.kind === "step"
             && latestFrame.selection.settledStepCount + 1 >= latestFrame.plan.steps.length) {
             context.sqlite.prepare(`UPDATE campaign_play_actor_plans SET status = 'completed', updated_at = ?
               WHERE plan_id = ? AND campaign_id = ? AND status = 'active'`).run(

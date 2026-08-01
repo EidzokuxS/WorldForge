@@ -63,7 +63,7 @@ interface CampaignPlayActorDueDecisionBase {
   dueOrder: number;
   actorId: string;
   scheduleId: string;
-  planId: string;
+  planId: string | null;
   nextActAtWorldTimeMinutes: number;
   priority: number;
   agencyDebt: number;
@@ -135,7 +135,7 @@ export type CampaignPlayActorStepSelection =
     }
   | {
       kind: "replan_required";
-      reason: "plan_inactive" | "plan_exhausted" | "precondition_failed" | "world_advanced";
+      reason: "plan_missing" | "plan_inactive" | "plan_exhausted" | "precondition_failed" | "world_advanced";
       failedPreconditionIndexes: number[];
     };
 
@@ -147,7 +147,7 @@ export interface CampaignPlayActorFrame {
   baseWorldVersion: number;
   worldTimeMinutes: number;
   actor: CampaignWorldReview["actors"][number];
-  plan: CampaignPlayActorPlan;
+  plan: CampaignPlayActorPlan | null;
   selection: CampaignPlayActorStepSelection;
   placements: CampaignWorldReview["placements"];
   goals: CampaignWorldReview["goals"];
@@ -186,12 +186,12 @@ export interface CampaignPlayActorScheduler {
 interface DueRow {
   scheduleId: string;
   actorId: string;
-  planId: string;
+  planId: string | null;
   nextActAtWorldTimeMinutes: number;
   priority: number;
   agencyDebt: number;
   cadenceMinutes: number;
-  planStatus: string;
+  planStatus: string | null;
   actorController: string;
   actorKind: string;
   incapacitated: number;
@@ -205,8 +205,8 @@ interface JobRow {
   campaignId: string;
   turnId: string;
   actorId: string;
-  admittedPlanId: string;
-  planId: string;
+  admittedPlanId: string | null;
+  planId: string | null;
   dueReason: CampaignPlayActorDueReason;
   frozenBaseWorldVersion: number;
   workerEpoch: number;
@@ -321,7 +321,8 @@ function dueRows(
     WITH due_candidates AS (
       SELECT s.schedule_id AS scheduleId, s.actor_id AS actorId, s.plan_id AS planId,
         s.next_act_at_world_time_minutes AS nextActAtWorldTimeMinutes,
-        s.priority, s.agency_debt AS agencyDebt, p.cadence_minutes AS cadenceMinutes,
+        s.priority, s.agency_debt AS agencyDebt,
+        COALESCE(p.cadence_minutes, (6 - s.priority) * 5) AS cadenceMinutes,
         p.status AS planStatus, a.controller AS actorController, a.kind AS actorKind,
         EXISTS (
           SELECT 1 FROM campaign_play_actor_conditions c
@@ -350,7 +351,8 @@ function dueRows(
             AND j.stage IN ('queued', 'claimed', 'interrupted', 'proposed')
         ) AS pendingJob
       FROM campaign_play_actor_schedules s
-      JOIN campaign_play_actor_plans p ON p.plan_id = s.plan_id
+       LEFT JOIN campaign_play_actor_plans p ON p.plan_id = s.plan_id
+         AND p.campaign_id = s.campaign_id AND p.actor_id = s.actor_id
       JOIN actors a ON a.id = s.actor_id
       WHERE s.campaign_id = ?
     )
@@ -736,13 +738,17 @@ export function createCampaignPlayActorScheduler(
         WHERE campaign_id = ? AND controller = 'agent' AND kind = 'person'
         ORDER BY id`).all(handle.campaignId) as Array<{ id: string }>).map((row) => row.id);
       if (
-        plans.length === 0 || plans.length !== schedules.length ||
+        schedules.length === 0 ||
         new Set(planActorIds).size !== plans.length ||
         new Set(scheduleActorIds).size !== schedules.length ||
-        canonicalizeCampaignPlayProjection(planActorIds) !==
-          canonicalizeCampaignPlayProjection(eligibleActorIds) ||
         canonicalizeCampaignPlayProjection(scheduleActorIds) !==
-          canonicalizeCampaignPlayProjection(eligibleActorIds)
+          canonicalizeCampaignPlayProjection(eligibleActorIds) ||
+        (plans.length > 0 && (
+          plans.length !== schedules.length ||
+          canonicalizeCampaignPlayProjection(planActorIds) !==
+            canonicalizeCampaignPlayProjection(eligibleActorIds)
+        )) ||
+        (plans.length === 0 && schedules.some((schedule) => schedule.planId !== null))
       ) {
         throw new CampaignPlayActorSchedulerError("scheduler_opening_invalid");
       }
@@ -758,8 +764,10 @@ export function createCampaignPlayActorScheduler(
       for (const schedule of schedules) {
         const plan = planByActor.get(schedule.actorId);
         if (
-          schedule.campaignId !== handle.campaignId || !plan ||
-          schedule.planId !== plan.planId || schedule.priority !== plan.priority ||
+          schedule.campaignId !== handle.campaignId ||
+          (plans.length > 0 && (
+            !plan || schedule.planId !== plan.planId || schedule.priority !== plan.priority
+          )) ||
           schedule.lastActAtWorldTimeMinutes !== null || schedule.agencyDebt !== 0
         ) {
           throw new CampaignPlayActorSchedulerError("scheduler_opening_invalid");
@@ -965,7 +973,7 @@ export function createCampaignPlayActorScheduler(
             UPDATE campaign_play_actor_schedules SET
               next_act_at_world_time_minutes = ?, agency_debt = ?, updated_at = ?
             WHERE schedule_id = ? AND campaign_id = ? AND actor_id = ?
-              AND plan_id = ? AND next_act_at_world_time_minutes = ?
+              AND plan_id IS ? AND next_act_at_world_time_minutes = ?
               AND priority = ? AND agency_debt = ?
           `).run(
             decision.nextDueAtWorldTimeMinutes,
@@ -1064,13 +1072,15 @@ export function createCampaignPlayActorScheduler(
             schedule.plan_id AS planId, plan.actor_id AS planActorId,
             plan.status AS planStatus
           FROM campaign_play_actor_schedules schedule
-          JOIN campaign_play_actor_plans plan
+          LEFT JOIN campaign_play_actor_plans plan
             ON plan.campaign_id = schedule.campaign_id AND plan.plan_id = schedule.plan_id
           WHERE schedule.campaign_id = ? AND schedule.actor_id = ?`).get(
             handle.campaignId,
             job.actorId,
-          ) as { planId: string; planActorId: string; planStatus: string } | undefined;
-        if (!schedulePair || schedulePair.planActorId !== job.actorId) {
+          ) as { planId: string | null; planActorId: string | null; planStatus: string | null } | undefined;
+        if (!schedulePair || (
+          schedulePair.planId !== null && schedulePair.planActorId !== job.actorId
+        )) {
           throw new CampaignPlayActorSchedulerError("scheduler_job_invalid");
         }
         const acceptedReplan = handle.sqlite.prepare(`SELECT artifact_json AS artifactJson
@@ -1298,10 +1308,13 @@ export function createCampaignPlayActorScheduler(
         FROM campaign_play_actor_plans WHERE plan_id = ? AND campaign_id = ?
       `).get(job.planId, handle.campaignId) as
         (Parameters<typeof planFromRow>[0] & { updatedAt: number }) | undefined;
-      if (!planRow || planRow.actorId !== job.actorId) {
+      if (
+        (job.planId !== null && !planRow)
+        || (planRow !== undefined && planRow.actorId !== job.actorId)
+      ) {
         throw new CampaignPlayActorSchedulerError("scheduler_frame_invalid");
       }
-       const plan = planFromRow(planRow);
+      const plan = planRow ? planFromRow(planRow) : null;
       const actorRow = handle.sqlite.prepare(`SELECT id, kind, controller, role, name, summary,
           traits, tags FROM actors WHERE campaign_id = ? AND id = ?`).get(
             handle.campaignId,
@@ -1441,9 +1454,9 @@ export function createCampaignPlayActorScheduler(
           after: parseJson(row.afterPayloadJson as string, "Known event result payload") as Record<string, unknown>,
         },
       }));
-      const failedPreconditionIndexes = plan.preconditions.flatMap((precondition, index) =>
-        preconditionSatisfied(handle, precondition) ? [] : [index]);
-      const worldAdvanced = knownEventRows.some((row) => {
+      const failedPreconditionIndexes = plan?.preconditions.flatMap((precondition, index) =>
+        preconditionSatisfied(handle, precondition) ? [] : [index]) ?? [];
+      const worldAdvanced = planRow !== undefined && knownEventRows.some((row) => {
         if (typeof row.knowledgeCreatedAt !== "number" || row.knowledgeCreatedAt <= planRow.updatedAt) {
           return false;
         }
@@ -1453,19 +1466,23 @@ export function createCampaignPlayActorScheduler(
         ) as Record<string, unknown>;
         return source.kind !== "actor" || source.actorId !== actor.id;
       });
-      const settledStepCount = (handle.sqlite.prepare(`SELECT count(*) AS count
-        FROM campaign_play_actor_jobs WHERE campaign_id = ? AND actor_id = ?
-          AND plan_id = ? AND stage = 'settled'`).get(
-        handle.campaignId,
-        actor.id,
-        plan.planId,
-      ) as { count: number }).count;
-      const selection = selectCampaignPlayActorPlanStep({
-        plan,
-        settledStepCount,
-        failedPreconditionIndexes,
-        worldAdvanced,
-      });
+      const settledStepCount = plan === null
+        ? 0
+        : (handle.sqlite.prepare(`SELECT count(*) AS count
+            FROM campaign_play_actor_jobs WHERE campaign_id = ? AND actor_id = ?
+              AND plan_id = ? AND stage = 'settled'`).get(
+            handle.campaignId,
+            actor.id,
+            plan.planId,
+          ) as { count: number }).count;
+      const selection: CampaignPlayActorStepSelection = plan === null
+        ? { kind: "replan_required", reason: "plan_missing", failedPreconditionIndexes: [] }
+        : selectCampaignPlayActorPlanStep({
+            plan,
+            settledStepCount,
+            failedPreconditionIndexes,
+            worldAdvanced,
+          });
       const authorizedRefs = uniqueRefs([
         { kind: "actor", id: actor.id },
         ...placements.map((placement) => ({ kind: "location" as const, id: placement.locationId })),
@@ -1484,8 +1501,8 @@ export function createCampaignPlayActorScheduler(
           { kind: "actor" as const, id: obligation.creditorActorId },
         ]),
         ...knownEvents.map((event) => ({ kind: "world_event" as const, id: event.eventId })),
-        ...plan.intent.targets,
-        ...plan.steps.flatMap((step) => step.intent.targets),
+        ...(plan?.intent.targets ?? []),
+        ...(plan?.steps.flatMap((step) => step.intent.targets) ?? []),
       ]);
       return freeze({
         campaignId: handle.campaignId,

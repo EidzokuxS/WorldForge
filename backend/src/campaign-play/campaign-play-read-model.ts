@@ -8,6 +8,7 @@ import {
   campaignPlayJournalEntrySchema,
   campaignPlayJournalPageSchema,
   campaignPlayNarrationSchema,
+  campaignPlayNarrationOperationSchema,
   campaignPlayPublicCharacterSchema,
   campaignPlayStateSchema,
   campaignPlayTurnReadResponseSchema,
@@ -135,9 +136,16 @@ function completedNarration(handle: CampaignPlayDatabaseHandle, turnId: string) 
     SELECT narration_id AS narrationId, turn_id AS turnId, beats_json AS beatsJson,
       display_text AS displayText, suggested_actions_json AS suggestedActionsJson,
       effects_json AS effectsJson, created_at AS createdAt
+    FROM campaign_play_proper_scenes
+    WHERE campaign_id = ? AND turn_id = ?
+    UNION ALL
+    SELECT narration_id AS narrationId, turn_id AS turnId, beats_json AS beatsJson,
+      display_text AS displayText, suggested_actions_json AS suggestedActionsJson,
+      effects_json AS effectsJson, created_at AS createdAt
     FROM campaign_play_narrations
     WHERE campaign_id = ? AND turn_id = ? AND status = 'complete'
-  `).get(handle.campaignId, turnId) as {
+    LIMIT 1
+  `).get(handle.campaignId, turnId, handle.campaignId, turnId) as {
     narrationId: string;
     turnId: string;
     beatsJson: string;
@@ -146,7 +154,7 @@ function completedNarration(handle: CampaignPlayDatabaseHandle, turnId: string) 
     effectsJson: string;
     createdAt: number;
   } | undefined;
-  if (!row) failCorrupt("Campaign Play completed turn lacks durable narration.");
+  if (!row) return null;
   return campaignPlayNarrationSchema.parse({
     narrationId: row.narrationId,
     turnId: row.turnId,
@@ -156,6 +164,52 @@ function completedNarration(handle: CampaignPlayDatabaseHandle, turnId: string) 
     effects: parseJson(row.effectsJson, "narration effects"),
     createdAt: row.createdAt,
   });
+}
+
+function narrationOperation(handle: CampaignPlayDatabaseHandle, turnId: string) {
+  const row = handle.sqlite.prepare(`SELECT operation_id AS operationId,
+      result_id AS resultId, turn_id AS turnId, narration_id AS narrationId,
+      packet_hash AS packetHash, receipt_ids_json AS receiptIdsJson, status,
+      current_attempt AS attempt, current_attempt_id AS attemptId,
+      concise_display_text AS conciseDisplayText,
+      concise_suggested_actions_json AS conciseSuggestedActionsJson,
+      created_at AS createdAt, completed_at AS completedAt
+    FROM campaign_play_narration_operations
+    WHERE campaign_id = ? AND turn_id = ?`).get(handle.campaignId, turnId) as {
+      operationId: string;
+      resultId: string;
+      turnId: string;
+      narrationId: string;
+      packetHash: string;
+      receiptIdsJson: string;
+      status: string;
+      attempt: number;
+      attemptId: string | null;
+      conciseDisplayText: string;
+      conciseSuggestedActionsJson: string;
+      createdAt: number;
+      completedAt: number | null;
+    } | undefined;
+  return row ? campaignPlayNarrationOperationSchema.parse({
+    operationId: row.operationId,
+    resultId: row.resultId,
+    turnId: row.turnId,
+    narrationId: row.narrationId,
+    packetHash: row.packetHash,
+    receiptIds: parseJson(row.receiptIdsJson, "narration operation receipt ids"),
+    status: row.status,
+    attemptId: row.attemptId,
+    attempt: row.attempt,
+    conciseResult: {
+      displayText: row.conciseDisplayText,
+      suggestedActions: parseJson(
+        row.conciseSuggestedActionsJson,
+        "narration operation concise actions",
+      ),
+    },
+    createdAt: row.createdAt,
+    completedAt: row.completedAt,
+  }) : null;
 }
 
 function terminalFailureCode(turn: LoadedCampaignPlayTurn): string {
@@ -212,6 +266,7 @@ export function createCampaignPlayReadModel(
         possessions: projection.possessions,
         obligations: projection.obligations,
         narration: projection.narration,
+        narrationOperation: projection.narrationOperation,
         consequences: projection.consequences,
         activeTurn,
         journalCursor: journal.length,
@@ -238,9 +293,10 @@ export function createCampaignPlayReadModel(
         ? {
           status: "completed" as const,
           narration: completedNarration(handle, turn.turnId),
+          narrationOperation: narrationOperation(handle, turn.turnId),
           consequences: (() => {
             const packet = handle.sqlite.prepare(`SELECT packet_json AS packetJson FROM campaign_play_narrations
-              WHERE campaign_id = ? AND turn_id = ? AND status = 'complete'`).get(handle.campaignId, turn.turnId) as { packetJson: string } | undefined;
+              WHERE campaign_id = ? AND turn_id = ?`).get(handle.campaignId, turn.turnId) as { packetJson: string } | undefined;
             if (!packet) failCorrupt("Campaign Play completed turn lacks a durable public packet.");
             const parsed = parseJson(packet.packetJson, "public narrator packet") as { consequences?: unknown };
             return parsed.consequences;

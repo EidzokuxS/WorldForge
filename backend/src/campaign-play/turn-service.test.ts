@@ -604,6 +604,80 @@ describe("Campaign Play turn service", () => {
     });
   });
 
+  it("bounds one provider operation, aborts it, and fences a late completion", async () => {
+    const { handle, state } = createOpeningReadyCampaign();
+    const repository = createCampaignPlayTurnRepository(handle);
+    repository.admitTurn(openingInput(state));
+    let time = 1_600;
+    let deadlineResolve!: () => void;
+    const providerState: { signal: AbortSignal | null } = { signal: null };
+    const lateCompletion = deferred<{
+      commit(input: {
+        token: Parameters<typeof repository.acceptModelArtifact>[0]["token"];
+        completedAt: number;
+      }): undefined;
+    }>();
+    const clock: CampaignPlayTurnServiceClock = {
+      now: () => time,
+      wait(delayMs, signal) {
+        if (delayMs === 40) {
+          return new Promise<void>((resolve) => { deadlineResolve = resolve; });
+        }
+        return new Promise<void>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        });
+      },
+    };
+    const service = createCampaignPlayTurnService({
+      handle,
+      owner: "deadline-worker",
+      leaseDurationMs: 200,
+      heartbeatIntervalMs: 50,
+      externalOperationDeadlineMs: 40,
+      clock,
+      resolveStage: ({ stage }) => stage === "admitted"
+        ? {
+            kind: "external",
+            async execute({ signal }) {
+              providerState.signal = signal;
+              return lateCompletion.promise;
+            },
+          }
+        : null,
+    });
+
+    const running = service.runNextStage("turn-opening");
+    await Promise.resolve();
+    time = 1_640;
+    deadlineResolve();
+    const result = await running;
+
+    expect(providerState.signal).not.toBeNull();
+    expect(providerState.signal!.aborted).toBe(true);
+    expect(result.turn).toMatchObject({
+      stage: "interrupted",
+      interruptedStage: "admitted",
+      errorCode: "stage_timeout",
+      resumeEligible: true,
+    });
+    expect(result.telemetry).toMatchObject({ stageTimeMs: 40, outcome: "interrupted" });
+    lateCompletion.resolve({
+      commit({ token, completedAt }) {
+        repository.acceptModelArtifact({
+          token,
+          artifact: { plan: "late" },
+          evidence: executionEvidence(),
+          mutationDomain: "runtime",
+          acceptedAt: completedAt,
+          mutationId: "late-deadline-commit",
+        });
+        return undefined;
+      },
+    });
+    await Promise.resolve();
+    expect(repository.loadAcceptedModelArtifact("turn-opening", "opening_planner")).toBeNull();
+  });
+
   it("surfaces an active-token stage defect without reclassifying it as stale", async () => {
     const commitFixture = createOpeningReadyCampaign();
     const commitRepository = createCampaignPlayTurnRepository(commitFixture.handle);

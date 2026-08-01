@@ -19,17 +19,12 @@ import {
 } from "../ai/structured-output-capabilities.js";
 import { createLogger } from "../lib/index.js";
 import {
-  campaignPlayActorIntentSchema,
-  campaignPlayActorObligationOutcomeSchema,
-  campaignPlayActorPossessionOutcomeSchema,
   campaignPlayActorPlanSchema,
   campaignPlayActorScheduleSchema,
   campaignPlayBootstrapCommandSchema,
-  campaignPlayElapsedBoundsSchema,
   campaignPlayExposurePredicateSchema,
   recordWorldEventCommandSchema,
   setRouteStateCommandSchema,
-  type CampaignPlayActorIntent,
   type CampaignPlayActorPlan,
   type CampaignPlayActorSchedule,
   type CampaignPlayBootstrapCommand,
@@ -53,9 +48,9 @@ import {
 import { deriveCampaignPlayCommandId } from "./rulebook.js";
 
 const OPENING_MAX_ELIGIBLE_ACTORS = 20;
-const OPENING_MAX_EXPOSURE_ACTIONS = 5;
 const OPENING_MAX_SCENE_CANDIDATES = 24;
-const OPENING_MIN_PLAN_STEPS = 3;
+const OPENING_ACTOR_STAGGER_MINUTES = 5;
+const OPENING_MAX_OUTPUT_TOKENS = 2_048;
 const log = createLogger("campaign-play-opening-planner");
 
 const boundedLine = (maximum: number) => z.string().min(1).max(maximum)
@@ -63,58 +58,6 @@ const boundedLine = (maximum: number) => z.string().min(1).max(maximum)
   .refine((value) => !value.includes("\n") && !value.includes("\r"));
 const boundedText = (maximum: number) => z.string().min(1).max(maximum)
   .refine((value) => value === value.trim());
-
-const openingHiddenExposurePredicateSchema = z.discriminatedUnion("channel", [
-  z.object({
-    channel: z.literal("local_aftermath"),
-    validUntilWorldTimeMinutes: z.number().int().safe().min(0),
-  }).strict(),
-  z.object({
-    channel: z.literal("route_state"),
-    triggers: z.array(z.enum(["inspect", "attempt", "traverse"]))
-      .min(1)
-      .max(3)
-      .refine((triggers) => new Set(triggers).size === triggers.length),
-  }).strict(),
-  z.object({
-    channel: z.literal("witness_report"),
-  }).strict(),
-]);
-
-const openingPlanStepProposalSchema = z.object({
-  intent: campaignPlayActorIntentSchema,
-  observableTrace: boundedText(CAMPAIGN_PLAY_LIMITS.shortText),
-  possessionOutcome: campaignPlayActorPossessionOutcomeSchema,
-  obligationOutcome: campaignPlayActorObligationOutcomeSchema,
-  elapsedBounds: campaignPlayElapsedBoundsSchema,
-}).strict().superRefine((step, context) => {
-  if (
-    step.intent.kind === "move"
-    && (step.possessionOutcome.kind !== "none" || step.obligationOutcome.kind !== "none")
-  ) {
-    context.addIssue({
-      code: "custom",
-      path: ["obligationOutcome"],
-      message: "Move steps cannot change possessions or obligations.",
-    });
-  }
-  if (step.obligationOutcome.kind !== "none") {
-    context.addIssue({
-      code: "custom",
-      path: ["obligationOutcome"],
-      message: "Opening plans begin before actor obligations are available.",
-    });
-  }
-});
-
-const openingActorPlanProposalSchema = z.object({
-  actorId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
-  primaryGoalId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
-  cadenceMinutes: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes),
-  steps: z.array(openingPlanStepProposalSchema)
-    .min(OPENING_MIN_PLAN_STEPS)
-    .max(CAMPAIGN_PLAY_LIMITS.planSteps),
-}).strict();
 
 export const campaignPlayOpeningProposalSchema = z.object({
   start: z.object({
@@ -135,14 +78,6 @@ export const campaignPlayOpeningProposalSchema = z.object({
       reason: boundedLine(CAMPAIGN_PLAY_LIMITS.shortText),
     }).strict().nullable(),
   }).strict().nullable(),
-  actorPlans: z.array(openingActorPlanProposalSchema)
-    .min(1)
-    .max(OPENING_MAX_ELIGIBLE_ACTORS),
-  hiddenConsequence: z.object({
-    actorId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
-    summary: boundedText(CAMPAIGN_PLAY_LIMITS.text),
-    exposure: openingHiddenExposurePredicateSchema,
-  }).strict(),
 }).strict();
 
 export type CampaignPlayOpeningProposal =
@@ -254,7 +189,7 @@ export interface CampaignPlayOpeningArtifact {
   playerPremise: { motivation: string; commandId: string } | null;
   actorPlans: CampaignPlayActorPlan[];
   actorSchedules: CampaignPlayActorSchedule[];
-  exposureSeed: CampaignPlayOpeningExposureSeed;
+  exposureSeed: CampaignPlayOpeningExposureSeed | null;
   narratorFacts: CampaignPlayOpeningNarratorFacts;
 }
 
@@ -306,7 +241,7 @@ export const campaignPlayOpeningArtifactSchema: z.ZodType<CampaignPlayOpeningArt
       motivation: boundedLine(CAMPAIGN_PLAY_LIMITS.label),
       commandId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
     }).strict().nullable(),
-    actorPlans: z.array(campaignPlayActorPlanSchema).min(1).max(OPENING_MAX_ELIGIBLE_ACTORS),
+    actorPlans: z.array(campaignPlayActorPlanSchema).max(OPENING_MAX_ELIGIBLE_ACTORS),
     actorSchedules: z.array(campaignPlayActorScheduleSchema).min(1).max(OPENING_MAX_ELIGIBLE_ACTORS),
     exposureSeed: z.object({
       sourceActorId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
@@ -315,8 +250,8 @@ export const campaignPlayOpeningArtifactSchema: z.ZodType<CampaignPlayOpeningArt
       summary: boundedText(CAMPAIGN_PLAY_LIMITS.text),
       observableTrace: boundedText(CAMPAIGN_PLAY_LIMITS.text),
       predicate: campaignPlayExposurePredicateSchema,
-      discoverableWithinPlayerActions: z.number().int().min(1).max(OPENING_MAX_EXPOSURE_ACTIONS),
-    }).strict(),
+      discoverableWithinPlayerActions: z.number().int().min(1).max(5),
+    }).strict().nullable(),
     narratorFacts: openingNarratorFactsSchema,
   }).strict().superRefine((artifact, context) => {
     if (artifact.baseWorldVersion < artifact.acceptedWorldVersion) {
@@ -326,11 +261,18 @@ export const campaignPlayOpeningArtifactSchema: z.ZodType<CampaignPlayOpeningArt
         message: "Opening artifact base world version precedes accepted world authority.",
       });
     }
-    if (artifact.actorPlans.length !== artifact.actorSchedules.length) {
+    const lazyOpening = artifact.actorPlans.length === 0;
+    if (
+      (lazyOpening && artifact.actorSchedules.some((schedule) => schedule.planId !== null))
+      || (!lazyOpening && (
+        artifact.actorPlans.length !== artifact.actorSchedules.length
+        || artifact.actorSchedules.some((schedule) => schedule.planId === null)
+      ))
+    ) {
       context.addIssue({
         code: "custom",
         path: ["actorSchedules"],
-        message: "Opening artifact requires one schedule per actor plan.",
+        message: "Opening artifact schedules must be uniformly lazy or paired with legacy plans.",
       });
     }
   });
@@ -526,103 +468,6 @@ function eligibleActors(world: CampaignWorldReview) {
     .sort((left, right) => compareText(left.id, right.id));
 }
 
-function entityExists(world: CampaignWorldReview, reference: CampaignPlayActorIntent["targets"][number]): boolean {
-  switch (reference.kind) {
-    case "actor": return world.actors.some((value) => value.id === reference.id);
-    case "location": return world.locations.some((value) => value.id === reference.id);
-    case "route": return world.routes.some((value) => value.id === reference.id);
-    case "relation": return world.relations.some((value) => value.id === reference.id);
-    case "goal": return world.goals.some((value) => value.id === reference.id);
-    case "pressure": return world.pressures.some((value) => value.id === reference.id);
-    case "possession": return false;
-    case "obligation": return false;
-    case "world_event": return false;
-  }
-}
-
-function targetLocationIds(
-  world: CampaignWorldReview,
-  reference: CampaignPlayActorIntent["targets"][number],
-): string[] {
-  switch (reference.kind) {
-    case "location": return [reference.id];
-    case "route": {
-      const route = world.routes.find((value) => value.id === reference.id);
-      return route ? [route.fromLocationId] : [];
-    }
-    case "actor": {
-      return actorLocations(world, reference.id);
-    }
-    case "goal": {
-      const goal = world.goals.find((value) => value.id === reference.id);
-      return goal ? actorLocations(world, goal.actorId) : [];
-    }
-    case "relation": {
-      const relation = world.relations.find((value) => value.id === reference.id);
-      if (!relation) return [];
-      return [...new Set([
-        ...actorLocations(world, relation.sourceActorId),
-        ...actorLocations(world, relation.targetActorId),
-      ])];
-    }
-    case "pressure": {
-      const pressure = world.pressures.find((value) => value.id === reference.id);
-      if (!pressure) return [];
-      return [...new Set([
-        ...pressure.locationIds,
-        ...pressure.actorIds
-          .flatMap((actorId) => actorLocations(world, actorId)),
-      ])];
-    }
-    case "world_event":
-    case "possession":
-    case "obligation": return [];
-  }
-}
-
-function validateIntent(
-  world: CampaignWorldReview,
-  actorLocationIds: readonly string[],
-  intent: CampaignPlayActorIntent,
-): void {
-  if (!intent.targets.every((target) => {
-    if (!entityExists(world, target)) return false;
-    const locations = targetLocationIds(world, target);
-    return locations.length > 0 && actorLocationIds.some((actorLocationId) =>
-      locations.some((locationId) =>
-        shortestDirectedDistance(world, actorLocationId, locationId) !== null));
-  })) {
-    fail("opening_proposal_invalid");
-  }
-}
-
-function shortestDirectedDistance(
-  world: CampaignWorldReview,
-  fromLocationId: string,
-  toLocationId: string,
-): number | null {
-  if (fromLocationId === toLocationId) return 0;
-  const queue: Array<{ locationId: string; distance: number }> = [
-    { locationId: fromLocationId, distance: 0 },
-  ];
-  const visited = new Set([fromLocationId]);
-  for (let cursor = 0; cursor < queue.length; cursor += 1) {
-    const current = queue[cursor]!;
-    const destinations = world.routes
-      .filter((route) => route.fromLocationId === current.locationId)
-      .map((route) => route.toLocationId)
-      .sort(compareText);
-    for (const destination of destinations) {
-      if (visited.has(destination)) continue;
-      const distance = current.distance + 1;
-      if (destination === toLocationId) return distance;
-      visited.add(destination);
-      queue.push({ locationId: destination, distance });
-    }
-  }
-  return null;
-}
-
 export function buildCampaignPlayOpeningSceneCandidates(
   frame: CampaignPlayOpeningFrame,
   startingConditions: CampaignPlayResolvedStartingConditions,
@@ -696,174 +541,35 @@ export function buildCampaignPlayOpeningSceneCandidates(
   return selected;
 }
 
-function shortestDirectedTravelMinutes(
-  world: CampaignWorldReview,
-  fromLocationId: string,
-  toLocationId: string,
-): number | null {
-  if (fromLocationId === toLocationId) return 0;
-  const remaining = new Set(
-    world.locations
-      .filter((location) => location.kind === "persistent_sublocation")
-      .map((location) => location.id),
-  );
-  const distances = new Map<string, number>([[fromLocationId, 0]]);
-  while (remaining.size > 0) {
-    const current = [...remaining]
-      .filter((locationId) => distances.has(locationId))
-      .sort((left, right) =>
-        distances.get(left)! - distances.get(right)! || compareText(left, right))[0];
-    if (current === undefined) return null;
-    if (current === toLocationId) return distances.get(current)!;
-    remaining.delete(current);
-    const currentDistance = distances.get(current)!;
-    for (const route of world.routes.filter((value) => value.fromLocationId === current)) {
-      const candidate = currentDistance + route.travelCost;
-      const known = distances.get(route.toLocationId);
-      if (known === undefined || candidate < known) distances.set(route.toLocationId, candidate);
-    }
-  }
-  return null;
-}
-
-function intentTargetKeys(intent: CampaignPlayActorIntent): Set<string> {
-  return new Set(intent.targets.map((target) => `${target.kind}:${target.id}`));
-}
-
-function validatePlanStepSequence(
-  world: CampaignWorldReview,
-  startLocationId: string,
-  steps: CampaignPlayOpeningProposal["actorPlans"][number]["steps"],
-): void {
-  let currentLocationId = startLocationId;
-  for (const step of steps) {
-    const routeTargets = step.intent.targets.filter((target) => target.kind === "route");
-    const locationTargets = step.intent.targets.filter((target) => target.kind === "location");
-    if (step.intent.kind === "move") {
-      const route = routeTargets.length === 1
-        ? world.routes.find((candidate) => candidate.id === routeTargets[0]!.id)
-        : undefined;
-      if (
-        !route
-        || route.fromLocationId !== currentLocationId
-        || locationTargets.length > 1
-        || (
-          locationTargets[0] !== undefined
-          && locationTargets[0].id !== route.toLocationId
-        )
-      ) {
-        fail("opening_proposal_invalid");
-      }
-      currentLocationId = route.toLocationId;
-      continue;
-    }
-    if (locationTargets.some((target) => target.id !== currentLocationId)) {
-      fail("opening_proposal_invalid");
-    }
-  }
-}
-
-function compilePlans(
+function compileActorSchedules(
   frame: CampaignPlayOpeningFrame,
-  proposal: CampaignPlayOpeningProposal,
   openingActorId: string,
-  startLocationId: string,
-) {
+): CampaignPlayActorSchedule[] {
   const world = frame.acceptedWorld;
-  const actors = eligibleActors(world);
-  if (
-    proposal.actorPlans.length !== actors.length
-    || !unique(proposal.actorPlans.map((plan) => plan.actorId))
-  ) {
-    log.warn("Opening proposal actor-plan roster mismatch.", {
-      expectedActorIds: actors.map((actor) => actor.id),
-      proposedActorIds: proposal.actorPlans.map((plan) => plan.actorId),
-    });
-    fail("opening_proposal_invalid");
-  }
-  const hiddenActorId = proposal.hiddenConsequence.actorId;
-  const plans: CampaignPlayActorPlan[] = [];
-  const schedules: CampaignPlayActorSchedule[] = [];
-
-  for (const actor of actors) {
-    const proposed = proposal.actorPlans.find((plan) => plan.actorId === actor.id);
+  const actors = eligibleActors(world).sort((left, right) => {
+    if (left.id === openingActorId) return -1;
+    if (right.id === openingActorId) return 1;
+    return compareText(left.id, right.id);
+  });
+  return actors.map((actor, dueOrder) => {
     const goals = world.goals
       .filter((goal) => goal.actorId === actor.id && goal.status === "active")
       .sort((left, right) => right.priority - left.priority || compareText(left.id, right.id));
-    if (!proposed || goals.length === 0) fail("opening_proposal_invalid");
-    if (!goals.some((goal) => goal.id === proposed.primaryGoalId)) {
-      fail("opening_proposal_invalid");
+    const primaryGoal = goals[0];
+    if (!primaryGoal || actorLocations(world, actor.id).length !== 1) {
+      fail("opening_frame_invalid");
     }
-    const locationIds = actorLocations(world, actor.id);
-    if (locationIds.length !== 1) fail("opening_proposal_invalid");
-    proposed.steps.forEach((step) => {
-      validateIntent(world, locationIds, step.intent);
-      if (step.observableTrace.toLowerCase().includes(actor.name.toLowerCase())) {
-        fail("opening_proposal_invalid");
-      }
-    });
-    validatePlanStepSequence(world, locationIds[0]!, proposed.steps);
-    const openingStepLocationTargets = proposed.steps[0]!.intent.targets
-      .filter((target) => target.kind === "location");
-    if (
-      actor.id === openingActorId
-      && (
-        openingStepLocationTargets.length !== 1
-        || openingStepLocationTargets[0]!.id !== startLocationId
-      )
-    ) {
-      fail("opening_proposal_invalid");
-    }
-
-    const primaryGoal = goals.find((goal) => goal.id === proposed.primaryGoalId)!;
-    const planId = stableId("plan", {
-      campaignId: frame.campaignId,
-      actorId: actor.id,
-      goalId: primaryGoal.id,
-      proposal: proposed,
-    });
-    const preconditions: CampaignPlayActorPlan["preconditions"] = [
-      { kind: "goal_status", goalId: primaryGoal.id, status: "active" },
-      { kind: "actor_at_location" as const, actorId: actor.id, locationId: locationIds[0]! },
-    ];
-    const plan = campaignPlayActorPlanSchema.parse({
-      planId,
-      campaignId: frame.campaignId,
-      actorId: actor.id,
-      goalId: primaryGoal.id,
-      planVersion: 1,
-      intent: proposed.steps[0]!.intent,
-      preconditions,
-      cadenceMinutes: proposed.cadenceMinutes,
-      priority: primaryGoal.priority,
-      steps: proposed.steps.map((step, order) => ({
-        stepId: stableId("step", { planId, order, step }),
-        order,
-        intent: step.intent,
-        observableTrace: step.observableTrace,
-        possessionOutcome: structuredClone(step.possessionOutcome),
-        obligationOutcome: { kind: "none" as const },
-        elapsedBounds: step.elapsedBounds,
-      })),
-      status: "active",
-    });
-    const schedule = campaignPlayActorScheduleSchema.parse({
+    return campaignPlayActorScheduleSchema.parse({
       scheduleId: stableId("schedule", { campaignId: frame.campaignId, actorId: actor.id }),
       campaignId: frame.campaignId,
       actorId: actor.id,
-      planId,
-      nextActAtWorldTimeMinutes:
-        actor.id === hiddenActorId || actor.id === openingActorId
-          ? 0
-          : proposed.cadenceMinutes,
+      planId: null,
+      nextActAtWorldTimeMinutes: dueOrder * OPENING_ACTOR_STAGGER_MINUTES,
       lastActAtWorldTimeMinutes: null,
       priority: primaryGoal.priority,
       agencyDebt: 0,
     });
-    plans.push(plan);
-    schedules.push(schedule);
-  }
-  return { plans, schedules };
+  });
 }
 
 function compileBootstrapCommands(
@@ -1083,100 +789,6 @@ function compileScene(
   };
 }
 
-function compileExposureSeed(
-  frame: CampaignPlayOpeningFrame,
-  proposal: CampaignPlayOpeningProposal,
-  narratorFacts: CampaignPlayOpeningNarratorFacts,
-  plans: CampaignPlayActorPlan[],
-): CampaignPlayOpeningExposureSeed {
-  const world = frame.acceptedWorld;
-  const hidden = proposal.hiddenConsequence;
-  const actor = world.actors.find((value) =>
-    value.id === hidden.actorId && value.controller === "agent" && value.kind === "person");
-  const locationIds = actor ? actorLocations(world, actor.id) : [];
-  const locationId = locationIds.length === 1 ? locationIds[0]! : "";
-  const plan = plans.find((value) => value.actorId === hidden.actorId);
-  const firstStep = plan?.steps[0];
-  const goal = plan
-    ? world.goals.find((value) =>
-        value.id === plan.goalId
-        && value.actorId === hidden.actorId
-        && value.status === "active")
-    : undefined;
-  if (
-    !actor
-    || !goal
-    || !plan
-    || !firstStep
-    || locationIds.length !== 1
-    || locationId === narratorFacts.location.id
-  ) {
-    fail("opening_proposal_invalid");
-  }
-  const observableTrace = firstStep.observableTrace;
-  if (observableTrace.toLowerCase().includes(actor.name.toLowerCase())) {
-    fail("opening_proposal_invalid");
-  }
-  const firstStepTargets = intentTargetKeys(firstStep.intent);
-  let discoverableWithinPlayerActions: number;
-  let predicate: CampaignPlayExposurePredicate;
-  switch (hidden.exposure.channel) {
-    case "route_state": {
-      const routeId = narratorFacts.route.id;
-      if (!firstStepTargets.has(`route:${routeId}`)) fail("opening_proposal_invalid");
-      predicate = {
-        channel: "route_state",
-        routeId,
-        triggers: hidden.exposure.triggers,
-      };
-      discoverableWithinPlayerActions = 2;
-      break;
-    }
-    case "witness_report": {
-      const witnessActorId = narratorFacts.supportActor.id;
-      if (!firstStepTargets.has(`actor:${witnessActorId}`)) {
-        fail("opening_proposal_invalid");
-      }
-      predicate = { channel: "witness_report", witnessActorId };
-      discoverableWithinPlayerActions = 2;
-      break;
-    }
-    case "local_aftermath": {
-      if (!firstStepTargets.has(`location:${locationId}`)) fail("opening_proposal_invalid");
-      const distance = shortestDirectedDistance(world, narratorFacts.location.id, locationId);
-      const travelMinutes = shortestDirectedTravelMinutes(
-        world,
-        narratorFacts.location.id,
-        locationId,
-      );
-      if (
-        distance === null
-        || travelMinutes === null
-        || hidden.exposure.validUntilWorldTimeMinutes < travelMinutes
-      ) fail("opening_proposal_invalid");
-      predicate = {
-        channel: "local_aftermath",
-        locationId,
-        validUntilWorldTimeMinutes: hidden.exposure.validUntilWorldTimeMinutes,
-      };
-      discoverableWithinPlayerActions = 1 + distance;
-      break;
-    }
-  }
-  if (discoverableWithinPlayerActions > OPENING_MAX_EXPOSURE_ACTIONS) {
-    fail("opening_proposal_invalid");
-  }
-  return {
-    sourceActorId: actor.id,
-    sourceGoalId: goal.id,
-    sourceLocationId: locationId,
-    summary: hidden.summary,
-    observableTrace,
-    predicate,
-    discoverableWithinPlayerActions,
-  };
-}
-
 function successfulEvidence(trace: Readonly<SafeGenerateTrace>): CampaignPlayOpeningModelEvidence {
   const actualStrategy = trace.strategy ?? trace.capability?.actualMode ?? null;
   const primaryStrategy = trace.primaryStrategy
@@ -1273,23 +885,7 @@ export function createCampaignPlayOpeningPlanner(
     ) {
       fail("opening_proposal_invalid");
     }
-    const { plans, schedules } = compilePlans(
-      frame,
-      proposal,
-      openingActorId,
-      start.sceneLocationId,
-    );
-    if (
-      proposal.playerPremise !== null
-      && proposal.playerPremise.routeRestriction !== null
-      && plans.some((plan) => plan.steps.some((step) =>
-        step.intent.kind === "move"
-        && step.intent.targets.some((target) =>
-          target.kind === "route" && target.id === narratorFacts.route.id)))
-    ) {
-      fail("opening_proposal_invalid");
-    }
-    const exposureSeed = compileExposureSeed(frame, proposal, narratorFacts, plans);
+    const schedules = compileActorSchedules(frame, openingActorId);
     const frameHash = hashCampaignPlayProjection({
       domain: "campaign_play_opening_frame",
       frame,
@@ -1326,9 +922,9 @@ export function createCampaignPlayOpeningPlanner(
             motivation: frame.player.motivations[proposal.playerPremise.motivationIndex]!,
             commandId: premiseCommand!.commandId,
           },
-      actorPlans: plans,
+      actorPlans: [],
       actorSchedules: schedules,
-      exposureSeed,
+      exposureSeed: null,
       narratorFacts,
     });
     const canonicalBytes = canonicalizeCampaignPlayProjection(artifact);
@@ -1379,7 +975,7 @@ export function createCampaignPlayOpeningPlanner(
             sceneCandidates,
           ),
           temperature: request.temperature,
-          maxOutputTokens: request.maxOutputTokens,
+          maxOutputTokens: Math.min(request.maxOutputTokens, OPENING_MAX_OUTPUT_TOKENS),
           abortSignal: request.signal,
           mode: "auto",
           strictSchema: true,

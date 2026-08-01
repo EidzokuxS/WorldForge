@@ -35,6 +35,7 @@ import {
   type CampaignPlayOpeningProposal,
 } from "./opening-planner.js";
 import {
+  CAMPAIGN_PLAY_OPENING_NARRATOR_MAX_OUTPUT_TOKENS,
   CampaignPlayNarratorError,
   createCampaignPlayNarrator,
   type CampaignPlayNarratorModelEvidence,
@@ -169,44 +170,6 @@ function createPlayableCampaign() {
 }
 
 function openingProposal(): CampaignPlayOpeningProposal {
-  const actorPlans = ["a", "b", "c", "d", "e", "f"].map((suffix) => {
-    const actorId = `actor-${suffix}`;
-    const goalId = `goal-${suffix}`;
-    const targets = suffix === "b"
-      ? [
-          { kind: "location" as const, id: "location-a" },
-          { kind: "goal" as const, id: goalId },
-        ]
-      : suffix === "c"
-        ? [
-            { kind: "location" as const, id: "location-c" },
-            { kind: "goal" as const, id: goalId },
-          ]
-        : [{ kind: "goal" as const, id: goalId }];
-    const intent = {
-      kind: "attempt" as const,
-      targets,
-      method: `Advance ${goalId} from the current situation`,
-      stakes: "The actor's own objective",
-    };
-    return {
-      actorId,
-      primaryGoalId: goalId,
-      cadenceMinutes: 15,
-      steps: Array.from({ length: 3 }, (_, stepIndex) => ({
-        intent: {
-          ...intent,
-          method: `${intent.method}; stage ${stepIndex + 1}`,
-        },
-        observableTrace: suffix === "b" && stepIndex === 0
-          ? "Fresh sealing wax and torn binding thread mark a ledger removed in haste."
-          : `Fresh work marks show stage ${stepIndex + 1} of the actor's own effort.`,
-        possessionOutcome: { kind: "none" as const },
-        obligationOutcome: { kind: "none" as const },
-        elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
-      })),
-    };
-  });
   return {
     start: {
       role: "A visitor on Bell Island",
@@ -228,15 +191,6 @@ function openingProposal(): CampaignPlayOpeningProposal {
       eventClass: "dialogue",
       summary: "The signal keeper asks Mara what she has learned about the impossible signal.",
       routeRestriction: null,
-    },
-    actorPlans,
-    hiddenConsequence: {
-      actorId: "actor-b",
-      summary: "A courier changes which ledger reaches the reef.",
-      exposure: {
-        channel: "local_aftermath",
-        validUntilWorldTimeMinutes: 4,
-      },
     },
   };
 }
@@ -289,6 +243,16 @@ function fixedClock(initial: number) {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 function count(handle: CampaignPlayDatabaseHandle, table: string): number {
   return (handle.sqlite.prepare(`SELECT count(*) AS value FROM ${table}
     WHERE campaign_id = ?`).get(CAMPAIGN_ID) as { value: number }).value;
@@ -330,18 +294,6 @@ function plannerFixture() {
               pressureId: "pressure-a",
               routeId: "route-a",
             }),
-          };
-          const hiddenPlan = proposal.actorPlans.find((plan) => plan.actorId === "actor-c")!;
-          hiddenPlan.steps[0]!.intent.targets.unshift({ kind: "location", id: "location-c" });
-          hiddenPlan.steps[0]!.observableTrace =
-            "A fresh warning notation contradicts the clear horizon.";
-          proposal.hiddenConsequence = {
-            actorId: "actor-c",
-            summary: "The bell tender changes which warning reaches the harbor.",
-            exposure: {
-              channel: "local_aftermath",
-              validUntilWorldTimeMinutes: 5,
-            },
           };
         }
       }
@@ -421,6 +373,129 @@ function runtimeModels() {
 }
 
 describe("Campaign Play opening runtime", () => {
+  it("bounds the opening provider, fences its late result, and resumes only in a fresh epoch", async () => {
+    const { handle, state } = createPlayableCampaign();
+    const before = createCampaignPlayStateRepository(handle).loadState()!;
+    const commandsBefore = count(handle, "campaign_play_commands");
+    const actorPlansBefore = count(handle, "campaign_play_actor_plans");
+    const basePlanner = plannerFixture();
+    const late = deferred<Awaited<ReturnType<typeof basePlanner.plan>>>();
+    const deadline = deferred<void>();
+    let now = 5_000;
+    let deadlineCalls = 0;
+    const provider: {
+      request: Parameters<typeof basePlanner.plan>[0] | null;
+      signal: AbortSignal | null;
+    } = { request: null, signal: null };
+    const clock: CampaignPlayTurnServiceClock = {
+      now: () => now,
+      wait(delayMs, signal) {
+        if (delayMs === 40 && deadlineCalls++ === 0) return deadline.promise;
+        return new Promise<void>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        });
+      },
+    };
+    let calls = 0;
+    const planner = {
+      compile: basePlanner.compile,
+      plan: vi.fn(async (request: Parameters<typeof basePlanner.plan>[0]) => {
+        calls += 1;
+        if (calls > 1) return basePlanner.plan(request);
+        provider.request = request;
+        provider.signal = request.signal ?? null;
+        return late.promise;
+      }),
+    };
+    const runtime = createCampaignPlayOpeningRuntime({
+      handle,
+      owner: "opening-timeout-worker",
+      leaseDurationMs: 1_000,
+      heartbeatIntervalMs: 10,
+      externalOperationDeadlineMs: 40,
+      clock,
+      ...runtimeModels(),
+      openingPlanner: planner,
+      narrator: narratorFixture(),
+    });
+    const admission = runtime.admitOpening({
+      submittedAt: now,
+      request: {
+        idempotencyKey: "opening-provider-timeout",
+        expectedWorldVersion: state.authority.worldVersion,
+        expectedRuntimeRevision: state.authority.runtimeRevision,
+        startingConditions: { mode: "delegate" },
+      },
+    });
+
+    const running = runtime.runNextStage(admission.turnId);
+    while (provider.signal === null) await Promise.resolve();
+    now = 5_040;
+    deadline.resolve();
+    const interrupted = await running;
+
+    expect(provider.signal?.aborted).toBe(true);
+    expect(interrupted.turn).toMatchObject({
+      stage: "interrupted",
+      interruptedStage: "admitted",
+      errorCode: "stage_timeout",
+      resumeEligible: true,
+      workerLeaseOwner: null,
+    });
+    expect(interrupted.telemetry).toMatchObject({ stageTimeMs: 40, outcome: "interrupted" });
+    expect(handle.sqlite.prepare(`SELECT status, error_code AS errorCode,
+        worker_epoch AS workerEpoch, completed_at AS completedAt, duration_ms AS durationMs
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'opening_planner' AND attempt = 1`).get(
+        CAMPAIGN_ID,
+        admission.turnId,
+      )).toEqual({
+        status: "interrupted",
+        errorCode: "stage_timeout",
+        workerEpoch: 1,
+        completedAt: 5_040,
+        durationMs: 40,
+      });
+    const afterTimeout = createCampaignPlayStateRepository(handle).loadState()!;
+    expect(afterTimeout.authority).toMatchObject({
+      setupPhase: before.authority.setupPhase,
+      worldVersion: before.authority.worldVersion,
+      worldHash: before.authority.worldHash,
+      worldTimeMinutes: before.authority.worldTimeMinutes,
+      openedAt: before.authority.openedAt,
+    });
+    expect(afterTimeout.acceptedReview).toEqual(before.acceptedReview);
+    expect(count(handle, "campaign_play_commands")).toBe(commandsBefore);
+    expect(count(handle, "campaign_play_actor_plans")).toBe(actorPlansBefore);
+
+    late.resolve(await basePlanner.plan(provider.request!));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(handle.sqlite.prepare(`SELECT status FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'opening_planner' AND attempt = 1`).get(
+        CAMPAIGN_ID,
+        admission.turnId,
+      )).toEqual({ status: "interrupted" });
+    expect(count(handle, "campaign_play_commands")).toBe(commandsBefore);
+    expect(count(handle, "campaign_play_actor_plans")).toBe(actorPlansBefore);
+
+    now = 5_060;
+    const resumed = await runtime.resumeInterruptedStage({
+      turnId: admission.turnId,
+      interruptedStage: "admitted",
+      observedEpoch: interrupted.turn.workerEpoch,
+    });
+    expect(resumed.turn).toMatchObject({ stage: "planned", workerEpoch: 2 });
+    expect(planner.plan).toHaveBeenCalledTimes(2);
+    expect(handle.sqlite.prepare(`SELECT attempt, status, worker_epoch AS workerEpoch
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'opening_planner'
+      ORDER BY attempt`).all(CAMPAIGN_ID, admission.turnId)).toEqual([
+        { attempt: 1, status: "interrupted", workerEpoch: 1 },
+        { attempt: 2, status: "accepted", workerEpoch: 2 },
+      ]);
+  });
+
   it.each(["delegate", "chosen"] as const)(
     "completes one real %s opening ledger and replays it idempotently",
     async (mode) => {
@@ -488,22 +563,19 @@ describe("Campaign Play opening runtime", () => {
       expect(finalState.authority.worldVersion).toBe(
         state.authority.worldVersion + 2 + finalState.acceptedReview.pressures.length,
       );
-      expect(count(handle, "campaign_play_actor_plans")).toBe(6);
+      expect(count(handle, "campaign_play_actor_plans")).toBe(0);
       expect(count(handle, "campaign_play_actor_schedules")).toBe(6);
-      expect(count(handle, "campaign_play_actor_jobs")).toBe(2);
-      expect(count(handle, "campaign_play_actor_proposals")).toBe(2);
+      expect(count(handle, "campaign_play_actor_jobs")).toBe(0);
+      expect(count(handle, "campaign_play_actor_proposals")).toBe(0);
       expect(handle.sqlite.prepare(`SELECT actor_id AS actorId, stage
         FROM campaign_play_actor_jobs WHERE campaign_id = ? AND turn_id = ?
-        ORDER BY actor_id`).all(CAMPAIGN_ID, admission.turnId)).toEqual([
-          { actorId: "actor-b", stage: "settled" },
-          { actorId: "actor-c", stage: "settled" },
-        ]);
+        ORDER BY actor_id`).all(CAMPAIGN_ID, admission.turnId)).toEqual([]);
       expect((handle.sqlite.prepare(`SELECT count(*) AS value
         FROM campaign_play_commands WHERE campaign_id = ? AND turn_id = ?
           AND json_extract(causal_parent_json, '$.kind') = 'actor_job'`).get(
             CAMPAIGN_ID,
             admission.turnId,
-          ) as { value: number }).value).toBe(2);
+          ) as { value: number }).value).toBe(0);
       expect(count(handle, "campaign_play_narrations")).toBe(1);
       expect(handle.sqlite.prepare(`SELECT status FROM campaign_play_narrations
         WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, admission.turnId))
@@ -513,13 +585,10 @@ describe("Campaign Play opening runtime", () => {
           CAMPAIGN_ID,
           admission.turnId,
         ) as { packetJson: string }).packetJson) as CampaignPlayNarratorPacket;
-      const localTrace = "Fresh work marks show stage 1 of the actor's own effort.";
       const hiddenTrace = "Fresh sealing wax and torn binding thread mark a ledger removed in haste.";
       expect(openingPacket.turnKind).toBe("opening");
       expect(openingPacket.consequences.map((consequence) => consequence.whatChanged))
         .toContain("The signal keeper asks Mara what she has learned about the impossible signal.");
-      expect(openingPacket.consequences.map((consequence) => consequence.whatChanged))
-        .toContain(localTrace);
       expect(openingPacket.consequences.map((consequence) => consequence.whatChanged))
         .not.toContain(hiddenTrace);
 
@@ -843,13 +912,55 @@ describe("Campaign Play opening runtime", () => {
     expect(buildRuntime(6).loadTurn(admission.turnId)).toMatchObject({ stage: "completed" });
     expect(planner.plan).toHaveBeenCalledTimes(1);
     expect(narrator.narrate).toHaveBeenCalledTimes(1);
-    expect(count(handle, "campaign_play_actor_plans")).toBe(6);
+    expect(count(handle, "campaign_play_actor_plans")).toBe(0);
     expect(count(handle, "campaign_play_actor_schedules")).toBe(6);
     expect(count(handle, "campaign_play_narrations")).toBe(1);
     expect((handle.sqlite.prepare(`SELECT packet_json AS packetJson
       FROM campaign_play_narrations WHERE campaign_id = ? AND turn_id = ?`)
       .get(CAMPAIGN_ID, admission.turnId) as { packetJson: string }).packetJson)
       .toBe(packetBytes);
+  });
+
+  it("caps only the opening narrator budget to the compact scene contract", async () => {
+    const { handle, state } = createPlayableCampaign();
+    const narrator = narratorFixture();
+    const models = runtimeModels();
+    const time = fixedClock(3_500);
+    const runtime = createCampaignPlayOpeningRuntime({
+      handle,
+      owner: "opening-compact-narrator-budget",
+      leaseDurationMs: 1_000,
+      heartbeatIntervalMs: 100,
+      clock: time.clock,
+      openingPlannerModel: models.openingPlannerModel,
+      narratorModel: {
+        ...models.narratorModel,
+        maximumOutputTokens: 32_768,
+        maximumTotalTokens: 33_768,
+      },
+      openingPlanner: plannerFixture(),
+      narrator,
+    });
+    const admission = runtime.admitOpening({
+      submittedAt: 3_500,
+      request: {
+        idempotencyKey: "compact-opening-narrator-budget",
+        expectedWorldVersion: state.authority.worldVersion,
+        expectedRuntimeRevision: state.authority.runtimeRevision,
+        startingConditions: { mode: "delegate" },
+      },
+    });
+
+    await runOpeningUntil(runtime, time, admission.turnId, (turn) => turn.stage === "completed");
+
+    expect(narrator.narrate).toHaveBeenCalledOnce();
+    expect(narrator.narrate.mock.calls[0]![0].budget).toMatchObject({
+      maximumInputTokens: models.narratorModel.maximumInputTokens,
+      maximumOutputTokens: CAMPAIGN_PLAY_OPENING_NARRATOR_MAX_OUTPUT_TOKENS,
+      maximumTotalTokens:
+        models.narratorModel.maximumInputTokens +
+        CAMPAIGN_PLAY_OPENING_NARRATOR_MAX_OUTPUT_TOKENS,
+    });
   });
 
   it.each(["actor_validation", "visibility"] as const)(

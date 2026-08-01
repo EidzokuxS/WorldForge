@@ -61,7 +61,16 @@ import {
   type CampaignPlayActorProposalService,
 } from "./actor-proposal-service.js";
 import { createCampaignPlayTurnRepository } from "./campaign-play-turn-repository.js";
+import {
+  canonicalizeCampaignPlayProjection,
+  hashCampaignPlayProjection,
+} from "./campaign-play-projection.js";
 import { createCampaignPlayReadModel } from "./campaign-play-read-model.js";
+import { createCampaignPlayNarrationOperationRepository } from "./narration-operation-repository.js";
+import {
+  CampaignPlayApplicationError,
+  createCampaignPlayApplication,
+} from "./campaign-play-application.js";
 import {
   safeGenerateObject,
   type SafeGenerateTrace,
@@ -180,64 +189,7 @@ function acceptWorld(): void {
   }
 }
 
-function openingProposal(actorCadenceMinutes = 1): CampaignPlayOpeningProposal {
-  const actorPlans = ["a", "b", "c", "d", "e", "f"].map((suffix) => {
-    const actorId = `actor-${suffix}`;
-    const goalId = `goal-${suffix}`;
-    const targets = suffix === "b"
-      ? [
-          { kind: "location" as const, id: "location-a" },
-          { kind: "goal" as const, id: goalId },
-        ]
-      : suffix === "c"
-        ? [
-            { kind: "location" as const, id: "location-c" },
-            { kind: "goal" as const, id: goalId },
-          ]
-        : [{ kind: "goal" as const, id: goalId }];
-    const intent = {
-      kind: "attempt" as const,
-      targets,
-      method: `Advance ${goalId} from the current situation`,
-      stakes: "The actor's own objective",
-    };
-    return {
-      actorId,
-      primaryGoalId: goalId,
-      cadenceMinutes: actorCadenceMinutes,
-      steps: [
-        {
-          intent,
-          observableTrace: suffix === "b"
-            ? "Fresh sealing wax and torn binding thread mark a ledger removed in haste."
-            : "Fresh work marks show that someone acted here recently.",
-          possessionOutcome: { kind: "none" as const },
-          obligationOutcome: { kind: "none" as const },
-          elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
-        },
-        {
-          intent: {
-            ...intent,
-            method: `Check local evidence before advancing ${goalId}`,
-          },
-          observableTrace: "Sorted notes and disturbed tools show that evidence was checked in place.",
-          possessionOutcome: { kind: "none" as const },
-          obligationOutcome: { kind: "none" as const },
-          elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
-        },
-        {
-          intent: {
-            ...intent,
-            method: `Commit the next grounded action toward ${goalId}`,
-          },
-          observableTrace: "A fresh notation records the next grounded action in the ongoing work.",
-          possessionOutcome: { kind: "none" as const },
-          obligationOutcome: { kind: "none" as const },
-          elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
-        },
-      ],
-    };
-  });
+function openingProposal(_actorCadenceMinutes = 1): CampaignPlayOpeningProposal {
   return {
     start: {
       role: "A visitor on Bell Island",
@@ -259,15 +211,6 @@ function openingProposal(actorCadenceMinutes = 1): CampaignPlayOpeningProposal {
       eventClass: "dialogue",
       summary: "The signal keeper asks Mara what she has learned about the impossible signal.",
       routeRestriction: null,
-    },
-    actorPlans,
-    hiddenConsequence: {
-      actorId: "actor-b",
-      summary: "A courier changes which ledger reaches the reef.",
-      exposure: {
-        channel: "local_aftermath",
-        validUntilWorldTimeMinutes: 4,
-      },
     },
   };
 }
@@ -368,7 +311,7 @@ function openingPlannerFixture(actorCadenceMinutes = 1) {
   };
 }
 
-function narratorActionSelections(packet: CampaignPlayNarratorPacket) {
+function narratorActionSelections(packet: CampaignPlayNarratorPacket, includeWait = false) {
   const latestVisiblePerformer = [...packet.consequences].reverse().find((consequence) =>
     consequence.performingActorHandle !== null && packet.visibleActors.some((actor) =>
       actor.handle === consequence.performingActorHandle))?.performingActorHandle ?? null;
@@ -381,15 +324,31 @@ function narratorActionSelections(packet: CampaignPlayNarratorPacket) {
   const orderedIndexes = requiredReplyIndex < 0
     ? indexes
     : [requiredReplyIndex, ...indexes.filter((intentIndex) => intentIndex !== requiredReplyIndex)];
-  return orderedIndexes.slice(0, CAMPAIGN_PLAY_LIMITS.suggestedActions).map((intentIndex) => ({
+  const waitIndex = includeWait
+    ? packet.availableIntents.findIndex((intent) => intent.kind === "wait")
+    : -1;
+  const selectedIndexes = waitIndex < 0
+    ? orderedIndexes.slice(0, CAMPAIGN_PLAY_LIMITS.suggestedActions)
+    : requiredReplyIndex < 0
+      ? [waitIndex, ...orderedIndexes.filter((intentIndex) => intentIndex !== waitIndex)]
+        .slice(0, CAMPAIGN_PLAY_LIMITS.suggestedActions)
+      : [
+          requiredReplyIndex,
+          waitIndex,
+          ...orderedIndexes.filter((intentIndex) =>
+            intentIndex !== requiredReplyIndex && intentIndex !== waitIndex),
+        ].slice(0, CAMPAIGN_PLAY_LIMITS.suggestedActions);
+  return selectedIndexes.map((intentIndex) => ({
     intentIndex,
     detail: packet.availableIntents[intentIndex]?.kind === "move"
       ? null
-      : "the immediate situation",
+      : packet.availableIntents[intentIndex]?.kind === "wait"
+        ? null
+        : "the immediate situation",
   }));
 }
 
-function openingNarratorFixture() {
+function openingNarratorFixture(includeWait = false) {
   const compiler = createCampaignPlayNarrator();
   return {
     compile: compiler.compile,
@@ -399,7 +358,7 @@ function openingNarratorFixture() {
         narrationId: request.narrationId,
         packet,
         proposal: {
-          actionSelections: narratorActionSelections(packet),
+          actionSelections: narratorActionSelections(packet, includeWait),
           beats: [
             { purpose: "orientation", observationIndexes: [], text: "Rain rings against the signal tower as Mara reaches Bell Island." },
             { purpose: "consequence", observationIndexes: packet.newObservations.map((_entry, index) => index), text: "Signal keepers brace the route gate while warning bells gather pace." },
@@ -428,7 +387,7 @@ function playerNarratorFixture() {
       const beats = clarification
         ? [{
             purpose: "action_handoff" as const,
-            observationIndexes: packet.newObservations.map((_entry, index) => index),
+            observationIndexes: [],
             text: clarification,
           }]
         : [
@@ -457,7 +416,10 @@ function playerNarratorFixture() {
   };
 }
 
-async function createReadyCampaignWithOpening(actorCadenceMinutes = 1) {
+async function createReadyCampaignWithOpening(
+  actorCadenceMinutes = 1,
+  options: { includeWait?: boolean } = {},
+) {
   acceptWorld();
   const handle = track(openCampaignPlayDatabase(CAMPAIGN_ID));
   const states = createCampaignPlayStateRepository(handle);
@@ -508,7 +470,7 @@ async function createReadyCampaignWithOpening(actorCadenceMinutes = 1) {
       maximumCostMicros: 10_000,
     },
     openingPlanner: openingPlannerFixture(actorCadenceMinutes),
-    narrator: openingNarratorFixture(),
+    narrator: openingNarratorFixture(options.includeWait),
   });
   const admitted = opening.admitOpening({
     request: {
@@ -635,7 +597,7 @@ function gameMasterFixture(
           fact.kind === "location")?.handle)!.handle;
       const movementEffects = request.ruling.movementRouteHandle === null
         ? []
-        : [{ kind: "move_actor" as const }];
+        : [{ kind: "move_actor" as const, actorHandle: null }];
       const performingActorHandle = actorlessResult
         ? null
         : request.ruling.normalizedIntent.targets.find((target) =>
@@ -647,7 +609,7 @@ function gameMasterFixture(
           request.resolution,
           request.uncertaintyAuthority,
           {
-            elapsedMinutes: 1,
+            elapsedMinutes: request.ruling.elapsedBounds.minimumMinutes,
             effects: [
               ...movementEffects,
               ...Array.from({ length: worldEventCount }, (_, index) => ({
@@ -856,6 +818,50 @@ function admissionRequest(
   };
 }
 
+function renderedMoveSuggestion(handle: CampaignPlayDatabaseHandle): {
+  choiceHandle: string;
+  label: string;
+} {
+  const row = handle.sqlite.prepare(`SELECT packet_json AS packetJson,
+      suggested_actions_json AS suggestedActionsJson
+    FROM campaign_play_narrations WHERE campaign_id = ? AND status = 'complete'
+    ORDER BY completed_at DESC LIMIT 1`).get(CAMPAIGN_ID) as {
+      packetJson: string;
+      suggestedActionsJson: string;
+    };
+  const packet = JSON.parse(row.packetJson) as CampaignPlayNarratorPacket;
+  const move = packet.availableIntents.find((intent) => intent.kind === "move");
+  if (!move) throw new Error("Opening fixture has no rendered move intent.");
+  const suggestion = (JSON.parse(row.suggestedActionsJson) as Array<{
+    choiceHandle: string;
+    label: string;
+  }>).find((candidate) => candidate.choiceHandle === move.handle);
+  if (!suggestion) throw new Error("Opening fixture did not render its move intent.");
+  return suggestion;
+}
+
+function renderedWaitSuggestion(handle: CampaignPlayDatabaseHandle): {
+  choiceHandle: string;
+  label: string;
+} {
+  const row = handle.sqlite.prepare(`SELECT packet_json AS packetJson,
+      suggested_actions_json AS suggestedActionsJson
+    FROM campaign_play_narrations WHERE campaign_id = ? AND status = 'complete'
+    ORDER BY completed_at DESC LIMIT 1`).get(CAMPAIGN_ID) as {
+      packetJson: string;
+      suggestedActionsJson: string;
+    };
+  const packet = JSON.parse(row.packetJson) as CampaignPlayNarratorPacket;
+  const wait = packet.availableIntents.find((intent) => intent.kind === "wait");
+  if (!wait) throw new Error("Opening fixture has no rendered wait intent.");
+  const suggestion = (JSON.parse(row.suggestedActionsJson) as Array<{
+    choiceHandle: string;
+    label: string;
+  }>).find((candidate) => candidate.choiceHandle === wait.handle);
+  if (!suggestion) throw new Error("Opening fixture did not render its wait intent.");
+  return suggestion;
+}
+
 function actorReplanProposalFromPrompt(prompt: string) {
   const startMarker = "ACTOR_FRAME\n";
   const endMarker = "\nEND_ACTOR_FRAME";
@@ -946,14 +952,16 @@ function forceFirstActorReplan(
     committedAt: claimedAt,
     mutationId: `force-replan-plan-boundary:${job.jobId}`,
     mutate(context) {
-      const updated = context.sqlite.prepare(`UPDATE campaign_play_actor_plans
-        SET status = 'completed', updated_at = ?
-        WHERE campaign_id = ? AND plan_id = ? AND status = 'active'`).run(
-          claimedAt,
-          context.campaignId,
-          job.planId,
-        );
-      if (updated.changes !== 1) throw new Error("Actor replan fixture lost its active plan.");
+      if (job.planId !== null) {
+        const updated = context.sqlite.prepare(`UPDATE campaign_play_actor_plans
+          SET status = 'completed', updated_at = ?
+          WHERE campaign_id = ? AND plan_id = ? AND status = 'active'`).run(
+            claimedAt,
+            context.campaignId,
+            job.planId,
+          );
+        if (updated.changes !== 1) throw new Error("Actor replan fixture lost its active plan.");
+      }
     },
   });
   repository.commitDeterministic({
@@ -998,6 +1006,304 @@ async function advanceUntilStage(
 }
 
 describe("Campaign Play player-action turn runtime", () => {
+  it("routes the exact current rendered wait directly to Game Master and keeps same-text freeform on Judge", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening(10_000, { includeWait: true });
+    const time = fixedClock(1_930);
+    const judge = judgeFixture("deterministic");
+    const gameMaster = gameMasterFixture();
+    const narrator = playerNarratorFixture();
+    const runtime = turnRuntime(handle, time, judge, gameMaster, { narrator });
+    const wait = renderedWaitSuggestion(handle);
+    const admission = runtime.admitAction({
+      request: {
+        idempotencyKey: "certified-rendered-wait",
+        expectedWorldVersion: state.authority.worldVersion,
+        expectedRuntimeRevision: state.authority.runtimeRevision,
+        source: "suggested",
+        choiceHandle: wait.choiceHandle,
+      },
+      submittedAt: 1_930,
+    });
+    const frame = loadCampaignPlayPlayerActionAdmissionFrame(runtime.loadTurn(admission.turnId)!);
+    expect(frame.executionRoute).toMatchObject({
+      kind: "certified_wait",
+      certificate: {
+        actionSchemaVersion: 1,
+        resolver: "game_master",
+        choiceHandle: wait.choiceHandle,
+        label: "Wait 10 minutes",
+        waitMinutes: 10,
+      },
+    });
+
+    time.advance();
+    await runtime.runNextStage(admission.turnId);
+    expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "planned" });
+    expect(judge.judge).toHaveBeenCalledTimes(0);
+    expect(gameMaster.plan).toHaveBeenCalledTimes(1);
+    expect(runtime.loadTelemetry(admission.turnId)).toMatchObject({
+      routeKind: "certified_wait",
+      modelCallCounts: { judge: 0, gameMaster: 1 },
+    });
+    await advanceUntilStage(runtime, time, admission.turnId, "completed");
+    await runtime.runNarration(admission.turnId);
+    expect(countForTurn(handle, "campaign_play_turn_results", admission.turnId)).toBe(1);
+    expect(countForTurn(handle, "campaign_play_receipts", admission.turnId)).toBeGreaterThan(0);
+
+    const nextState = createCampaignPlayStateRepository(handle).loadState()!;
+    const freeform = runtime.admitAction({
+      request: admissionRequest(nextState, "same-wait-as-freeform", wait.label),
+      submittedAt: time.clock.now(),
+    });
+    expect(loadCampaignPlayPlayerActionAdmissionFrame(runtime.loadTurn(freeform.turnId)!)
+      .executionRoute).toEqual({ kind: "full_authority" });
+    time.advance();
+    await runtime.runNextStage(freeform.turnId);
+    expect(judge.judge).toHaveBeenCalledTimes(1);
+  });
+
+  it("resumes a certified wait under a fresh epoch without Judge or duplicate settlement", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening(10_000, { includeWait: true });
+    const time = fixedClock(1_940);
+    const judge = judgeFixture("deterministic");
+    const successful = gameMasterFixture();
+    let calls = 0;
+    const gameMaster = {
+      plan: vi.fn(async (request: Parameters<typeof successful.plan>[0]) => {
+        calls += 1;
+        if (calls === 1) throw new CampaignPlayGameMasterError("stage_timeout", null);
+        return successful.plan(request);
+      }),
+    };
+    const runtime = turnRuntime(handle, time, judge, gameMaster);
+    const wait = renderedWaitSuggestion(handle);
+    const admission = runtime.admitAction({
+      request: {
+        idempotencyKey: "certified-wait-recovery",
+        expectedWorldVersion: state.authority.worldVersion,
+        expectedRuntimeRevision: state.authority.runtimeRevision,
+        source: "suggested",
+        choiceHandle: wait.choiceHandle,
+      },
+      submittedAt: 1_940,
+    });
+    time.advance();
+    await runtime.runNextStage(admission.turnId);
+    const interrupted = runtime.loadTurn(admission.turnId)!;
+    expect(interrupted).toMatchObject({
+      stage: "interrupted", interruptedStage: "admitted", workerEpoch: 1, resumeEligible: true,
+    });
+    time.advance();
+    await runtime.resumeInterruptedStage({
+      turnId: admission.turnId,
+      interruptedStage: "admitted",
+      observedEpoch: interrupted.workerEpoch,
+    });
+    expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "planned", workerEpoch: 2 });
+    expect(judge.judge).toHaveBeenCalledTimes(0);
+    expect(gameMaster.plan).toHaveBeenCalledTimes(2);
+    await advanceUntilStage(runtime, time, admission.turnId, "completed");
+    expect(countForTurn(handle, "campaign_play_turn_results", admission.turnId)).toBe(1);
+    expect(countForTurn(handle, "campaign_play_receipts", admission.turnId)).toBeGreaterThan(0);
+  });
+
+  it("routes the exact current rendered move directly to Game Master and keeps freeform on Judge", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening(10_000);
+    const time = fixedClock(1_950);
+    const judge = judgeFixture("deterministic");
+    const gameMaster = gameMasterFixture();
+    const narrator = playerNarratorFixture();
+    const runtime = turnRuntime(handle, time, judge, gameMaster, { narrator });
+    const move = renderedMoveSuggestion(handle);
+    const admitted = runtime.admitAction({
+      request: {
+        idempotencyKey: "certified-rendered-move",
+        expectedWorldVersion: state.authority.worldVersion,
+        expectedRuntimeRevision: state.authority.runtimeRevision,
+        source: "suggested",
+        choiceHandle: move.choiceHandle,
+      },
+      submittedAt: 1_950,
+    });
+    const admittedTurn = runtime.loadTurn(admitted.turnId)!;
+    const frame = loadCampaignPlayPlayerActionAdmissionFrame(admittedTurn);
+    expect(frame.executionRoute).toMatchObject({
+      kind: "certified_move",
+      certificate: {
+        actionSchemaVersion: 1,
+        resolver: "game_master",
+        choiceHandle: move.choiceHandle,
+        label: move.label,
+      },
+      certificateHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(admittedTurn.modelSelection).toMatchObject({ routeKind: "certified_move" });
+
+    time.advance();
+    await runtime.runNextStage(admitted.turnId);
+    expect(runtime.loadTurn(admitted.turnId)).toMatchObject({ stage: "planned" });
+    expect(judge.judge).toHaveBeenCalledTimes(0);
+    expect(gameMaster.plan).toHaveBeenCalledTimes(1);
+    expect(runtime.loadTelemetry(admitted.turnId)).toMatchObject({
+      routeKind: "certified_move",
+      modelCallCounts: { judge: 0, gameMaster: 1 },
+      stageExecutions: [expect.objectContaining({ stage: "admitted", outcome: "advanced" })],
+    });
+
+    await advanceUntilStage(runtime, time, admitted.turnId, "completed");
+    expect(createCampaignPlayReadModel(handle).loadState()).toMatchObject({
+      phase: "ready",
+      narrationOperation: { status: "pending", turnId: admitted.turnId },
+    });
+    await runtime.runNarration(admitted.turnId);
+    expect(narrator.narrate).toHaveBeenCalledTimes(1);
+    expect(countForTurn(handle, "campaign_play_turn_results", admitted.turnId)).toBe(1);
+    expect(countForTurn(handle, "campaign_play_receipts", admitted.turnId)).toBeGreaterThan(0);
+
+    const nextState = createCampaignPlayStateRepository(handle).loadState()!;
+    const freeform = runtime.admitAction({
+      request: admissionRequest(nextState, "same-move-as-freeform", move.label),
+      submittedAt: time.clock.now(),
+    });
+    expect(loadCampaignPlayPlayerActionAdmissionFrame(runtime.loadTurn(freeform.turnId)!)
+      .executionRoute).toEqual({ kind: "full_authority" });
+    time.advance();
+    await runtime.runNextStage(freeform.turnId);
+    expect(judge.judge).toHaveBeenCalledTimes(1);
+    expect(gameMaster.plan).toHaveBeenCalledTimes(1);
+    expect(runtime.loadTelemetry(freeform.turnId)).toMatchObject({
+      routeKind: "full_authority",
+      modelCallCounts: { judge: 1, gameMaster: 0 },
+    });
+  });
+
+  it("interrupts and resumes the certified move at the same Game Master authority boundary", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening(10_000);
+    const time = fixedClock(1_975);
+    const judge = judgeFixture("deterministic");
+    const successful = gameMasterFixture();
+    let calls = 0;
+    const gameMaster = {
+      plan: vi.fn(async (request: Parameters<typeof successful.plan>[0]) => {
+        calls += 1;
+        if (calls === 1) {
+          throw new CampaignPlayGameMasterError("stage_timeout", null);
+        }
+        return successful.plan(request);
+      }),
+    };
+    const runtime = turnRuntime(handle, time, judge, gameMaster);
+    const move = renderedMoveSuggestion(handle);
+    const admission = runtime.admitAction({
+      request: {
+        idempotencyKey: "certified-move-recovery",
+        expectedWorldVersion: state.authority.worldVersion,
+        expectedRuntimeRevision: state.authority.runtimeRevision,
+        source: "suggested",
+        choiceHandle: move.choiceHandle,
+      },
+      submittedAt: 1_975,
+    });
+
+    time.advance();
+    await runtime.runNextStage(admission.turnId);
+    const interrupted = runtime.loadTurn(admission.turnId)!;
+    expect(interrupted).toMatchObject({
+      stage: "interrupted",
+      interruptedStage: "admitted",
+      workerEpoch: 1,
+      resumeEligible: true,
+    });
+    expect(judge.judge).toHaveBeenCalledTimes(0);
+    expect(gameMaster.plan).toHaveBeenCalledTimes(1);
+    expect(runtime.loadTelemetry(admission.turnId)).toMatchObject({
+      routeKind: "certified_move",
+      modelCallCounts: { judge: 0, gameMaster: 1 },
+    });
+
+    time.advance();
+    await runtime.resumeInterruptedStage({
+      turnId: admission.turnId,
+      interruptedStage: "admitted",
+      observedEpoch: interrupted.workerEpoch,
+    });
+    expect(runtime.loadTurn(admission.turnId)).toMatchObject({
+      stage: "planned",
+      workerEpoch: 2,
+      workerLeaseOwner: null,
+    });
+    expect(judge.judge).toHaveBeenCalledTimes(0);
+    expect(gameMaster.plan).toHaveBeenCalledTimes(2);
+    expect(runtime.loadTelemetry(admission.turnId)).toMatchObject({
+      modelCallCounts: { judge: 0, gameMaster: 2 },
+      modelAttempts: [
+        expect.objectContaining({ kind: "game_master", status: "interrupted", workerEpoch: 1 }),
+        expect.objectContaining({ kind: "game_master", status: "accepted", workerEpoch: 2 }),
+      ],
+    });
+  });
+
+  it.each(["handle", "target", "parameters", "revision"] as const)(
+    "rejects a certified move with mismatched %s authority before a provider call",
+    async (mismatch) => {
+      const { handle, state } = await createReadyCampaignWithOpening(10_000);
+      const time = fixedClock(1_990);
+      const judge = judgeFixture("deterministic");
+      const gameMaster = gameMasterFixture();
+      const runtime = turnRuntime(handle, time, judge, gameMaster);
+      const move = renderedMoveSuggestion(handle);
+      const admission = runtime.admitAction({
+        request: {
+          idempotencyKey: `certified-move-mismatch-${mismatch}`,
+          expectedWorldVersion: state.authority.worldVersion,
+          expectedRuntimeRevision: state.authority.runtimeRevision,
+          source: "suggested",
+          choiceHandle: move.choiceHandle,
+        },
+        submittedAt: 1_990,
+      });
+      const stored = runtime.loadTurn(admission.turnId)!;
+      const document = structuredClone(stored.document);
+      if (document.turnKind !== "player_action") throw new Error("Expected player action.");
+      const route = document.frame.executionRoute as Record<string, unknown>;
+      const certificate = route.certificate as Record<string, unknown>;
+      const ruling = certificate.ruling as Record<string, unknown>;
+      const normalizedIntent = ruling.normalizedIntent as Record<string, unknown>;
+      if (mismatch === "handle") {
+        certificate.choiceHandle = "choice_mismatched";
+        normalizedIntent.choiceHandle = "choice_mismatched";
+      } else if (mismatch === "target") {
+        certificate.destinationLocationId = "location-mismatched";
+      } else if (mismatch === "parameters") {
+        const travelCost = Number(certificate.travelCost) + 1;
+        certificate.travelCost = travelCost;
+        ruling.elapsedBounds = { minimumMinutes: travelCost, maximumMinutes: travelCost };
+      } else {
+        certificate.baseRuntimeRevision = Number(certificate.baseRuntimeRevision) + 1;
+      }
+      route.certificateHash = hashCampaignPlayProjection({
+        domain: "campaign_play_certified_move",
+        certificate,
+      });
+      const inputJson = canonicalizeCampaignPlayProjection(document);
+      expect(() => handle.sqlite.prepare(`UPDATE campaign_play_turns
+          SET input_json = ?, input_hash = ?, frame_hash = ?
+          WHERE campaign_id = ? AND id = ?`).run(
+            inputJson,
+            hashCampaignPlayProjection({ domain: "campaign_play_turn_input", document }),
+            hashCampaignPlayProjection({
+              domain: "campaign_play_turn_frame",
+              frame: document.frame,
+            }),
+            CAMPAIGN_ID,
+            admission.turnId,
+          )).toThrow("campaign_play_turn_admission_immutable");
+      expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "admitted" });
+      expect(judge.judge).toHaveBeenCalledTimes(0);
+      expect(gameMaster.plan).toHaveBeenCalledTimes(0);
+    },
+  );
+
   it.each(["freeform", "suggested"] as const)(
     "freezes one real completed opening for %s admission",
     async (source) => {
@@ -1028,7 +1334,7 @@ describe("Campaign Play player-action turn runtime", () => {
     const frame = loadCampaignPlayPlayerActionAdmissionFrame(runtime.loadTurn(admitted.turnId)!);
     expect(frame).toMatchObject({
       sourceTurnId: openingTurnId,
-      sourceNarrationId: expect.any(String),
+      sourceMomentId: expect.any(String),
       player: {
         name: "Mara Venn",
         profileDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
@@ -1045,7 +1351,7 @@ describe("Campaign Play player-action turn runtime", () => {
         ? { source: "freeform", choiceHandle: null }
         : { originalText: suggestion.label, source: "suggested", choiceHandle: suggestion.choiceHandle },
     });
-    expect(isCanonicalHash(frame.sourceNarrationHash)).toBe(true);
+    expect(isCanonicalHash(frame.sourceMomentHash)).toBe(true);
     expect(isCanonicalHash(frame.sourcePacketHash)).toBe(true);
     expect(JSON.stringify(frame.visibleFacts)).not.toContain("location-c");
     expect(JSON.stringify(frame.visibleFacts)).not.toContain(PLAYER_ID);
@@ -1402,8 +1708,8 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "primary_settled" });
     expect(judge.judge).toHaveBeenCalledTimes(1);
     expect(gameMaster.plan).toHaveBeenCalledTimes(1);
-    expect(judge.judge.mock.calls[0]![0].frame.sourceMoment).toBe(frame.sourceNarration.displayText);
-    expect(gameMaster.plan.mock.calls[0]![0].frame.sourceMoment).toBe(frame.sourceNarration.displayText);
+    expect(judge.judge.mock.calls[0]![0].frame.sourceMoment).toBe(frame.sourceMoment.displayText);
+    expect(gameMaster.plan.mock.calls[0]![0].frame.sourceMoment).toBe(frame.sourceMoment.displayText);
   });
 
   it("admits a visible nonplayer participant added to a frozen suggested action", async () => {
@@ -1764,10 +2070,10 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(dueSet).not.toBeNull();
     const expectedJobs = dueSet!.decisions.filter((decision) => decision.disposition !== "skip");
     expect(dueSet!.decisions.filter((decision) => decision.disposition === "wake"))
-      .toHaveLength(CAMPAIGN_PLAY_LIMITS.actorOpportunitiesPerTurn);
+      .toHaveLength(1);
     expect(dueSet!.decisions.filter((decision) =>
       decision.disposition === "defer" && decision.reason === "actor_capacity"))
-      .toHaveLength(3);
+      .toHaveLength(0);
     expect(scheduler.listTurnJobs(admission.turnId)).toHaveLength(expectedJobs.length);
     expect(() => scheduler.validateTurnSettlement(admission.turnId))
       .toThrow("scheduler_job_invalid");
@@ -1784,7 +2090,7 @@ describe("Campaign Play player-action turn runtime", () => {
       expect(terminalCount - priorTerminalCount).toBeLessThanOrEqual(1);
       priorTerminalCount = terminalCount;
       actorBoundaries += 1;
-      if (actorBoundaries > expectedJobs.length + 1) {
+      if (actorBoundaries > expectedJobs.length + 2) {
         throw new Error("Actor settlement exceeded the frozen serial boundary count.");
       }
     }
@@ -1793,7 +2099,7 @@ describe("Campaign Play player-action turn runtime", () => {
     const settledJobs = scheduler.validateTurnSettlement(admission.turnId);
     expect(settledJobs).toHaveLength(expectedJobs.length);
     const capacityDeferred = settledJobs.filter((job) => job.deferReason === "actor_capacity");
-    expect(capacityDeferred).toHaveLength(3);
+    expect(capacityDeferred).toHaveLength(0);
     for (const job of capacityDeferred) {
       const schedule = handle.sqlite.prepare(`SELECT next_act_at_world_time_minutes AS nextDue,
           agency_debt AS agencyDebt FROM campaign_play_actor_schedules
@@ -1829,16 +2135,6 @@ describe("Campaign Play player-action turn runtime", () => {
             locationId: "location-c",
             validUntilWorldTimeMinutes: null,
           },
-          {
-            channel: "local_aftermath",
-            locationId: "location-a",
-            validUntilWorldTimeMinutes: 1_441,
-          },
-          {
-            channel: "local_aftermath",
-            locationId: "location-a",
-            validUntilWorldTimeMinutes: 1_441,
-          },
         ]);
   });
 
@@ -1865,11 +2161,24 @@ describe("Campaign Play player-action turn runtime", () => {
       workerLeaseOwner: null,
       workerLeaseExpiresAt: null,
     });
+    const pendingState = createCampaignPlayReadModel(handle).loadState();
+    expect(pendingState).toMatchObject({
+      phase: "ready",
+      narration: null,
+      narrationOperation: { status: "pending", turnId: admission.turnId },
+    });
+    expect(narrator.narrate).toHaveBeenCalledTimes(0);
+    await runtime.runNarration(admission.turnId);
     expect(narrator.narrate).toHaveBeenCalledTimes(1);
-    const narrationRow = handle.sqlite.prepare(`SELECT packet_json AS packetJson,
-        beats_json AS beatsJson, suggested_actions_json AS suggestedActionsJson,
-        effects_json AS effectsJson, status
-      FROM campaign_play_narrations WHERE campaign_id = ? AND turn_id = ?`).get(
+    const narrationRow = handle.sqlite.prepare(`SELECT narration.packet_json AS packetJson,
+        scene.beats_json AS beatsJson, scene.suggested_actions_json AS suggestedActionsJson,
+        scene.effects_json AS effectsJson, operation.status
+      FROM campaign_play_narrations narration
+      JOIN campaign_play_narration_operations operation
+        ON operation.campaign_id = narration.campaign_id AND operation.turn_id = narration.turn_id
+      JOIN campaign_play_proper_scenes scene
+        ON scene.campaign_id = operation.campaign_id AND scene.operation_id = operation.operation_id
+      WHERE narration.campaign_id = ? AND narration.turn_id = ?`).get(
         CAMPAIGN_ID,
         admission.turnId,
       ) as {
@@ -1881,7 +2190,7 @@ describe("Campaign Play player-action turn runtime", () => {
       };
     const packet = JSON.parse(narrationRow.packetJson) as CampaignPlayNarratorPacket;
     const frozenAdmission = loadCampaignPlayPlayerActionAdmissionFrame(completed);
-    expect(packet.sourceMoment).toBe(frozenAdmission.sourceNarration.displayText);
+    expect(packet.sourceMoment).toBe(frozenAdmission.sourceMoment.displayText);
     expect(packet.actionContext).toMatchObject({
       submittedText: request.text,
       disposition: "deterministic",
@@ -1912,20 +2221,17 @@ describe("Campaign Play player-action turn runtime", () => {
       .toEqual({ value: 1 });
 
     const telemetry = runtime.loadTelemetry(admission.turnId);
-    expect(telemetry).toMatchObject({
-      terminalReason: "action_resolved",
-      costComplete: true,
-      inputTokens: 135,
-      outputTokens: 135,
-      totalTokens: 270,
-      estimatedCostMicros: 8,
-    });
+    expect(telemetry).toMatchObject({ terminalReason: "action_resolved", costComplete: true });
     expect(telemetry.modelAttempts.map((attempt) => attempt.kind).sort()).toEqual([
       "actor_replanner",
       "game_master",
       "judge",
-      "narrator",
     ]);
+    expect(handle.sqlite.prepare(`SELECT status, schema_outcome AS schemaOutcome
+      FROM campaign_play_narration_attempts WHERE campaign_id = ? AND turn_id = ?`).get(
+        CAMPAIGN_ID,
+        admission.turnId,
+      )).toEqual({ status: "accepted", schemaOutcome: "valid" });
     expect(telemetry.stageExecutions.every((stage) => stage.outcome === "advanced")).toBe(true);
 
     const nextState = createCampaignPlayStateRepository(handle).loadState()!;
@@ -1954,6 +2260,7 @@ describe("Campaign Play player-action turn runtime", () => {
       )).toEqual({ value: 2 });
 
     await advanceUntilStage(runtime, time, nextAdmission.turnId, "completed");
+    await runtime.runNarration(nextAdmission.turnId);
     const nextNarrationRow = handle.sqlite.prepare(`SELECT packet_json AS packetJson
       FROM campaign_play_narrations WHERE campaign_id = ? AND turn_id = ?`).get(
         CAMPAIGN_ID,
@@ -1997,6 +2304,7 @@ describe("Campaign Play player-action turn runtime", () => {
         submittedAt: time.clock.now(),
       });
       await advanceUntilStage(runtime, time, admission.turnId, "completed");
+      await runtime.runNarration(admission.turnId);
       if (index === 0) {
         const stored = handle.sqlite.prepare(`SELECT observation.public_entry_json AS publicEntryJson
           FROM campaign_play_observations observation
@@ -2058,14 +2366,30 @@ describe("Campaign Play player-action turn runtime", () => {
       const admission = runtime.admitAction({ request, submittedAt: 7_250 });
 
       await advanceUntilStage(runtime, time, admission.turnId, "completed");
+      if (clarificationQuestion !== null) {
+        const visiblePacket = handle.sqlite.prepare(`SELECT packet_json AS packetJson
+          FROM campaign_play_narrations WHERE campaign_id = ? AND turn_id = ?`).get(
+            CAMPAIGN_ID,
+            admission.turnId,
+          ) as { packetJson: string };
+        expect((JSON.parse(visiblePacket.packetJson) as CampaignPlayNarratorPacket).newObservations)
+          .toHaveLength(0);
+      }
+      const narrationOperation = await runtime.runNarration(admission.turnId);
+      expect(narrationOperation).toMatchObject({ status: "complete" });
 
       expect(runtime.loadTurn(admission.turnId)).toMatchObject({
         stage: "completed",
         terminalReason,
       });
-      const stored = handle.sqlite.prepare(`SELECT packet_json AS packetJson,
-          beats_json AS beatsJson, effects_json AS effectsJson
-        FROM campaign_play_narrations WHERE campaign_id = ? AND turn_id = ?`).get(
+      const stored = handle.sqlite.prepare(`SELECT narration.packet_json AS packetJson,
+          scene.beats_json AS beatsJson, scene.effects_json AS effectsJson
+        FROM campaign_play_narrations narration
+        JOIN campaign_play_narration_operations operation
+          ON operation.campaign_id = narration.campaign_id AND operation.turn_id = narration.turn_id
+        JOIN campaign_play_proper_scenes scene
+          ON scene.campaign_id = operation.campaign_id AND scene.operation_id = operation.operation_id
+        WHERE narration.campaign_id = ? AND narration.turn_id = ?`).get(
           CAMPAIGN_ID,
           admission.turnId,
         ) as { packetJson: string; beatsJson: string; effectsJson: string };
@@ -2112,7 +2436,7 @@ describe("Campaign Play player-action turn runtime", () => {
       request: admissionRequest(fixture.state, "visibility-reopen"),
       submittedAt: 7_500,
     });
-    await advanceUntilStage(buildRuntime(), time, admission.turnId, "visibility_projected");
+    await advanceUntilStage(buildRuntime(), time, admission.turnId, "completed");
     const frozen = handle.sqlite.prepare(`SELECT packet_hash AS packetHash, packet_json AS packetJson
       FROM campaign_play_narrations WHERE campaign_id = ? AND turn_id = ?`).get(
         CAMPAIGN_ID,
@@ -2124,34 +2448,93 @@ describe("Campaign Play player-action turn runtime", () => {
     handle = track(openCampaignPlayDatabase(CAMPAIGN_ID));
     const reopenedRuntime = buildRuntime();
     time.advance();
-    await reopenedRuntime.runNextStage(admission.turnId);
+    await reopenedRuntime.runNarration(admission.turnId);
 
     expect(reopenedRuntime.loadTurn(admission.turnId)).toMatchObject({ stage: "completed" });
     expect(narrator.narrate).toHaveBeenCalledTimes(1);
     expect(narrator.narrate.mock.calls[0]![0].packetBytes).toBe(frozen.packetJson);
     expect(handle.sqlite.prepare(`SELECT packet_hash AS packetHash, packet_json AS packetJson
       FROM campaign_play_narrations WHERE campaign_id = ? AND turn_id = ?`).get(
-        CAMPAIGN_ID,
-        admission.turnId,
-      )).toEqual(frozen);
+      CAMPAIGN_ID,
+      admission.turnId,
+    )).toEqual(frozen);
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count FROM campaign_play_proper_scenes
+      WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, admission.turnId))
+      .toEqual({ count: 1 });
     expect(countForTurn(handle, "campaign_play_commands", admission.turnId)).toBe(commandCount);
   });
 
-  it("persists interrupted narrator identity only when provider, model, and strategy are complete", async () => {
+  it("reopens an expired narration attempt as the same failed recovery operation", async () => {
+    const fixture = await createReadyCampaignWithOpening();
+    let handle = fixture.handle;
+    const time = fixedClock(7_625);
+    const narrator = playerNarratorFixture();
+    const runtime = turnRuntime(
+      handle,
+      time,
+      judgeFixture("deterministic"),
+      gameMasterFixture(),
+      {
+        narrator,
+        injectNarratorFault(point) {
+          if (point === "after_provider_return") throw new Error("process stopped after provider return");
+        },
+      },
+    );
+    const admission = runtime.admitAction({
+      request: admissionRequest(fixture.state, "narration-expired-reload"),
+      submittedAt: 7_625,
+    });
+    await advanceUntilStage(runtime, time, admission.turnId, "completed");
+    const original = createCampaignPlayReadModel(handle).loadState().narrationOperation!;
+    const commandCount = countForTurn(handle, "campaign_play_commands", admission.turnId);
+    await expect(runtime.runNarration(admission.turnId))
+      .rejects.toThrow("process stopped after provider return");
+
+    closeTracked(handle);
+    time.advanceBy(1_001);
+    handle = track(openCampaignPlayDatabase(CAMPAIGN_ID));
+    const interrupted = createCampaignPlayNarrationOperationRepository(handle)
+      .interruptExpired(time.clock.now());
+    expect(interrupted).toMatchObject({
+      operationId: original.operationId,
+      resultId: original.resultId,
+      packetHash: original.packetHash,
+      receiptIds: original.receiptIds,
+      attemptId: expect.any(String),
+      attempt: 1,
+      status: "failed",
+    });
+    expect(createCampaignPlayReadModel(handle).loadState()).toMatchObject({
+      phase: "ready",
+      narration: null,
+      narrationOperation: { operationId: original.operationId, status: "failed" },
+    });
+    expect(countForTurn(handle, "campaign_play_commands", admission.turnId)).toBe(commandCount);
+    expect(countForTurn(handle, "campaign_play_turn_results", admission.turnId)).toBe(1);
+  });
+
+  it("keeps a failed proper scene separate from the committed result and recovers by exact identity", async () => {
     const { handle, state } = await createReadyCampaignWithOpening();
     const time = fixedClock(7_750);
     const compiler = createCampaignPlayNarrator();
+    const successfulNarrator = playerNarratorFixture();
+    let narrationCalls = 0;
     const narrator = {
       compile: compiler.compile,
-      narrate: vi.fn(async () => {
-        throw new CampaignPlayNarratorError("transport_interrupted", {
-          ...openingNarratorEvidence,
-          actualProviderId: "partial-provider",
-          responseModel: null,
-          actualStrategy: "native_schema",
-          durationMs: 77,
-          errorCode: "narration_invalid",
-        });
+      narrate: vi.fn(async (request: Parameters<typeof compiler.narrate>[0]) => {
+        narrationCalls += 1;
+        if (narrationCalls === 1) {
+          throw new CampaignPlayNarratorError("transport_interrupted", {
+            ...openingNarratorEvidence,
+            actualProviderId: "partial-provider",
+            responseModel: null,
+            actualStrategy: "native_schema",
+            durationMs: 77,
+            errorCode: "narration_invalid",
+          });
+        }
+        return successfulNarrator.narrate(request);
       }),
     };
     const runtime = turnRuntime(
@@ -2165,124 +2548,228 @@ describe("Campaign Play player-action turn runtime", () => {
       request: admissionRequest(state, "partial-narrator-identity"),
       submittedAt: 7_750,
     });
-    await advanceUntilStage(runtime, time, admission.turnId, "visibility_projected");
-
-    time.advance();
-    await runtime.runNextStage(admission.turnId);
-
+    await advanceUntilStage(runtime, time, admission.turnId, "completed");
+    const commandCount = countForTurn(handle, "campaign_play_commands", admission.turnId);
+    const pending = createCampaignPlayReadModel(handle).loadState().narrationOperation!;
+    const failed = await runtime.runNarration(admission.turnId);
+    expect(failed).toMatchObject({
+      operationId: pending.operationId,
+      resultId: pending.resultId,
+      packetHash: pending.packetHash,
+      receiptIds: pending.receiptIds,
+      status: "failed",
+      attempt: 1,
+    });
     expect(runtime.loadTurn(admission.turnId)).toMatchObject({
-      stage: "interrupted",
-      interruptedStage: "visibility_projected",
-      errorCode: "provider_unavailable",
-      resumeEligible: true,
+      stage: "completed",
+      resumeEligible: false,
     });
     expect(handle.sqlite.prepare(`SELECT actual_provider_id AS actualProviderId,
       actual_model AS actualModel, actual_strategy AS actualStrategy,
-      duration_ms AS durationMs, error_code AS errorCode
-      FROM campaign_play_model_stages
-      WHERE campaign_id = ? AND turn_id = ? AND kind = 'narrator'
+      duration_ms AS durationMs, error_code AS errorCode, schema_outcome AS schemaOutcome
+      FROM campaign_play_narration_attempts
+      WHERE campaign_id = ? AND turn_id = ?
       ORDER BY attempt DESC LIMIT 1`).get(CAMPAIGN_ID, admission.turnId)).toEqual({
         actualProviderId: null,
         actualModel: null,
         actualStrategy: null,
         durationMs: 77,
         errorCode: "provider_unavailable",
+        schemaOutcome: "transport_error",
       });
+    const token = runtime.prepareNarrationRecovery({
+      operationId: failed!.operationId,
+      resultId: failed!.resultId,
+      narrationId: failed!.narrationId,
+      packetHash: failed!.packetHash,
+      receiptIds: failed!.receiptIds,
+    });
+    expect(token).toMatchObject({
+      operationId: pending.operationId,
+      turnId: admission.turnId,
+      packetHash: pending.packetHash,
+      attempt: 2,
+    });
+    const recovered = await runtime.runNarration(admission.turnId, token);
+    expect(recovered).toMatchObject({ status: "complete", attempt: 2 });
+    expect(countForTurn(handle, "campaign_play_commands", admission.turnId)).toBe(commandCount);
+    expect(countForTurn(handle, "campaign_play_turn_results", admission.turnId)).toBe(1);
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count FROM campaign_play_proper_scenes
+      WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, admission.turnId))
+      .toEqual({ count: 1 });
   });
 
-  it.each(["after_provider_return", "during_terminal_commit"] as const)(
-    "recovers %s with one accepted narration and complete reopened telemetry",
-    async (faultPoint) => {
-      const fixture = await createReadyCampaignWithOpening();
-      let handle = fixture.handle;
-      const state = fixture.state;
-      const time = fixedClock(8_000);
-      const narrator = playerNarratorFixture();
-      let inject = true;
-      const runtime = turnRuntime(
-        handle,
-        time,
-        judgeFixture("deterministic"),
-        gameMasterFixture(),
-        {
-          narrator,
-          injectNarratorFault(point) {
-            if (inject && point === faultPoint) {
-              inject = false;
-              throw new Error(`process stopped ${faultPoint}`);
-            }
-          },
-        },
-      );
-      const admission = runtime.admitAction({
-        request: admissionRequest(state, `narrator-recovery-${faultPoint}`),
-        submittedAt: 8_000,
-      });
-      await advanceUntilStage(runtime, time, admission.turnId, "visibility_projected");
-      const commandCount = countForTurn(handle, "campaign_play_commands", admission.turnId);
+  it("coalesces duplicate narration completion at one proper scene", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening();
+    const time = fixedClock(8_000);
+    const narrator = playerNarratorFixture();
+    const runtime = turnRuntime(
+      handle,
+      time,
+      judgeFixture("deterministic"),
+      gameMasterFixture(),
+      { narrator },
+    );
+    const admission = runtime.admitAction({
+      request: admissionRequest(state, "narrator-duplicate-completion"),
+      submittedAt: 8_000,
+    });
+    await advanceUntilStage(runtime, time, admission.turnId, "completed");
+    const first = await runtime.runNarration(admission.turnId);
+    const duplicate = await runtime.runNarration(admission.turnId);
 
-      time.advance();
-      await expect(runtime.runNextStage(admission.turnId))
-        .rejects.toThrow(`process stopped ${faultPoint}`);
-      expect(runtime.loadTurn(admission.turnId)).toMatchObject({
-        stage: "visibility_projected",
-        workerLeaseOwner: "turn-runtime-worker",
-      });
-      expect(countForTurn(handle, "campaign_play_turn_results", admission.turnId)).toBe(0);
+    expect(duplicate).toEqual(first);
+    expect(narrator.narrate).toHaveBeenCalledTimes(1);
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count FROM campaign_play_proper_scenes
+      WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, admission.turnId))
+      .toEqual({ count: 1 });
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count FROM campaign_play_narration_attempts
+      WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, admission.turnId))
+      .toEqual({ count: 1 });
+  });
 
-      time.advanceBy(1_001);
-      await runtime.recoverActiveTurn();
-      const interrupted = runtime.loadTurn(admission.turnId)!;
-      expect(interrupted).toMatchObject({
-        stage: "interrupted",
-        interruptedStage: "visibility_projected",
-        resumeEligible: true,
-      });
-      time.advance();
-      await runtime.resumeInterruptedStage({
-        turnId: admission.turnId,
-        interruptedStage: "visibility_projected",
-        observedEpoch: interrupted.workerEpoch,
-      });
+  it("keeps late completion and mismatched reload recovery fenced behind the newer result", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening();
+    const time = fixedClock(8_250);
+    const successfulNarrator = playerNarratorFixture();
+    let releaseNarration: (() => Promise<void>) | null = null;
+    let narrationCalls = 0;
+    const compiler = createCampaignPlayNarrator();
+    const narrator = {
+      compile: compiler.compile,
+      narrate: vi.fn((request: Parameters<typeof compiler.narrate>[0]) => {
+        narrationCalls += 1;
+        if (narrationCalls === 1) {
+          return new Promise<Awaited<ReturnType<typeof compiler.narrate>>>((resolve) => {
+            releaseNarration = async () => resolve(await successfulNarrator.narrate(request));
+          });
+        }
+        throw new CampaignPlayNarratorError("transport_interrupted", {
+          ...openingNarratorEvidence,
+          actualProviderId: "current-result-provider",
+          responseModel: null,
+          actualStrategy: "native_schema",
+          durationMs: 91,
+          errorCode: "narration_invalid",
+        });
+      }),
+    };
+    const runtime = turnRuntime(
+      handle,
+      time,
+      judgeFixture("deterministic"),
+      gameMasterFixture(),
+      { narrator },
+    );
+    const first = runtime.admitAction({
+      request: admissionRequest(state, "narrator-stale-first"),
+      submittedAt: 8_250,
+    });
+    await advanceUntilStage(runtime, time, first.turnId, "completed");
+    const inFlight = runtime.runNarration(first.turnId);
+    await vi.waitFor(() => expect(releaseNarration).not.toBeNull());
 
-      expect(runtime.loadTurn(admission.turnId)).toMatchObject({
-        stage: "completed",
-        terminalReason: "action_resolved",
-      });
-      expect(narrator.narrate).toHaveBeenCalledTimes(2);
-      expect(countForTurn(handle, "campaign_play_commands", admission.turnId)).toBe(commandCount);
-      expect(countForTurn(handle, "campaign_play_turn_results", admission.turnId)).toBe(1);
-      expect(handle.sqlite.prepare(`SELECT count(*) AS value FROM campaign_play_model_stages
-        WHERE campaign_id = ? AND turn_id = ? AND kind = 'narrator' AND status = 'accepted'`).get(
+    const nextState = createCampaignPlayStateRepository(handle).loadState()!;
+    expect(createCampaignPlayReadModel(handle).loadState().phase).toBe("ready");
+    const second = runtime.admitAction({
+      request: admissionRequest(nextState, "narrator-stale-second", "I follow the next signal."),
+      submittedAt: 8_251,
+    });
+    await advanceUntilStage(runtime, time, second.turnId, "completed");
+    const currentFailure = await runtime.runNarration(second.turnId);
+    expect(currentFailure).toMatchObject({ status: "failed", turnId: second.turnId });
+    await releaseNarration!();
+    const stale = await inFlight;
+
+    expect(stale).toMatchObject({ status: "failed", turnId: first.turnId });
+    expect(handle.sqlite.prepare(`SELECT status, error_code AS errorCode
+      FROM campaign_play_narration_attempts WHERE campaign_id = ? AND turn_id = ?`).get(
+        CAMPAIGN_ID,
+        first.turnId,
+      )).toEqual({ status: "stale", errorCode: "stale_artifact" });
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count FROM campaign_play_proper_scenes
+      WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, first.turnId))
+      .toEqual({ count: 0 });
+    expect(countForTurn(handle, "campaign_play_turn_results", first.turnId)).toBe(1);
+    expect(countForTurn(handle, "campaign_play_turn_results", second.turnId)).toBe(1);
+
+    const recoveryRequest = {
+      operationId: currentFailure!.operationId,
+      resultId: currentFailure!.resultId,
+      narrationId: currentFailure!.narrationId,
+      packetHash: currentFailure!.packetHash,
+      receiptIds: currentFailure!.receiptIds,
+    };
+    const snapshot = () => ({
+      authority: handle.sqlite.prepare(`SELECT * FROM campaign_play_states
+        WHERE campaign_id = ?`).get(CAMPAIGN_ID),
+      turns: handle.sqlite.prepare(`SELECT * FROM campaign_play_turns
+        WHERE campaign_id = ? AND id IN (?, ?) ORDER BY submitted_at, id`).all(
           CAMPAIGN_ID,
-          admission.turnId,
-        )).toEqual({ value: 1 });
-      const telemetry = runtime.loadTelemetry(admission.turnId);
-      expect(telemetry.costComplete).toBe(false);
-      expect(telemetry.estimatedCostMicros).toBeNull();
-      expect(telemetry.modelAttempts.filter((attempt) => attempt.kind === "narrator"))
-        .toEqual([
-          expect.objectContaining({ status: "interrupted", inputTokens: null, outputTokens: null }),
-          expect.objectContaining({ status: "accepted", inputTokens: 15, outputTokens: 25 }),
-        ]);
-      expect(telemetry.stageExecutions).toContainEqual(expect.objectContaining({
-        stage: "visibility_projected",
-        outcome: "interrupted",
-      }));
-      expect(telemetry.stageExecutions).toContainEqual(expect.objectContaining({
-        stage: "visibility_projected",
-        outcome: "advanced",
-      }));
-      closeTracked(handle);
-      handle = track(openCampaignPlayDatabase(CAMPAIGN_ID));
-      expect(turnRuntime(
-        handle,
+          first.turnId,
+          second.turnId,
+        ),
+      operation: handle.sqlite.prepare(`SELECT * FROM campaign_play_narration_operations
+        WHERE campaign_id = ? AND operation_id = ?`).get(
+          CAMPAIGN_ID,
+          currentFailure!.operationId,
+        ),
+      attempts: handle.sqlite.prepare(`SELECT * FROM campaign_play_narration_attempts
+        WHERE campaign_id = ? AND operation_id = ? ORDER BY attempt`).all(
+          CAMPAIGN_ID,
+          currentFailure!.operationId,
+        ),
+      result: handle.sqlite.prepare(`SELECT * FROM campaign_play_turn_results
+        WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, second.turnId),
+      packet: handle.sqlite.prepare(`SELECT * FROM campaign_play_narrations
+        WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, second.turnId),
+      receipts: handle.sqlite.prepare(`SELECT * FROM campaign_play_receipts
+        WHERE campaign_id = ? AND turn_id = ? ORDER BY receipt_id`).all(
+          CAMPAIGN_ID,
+          second.turnId,
+        ),
+      counts: handle.sqlite.prepare(`SELECT
+        (SELECT COUNT(*) FROM campaign_play_narration_operations WHERE campaign_id = ?) AS operations,
+        (SELECT COUNT(*) FROM campaign_play_narration_attempts WHERE campaign_id = ?) AS attempts,
+        (SELECT COUNT(*) FROM campaign_play_proper_scenes WHERE campaign_id = ?) AS scenes,
+        (SELECT COUNT(*) FROM campaign_play_turn_results WHERE campaign_id = ?) AS results,
+        (SELECT COUNT(*) FROM campaign_play_receipts WHERE campaign_id = ?) AS receipts,
+        (SELECT COUNT(*) FROM campaign_play_turns WHERE campaign_id = ?) AS turns`).get(
+          CAMPAIGN_ID,
+          CAMPAIGN_ID,
+          CAMPAIGN_ID,
+          CAMPAIGN_ID,
+          CAMPAIGN_ID,
+          CAMPAIGN_ID,
+        ),
+    });
+    const before = snapshot();
+    const createTurn = vi.fn((reloadedHandle: CampaignPlayDatabaseHandle) =>
+      turnRuntime(
+        reloadedHandle,
         time,
         judgeFixture("deterministic"),
         gameMasterFixture(),
-      ).loadTelemetry(admission.turnId)).toEqual(telemetry);
-    },
-  );
+      ));
+    const reloadedApplication = createCampaignPlayApplication({
+      now: time.clock.now,
+      runtimeFactory: {
+        createOpening: () => { throw new Error("Opening is outside narration recovery."); },
+        createTurn,
+      },
+    });
+
+    expect(() => reloadedApplication.recoverNarration(
+      CAMPAIGN_ID,
+      first.turnId,
+      recoveryRequest,
+    )).toThrow(expect.objectContaining<Partial<CampaignPlayApplicationError>>({
+      publicCode: "turn_not_resumable",
+      message: "The proper scene can no longer be restored.",
+    }));
+    expect(createTurn).not.toHaveBeenCalled();
+    expect(snapshot()).toEqual(before);
+  });
 
   it("keeps failed actor replanning interrupted until explicit fresh-epoch resume", async () => {
     const { handle, state } = await createReadyCampaignWithOpening();
@@ -2991,7 +3478,7 @@ describe("Campaign Play player-action turn runtime", () => {
       )).toEqual({ count: 1 });
   });
 
-  it("reopens one accepted actor replan, executes it once, and defers a second boundary", async () => {
+  it("reopens one accepted first actor plan and executes it once", async () => {
     const fixture = await createReadyCampaignWithOpening();
     let handle = fixture.handle;
     const { state } = fixture;
@@ -3038,11 +3525,7 @@ describe("Campaign Play player-action turn runtime", () => {
     );
     time.advance();
     await reopenedRuntime.runNextStage(admission.turnId);
-    const secondJobId = forceFirstActorReplan(handle, time, admission.turnId);
-    time.advance();
-    await reopenedRuntime.runNextStage(admission.turnId);
 
-    expect(secondJobId).not.toBe(firstJobId);
     expect(providerCalls).toBe(2);
     const rows = handle.sqlite.prepare(`SELECT stage_id AS stageId, status, worker_epoch AS workerEpoch
       FROM campaign_play_model_stages
@@ -3066,10 +3549,6 @@ describe("Campaign Play player-action turn runtime", () => {
       admittedPlanId: expect.not.stringMatching(/^actor-plan:/),
       planId: expect.stringMatching(/^actor-plan:/),
     });
-    expect(jobs.find((job) => job.jobId === secondJobId)).toMatchObject({
-      stage: "deferred",
-      deferReason: "replan_capacity",
-    });
     const repository = createCampaignPlayTurnRepository(handle);
     expect(repository.loadTurn(admission.turnId)).toMatchObject({ stage: "primary_settled" });
     expect(() => repository.loadAcceptedModelArtifact(admission.turnId, "actor_replanner"))
@@ -3077,7 +3556,6 @@ describe("Campaign Play player-action turn runtime", () => {
   });
 
   it.each([
-    ["after_job_claim", "claimed"],
     ["after_proposal_persisted", "proposed"],
   ] as const)(
     "recovers a process stop %s from stored actor state without duplicating settlement",
@@ -3115,9 +3593,18 @@ describe("Campaign Play player-action turn runtime", () => {
       time.advance();
       await runtime.runNextStage(admission.turnId);
 
-      time.advance();
-      await expect(runtime.runNextStage(admission.turnId))
-        .rejects.toThrow(`process stopped ${faultPoint}`);
+      let stopped: unknown = null;
+      for (let boundary = 0; boundary < 8 && stopped === null; boundary += 1) {
+        time.advance();
+        try {
+          await runtime.runNextStage(admission.turnId);
+        } catch (cause) {
+          stopped = cause;
+        }
+      }
+      expect(stopped).toEqual(expect.objectContaining({
+        message: expect.stringContaining(`process stopped ${faultPoint}`),
+      }));
       const scheduler = createCampaignPlayActorScheduler(handle);
       const stranded = scheduler.listTurnJobs(admission.turnId)
         .find((job) => job.stage === strandedStage);
@@ -3189,9 +3676,18 @@ describe("Campaign Play player-action turn runtime", () => {
     time.advance();
     await runtime.runNextStage(admission.turnId);
 
-    time.advance();
-    await expect(runtime.runNextStage(admission.turnId))
-      .rejects.toThrow("process stopped after actor receipt");
+    let stopped: unknown = null;
+    for (let boundary = 0; boundary < 4 && stopped === null; boundary += 1) {
+      time.advance();
+      try {
+        await runtime.runNextStage(admission.turnId);
+      } catch (cause) {
+        stopped = cause;
+      }
+    }
+    expect(stopped).toEqual(expect.objectContaining({
+      message: expect.stringContaining("process stopped after actor receipt"),
+    }));
     const scheduler = createCampaignPlayActorScheduler(handle);
     const proposed = scheduler.listTurnJobs(admission.turnId).find((job) => job.stage === "proposed");
     expect(proposed).toBeDefined();

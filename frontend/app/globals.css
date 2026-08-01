@@ -4860,6 +4860,44 @@
   backdrop-filter: blur(22px);
 }
 
+.campaign-play-concise-result {
+  display: grid;
+  align-self: start;
+  gap: 14px;
+  min-width: 0;
+  max-width: 78ch;
+  padding: clamp(22px, 3vw, 34px);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-l);
+  background: rgba(8, 8, 10, 0.9);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.44);
+  backdrop-filter: blur(22px);
+}
+
+.campaign-play-concise-result > header,
+.campaign-play-concise-result > footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.campaign-play-concise-result > header > span,
+.campaign-play-concise-result > footer > span {
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.campaign-play-concise-result > p {
+  color: var(--fg);
+  font-family: var(--font-prose);
+  font-size: clamp(16px, 1.45vw, 20px);
+  line-height: 1.62;
+}
+
 .campaign-play-narration > header {
   display: flex;
   align-items: center;
@@ -4899,6 +4937,7 @@
 }
 
 .campaign-play-narration button,
+.campaign-play-concise-result button,
 .campaign-play-arrival button,
 .campaign-play-interruption button,
 .campaign-play-choices button,
@@ -4921,6 +4960,7 @@
 }
 
 .campaign-play-narration button:hover:not(:disabled),
+.campaign-play-concise-result button:hover:not(:disabled),
 .campaign-play-arrival button:hover:not(:disabled),
 .campaign-play-interruption button:hover:not(:disabled),
 .campaign-play-choices button:hover:not(:disabled),
@@ -4933,6 +4973,7 @@
 }
 
 .campaign-play-narration button:disabled,
+.campaign-play-concise-result button:disabled,
 .campaign-play-arrival button:disabled,
 .campaign-play-interruption button:disabled,
 .campaign-play-choices button:disabled,

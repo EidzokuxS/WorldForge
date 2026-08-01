@@ -3,6 +3,7 @@ import {
   CAMPAIGN_PLAY_CONSEQUENCE_CUE_VALUES,
   CAMPAIGN_PLAY_EFFECT_KIND_VALUES,
   CAMPAIGN_PLAY_LIMITS,
+  CAMPAIGN_PLAY_NARRATION_OPERATION_STATUS_VALUES,
   CAMPAIGN_PLAY_PHASE_VALUES,
   CAMPAIGN_PLAY_PUBLIC_ERROR_CODE_VALUES,
   CAMPAIGN_PLAY_PUBLIC_PROGRESS_VALUES,
@@ -21,6 +22,9 @@ import {
   type CampaignPlayJournalPage,
   type CampaignPlayJournalRequest,
   type CampaignPlayNarration,
+  type CampaignPlayNarrationOperation,
+  type CampaignPlayNarrationRecoveryRequest,
+  type CampaignPlayNarrationRecoveryResponse,
   type CampaignPlayOpeningAdmissionRequest,
   type CampaignPlayOpeningDetailOption,
   type CampaignPlayOpeningLocationOption,
@@ -468,6 +472,55 @@ function parseNarration(value: unknown): CampaignPlayNarration | null {
   return asParsed<CampaignPlayNarration>(value);
 }
 
+function parseNarrationOperation(value: unknown): CampaignPlayNarrationOperation | null {
+  if (
+    !isObject(value) ||
+    !hasExactKeys(value, [
+      "operationId",
+      "resultId",
+      "turnId",
+      "narrationId",
+      "packetHash",
+      "receiptIds",
+      "status",
+      "attemptId",
+      "attempt",
+      "conciseResult",
+      "createdAt",
+      "completedAt",
+    ]) ||
+    !isId(value.operationId) || !isId(value.resultId) || !isId(value.turnId) ||
+    !isId(value.narrationId) || !isHash(value.packetHash) ||
+    !isOneOf(value.status, CAMPAIGN_PLAY_NARRATION_OPERATION_STATUS_VALUES) ||
+    !(value.attemptId === null || isId(value.attemptId)) ||
+    !isNonnegativeInteger(value.attempt) || !isNonnegativeInteger(value.createdAt) ||
+    !(value.completedAt === null || isNonnegativeInteger(value.completedAt)) ||
+    !isObject(value.conciseResult) ||
+    !hasExactKeys(value.conciseResult, ["displayText", "suggestedActions"]) ||
+    !isNarrationText(value.conciseResult.displayText)
+  ) {
+    return null;
+  }
+  const receiptIds = parseArray(value.receiptIds, (item) => isId(item) ? item : null,
+    CAMPAIGN_PLAY_LIMITS.commandsPerBatch);
+  const suggestedActions = parseArray(value.conciseResult.suggestedActions, (item) => {
+    if (
+      !isObject(item) || !hasExactKeys(item, ["choiceHandle", "label"]) ||
+      !isHandle(item.choiceHandle) || !isLabel(item.label)
+    ) return null;
+    return asParsed<{ choiceHandle: string; label: string }>(item);
+  }, CAMPAIGN_PLAY_LIMITS.suggestedActions);
+  if (
+    receiptIds === null || suggestedActions === null ||
+    !isUnique(receiptIds as string[]) ||
+    !isUnique(suggestedActions.map((action) => action.choiceHandle)) ||
+    (value.status === "pending" ? value.attemptId !== null
+      : value.attempt < 1 || value.attemptId === null) ||
+    ((value.status === "complete") !== (value.completedAt !== null))
+  ) return null;
+  return asParsed<CampaignPlayNarrationOperation>(value);
+}
+
 function parsePublicCharacter(value: unknown): CampaignPlayPublicCharacter | null {
   if (
     !isObject(value) ||
@@ -585,18 +638,29 @@ function parseTurnResult(value: unknown): CampaignPlayTurnPublicResult | null {
   }
   if (value.status !== "completed") return null;
   if (
-    !hasExactKeys(value, ["status", "narration", "consequences", "journalCursor"]) ||
+    !hasExactKeys(value, [
+      "status",
+      "narration",
+      "narrationOperation",
+      "consequences",
+      "journalCursor",
+    ]) ||
     !isNonnegativeInteger(value.journalCursor)
   ) {
     return null;
   }
-  const narration = parseNarration(value.narration);
+  const narration = value.narration === null ? null : parseNarration(value.narration);
+  const narrationOperation = value.narrationOperation === null
+    ? null
+    : parseNarrationOperation(value.narrationOperation);
   const consequences = parseArray(
     value.consequences,
     parseConsequence,
     CAMPAIGN_PLAY_LIMITS.newObservations,
   );
-  return narration === null || consequences === null
+  return (narration === null && value.narration !== null) ||
+      (narrationOperation === null && value.narrationOperation !== null) ||
+      (narration === null && narrationOperation === null) || consequences === null
     ? null
     : asParsed<CampaignPlayTurnPublicResult>(value);
 }
@@ -619,6 +683,7 @@ function parseState(value: unknown): CampaignPlayState | null {
       "possessions",
       "obligations",
       "narration",
+      "narrationOperation",
       "consequences",
       "activeTurn",
       "journalCursor",
@@ -668,6 +733,9 @@ function parseState(value: unknown): CampaignPlayState | null {
     CAMPAIGN_PLAY_LIMITS.visibleObligations,
   );
   const narration = value.narration === null ? null : parseNarration(value.narration);
+  const narrationOperation = value.narrationOperation === null
+    ? null
+    : parseNarrationOperation(value.narrationOperation);
   const consequences = parseArray(
     value.consequences,
     parseConsequence,
@@ -684,13 +752,14 @@ function parseState(value: unknown): CampaignPlayState | null {
     possessions === null ||
     obligations === null ||
     (narration === null && value.narration !== null) ||
+    (narrationOperation === null && value.narrationOperation !== null) ||
     consequences === null ||
     (activeTurn === null && value.activeTurn !== null) ||
     !isUnique(openingOptions.map((option) => option.locationHandle))
   ) {
     return null;
   }
-  const noLiveScene = currentLocation === null && narration === null &&
+  const noLiveScene = currentLocation === null && narration === null && narrationOperation === null &&
     visibleActors.length === 0 && visibleRoutes.length === 0 &&
     visiblePressures.length === 0 && obligations.length === 0 && consequences.length === 0;
   if ((value.phase === "opening_required") !== (openingOptions.length > 0)) return null;
@@ -707,7 +776,10 @@ function parseState(value: unknown): CampaignPlayState | null {
       return null;
     }
   } else if (value.phase === "ready") {
-    if (character === null || currentLocation === null || narration === null || activeTurn !== null) return null;
+    if (
+      character === null || currentLocation === null ||
+      (narration === null && narrationOperation === null) || activeTurn !== null
+    ) return null;
   } else if (value.phase === "turn_active") {
     if (
       character === null || currentLocation === null || activeTurn === null ||
@@ -748,7 +820,11 @@ function parseTurnReadResponse(value: unknown): CampaignPlayTurnReadResponse | n
   const turn = parsePublicTurn(value.turn);
   const result = parseTurnResult(value.result);
   if (turn === null || result === null || turn.status !== result.status) return null;
-  if (result.status === "completed" && result.narration.turnId !== turn.turnId) return null;
+  if (
+    result.status === "completed" &&
+    ((result.narration !== null && result.narration.turnId !== turn.turnId) ||
+      (result.narrationOperation !== null && result.narrationOperation.turnId !== turn.turnId))
+  ) return null;
   const metadata = result.status === "interrupted" || result.status === "failed"
     ? ERROR_METADATA[result.errorCode]
     : null;
@@ -941,6 +1017,20 @@ function parseTurnAdmissionResponse(value: unknown): CampaignPlayTurnAdmissionRe
     return null;
   }
   return asParsed<CampaignPlayTurnAdmissionResponse>(value);
+}
+
+function parseNarrationRecoveryResponse(
+  value: unknown,
+): CampaignPlayNarrationRecoveryResponse | null {
+  if (
+    !isObject(value) ||
+    !hasExactKeys(value, ["operationId", "attemptId", "attempt", "status"]) ||
+    !isId(value.operationId) || !isId(value.attemptId) ||
+    !isPositiveInteger(value.attempt) || value.status !== "running"
+  ) {
+    return null;
+  }
+  return asParsed<CampaignPlayNarrationRecoveryResponse>(value);
 }
 
 function parseErrorResponse(value: unknown): CampaignPlayErrorResponse | null {
@@ -1412,6 +1502,23 @@ export function resumeCampaignPlayTurn(
     },
     202,
     parseTurnAdmissionResponse,
+  );
+}
+
+export function recoverCampaignPlayNarration(
+  campaignId: string,
+  turnId: string,
+  request: CampaignPlayNarrationRecoveryRequest,
+): Promise<CampaignPlayNarrationRecoveryResponse> {
+  return requestJson(
+    campaignPath(campaignId, `/turns/${encodeURIComponent(turnId)}/narration/recover`),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    },
+    202,
+    parseNarrationRecoveryResponse,
   );
 }
 

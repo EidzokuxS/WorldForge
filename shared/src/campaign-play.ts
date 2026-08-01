@@ -366,6 +366,36 @@ export interface CampaignPlayNarration {
   createdAt: number;
 }
 
+export const CAMPAIGN_PLAY_NARRATION_OPERATION_STATUS_VALUES = [
+  "pending",
+  "running",
+  "failed",
+  "complete",
+] as const;
+
+export type CampaignPlayNarrationOperationStatus =
+  (typeof CAMPAIGN_PLAY_NARRATION_OPERATION_STATUS_VALUES)[number];
+
+export interface CampaignPlayConciseResult {
+  displayText: string;
+  suggestedActions: CampaignPlaySuggestedAction[];
+}
+
+export interface CampaignPlayNarrationOperation {
+  operationId: string;
+  resultId: string;
+  turnId: string;
+  narrationId: string;
+  packetHash: string;
+  receiptIds: string[];
+  status: CampaignPlayNarrationOperationStatus;
+  attemptId: string | null;
+  attempt: number;
+  conciseResult: CampaignPlayConciseResult;
+  createdAt: number;
+  completedAt: number | null;
+}
+
 export interface CampaignPlayPublicCharacter {
   name: string;
   monogram: string;
@@ -410,10 +440,26 @@ export interface CampaignPlayState extends CampaignPlayPublicVersions {
   possessions: CampaignPlayVisiblePossession[];
   obligations: CampaignPlayVisibleObligation[];
   narration: CampaignPlayNarration | null;
+  narrationOperation: CampaignPlayNarrationOperation | null;
   consequences: CampaignPlayConsequence[];
   activeTurn: CampaignPlayPublicTurn | null;
   journalCursor: number;
   projectionHash: string;
+}
+
+export interface CampaignPlayNarrationRecoveryRequest {
+  operationId: string;
+  resultId: string;
+  narrationId: string;
+  packetHash: string;
+  receiptIds: string[];
+}
+
+export interface CampaignPlayNarrationRecoveryResponse {
+  operationId: string;
+  attemptId: string;
+  attempt: number;
+  status: "running";
 }
 
 export interface CampaignPlayJournalPage extends CampaignPlayPublicVersions {
@@ -472,7 +518,8 @@ export type CampaignPlayTurnPublicResult =
     }
   | {
       status: "completed";
-      narration: CampaignPlayNarration;
+      narration: CampaignPlayNarration | null;
+      narrationOperation: CampaignPlayNarrationOperation | null;
       consequences: CampaignPlayConsequence[];
       journalCursor: number;
     }

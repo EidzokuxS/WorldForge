@@ -4,6 +4,7 @@ import { useCallback, useState, type ReactNode, type RefObject } from "react";
 import type { CampaignPlayStageEffect, CampaignPlayState } from "@worldforge/shared";
 
 import { NarrationDock } from "./NarrationDock";
+import { ConciseResultDock } from "./ConciseResultDock";
 import { SceneCard } from "./SceneCard";
 
 export interface CampaignPlayStageProps {
@@ -11,6 +12,8 @@ export interface CampaignPlayStageProps {
   connectionMessage?: string;
   children?: ReactNode;
   narrationFocusRef?: RefObject<HTMLElement | null>;
+  onRecoverNarration?: () => void;
+  narrationRecoveryPending?: boolean;
 }
 
 interface StageEffectState {
@@ -31,6 +34,8 @@ export function CampaignPlayStage({
   connectionMessage = "",
   children,
   narrationFocusRef,
+  onRecoverNarration = () => {},
+  narrationRecoveryPending = false,
 }: CampaignPlayStageProps) {
   const narrationId = state.narration?.narrationId ?? null;
   const [effectState, setEffectState] = useState<StageEffectState>(() => ({
@@ -123,6 +128,12 @@ export function CampaignPlayStage({
                 narration={state.narration}
                 onBeatPresented={presentBeatEffects}
                 ref={narrationFocusRef}
+              />
+            ) : state.narrationOperation ? (
+              <ConciseResultDock
+                onRecover={onRecoverNarration}
+                operation={state.narrationOperation}
+                recoveryPending={narrationRecoveryPending}
               />
             ) : null}
           </>

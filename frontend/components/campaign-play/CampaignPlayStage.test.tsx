@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { CampaignPlayStageEffect, CampaignPlayState } from "@worldforge/shared";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { CampaignPlayStage } from "./CampaignPlayStage";
 
@@ -31,6 +31,7 @@ function readyState(
       effects: [{ kind: effect, beatId: `beat-${narrationId}` }],
       createdAt: 100,
     },
+    narrationOperation: null,
     consequences: [],
     activeTurn: null,
     journalCursor: 0,
@@ -39,6 +40,36 @@ function readyState(
 }
 
 describe("CampaignPlayStage", () => {
+  it("shows the exact concise result without presenting it as full narration", () => {
+    const fallback = readyState();
+    fallback.narration = null;
+    fallback.narrationOperation = {
+      operationId: "operation-1",
+      resultId: "result-1",
+      turnId: "turn-1",
+      narrationId: "narration-1",
+      packetHash: "b".repeat(64),
+      receiptIds: ["receipt-1"],
+      status: "failed",
+      attemptId: "attempt-1",
+      attempt: 1,
+      conciseResult: {
+        displayText: "The signal gate opens, and rain spills across the north rail.",
+        suggestedActions: [{ choiceHandle: "choice-1", label: "Follow the north rail" }],
+      },
+      createdAt: 100,
+      completedAt: null,
+    };
+    const recover = vi.fn();
+    render(<CampaignPlayStage onRecoverNarration={recover} state={fallback} />);
+
+    expect(screen.getByText(fallback.narrationOperation.conciseResult.displayText))
+      .toBeInTheDocument();
+    expect(screen.queryByLabelText("Narration controls")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Restore the telling" }));
+    expect(recover).toHaveBeenCalledTimes(1);
+  });
+
   it("hydrates a settled artifact without replaying its effect", () => {
     const { container } = render(<CampaignPlayStage state={readyState()} />);
     expect(screen.getByRole("heading", { name: "Signal Yard" })).toBeInTheDocument();

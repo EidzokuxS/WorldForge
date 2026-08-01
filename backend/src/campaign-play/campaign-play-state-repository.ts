@@ -851,14 +851,43 @@ function selectPublicState(
     worldTimeMinutes: number;
     publicEntryJson: string;
   }>;
-  const narration = sqlite.prepare(`
+  const narrationOperation = sqlite.prepare(`
+    SELECT operation.operation_id AS operationId, operation.result_id AS resultId,
+      operation.turn_id AS turnId, operation.narration_id AS narrationId,
+      operation.packet_hash AS packetHash, operation.receipt_ids_json AS receiptIdsJson,
+      operation.concise_display_text AS conciseDisplayText,
+      operation.concise_suggested_actions_json AS conciseSuggestedActionsJson,
+      operation.status, operation.current_attempt AS currentAttempt,
+      operation.current_attempt_id AS currentAttemptId,
+      operation.created_at AS createdAt, operation.completed_at AS completedAt
+    FROM campaign_play_narration_operations operation
+    JOIN campaign_play_runtime_events event
+      ON event.campaign_id = operation.campaign_id AND event.turn_id = operation.turn_id
+      AND event.kind = 'turn_completed'
+    WHERE operation.campaign_id = ?
+    ORDER BY event.sequence DESC LIMIT 1
+  `).get(campaignId) as Record<string, unknown> | undefined;
+  const properScene = narrationOperation?.status === "complete"
+    ? sqlite.prepare(`SELECT narration_id AS narrationId, turn_id AS turnId,
+        display_text AS displayText, beats_json AS beatsJson,
+        suggested_actions_json AS suggestedActionsJson, effects_json AS effectsJson,
+        created_at AS createdAt
+      FROM campaign_play_proper_scenes
+      WHERE campaign_id = ? AND operation_id = ? AND turn_id = ?`).get(
+        campaignId,
+        narrationOperation.operationId,
+        narrationOperation.turnId,
+      ) as Record<string, unknown> | undefined
+    : undefined;
+  const legacyNarration = narrationOperation === undefined ? sqlite.prepare(`
     SELECT narration_id AS narrationId, turn_id AS turnId, display_text AS displayText,
       beats_json AS beatsJson, suggested_actions_json AS suggestedActionsJson,
       effects_json AS effectsJson, created_at AS createdAt
     FROM campaign_play_narrations
     WHERE campaign_id = ? AND status = 'complete'
     ORDER BY completed_at DESC, narration_id DESC LIMIT 1
-  `).get(campaignId) as Record<string, unknown> | undefined;
+  `).get(campaignId) as Record<string, unknown> | undefined : undefined;
+  const narration = properScene ?? legacyNarration;
   const publicNarration = narration
     ? cleanUndefined({
       narrationId: narration.narrationId,
@@ -871,6 +900,31 @@ function selectPublicState(
       ),
       effects: parseJson(narration.effectsJson as string, "Narration effects"),
       createdAt: narration.createdAt,
+    })
+    : null;
+  const publicNarrationOperation = narrationOperation
+    ? cleanUndefined({
+      operationId: narrationOperation.operationId,
+      resultId: narrationOperation.resultId,
+      turnId: narrationOperation.turnId,
+      narrationId: narrationOperation.narrationId,
+      packetHash: narrationOperation.packetHash,
+      receiptIds: parseJson(
+        narrationOperation.receiptIdsJson as string,
+        "Narration operation receipt ids",
+      ),
+      status: narrationOperation.status,
+      attemptId: narrationOperation.currentAttemptId,
+      attempt: narrationOperation.currentAttempt,
+      conciseResult: {
+        displayText: narrationOperation.conciseDisplayText,
+        suggestedActions: parseRecordArray(
+          narrationOperation.conciseSuggestedActionsJson as string,
+          "Narration operation concise actions",
+        ),
+      },
+      createdAt: narrationOperation.createdAt,
+      completedAt: narrationOperation.completedAt,
     })
     : null;
   const possessions = sqlite.prepare(`
@@ -945,6 +999,7 @@ function selectPublicState(
       entry: campaignPlayJournalEntrySchema.parse(JSON.parse(row.publicEntryJson) as unknown),
     })),
     narration: publicNarration,
+    narrationOperation: publicNarrationOperation,
   });
 }
 
