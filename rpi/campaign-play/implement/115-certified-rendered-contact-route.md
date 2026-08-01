@@ -1,0 +1,11 @@
+# Task 115 — Certified rendered contact route
+
+Status: implemented and product-validated on a disposable Campaign Play fixture.
+
+An exact current rendered question addressed to one visible actor can use `certified_contact`. The route skips Judge only when the choice handle, label, actor, location, authority, conditions, packet, source moment, world version, and runtime revision still match. The detail is limited to the code-owned `ask about/what/who/where/when/why/how/whether/if` grammar. GM, Rulebook settlement, actor scheduling, receipts, visibility, action-ready state, and receipt-keyed Narrator recovery remain authoritative. The same words entered as freeform, nonmatching questions, and stale or mismatched choices use full authority or fail closed.
+
+Player-action Narrator construction uses `reasoningMode: "bypass"`; Opening Narrator construction remains unchanged. The exact r51 packet passed the unchanged schema, compiler, and semantic guards in 8,095 ms with 256 output tokens, versus 74,522 ms with default reasoning. The bypass result retained the action's refusal, redirect, and visible actor reaction; prose details may vary within the existing packet contract.
+
+Rendered acceptance used disposable campaign `e5e41b51-d60f-44e2-90c6-202dae12a74f` at `http://localhost:3251/campaign/e5e41b51-d60f-44e2-90c6-202dae12a74f/play`. The current choice `Talk to Tomasso Gravelle: ask how to get guild authorization` was clicked once. The turn recorded `certified_contact`, Judge 0, one valid GM stage, one valid actor stage, one accepted Narrator attempt, three receipts, and world version 10 → 11. Proper scene and next controls appeared 26,123 ms after the click. SQLite `integrity_check` was `ok` and `foreign_key_check` was empty.
+
+Focused contracts/database/application/runtime tests passed 111/111; backend and frontend typechecks, shared build, and diff checks passed. The repository-wide typecheck still reports the pre-existing Forge-page hooks warning at `frontend/app/(non-game)/campaign/[id]/forge/page.tsx:105`; that file was not changed. Prompt and visible-copy review found no rewrite required. Frozen r51/r46/r47 evidence and user-owned `AGENTS.md`/`CLAUDE.md` were untouched.

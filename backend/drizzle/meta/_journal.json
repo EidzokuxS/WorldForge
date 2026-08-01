@@ -337,6 +337,13 @@
       "when": 1785643200000,
       "tag": "0047_campaign_play_lazy_actor_plans",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1785729600000,
+      "tag": "0048_campaign_play_certified_contact_results",
+      "breakpoints": true
     }
   ]
 }

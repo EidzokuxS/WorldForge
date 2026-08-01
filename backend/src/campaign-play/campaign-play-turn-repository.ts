@@ -78,7 +78,7 @@ export type CampaignPlayTurnModelSelection =
       gameMaster: CampaignPlayRequestedModel;
       actorReplanner: CampaignPlayRequestedModel;
       narrator: CampaignPlayRequestedModel;
-      routeKind?: "full_authority" | "certified_move" | "certified_wait";
+      routeKind?: "full_authority" | "certified_move" | "certified_wait" | "certified_contact";
     };
 
 export type CampaignPlayTurnAdmissionDocument =
@@ -333,7 +333,7 @@ export interface CampaignPlayModelAttemptTelemetry {
 
 export interface CampaignPlayTurnTelemetry {
   turnId: string;
-  routeKind: "full_authority" | "certified_move" | "certified_wait";
+  routeKind: "full_authority" | "certified_move" | "certified_wait" | "certified_contact";
   submittedAt: number;
   completedAt: number | null;
   totalLatencyMs: number | null;
@@ -568,7 +568,8 @@ function parseModelSelection(value: string, turnKind: TurnRow["turnKind"]): Camp
     isRequestedModel(record.gameMaster) && isRequestedModel(record.actorReplanner) &&
     isRequestedModel(record.narrator) &&
     (record.routeKind === undefined || record.routeKind === "full_authority" ||
-      record.routeKind === "certified_move" || record.routeKind === "certified_wait")
+      record.routeKind === "certified_move" || record.routeKind === "certified_wait" ||
+      record.routeKind === "certified_contact")
   ) {
     return record as unknown as CampaignPlayTurnModelSelection;
   }
@@ -587,7 +588,7 @@ function validateAdmissionDocument(document: CampaignPlayTurnAdmissionDocument):
 function resolveActionExecutionRoute(
   document: CampaignPlayTurnAdmissionDocument,
   selection: CampaignPlayTurnModelSelection,
-): "full_authority" | "certified_move" | "certified_wait" {
+): "full_authority" | "certified_move" | "certified_wait" | "certified_contact" {
   if (document.turnKind !== "player_action" || selection.turnKind !== "player_action") {
     return "full_authority";
   }
@@ -603,10 +604,12 @@ function resolveActionExecutionRoute(
   if (route.kind !== selectedKind) {
     throw new Error("route selection disagrees with admission authority");
   }
-  if (route.kind === "certified_move" || route.kind === "certified_wait") {
+  if (route.kind !== "full_authority") {
     const domain = route.kind === "certified_move"
       ? "campaign_play_certified_move"
-      : "campaign_play_certified_wait";
+      : route.kind === "certified_wait"
+        ? "campaign_play_certified_wait"
+        : "campaign_play_certified_contact";
     if (route.certificateHash !== hashCampaignPlayProjection({ domain, certificate: route.certificate })) {
       throw new Error("certified route hash is invalid");
     }
@@ -663,7 +666,8 @@ function resolveStageClaimRoute(
 ): StageClaimRoute {
   if (
     turnKind === "player_action" && selection.turnKind === "player_action" &&
-    (selection.routeKind === "certified_move" || selection.routeKind === "certified_wait") &&
+    (selection.routeKind === "certified_move" || selection.routeKind === "certified_wait" ||
+      selection.routeKind === "certified_contact") &&
     stage === "admitted"
   ) {
     return {
@@ -938,7 +942,7 @@ function nextStageAfterAcceptedModel(
   stage: CampaignPlayClaimableTurnStage,
   kind: CampaignPlayTurnModelStageKind,
   artifact: unknown,
-  authorityKind: "full_authority" | "certified_move" | "certified_wait",
+  authorityKind: "full_authority" | "certified_move" | "certified_wait" | "certified_contact",
   acceptedAuthorityHash: string | null,
 ): CampaignPlayClaimableTurnStage {
   if (turnKind === "opening" && stage === "admitted" && kind === "opening_planner") {
@@ -954,7 +958,8 @@ function nextStageAfterAcceptedModel(
   if (
     turnKind === "player_action" && kind === "game_master" &&
     ((authorityKind === "full_authority" && stage === "judged") ||
-      ((authorityKind === "certified_move" || authorityKind === "certified_wait") &&
+      ((authorityKind === "certified_move" || authorityKind === "certified_wait" ||
+        authorityKind === "certified_contact") &&
         stage === "admitted"))
   ) {
     const gameMaster = campaignPlayGameMasterArtifactSchema.safeParse(artifact);
@@ -964,12 +969,15 @@ function nextStageAfterAcceptedModel(
     if (acceptedAuthorityHash === null) {
       throw stageInvalid("Campaign Play Game Master artifact has no immutable authority.");
     }
-    if (authorityKind === "certified_move" || authorityKind === "certified_wait") {
+    if (authorityKind !== "full_authority") {
       const authorityMatches = authorityKind === "certified_move"
         ? "certifiedMoveHash" in gameMaster.data &&
           gameMaster.data.certifiedMoveHash === acceptedAuthorityHash
-        : "certifiedWaitHash" in gameMaster.data &&
-          gameMaster.data.certifiedWaitHash === acceptedAuthorityHash;
+        : authorityKind === "certified_wait"
+          ? "certifiedWaitHash" in gameMaster.data &&
+            gameMaster.data.certifiedWaitHash === acceptedAuthorityHash
+          : "certifiedContactHash" in gameMaster.data &&
+            gameMaster.data.certifiedContactHash === acceptedAuthorityHash;
       if (!authorityMatches) {
         throw stageInvalid("Campaign Play Game Master artifact references another certified route.");
       }
@@ -1163,7 +1171,7 @@ function telemetryStageForProgress(
   progress: CampaignPlayPublicProgress,
   workerEpoch: number,
   modelStages: readonly ModelStageRow[],
-  routeKind: "full_authority" | "certified_move" | "certified_wait",
+  routeKind: "full_authority" | "certified_move" | "certified_wait" | "certified_contact",
 ): CampaignPlayClaimableTurnStage {
   if (progress === "settling") return "planned";
   if (progress === "world_acting") return "primary_settled";
@@ -1695,9 +1703,11 @@ function advanceReplayStageForAcceptedModel(
           route.kind !== routeKind ||
           (routeKind === "certified_move"
             ? !("certifiedMoveHash" in artifact) || artifact.certifiedMoveHash !== route.certificateHash
-            : !("certifiedWaitHash" in artifact) || artifact.certifiedWaitHash !== route.certificateHash)
+            : routeKind === "certified_wait"
+              ? !("certifiedWaitHash" in artifact) || artifact.certifiedWaitHash !== route.certificateHash
+              : !("certifiedContactHash" in artifact) || artifact.certifiedContactHash !== route.certificateHash)
         ) {
-          throw new Error("game master certified move authority");
+          throw new Error("game master certified route authority");
         }
       } else if (!("judgeArtifactHash" in artifact)) {
         throw new Error("game master judge authority");
@@ -2119,7 +2129,7 @@ function loadRow(handle: CampaignPlayDatabaseHandle, row: TurnRow): LoadedCampai
           route.kind !== routeKind ||
           route.certificate.publicResult.disposition !== "deterministic"
         ) {
-          throw corrupt("Campaign Play terminal certified move authority is invalid.");
+          throw corrupt("Campaign Play terminal certified route authority is invalid.");
         }
         expectedTerminalReason = "action_resolved";
       } else {

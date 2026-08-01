@@ -533,7 +533,7 @@ export function createCampaignPlayApplication(
       narratorModel: stageModel(
         storyteller,
         narratorRequested,
-        dependencies.createModel(storyteller.provider, { role: "storyteller" }),
+        dependencies.createModel(storyteller.provider, { role: "storyteller", reasoningMode: "bypass" }),
       ),
     });
   };

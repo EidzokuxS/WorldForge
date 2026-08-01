@@ -149,6 +149,44 @@ function bootstrapPlayer(application: ReturnType<typeof createCampaignPlayApplic
   });
 }
 
+function applicationSettings() {
+  const provider = {
+    id: "provider-test",
+    name: "Provider Test",
+    baseUrl: "http://localhost:1234",
+    apiKey: "",
+    defaultModel: "test-model",
+  };
+  const role = (model: string) => ({
+    providerId: provider.id,
+    model,
+    temperature: 0,
+    maxTokens: 32_768,
+  });
+  return {
+    providers: [provider],
+    judge: role("judge-model"),
+    storyteller: role("storyteller-model"),
+    generator: role("generator-model"),
+    embedder: { providerId: provider.id, model: "embedder-model", enabled: false },
+    images: { providerId: provider.id, model: "image-model", stylePrompt: "", enabled: false },
+    research: { enabled: false, maxSearchSteps: 1, searchProvider: "duckduckgo" as const },
+    ui: { showRawReasoning: false },
+    observability: {
+      enabled: false,
+      dumpFullPrompts: false,
+      roles: {
+        judge: false,
+        storyteller: false,
+        oracle: false,
+        npcAgent: false,
+        reflection: false,
+        embedder: false,
+      },
+    },
+  };
+}
+
 function fakeOpeningRuntime(
   handle: CampaignPlayDatabaseHandle,
   options: {
@@ -326,6 +364,42 @@ describe("CampaignPlayApplication", () => {
         rounding: "ceil",
       },
     });
+  });
+
+  it("uses bypass reasoning for player-action Narrator and keeps Opening Narrator default", () => {
+    createAcceptedCampaign();
+    const createModel = vi.fn((
+      _config: unknown,
+      options: { role?: string; reasoningMode?: string } = {},
+    ) => ({}) as never);
+    const openingApplication = createCampaignPlayApplication({
+      now: () => 1_300,
+      loadSettings: () => applicationSettings() as never,
+      createModel: createModel as never,
+    });
+    expect(() => openingApplication.admitOpening(CAMPAIGN_ID, {
+      idempotencyKey: "opening-narrator-options",
+      expectedWorldVersion: openingApplication.loadState(CAMPAIGN_ID).worldVersion,
+      expectedRuntimeRevision: openingApplication.loadState(CAMPAIGN_ID).runtimeRevision,
+      startingConditions: { mode: "delegate" },
+    })).toThrow(expect.objectContaining({ publicCode: "character_required" }));
+    expect(createModel.mock.calls.filter(([, options]) => options?.role === "storyteller"))
+      .toEqual([[expect.anything(), { role: "storyteller" }]]);
+
+    bootstrapPlayer(openingApplication);
+    const state = openingApplication.loadState(CAMPAIGN_ID);
+    expect(() => openingApplication.admitTurn(CAMPAIGN_ID, {
+      idempotencyKey: "player-narrator-options",
+      expectedWorldVersion: state.worldVersion,
+      expectedRuntimeRevision: state.runtimeRevision,
+      source: "freeform",
+      text: "I ask the keeper about the signal.",
+    })).toThrow(expect.objectContaining({ publicCode: "opening_required" }));
+    expect(createModel.mock.calls.filter(([, options]) => options?.role === "storyteller"))
+      .toEqual([
+        [expect.anything(), { role: "storyteller" }],
+        [expect.anything(), { role: "storyteller", reasoningMode: "bypass" }],
+      ]);
   });
 
   it("initializes once and deduplicates same-key opening admission and its driver", async () => {

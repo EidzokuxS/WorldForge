@@ -1243,10 +1243,12 @@ function actionContextForTurn(
   }
   if (frame.executionRoute !== undefined) {
     const executionRoute = campaignPlayActionExecutionRouteSchema.parse(frame.executionRoute);
-    if (executionRoute.kind === "certified_move" || executionRoute.kind === "certified_wait") {
+    if (executionRoute.kind !== "full_authority") {
       const domain = executionRoute.kind === "certified_move"
         ? "campaign_play_certified_move"
-        : "campaign_play_certified_wait";
+        : executionRoute.kind === "certified_wait"
+          ? "campaign_play_certified_wait"
+          : "campaign_play_certified_contact";
       if (
         executionRoute.certificateHash !== hashCampaignPlayProjection({
           domain,

@@ -311,7 +311,11 @@ function openingPlannerFixture(actorCadenceMinutes = 1) {
   };
 }
 
-function narratorActionSelections(packet: CampaignPlayNarratorPacket, includeWait = false) {
+function narratorActionSelections(
+  packet: CampaignPlayNarratorPacket,
+  includeWait = false,
+  contactDetail = "the immediate situation",
+) {
   const latestVisiblePerformer = [...packet.consequences].reverse().find((consequence) =>
     consequence.performingActorHandle !== null && packet.visibleActors.some((actor) =>
       actor.handle === consequence.performingActorHandle))?.performingActorHandle ?? null;
@@ -338,17 +342,28 @@ function narratorActionSelections(packet: CampaignPlayNarratorPacket, includeWai
           ...orderedIndexes.filter((intentIndex) =>
             intentIndex !== requiredReplyIndex && intentIndex !== waitIndex),
         ].slice(0, CAMPAIGN_PLAY_LIMITS.suggestedActions);
-  return selectedIndexes.map((intentIndex) => ({
+  const contactIndex = contactDetail.startsWith("ask ")
+    ? requiredReplyIndex >= 0
+      ? requiredReplyIndex
+      : packet.availableIntents.findIndex((intent) => intent.kind === "contact")
+    : -1;
+  const finalIndexes = contactIndex < 0
+    ? selectedIndexes
+    : [contactIndex, ...selectedIndexes.filter((intentIndex) => intentIndex !== contactIndex)]
+      .slice(0, CAMPAIGN_PLAY_LIMITS.suggestedActions);
+  return finalIndexes.map((intentIndex) => ({
     intentIndex,
     detail: packet.availableIntents[intentIndex]?.kind === "move"
       ? null
       : packet.availableIntents[intentIndex]?.kind === "wait"
         ? null
-        : "the immediate situation",
+        : packet.availableIntents[intentIndex]?.kind === "contact"
+          ? contactDetail
+          : "the immediate situation",
   }));
 }
 
-function openingNarratorFixture(includeWait = false) {
+function openingNarratorFixture(includeWait = false, contactDetail = "the immediate situation") {
   const compiler = createCampaignPlayNarrator();
   return {
     compile: compiler.compile,
@@ -358,7 +373,7 @@ function openingNarratorFixture(includeWait = false) {
         narrationId: request.narrationId,
         packet,
         proposal: {
-          actionSelections: narratorActionSelections(packet, includeWait),
+          actionSelections: narratorActionSelections(packet, includeWait, contactDetail),
           beats: [
             { purpose: "orientation", observationIndexes: [], text: "Rain rings against the signal tower as Mara reaches Bell Island." },
             { purpose: "consequence", observationIndexes: packet.newObservations.map((_entry, index) => index), text: "Signal keepers brace the route gate while warning bells gather pace." },
@@ -372,7 +387,7 @@ function openingNarratorFixture(includeWait = false) {
   };
 }
 
-function playerNarratorFixture() {
+function playerNarratorFixture(contactDetail = "the immediate situation") {
   const compiler = createCampaignPlayNarrator();
   const evidence: CampaignPlayNarratorModelEvidence = {
     ...openingNarratorEvidence,
@@ -406,7 +421,7 @@ function playerNarratorFixture() {
         narrationId: request.narrationId,
         packet,
         proposal: {
-          actionSelections: narratorActionSelections(packet),
+            actionSelections: narratorActionSelections(packet, false, contactDetail),
           beats,
         },
         createdAt: request.createdAt,
@@ -418,7 +433,7 @@ function playerNarratorFixture() {
 
 async function createReadyCampaignWithOpening(
   actorCadenceMinutes = 1,
-  options: { includeWait?: boolean } = {},
+  options: { includeWait?: boolean; contactDetail?: string } = {},
 ) {
   acceptWorld();
   const handle = track(openCampaignPlayDatabase(CAMPAIGN_ID));
@@ -470,7 +485,7 @@ async function createReadyCampaignWithOpening(
       maximumCostMicros: 10_000,
     },
     openingPlanner: openingPlannerFixture(actorCadenceMinutes),
-    narrator: openingNarratorFixture(options.includeWait),
+    narrator: openingNarratorFixture(options.includeWait, options.contactDetail),
   });
   const admitted = opening.admitOpening({
     request: {
@@ -486,7 +501,8 @@ async function createReadyCampaignWithOpening(
     time.advance();
     await opening.runNextStage(admitted.turnId);
   }
-  expect(opening.loadTurn(admitted.turnId)).toMatchObject({ stage: "completed" });
+  const completedOpening = opening.loadTurn(admitted.turnId);
+  expect(completedOpening).toMatchObject({ stage: "completed" });
   return {
     handle,
     state: createCampaignPlayStateRepository(handle).loadState()!,
@@ -862,6 +878,34 @@ function renderedWaitSuggestion(handle: CampaignPlayDatabaseHandle): {
   return suggestion;
 }
 
+function renderedContactSuggestion(
+  handle: CampaignPlayDatabaseHandle,
+  requireQuestion = true,
+): {
+  choiceHandle: string;
+  label: string;
+} {
+  const row = handle.sqlite.prepare(`SELECT packet_json AS packetJson,
+      suggested_actions_json AS suggestedActionsJson
+    FROM campaign_play_narrations WHERE campaign_id = ? AND status = 'complete'
+    ORDER BY completed_at DESC LIMIT 1`).get(CAMPAIGN_ID) as {
+      packetJson: string;
+      suggestedActionsJson: string;
+  };
+  const packet = JSON.parse(row.packetJson) as CampaignPlayNarratorPacket;
+  const contacts = packet.availableIntents.filter((intent) => intent.kind === "contact");
+  if (contacts.length === 0) throw new Error("Opening fixture has no rendered contact intent.");
+  const suggestions = JSON.parse(row.suggestedActionsJson) as Array<{
+    choiceHandle: string;
+    label: string;
+  }>;
+  const suggestion = suggestions.find((candidate) => contacts.some((contact) =>
+    contact.handle === candidate.choiceHandle &&
+    (!requireQuestion || /^Talk to .+: ask /.test(candidate.label))));
+  if (!suggestion) throw new Error("Opening fixture did not render a matching contact intent.");
+  return suggestion;
+}
+
 function actorReplanProposalFromPrompt(prompt: string) {
   const startMarker = "ACTOR_FRAME\n";
   const endMarker = "\nEND_ACTOR_FRAME";
@@ -1105,6 +1149,151 @@ describe("Campaign Play player-action turn runtime", () => {
     await advanceUntilStage(runtime, time, admission.turnId, "completed");
     expect(countForTurn(handle, "campaign_play_turn_results", admission.turnId)).toBe(1);
     expect(countForTurn(handle, "campaign_play_receipts", admission.turnId)).toBeGreaterThan(0);
+  });
+
+  it("routes an exact rendered question to the visible actor without Judge and keeps freeform on Judge", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening(10_000, {
+      contactDetail: "ask about the immediate situation",
+    });
+    const time = fixedClock(1_945);
+    const judge = judgeFixture("deterministic");
+    const gameMaster = gameMasterFixture(1, true);
+    const narrator = playerNarratorFixture();
+    const runtime = turnRuntime(handle, time, judge, gameMaster, { narrator });
+    const contact = renderedContactSuggestion(handle);
+    const admission = runtime.admitAction({
+      request: {
+        idempotencyKey: "certified-rendered-contact",
+        expectedWorldVersion: state.authority.worldVersion,
+        expectedRuntimeRevision: state.authority.runtimeRevision,
+        source: "suggested",
+        choiceHandle: contact.choiceHandle,
+      },
+      submittedAt: 1_945,
+    });
+    const frame = loadCampaignPlayPlayerActionAdmissionFrame(runtime.loadTurn(admission.turnId)!);
+    expect(frame.executionRoute).toMatchObject({
+      kind: "certified_contact",
+      certificate: {
+        actionSchemaVersion: 1,
+        resolver: "game_master",
+        choiceHandle: contact.choiceHandle,
+        label: contact.label,
+        targetActorHandle: expect.any(String),
+        detail: "ask about the immediate situation",
+        ruling: {
+          normalizedIntent: {
+            kind: "contact",
+            method: "ask about the immediate situation",
+          },
+          elapsedBounds: { minimumMinutes: 1, maximumMinutes: 1 },
+        },
+      },
+      certificateHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(runtime.loadTurn(admission.turnId)).toMatchObject({
+      modelSelection: { routeKind: "certified_contact" },
+    });
+
+    time.advance();
+    await runtime.runNextStage(admission.turnId);
+    expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "planned" });
+    expect(judge.judge).toHaveBeenCalledTimes(0);
+    expect(gameMaster.plan).toHaveBeenCalledTimes(1);
+    expect(runtime.loadTelemetry(admission.turnId)).toMatchObject({
+      routeKind: "certified_contact",
+      modelCallCounts: { judge: 0, gameMaster: 1 },
+    });
+    await advanceUntilStage(runtime, time, admission.turnId, "completed");
+    await runtime.runNarration(admission.turnId);
+    expect(countForTurn(handle, "campaign_play_turn_results", admission.turnId)).toBe(1);
+    expect(countForTurn(handle, "campaign_play_receipts", admission.turnId)).toBeGreaterThan(0);
+
+    const nextState = createCampaignPlayStateRepository(handle).loadState()!;
+    const freeform = runtime.admitAction({
+      request: admissionRequest(nextState, "same-contact-as-freeform", contact.label),
+      submittedAt: time.clock.now(),
+    });
+    expect(loadCampaignPlayPlayerActionAdmissionFrame(runtime.loadTurn(freeform.turnId)!)
+      .executionRoute).toEqual({ kind: "full_authority" });
+    time.advance();
+    await runtime.runNextStage(freeform.turnId);
+    expect(judge.judge).toHaveBeenCalledTimes(1);
+  });
+
+  it("resumes a certified contact under a fresh epoch without Judge or duplicate settlement", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening(10_000, {
+      contactDetail: "ask about the immediate situation",
+    });
+    const time = fixedClock(1_947);
+    const judge = judgeFixture("deterministic");
+    const successful = gameMasterFixture();
+    let calls = 0;
+    const gameMaster = {
+      plan: vi.fn(async (request: Parameters<typeof successful.plan>[0]) => {
+        calls += 1;
+        if (calls === 1) throw new CampaignPlayGameMasterError("stage_timeout", null);
+        return successful.plan(request);
+      }),
+    };
+    const runtime = turnRuntime(handle, time, judge, gameMaster);
+    const contact = renderedContactSuggestion(handle);
+    const admission = runtime.admitAction({
+      request: {
+        idempotencyKey: "certified-contact-recovery",
+        expectedWorldVersion: state.authority.worldVersion,
+        expectedRuntimeRevision: state.authority.runtimeRevision,
+        source: "suggested",
+        choiceHandle: contact.choiceHandle,
+      },
+      submittedAt: 1_947,
+    });
+    time.advance();
+    await runtime.runNextStage(admission.turnId);
+    const interrupted = runtime.loadTurn(admission.turnId)!;
+    expect(interrupted).toMatchObject({
+      stage: "interrupted", interruptedStage: "admitted", workerEpoch: 1, resumeEligible: true,
+    });
+    expect(judge.judge).toHaveBeenCalledTimes(0);
+    time.advance();
+    await runtime.resumeInterruptedStage({
+      turnId: admission.turnId,
+      interruptedStage: "admitted",
+      observedEpoch: interrupted.workerEpoch,
+    });
+    expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "planned", workerEpoch: 2 });
+    expect(judge.judge).toHaveBeenCalledTimes(0);
+    expect(gameMaster.plan).toHaveBeenCalledTimes(2);
+    await advanceUntilStage(runtime, time, admission.turnId, "completed");
+    expect(countForTurn(handle, "campaign_play_turn_results", admission.turnId)).toBe(1);
+  });
+
+  it("keeps a nonmatching rendered contact detail on full authority", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening(10_000, {
+      contactDetail: "greet the keeper",
+    });
+    const time = fixedClock(1_948);
+    const judge = judgeFixture("deterministic");
+    const gameMaster = gameMasterFixture();
+    const runtime = turnRuntime(handle, time, judge, gameMaster);
+    const contact = renderedContactSuggestion(handle, false);
+    expect(contact.label).not.toMatch(/: ask /);
+    const admission = runtime.admitAction({
+      request: {
+        idempotencyKey: "nonmatching-rendered-contact",
+        expectedWorldVersion: state.authority.worldVersion,
+        expectedRuntimeRevision: state.authority.runtimeRevision,
+        source: "suggested",
+        choiceHandle: contact.choiceHandle,
+      },
+      submittedAt: 1_948,
+    });
+    expect(loadCampaignPlayPlayerActionAdmissionFrame(runtime.loadTurn(admission.turnId)!)
+      .executionRoute).toEqual({ kind: "full_authority" });
+    time.advance();
+    await runtime.runNextStage(admission.turnId);
+    expect(judge.judge).toHaveBeenCalledTimes(1);
+    expect(gameMaster.plan).toHaveBeenCalledTimes(0);
   });
 
   it("routes the exact current rendered move directly to Game Master and keeps freeform on Judge", async () => {
