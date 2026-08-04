@@ -441,6 +441,7 @@ export interface CampaignPlayState extends CampaignPlayPublicVersions {
   obligations: CampaignPlayVisibleObligation[];
   narration: CampaignPlayNarration | null;
   narrationOperation: CampaignPlayNarrationOperation | null;
+  utilityActions: CampaignPlaySuggestedAction[];
   consequences: CampaignPlayConsequence[];
   activeTurn: CampaignPlayPublicTurn | null;
   journalCursor: number;

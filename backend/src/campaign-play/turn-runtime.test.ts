@@ -1058,6 +1058,7 @@ describe("Campaign Play player-action turn runtime", () => {
     const narrator = playerNarratorFixture();
     const runtime = turnRuntime(handle, time, judge, gameMaster, { narrator });
     const wait = renderedWaitSuggestion(handle);
+    expect(createCampaignPlayReadModel(handle).loadState().utilityActions).toEqual([wait]);
     const admission = runtime.admitAction({
       request: {
         idempotencyKey: "certified-rendered-wait",
@@ -1149,6 +1150,30 @@ describe("Campaign Play player-action turn runtime", () => {
     await advanceUntilStage(runtime, time, admission.turnId, "completed");
     expect(countForTurn(handle, "campaign_play_turn_results", admission.turnId)).toBe(1);
     expect(countForTurn(handle, "campaign_play_receipts", admission.turnId)).toBeGreaterThan(0);
+  });
+
+  it("rejects a stale utility wait handle before any provider call", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening(10_000, { includeWait: true });
+    const runtimeEventsBefore = countForCampaign(handle, "campaign_play_runtime_events");
+    const judge = judgeFixture("deterministic");
+    const gameMaster = gameMasterFixture();
+    const runtime = turnRuntime(handle, fixedClock(1_950), judge, gameMaster);
+    const currentWait = renderedWaitSuggestion(handle);
+    expect(currentWait.label).toBe("Wait 10 minutes");
+    expect(() => runtime.admitAction({
+      request: {
+        idempotencyKey: "stale-utility-wait",
+        expectedWorldVersion: state.authority.worldVersion,
+        expectedRuntimeRevision: state.authority.runtimeRevision,
+        source: "suggested",
+        choiceHandle: "choice_ffffffffffffffffffffffff",
+      },
+      submittedAt: 1_950,
+    })).toThrowError(expect.objectContaining({ code: "turn_request_invalid" }));
+    expect(judge.judge).toHaveBeenCalledTimes(0);
+    expect(gameMaster.plan).toHaveBeenCalledTimes(0);
+    expect(countForCampaign(handle, "campaign_play_turns")).toBe(1);
+    expect(countForCampaign(handle, "campaign_play_runtime_events")).toBe(runtimeEventsBefore);
   });
 
   it("routes an exact rendered question to the visible actor without Judge and keeps freeform on Judge", async () => {

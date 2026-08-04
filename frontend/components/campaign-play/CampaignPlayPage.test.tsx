@@ -86,6 +86,7 @@ function state(
       createdAt: 90,
     } : null,
     narrationOperation: null,
+    utilityActions: [],
     consequences: [],
     activeTurn,
     journalCursor: 0,

@@ -37,6 +37,7 @@ import {
   type CampaignPlayResearchPlayerRequest,
   type CampaignPlayResumeTurnRequest,
   type CampaignPlaySseEvent,
+  type CampaignPlaySuggestedAction,
   type CampaignPlayState,
   type CampaignPlayTurnAdmissionRequest,
   type CampaignPlayTurnAdmissionResponse,
@@ -412,6 +413,18 @@ function parseJournalEntry(value: unknown): CampaignPlayJournalEntry | null {
   return asParsed<CampaignPlayJournalEntry>(value);
 }
 
+function parseSuggestedAction(value: unknown): CampaignPlaySuggestedAction | null {
+  if (
+    !isObject(value) ||
+    !hasExactKeys(value, ["choiceHandle", "label"]) ||
+    !isHandle(value.choiceHandle) ||
+    !isLabel(value.label)
+  ) {
+    return null;
+  }
+  return asParsed<CampaignPlaySuggestedAction>(value);
+}
+
 function parseNarration(value: unknown): CampaignPlayNarration | null {
   if (
     !isObject(value) ||
@@ -684,6 +697,7 @@ function parseState(value: unknown): CampaignPlayState | null {
       "obligations",
       "narration",
       "narrationOperation",
+      "utilityActions",
       "consequences",
       "activeTurn",
       "journalCursor",
@@ -736,6 +750,11 @@ function parseState(value: unknown): CampaignPlayState | null {
   const narrationOperation = value.narrationOperation === null
     ? null
     : parseNarrationOperation(value.narrationOperation);
+  const utilityActions = parseArray(
+    value.utilityActions,
+    parseSuggestedAction,
+    1,
+  );
   const consequences = parseArray(
     value.consequences,
     parseConsequence,
@@ -753,10 +772,15 @@ function parseState(value: unknown): CampaignPlayState | null {
     obligations === null ||
     (narration === null && value.narration !== null) ||
     (narrationOperation === null && value.narrationOperation !== null) ||
+    utilityActions === null ||
     consequences === null ||
     (activeTurn === null && value.activeTurn !== null) ||
-    !isUnique(openingOptions.map((option) => option.locationHandle))
+    !isUnique(openingOptions.map((option) => option.locationHandle)) ||
+    !isUnique(utilityActions.map((action) => action.choiceHandle))
   ) {
+    return null;
+  }
+  if ((value.phase !== "ready" || activeTurn !== null) && utilityActions.length > 0) {
     return null;
   }
   const noLiveScene = currentLocation === null && narration === null && narrationOperation === null &&

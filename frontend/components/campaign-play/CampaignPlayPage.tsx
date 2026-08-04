@@ -795,6 +795,7 @@ export function CampaignPlayPage({
           statusSlot={activeTurn !== null || followsCurrentCampaign ? turnProgress : undefined}
           suggestedActions={campaignState.narration?.suggestedActions ??
             campaignState.narrationOperation?.conciseResult.suggestedActions ?? []}
+          utilityActions={campaignState.utilityActions}
           suggestionsHeadingRef={suggestionsHeadingRef}
           textareaRef={actionTextareaRef}
         />

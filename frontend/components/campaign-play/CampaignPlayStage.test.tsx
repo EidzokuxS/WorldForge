@@ -32,6 +32,7 @@ function readyState(
       createdAt: 100,
     },
     narrationOperation: null,
+    utilityActions: [],
     consequences: [],
     activeTurn: null,
     journalCursor: 0,

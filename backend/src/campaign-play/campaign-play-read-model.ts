@@ -267,6 +267,7 @@ export function createCampaignPlayReadModel(
         obligations: projection.obligations,
         narration: projection.narration,
         narrationOperation: projection.narrationOperation,
+        utilityActions: projection.utilityActions,
         consequences: projection.consequences,
         activeTurn,
         journalCursor: journal.length,

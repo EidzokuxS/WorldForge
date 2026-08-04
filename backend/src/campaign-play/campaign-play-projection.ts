@@ -2,6 +2,8 @@ import crypto from "node:crypto";
 import type {
   CampaignPlayConsequence,
   CampaignPlayJournalEntry,
+  CampaignPlayNarratorPacket,
+  CampaignPlaySuggestedAction,
   CampaignPlayVisibleActor,
   CampaignPlayVisibleLocation,
   CampaignPlayVisibleObligation,
@@ -10,6 +12,7 @@ import type {
   CampaignPlayVisibleRoute,
   CampaignWorldReview,
 } from "@worldforge/shared";
+import { CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES } from "@worldforge/shared";
 import {
   serializeCampaignWorldContent,
 } from "../campaign-world/world-snapshot.js";
@@ -226,12 +229,27 @@ export interface CampaignPlayPublicProjectionInput {
   journal: readonly CampaignPlayPublicJournalEntry[];
   narration: CampaignPlayProjectionRecord | null;
   narrationOperation?: CampaignPlayProjectionRecord | null;
+  utilityActions?: readonly CampaignPlaySuggestedAction[];
 }
 
 export interface CampaignPlayPublicJournalEntry {
   observationId: string;
   worldTimeMinutes: number;
   entry: CampaignPlayJournalEntry;
+}
+
+export function deriveCampaignPlayUtilityActions(
+  packet: Pick<CampaignPlayNarratorPacket, "availableIntents"> | null,
+  enabled = true,
+): CampaignPlaySuggestedAction[] {
+  if (!enabled || packet === null) return [];
+  const matches = packet.availableIntents.filter((intent) =>
+    intent.kind === "wait" &&
+    intent.targets.length === 0 &&
+    intent.label === `Wait ${CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES} minutes`);
+  return matches.length === 1
+    ? [{ choiceHandle: matches[0]!.handle, label: matches[0]!.label }]
+    : [];
 }
 
 function compareText(left: string, right: string): number {
@@ -920,5 +938,9 @@ export function projectCampaignPlayPublicState(
       .map((row) => publicJournalEntry(row.entry)),
     narration: input.narration,
     narrationOperation: input.narrationOperation ?? null,
+    utilityActions: (input.utilityActions ?? []).map((action) => ({
+      choiceHandle: action.choiceHandle,
+      label: action.label,
+    })),
   });
 }

@@ -11,6 +11,7 @@ export interface ActionDockProps {
   pendingAdmission: boolean;
   statusSlot?: ReactNode;
   suggestedActions: CampaignPlaySuggestedAction[];
+  utilityActions: CampaignPlaySuggestedAction[];
   suggestionsHeadingRef: RefObject<HTMLHeadingElement | null>;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   onDraftChange: (value: string) => void;
@@ -29,6 +30,7 @@ export function ActionDock({
   pendingAdmission,
   statusSlot,
   suggestedActions,
+  utilityActions,
   suggestionsHeadingRef,
   textareaRef,
   onDraftChange,
@@ -61,6 +63,22 @@ export function ActionDock({
               </button>
             ))}
           </div>
+        </div>
+      ) : null}
+      {utilityActions.length > 0 ? (
+        <div className="campaign-play-utility-actions">
+          {utilityActions.map((action) => (
+            <button
+              className="campaign-play-utility-action"
+              disabled={inputLocked}
+              key={action.choiceHandle}
+              onClick={() => onSubmitSuggested(action.choiceHandle)}
+              type="button"
+            >
+              <span aria-hidden="true">◷</span>
+              <strong>{action.label}</strong>
+            </button>
+          ))}
         </div>
       ) : null}
       <div className="campaign-play-action-shell">

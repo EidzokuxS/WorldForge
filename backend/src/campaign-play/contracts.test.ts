@@ -318,6 +318,7 @@ function stateFixture(): CampaignPlayState {
     obligations: packet.obligations,
     narration: narrationFixture(),
     narrationOperation: null,
+    utilityActions: [],
     consequences: packet.consequences,
     activeTurn: {
       turnId: packet.turnId,
@@ -913,6 +914,25 @@ describe("Campaign Play shared public contracts", () => {
     for (const state of states) {
       expect(campaignPlayStateSchema.safeParse(state).success).toBe(true);
     }
+    const utilityReady = {
+      ...active,
+      phase: "ready" as const,
+      activeTurn: null,
+      utilityActions: [{ choiceHandle: "utility_wait", label: "Wait 10 minutes" }],
+    };
+    expect(campaignPlayStateSchema.safeParse(utilityReady).success).toBe(true);
+    expect(campaignPlayStateSchema.safeParse({
+      ...utilityReady,
+      phase: "turn_active" as const,
+      activeTurn: active.activeTurn,
+    }).success).toBe(false);
+    expect(campaignPlayStateSchema.safeParse({
+      ...utilityReady,
+      utilityActions: [
+        ...utilityReady.utilityActions,
+        { choiceHandle: "utility_wait", label: "Wait 10 minutes" },
+      ],
+    }).success).toBe(false);
     expect(campaignPlayStateSchema.safeParse({
       ...active,
       phase: "ready",

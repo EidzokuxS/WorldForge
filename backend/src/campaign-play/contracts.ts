@@ -1112,6 +1112,7 @@ const campaignPlayStateBaseSchema = campaignPlayPublicVersionsBaseSchema.extend(
     .max(CAMPAIGN_PLAY_LIMITS.visibleObligations),
   narration: campaignPlayNarrationSchema.nullable(),
   narrationOperation: campaignPlayNarrationOperationSchema.nullable(),
+  utilityActions: z.array(campaignPlaySuggestedActionSchema).max(1),
   consequences: z.array(campaignPlayConsequenceSchema)
     .max(CAMPAIGN_PLAY_LIMITS.newObservations),
   activeTurn: campaignPlayPublicTurnSchema.nullable(),
@@ -1140,6 +1141,19 @@ export const campaignPlayStateSchema: z.ZodType<CampaignPlayState> =
       ["obligations"],
       "Visible obligation handles",
     );
+    addDuplicateIssue(
+      state.utilityActions.map((action) => action.choiceHandle),
+      context,
+      ["utilityActions"],
+      "Utility action handles",
+    );
+    if ((state.phase !== "ready" || state.activeTurn !== null) && state.utilityActions.length > 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["utilityActions"],
+        message: "Utility actions belong only to a ready state without an active turn.",
+      });
+    }
     if (
       (state.phase === "opening_required") !== (state.openingOptions.length > 0)
     ) {

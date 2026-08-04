@@ -21,6 +21,7 @@ function Harness({ onFreeform, onSuggested }: {
     onSubmitSuggested={onSuggested}
     pendingAdmission={false}
     suggestedActions={[{ choiceHandle: "choice-opaque", label: "Follow the lantern" }]}
+    utilityActions={[]}
     suggestionsHeadingRef={createRef()}
     textareaRef={createRef()}
   />;
@@ -60,12 +61,44 @@ describe("ActionDock", () => {
       onSubmitSuggested={vi.fn()}
       pendingAdmission
       suggestedActions={[{ choiceHandle: "choice-1", label: "Wait here" }]}
+      utilityActions={[{ choiceHandle: "utility-wait", label: "Wait 10 minutes" }]}
       suggestionsHeadingRef={createRef()}
       textareaRef={createRef()}
     />);
     expect(screen.getByRole("button", { name: "Wait here" })).toBeDisabled();
     expect(screen.getByLabelText("Your action")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Sending" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Wait 10 minutes" })).toBeDisabled();
     expect(container.firstElementChild).not.toHaveAttribute("aria-busy");
+  });
+
+  it("renders the utility wait outside the lettered story choices and submits its opaque handle", async () => {
+    const user = userEvent.setup();
+    const onSuggested = vi.fn();
+    render(<ActionDock
+      draft=""
+      inputLocked={false}
+      journalOpen={false}
+      journalTriggerRef={createRef()}
+      onDraftChange={vi.fn()}
+      onJournalOpen={vi.fn()}
+      onSubmitFreeform={vi.fn()}
+      onSubmitSuggested={onSuggested}
+      pendingAdmission={false}
+      suggestedActions={[
+        { choiceHandle: "story-a", label: "Follow the lantern" },
+        { choiceHandle: "story-b", label: "Read the map" },
+      ]}
+      utilityActions={[{ choiceHandle: "utility-wait", label: "Wait 10 minutes" }]}
+      suggestionsHeadingRef={createRef()}
+      textareaRef={createRef()}
+    />);
+    const story = screen.getByRole("button", { name: /Follow the lantern/ });
+    const utility = screen.getByRole("button", { name: "Wait 10 minutes" });
+    expect(story.parentElement?.parentElement).toHaveClass("campaign-play-choices");
+    expect(utility.parentElement).toHaveClass("campaign-play-utility-actions");
+    expect(utility).not.toHaveTextContent("a.");
+    await user.click(utility);
+    expect(onSuggested).toHaveBeenCalledWith("utility-wait");
   });
 });

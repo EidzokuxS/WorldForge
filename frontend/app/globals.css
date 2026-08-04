@@ -4941,6 +4941,7 @@
 .campaign-play-arrival button,
 .campaign-play-interruption button,
 .campaign-play-choices button,
+.campaign-play-utility-action,
 .campaign-play-action-shell button,
 .campaign-play-journal button,
 .campaign-play-guard a {
@@ -4964,6 +4965,7 @@
 .campaign-play-arrival button:hover:not(:disabled),
 .campaign-play-interruption button:hover:not(:disabled),
 .campaign-play-choices button:hover:not(:disabled),
+.campaign-play-utility-action:hover:not(:disabled),
 .campaign-play-action-shell button:hover:not(:disabled),
 .campaign-play-journal button:hover:not(:disabled),
 .campaign-play-guard a:hover {
@@ -4977,6 +4979,7 @@
 .campaign-play-arrival button:disabled,
 .campaign-play-interruption button:disabled,
 .campaign-play-choices button:disabled,
+.campaign-play-utility-action:disabled,
 .campaign-play-action-shell button:disabled {
   cursor: default;
   opacity: 0.42;
@@ -5218,6 +5221,33 @@
   font-weight: 500;
   letter-spacing: 0;
   line-height: 1.4;
+}
+
+.campaign-play-utility-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.campaign-play-utility-action {
+  gap: 9px;
+  min-height: 44px;
+  background: rgba(8, 8, 10, 0.72);
+  text-align: left;
+  backdrop-filter: blur(18px);
+}
+
+.campaign-play-utility-action > span {
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  font-size: 14px;
+}
+
+.campaign-play-utility-action > strong {
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
 }
 
 .campaign-play-action-shell {

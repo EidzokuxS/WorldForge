@@ -45,6 +45,7 @@ import type { CampaignPlayDatabaseHandle } from "./campaign-play-database.js";
 import {
   canonicalizeCampaignPlayProjection,
   deriveCampaignPlayPublicHandle,
+  deriveCampaignPlayUtilityActions,
   hashCampaignPlayProjection,
   type CampaignPlayProjectionRecord,
 } from "./campaign-play-projection.js";
@@ -173,6 +174,7 @@ const publicMomentSchema = z.object({
   displayText: z.string().min(1).max(CAMPAIGN_PLAY_LIMITS.narrationText),
   suggestedActions: z.array(campaignPlaySuggestedActionSchema)
     .max(CAMPAIGN_PLAY_LIMITS.suggestedActions),
+  utilityActions: z.array(campaignPlaySuggestedActionSchema).max(1),
   createdAt: z.number().int().safe().nonnegative(),
 }).strict();
 
@@ -203,7 +205,8 @@ const playerActionAdmissionFrameSchema = z.object({
   judgeInput: judgeInputSchema,
   visibleFacts: z.array(campaignPlayJudgeVisibleFactSchema).max(40),
   handleBindings: z.array(handleBindingSchema).max(40),
-  choiceBindings: z.array(choiceBindingSchema).max(CAMPAIGN_PLAY_LIMITS.suggestedActions),
+  choiceBindings: z.array(choiceBindingSchema)
+    .max(CAMPAIGN_PLAY_LIMITS.suggestedActions + 1),
   authority: z.object({
     authorizedRefs: z.array(campaignPlayEntityRefSchema).max(40),
     witnessActorIds: z.array(line(CAMPAIGN_PLAY_LIMITS.id)).max(8),
@@ -633,6 +636,7 @@ function loadCompletedPublicMoment(
         turnId: row.sourceTurnId,
         displayText: scene.displayText,
         suggestedActions: JSON.parse(scene.suggestedActionsJson) as unknown,
+        utilityActions: deriveCampaignPlayUtilityActions(packet),
         createdAt: scene.createdAt,
       });
     } else if (concise) {
@@ -642,6 +646,7 @@ function loadCompletedPublicMoment(
         turnId: row.sourceTurnId,
         displayText: concise.displayText,
         suggestedActions: JSON.parse(concise.suggestedActionsJson) as unknown,
+        utilityActions: deriveCampaignPlayUtilityActions(packet),
         createdAt: concise.createdAt,
       });
     } else {
@@ -872,7 +877,13 @@ function buildPublicAuthority(input: {
       ? `You owe ${obligation.counterpartyName}: ${obligation.outstandingAmount} ${obligation.unitKey}`
       : `${obligation.counterpartyName} owes you: ${obligation.outstandingAmount} ${obligation.unitKey}`,
   }));
-  const choiceBindings = moment.suggestedActions.map((suggestion) => {
+  const actions = [
+    ...moment.suggestedActions,
+    ...moment.utilityActions.filter((utility) =>
+      !moment.suggestedActions.some((suggestion) =>
+        suggestion.choiceHandle === utility.choiceHandle)),
+  ];
+  const choiceBindings = actions.map((suggestion) => {
     const available = packet.availableIntents.find((intent) =>
       intent.handle === suggestion.choiceHandle);
     if (!available) {
@@ -966,7 +977,10 @@ function resolveJudgeInput(
       choiceHandle: null,
     });
   }
-  const suggestion = moment.suggestedActions.find((action) =>
+  const suggestion = [
+    ...moment.suggestedActions,
+    ...moment.utilityActions,
+  ].find((action) =>
     action.choiceHandle === request.choiceHandle);
   const available = packet.availableIntents.find((intent) =>
     intent.handle === request.choiceHandle);
@@ -1159,7 +1173,7 @@ function certifyPureRenderedWait(input: {
 }): CampaignPlayCertifiedWait | null {
   const { judgeInput, packet, moment, publicAuthority } = input;
   if (judgeInput.source !== "suggested" || judgeInput.choiceHandle === null) return null;
-  const suggestion = moment.suggestedActions.find((candidate) =>
+  const suggestion = moment.utilityActions.find((candidate) =>
     candidate.choiceHandle === judgeInput.choiceHandle);
   const intent = packet.availableIntents.find((candidate) =>
     candidate.handle === judgeInput.choiceHandle);
@@ -1443,6 +1457,18 @@ function buildAdmissionFrame(input: {
     publicAuthority,
     judgeInput,
   }) : null;
+  const submittedChoiceHandle = input.request.source === "suggested"
+    ? input.request.choiceHandle
+    : null;
+  const utilitySubmission = submittedChoiceHandle !== null &&
+    moment.moment.utilityActions.some((action) =>
+      action.choiceHandle === submittedChoiceHandle);
+  if (utilitySubmission && waitCertificate === null) {
+    throw new CampaignPlayTurnRuntimeError(
+      "turn_request_invalid",
+      "Campaign Play utility action no longer matches the current wait certificate.",
+    );
+  }
   const contactCertificate = moveCertificate === null && waitCertificate === null
     ? certifyPureRenderedContact({
       campaignId: baseFrame.campaignId,

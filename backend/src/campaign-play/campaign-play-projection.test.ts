@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { calculateCampaignWorldContentHash } from "../campaign-world/world-snapshot.js";
 import {
   canonicalizeCampaignPlayProjection,
+  deriveCampaignPlayUtilityActions,
   deriveCampaignPlayObligationId,
   deriveCampaignPlayPossessionId,
   deriveCampaignPlayPossessionKey,
@@ -204,6 +205,34 @@ function initialMechanicalInput(review: CampaignWorldReview): CampaignPlayMechan
 }
 
 describe("Campaign Play canonical projections", () => {
+  it("derives one canonical wait utility from exactly one zero-target wait intent", () => {
+    const packet = {
+      availableIntents: [
+        { handle: "move-a", label: "Go onward", kind: "move" as const, targets: [] },
+        { handle: "wait-a", label: "Wait 10 minutes", kind: "wait" as const, targets: [] },
+      ],
+    };
+    expect(deriveCampaignPlayUtilityActions(packet)).toEqual([{
+      choiceHandle: "wait-a",
+      label: "Wait 10 minutes",
+    }]);
+    expect(deriveCampaignPlayUtilityActions({
+      availableIntents: [
+        ...packet.availableIntents,
+        { handle: "wait-b", label: "Wait 10 minutes", kind: "wait" as const, targets: [] },
+      ],
+    })).toEqual([]);
+    expect(deriveCampaignPlayUtilityActions({
+      availableIntents: [{
+        handle: "wait-targeted",
+        label: "Wait 10 minutes",
+        kind: "wait" as const,
+        targets: [{ handle: "actor-a", kind: "actor" as const }],
+      }],
+    })).toEqual([]);
+    expect(deriveCampaignPlayUtilityActions(packet, false)).toEqual([]);
+  });
+
   it("derives stable possession identity from a normalized visible name", () => {
     const key = deriveCampaignPlayPossessionKey("  Brass\u00a0Signal   Key  ");
     expect(key).toBe("brass signal key");

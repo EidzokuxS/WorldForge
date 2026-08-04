@@ -75,6 +75,7 @@ const state = {
   obligations: [],
   narration: null,
   narrationOperation: null,
+  utilityActions: [],
   consequences: [],
   activeTurn: null,
   journalCursor: 0,
@@ -223,6 +224,49 @@ describe("Campaign Play API", () => {
     })));
 
     await expect(loadCampaignPlayState("campaign-one")).resolves.toMatchObject({ obligations });
+  });
+
+  it("preserves the opaque utility wait action on a ready public state", async () => {
+    const utilityActions = [{ choiceHandle: "opaque-wait", label: "Wait 10 minutes" }];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+      ...state,
+      phase: "ready",
+      character: {
+        name: "Mara",
+        monogram: "M",
+        descriptor: "Signal cartographer",
+        accent: "ember",
+      },
+      currentLocation: {
+        handle: "location-yard",
+        name: "Signal Yard",
+        description: "Rain crosses the rails.",
+      },
+      narration: {
+        narrationId: "narration-one",
+        turnId: "opening-one",
+        beats: [{ beatId: "beat-one", text: "The yard waits under the rain." }],
+        displayText: "The yard waits under the rain.",
+        suggestedActions: [],
+        effects: [],
+        createdAt: 10,
+      },
+      utilityActions,
+    })));
+
+    await expect(loadCampaignPlayState("campaign-one")).resolves.toMatchObject({
+      utilityActions,
+    });
+  });
+
+  it("rejects utility actions outside a ready state", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+      ...state,
+      utilityActions: [{ choiceHandle: "opaque-wait", label: "Wait 10 minutes" }],
+    })));
+
+    await expect(loadCampaignPlayState("campaign-one"))
+      .rejects.toMatchObject({ code: "service_unavailable", invalidResponse: true });
   });
 
   it("uses exact campaign-scoped endpoints, JSON bodies, and admission status contracts", async () => {

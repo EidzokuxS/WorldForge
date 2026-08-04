@@ -13,6 +13,7 @@ import type { CampaignPlayDatabaseHandle } from "./campaign-play-database.js";
 import {
   canonicalizeCampaignPlayProjection,
   hashCampaignPlayProjection,
+  deriveCampaignPlayUtilityActions,
   projectAcceptedTopologyEligibility,
   projectCampaignPlayMechanicalTruth,
   projectCampaignPlayProtectedAudit,
@@ -841,6 +842,10 @@ function selectPublicState(
       JSON.parse(packetRow.packetJson) as unknown,
     )
     : null;
+  const utilityActions = deriveCampaignPlayUtilityActions(
+    packet,
+    state.setupPhase === "ready" && activeTurn(sqlite, campaignId) === null,
+  );
   const journalRows = sqlite.prepare(`
     SELECT observation_id AS observationId, world_time_minutes AS worldTimeMinutes,
       public_entry_json AS publicEntryJson
@@ -1000,6 +1005,7 @@ function selectPublicState(
     })),
     narration: publicNarration,
     narrationOperation: publicNarrationOperation,
+    utilityActions,
   });
 }
 

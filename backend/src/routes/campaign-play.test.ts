@@ -67,6 +67,7 @@ function stateFixture(): CampaignPlayState {
     obligations: [],
     narration: null,
     narrationOperation: null,
+    utilityActions: [],
     consequences: [],
     activeTurn: null,
     journalCursor: 0,
