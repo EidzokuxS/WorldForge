@@ -1864,11 +1864,39 @@ describe("Campaign Play Game Master", () => {
         effects: [{ kind: "move_actor", actorHandle: null, exposure: { mode: "protected" } }],
       },
     )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+    expect(() => createCampaignPlayGameMaster().compile(
+      frame(),
+      moveRuling,
+      resolution,
+      null,
+      {
+        elapsedMinutes: 5,
+        effects: [
+          { kind: "move_actor", actorHandle: null },
+          {
+            kind: "enter_local_scene",
+            name: "South Harbor Market Interior",
+            description: "A narrow market interior with stacked crates and damp stone.",
+          },
+          {
+            kind: "record_world_event",
+            eventClass: "scene",
+            performingActorHandle: null,
+            routeAccessClaims: [],
+            summary: "The player reaches the market interior.",
+            affectedHandles: ["you", "south"],
+          },
+        ],
+      },
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
       'PLAYER_MOVEMENT={"actorHandle":"you","routeHandle":"passage","fromLocationHandle":"here","toLocationHandle":"south","travelCost":5,"initialRouteState":"open"}',
     );
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
-      "For a pure move, elapsedMinutes must equal travelCost exactly",
+      "For a pure move ruling or resolution, elapsedMinutes must equal travelCost exactly; do not emit enter_local_scene",
+    );
+    expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
+      "An actorless record_world_event remains permitted",
     );
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
       'return exactly one {"kind":"move_actor","actorHandle":null} effect for the player',
