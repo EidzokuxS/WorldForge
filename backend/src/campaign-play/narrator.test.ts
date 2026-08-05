@@ -477,6 +477,7 @@ describe("Campaign Play narrator", () => {
 
     expect(result.narration.suggestedActions.map((action) => action.choiceHandle))
       .toEqual(["choice_public_4", "choice_public_1", "choice_public_3", "choice_public_0"]);
+    narratorWarn.mockClear();
     expect(() => createCampaignPlayNarrator().compile({
       narrationId: "narration-duplicate-actions",
       packet,
@@ -488,7 +489,21 @@ describe("Campaign Play narrator", () => {
         })),
       },
       createdAt: 1_000,
-    })).toThrow();
+    })).toThrowError(expect.objectContaining({
+      code: "narration_invalid",
+      modelEvidence: null,
+    }));
+    expect(narratorWarn).toHaveBeenCalledOnce();
+    expect(narratorWarn).toHaveBeenCalledWith(
+      "narrator_packet_validation_mismatch",
+      expect.objectContaining({
+        diagnostic: "narrator_packet_validation_mismatch",
+        failedChecks: expect.arrayContaining([{
+          check: "duplicate_selected_intent_indexes",
+          indexes: [0],
+        }]),
+      }),
+    );
   });
 
   it("reserves the first action for replying to the visible actor who just acted", async () => {
@@ -618,6 +633,12 @@ describe("Campaign Play narrator", () => {
       ],
     }).success).toBe(false);
     expect(String(options.prompt)).toContain("REQUIRED_REPLY_INTENT_INDEX=1");
+    expect(String(options.prompt)).toContain(
+      "Put that exact index only in actionSelections[0] so the player can answer, accept, refuse, or continue the exchange.",
+    );
+    expect(String(options.prompt)).toContain(
+      "Do not select that index again; every later actionSelection must use a different intentIndex.",
+    );
     expect(String(options.prompt)).toContain(
       "the beat carrying that observationIndex must name that actor",
     );
