@@ -416,26 +416,121 @@ function assertProposalForPacket(
   const coveredObservationIndexes = proposal.beats
     .flatMap((beat) => beat.observationIndexes);
   const expectedObservationIndexes = packet.newObservations.map((_entry, index) => index);
+  const duplicateSelectedIntentIndexes = [...new Set(
+    selectedIndexes.filter((index, indexPosition) =>
+      selectedIndexes.indexOf(index) !== indexPosition),
+  )].sort((left, right) => left - right);
+  const selectedIntentIndexesOutOfRange = [...new Set(
+    selectedIndexes.filter((index) => packet.availableIntents[index] === undefined),
+  )].sort((left, right) => left - right);
+  const duplicateCoveredObservationIndexes = [...new Set(
+    coveredObservationIndexes.filter((index, indexPosition) =>
+      coveredObservationIndexes.indexOf(index) !== indexPosition),
+  )].sort((left, right) => left - right);
+  const coveredObservationIndexesOutOfRange = [...new Set(
+    coveredObservationIndexes.filter((index) => packet.newObservations[index] === undefined),
+  )].sort((left, right) => left - right);
+  const missingExpectedObservationIndexes = expectedObservationIndexes.filter((index) =>
+    !coveredObservationIndexes.includes(index));
+  const detailNullabilityViolations = proposal.actionSelections.flatMap((selection, actionSelectionIndex) => {
+    const intent = packet.availableIntents[selection.intentIndex];
+    const violates = intent?.kind === "move" || intent?.kind === "wait"
+      ? selection.detail !== null
+      : selection.detail === null;
+    return violates
+      ? [{
+          actionSelectionIndex,
+          intentIndex: selection.intentIndex,
+          intentKind: intent?.kind ?? null,
+          detailIsNull: selection.detail === null,
+        }]
+      : [];
+  });
+  const failedChecks: Array<Record<string, unknown>> = [];
+  if (proposal.actionSelections.length !== expectedActionCount) {
+    failedChecks.push({
+      check: "selected_action_count",
+      actual: proposal.actionSelections.length,
+      expected: expectedActionCount,
+    });
+  }
+  if (duplicateSelectedIntentIndexes.length > 0) {
+    failedChecks.push({
+      check: "duplicate_selected_intent_indexes",
+      indexes: duplicateSelectedIntentIndexes,
+    });
+  }
+  if (selectedIntentIndexesOutOfRange.length > 0) {
+    failedChecks.push({
+      check: "selected_intent_indexes_out_of_range",
+      indexes: selectedIntentIndexesOutOfRange,
+      availableIntentCount: packet.availableIntents.length,
+    });
+  }
+  if (requiredIntentIndex !== null && selectedIndexes[0] !== requiredIntentIndex) {
+    failedChecks.push({
+      check: "required_reply_intent_mismatch",
+      requiredIntentIndex,
+      firstSelectedIntentIndex: selectedIndexes[0] ?? null,
+    });
+  }
+  if (coveredObservationIndexes.length !== expectedObservationIndexes.length) {
+    failedChecks.push({
+      check: "covered_observation_count",
+      actual: coveredObservationIndexes.length,
+      expected: expectedObservationIndexes.length,
+    });
+  }
+  if (duplicateCoveredObservationIndexes.length > 0) {
+    failedChecks.push({
+      check: "duplicate_covered_observation_indexes",
+      indexes: duplicateCoveredObservationIndexes,
+    });
+  }
+  if (coveredObservationIndexesOutOfRange.length > 0) {
+    failedChecks.push({
+      check: "covered_observation_indexes_out_of_range",
+      indexes: coveredObservationIndexesOutOfRange,
+      observationCount: packet.newObservations.length,
+    });
+  }
+  if (missingExpectedObservationIndexes.length > 0) {
+    failedChecks.push({
+      check: "missing_expected_observation_indexes",
+      indexes: missingExpectedObservationIndexes,
+    });
+  }
+  if (packet.turnKind === "opening" && proposal.beats[0]?.purpose !== "orientation") {
+    failedChecks.push({
+      check: "opening_first_beat_purpose",
+      actualPurpose: proposal.beats[0]?.purpose ?? null,
+      expectedPurpose: "orientation",
+    });
+  }
   if (
-    proposal.actionSelections.length !== expectedActionCount ||
-    new Set(selectedIndexes).size !== selectedIndexes.length ||
-    selectedIndexes.some((index) => packet.availableIntents[index] === undefined) ||
-    (requiredIntentIndex !== null && selectedIndexes[0] !== requiredIntentIndex) ||
-    coveredObservationIndexes.length !== expectedObservationIndexes.length ||
-    new Set(coveredObservationIndexes).size !== coveredObservationIndexes.length ||
-    coveredObservationIndexes.some((index) => packet.newObservations[index] === undefined) ||
-    expectedObservationIndexes.some((index) => !coveredObservationIndexes.includes(index)) ||
-    (packet.turnKind === "opening" && proposal.beats[0]?.purpose !== "orientation") ||
-    (packet.actionContext !== null &&
-      packet.actionContext.disposition !== "clarification_required" &&
-      !proposal.beats.some((beat) => beat.purpose === "consequence")) ||
-    proposal.actionSelections.some((selection) => {
-      const intent = packet.availableIntents[selection.intentIndex];
-      return intent?.kind === "move" || intent?.kind === "wait"
-        ? selection.detail !== null
-        : selection.detail === null;
-    })
+    packet.actionContext !== null &&
+    packet.actionContext.disposition !== "clarification_required" &&
+    !proposal.beats.some((beat) => beat.purpose === "consequence")
   ) {
+    failedChecks.push({
+      check: "missing_consequence_beat",
+      beatPurposes: proposal.beats.map((beat) => beat.purpose),
+      requiredPurpose: "consequence",
+    });
+  }
+  if (detailNullabilityViolations.length > 0) {
+    failedChecks.push({
+      check: "action_selection_detail_nullability",
+      violations: detailNullabilityViolations,
+    });
+  }
+  if (failedChecks.length > 0) {
+    log.warn("narrator_packet_validation_mismatch", {
+      diagnostic: "narrator_packet_validation_mismatch",
+      campaignId: packet.campaignId,
+      turnId: packet.turnId,
+      failedChecks,
+    });
     throw new CampaignPlayNarratorError("narration_invalid", null);
   }
   if (packet.actionContext?.disposition === "clarification_required") {

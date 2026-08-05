@@ -268,6 +268,192 @@ describe("Campaign Play narrator", () => {
     }]);
   });
 
+  it("reports every packet validation coordinate without retaining model prose", () => {
+    const replyConsequence = {
+      observationHandle: "observation-0",
+      performingActorHandle: "actor_public_keeper",
+      performingActorName: "Mara Venn",
+      whatChanged: "secret-provider-output",
+      whereOrRoute: "Salt Harbor",
+      worldTimeLabel: "Day 1, 00:10",
+      causalCue: "direct_perception" as const,
+    };
+    const packet: CampaignPlayNarratorPacket = {
+      ...packetFixture(),
+      campaignId: "campaign-diagnostic",
+      turnId: "turn-diagnostic",
+      turnKind: "opening",
+      newObservations: [0, 1].map((index) => ({
+        observationHandle: `observation-${index}`,
+        title: `secret-label-${index}`,
+        text: `secret-observation-${index}`,
+        whereOrRoute: "Salt Harbor",
+        worldTimeLabel: "Day 1, 00:10",
+        consequence: null,
+      })),
+      availableIntents: [
+        {
+          handle: "choice_public_contact",
+          label: "secret-label-contact",
+          kind: "contact",
+          targets: [{ handle: "actor_public_keeper", kind: "actor" }],
+        },
+        {
+          handle: "choice_public_move",
+          label: "secret-label-move",
+          kind: "move",
+          targets: [{ handle: "route_public_gate", kind: "route" }],
+        },
+      ],
+    };
+    const proposal: CampaignPlayNarratorProposal = {
+      actionSelections: [
+        { intentIndex: 1, detail: "secret-detail-value" },
+        { intentIndex: 1, detail: null },
+        { intentIndex: 26, detail: null },
+      ],
+      beats: [
+        {
+          purpose: "moment",
+          observationIndexes: [1, 2],
+          text: "secret-beat-text",
+        },
+        {
+          purpose: "moment",
+          observationIndexes: [1],
+          text: "secret-second-beat-text",
+        },
+      ],
+    };
+    narratorWarn.mockClear();
+
+    expect(() => createCampaignPlayNarrator().compile({
+      narrationId: "narration-diagnostic",
+      packet,
+      proposal,
+      createdAt: 1_000,
+    })).toThrowError(expect.objectContaining({
+      code: "narration_invalid",
+      modelEvidence: null,
+    }));
+    expect(narratorWarn).toHaveBeenCalledOnce();
+    const [warningName, warningPayload] = narratorWarn.mock.calls[0] as [
+      string,
+      { diagnostic: string; campaignId: string; turnId: string; failedChecks: unknown[] },
+    ];
+    expect(warningName).toBe("narrator_packet_validation_mismatch");
+    expect(warningPayload).toEqual({
+      diagnostic: "narrator_packet_validation_mismatch",
+      campaignId: "campaign-diagnostic",
+      turnId: "turn-diagnostic",
+      failedChecks: [
+        { check: "selected_action_count", actual: 3, expected: 2 },
+        { check: "duplicate_selected_intent_indexes", indexes: [1] },
+        {
+          check: "selected_intent_indexes_out_of_range",
+          indexes: [26],
+          availableIntentCount: 2,
+        },
+        {
+          check: "covered_observation_count", actual: 3, expected: 2,
+        },
+        { check: "duplicate_covered_observation_indexes", indexes: [1] },
+        {
+          check: "covered_observation_indexes_out_of_range",
+          indexes: [2],
+          observationCount: 2,
+        },
+        { check: "missing_expected_observation_indexes", indexes: [0] },
+        {
+          check: "opening_first_beat_purpose",
+          actualPurpose: "moment",
+          expectedPurpose: "orientation",
+        },
+        {
+          check: "action_selection_detail_nullability",
+          violations: [
+            {
+              actionSelectionIndex: 0,
+              intentIndex: 1,
+              intentKind: "move",
+              detailIsNull: false,
+            },
+            {
+              actionSelectionIndex: 2,
+              intentIndex: 26,
+              intentKind: null,
+              detailIsNull: true,
+            },
+          ],
+        },
+      ],
+    });
+    expect("narrationId" in warningPayload).toBe(false);
+    const recorded = JSON.stringify(narratorWarn.mock.calls);
+    expect(recorded).not.toContain("secret-beat-text");
+    expect(recorded).not.toContain("secret-detail-value");
+    expect(recorded).not.toContain("secret-label");
+    expect(recorded).not.toContain("secret-provider-output");
+    expect(recorded).not.toContain(JSON.stringify(proposal));
+
+    const actionPacket: CampaignPlayNarratorPacket = {
+      ...packet,
+      turnId: "turn-diagnostic-action",
+      turnKind: "player_action",
+      openingContext: null,
+      sourceMoment: "secret-source-moment",
+      actionContext: {
+        submittedText: "secret-prompt",
+        intentKind: "contact",
+        disposition: "deterministic",
+        result: "success",
+        clarificationQuestion: null,
+      },
+      newObservations: packet.newObservations.map((observation, index) =>
+        index === 0 ? { ...observation, consequence: replyConsequence } : observation),
+      consequences: [replyConsequence],
+    };
+    narratorWarn.mockClear();
+
+    expect(() => createCampaignPlayNarrator().compile({
+      narrationId: "narration-diagnostic-action",
+      packet: actionPacket,
+      proposal,
+      createdAt: 1_000,
+    })).toThrowError(expect.objectContaining({
+      code: "narration_invalid",
+      modelEvidence: null,
+    }));
+    expect(narratorWarn).toHaveBeenCalledOnce();
+    const [actionWarningName, actionWarningPayload] = narratorWarn.mock.calls[0] as [
+      string,
+      { failedChecks: Array<Record<string, unknown>> },
+    ];
+    expect(actionWarningName).toBe("narrator_packet_validation_mismatch");
+    expect(actionWarningPayload.failedChecks).toContainEqual({
+      check: "required_reply_intent_mismatch",
+      requiredIntentIndex: 0,
+      firstSelectedIntentIndex: 1,
+    });
+    expect(actionWarningPayload.failedChecks).toContainEqual({
+      check: "missing_consequence_beat",
+      beatPurposes: ["moment", "moment"],
+      requiredPurpose: "consequence",
+    });
+  });
+
+  it("emits no packet validation warning for a valid proposal", () => {
+    narratorWarn.mockClear();
+
+    expect(() => createCampaignPlayNarrator().compile({
+      narrationId: "narration-valid-diagnostic",
+      packet: packetFixture(),
+      proposal: proposalFixture(),
+      createdAt: 1_000,
+    })).not.toThrow();
+    expect(narratorWarn).not.toHaveBeenCalled();
+  });
+
   it("selects a noncontiguous subset from the frozen intent catalog", () => {
     const packet = {
       ...packetFixture(),
