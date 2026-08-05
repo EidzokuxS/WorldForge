@@ -614,6 +614,7 @@ export function createCampaignPlayApplication(
     resume: { interruptedStage: LoadedCampaignPlayTurn["interruptedStage"]; observedEpoch: number } | null,
   ): Promise<void> => {
     let pendingResume = resume;
+    let automaticResumeAttempted = false;
     while (true) {
       const handle = dependencies.openDatabase(campaignId);
       try {
@@ -622,6 +623,7 @@ export function createCampaignPlayApplication(
         if (!before || before.stage === "completed" || before.stage === "failed") return;
         if (before.stage === "interrupted" && pendingResume === null) return;
         const runtime = runtimeForTurn(handle, before);
+        const wasResume = pendingResume !== null;
         const result = pendingResume
           ? await runtime.resumeInterruptedStage({
               turnId,
@@ -630,6 +632,19 @@ export function createCampaignPlayApplication(
             })
           : await runtime.runNextStage(turnId);
         pendingResume = null;
+        if (
+          !wasResume && !automaticResumeAttempted &&
+          result.recovery.kind === "explicit_resume_required" &&
+          result.recovery.errorCode === "provider_unavailable" &&
+          result.recovery.attempt === 1
+        ) {
+          automaticResumeAttempted = true;
+          pendingResume = {
+            interruptedStage: result.recovery.interruptedStage,
+            observedEpoch: result.recovery.workerEpoch,
+          };
+          continue;
+        }
         if (result.recovery.kind === "completed" && result.turn.turnKind === "player_action") {
           scheduleNarration(campaignId, result.turn.turnId);
         }

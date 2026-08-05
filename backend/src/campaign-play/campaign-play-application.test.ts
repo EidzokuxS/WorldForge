@@ -26,6 +26,7 @@ import {
 } from "./campaign-play-application.js";
 import {
   createCampaignPlayTurnRepository,
+  type CampaignPlayExternalInterruptionEvidence,
   type CampaignPlayTurnModelSelection,
 } from "./campaign-play-turn-repository.js";
 import type { CampaignPlayOpeningRuntime } from "./opening-runtime.js";
@@ -193,6 +194,9 @@ function fakeOpeningRuntime(
     runNextStage: ReturnType<typeof vi.fn>;
     resumeStage?: ReturnType<typeof vi.fn>;
     interruptOnRun?: boolean;
+    initialErrorCode?: CampaignPlayExternalInterruptionEvidence["errorCode"];
+    resumeErrorCode?: CampaignPlayExternalInterruptionEvidence["errorCode"];
+    resumeSucceeds?: boolean;
   },
 ): CampaignPlayOpeningRuntime {
   const repository = createCampaignPlayTurnRepository(handle);
@@ -247,7 +251,9 @@ function fakeOpeningRuntime(
     async runNextStage(turnId) {
       options.runNextStage(turnId);
       const turn = repository.loadTurn(turnId)!;
-      if (!options.interruptOnRun) return snapshot(turnId, turn.updatedAt);
+      if (!options.interruptOnRun || turn.stage !== "admitted") {
+        return snapshot(turnId, turn.updatedAt);
+      }
       const claimedAt = turn.updatedAt + 1;
       const token = repository.claimStage({
         turnId,
@@ -267,9 +273,11 @@ function fakeOpeningRuntime(
           inputTokens: 3,
           outputTokens: 0,
           durationMs: 2,
-          finishReason: "transport_error",
-          schemaOutcome: "transport_error",
-          errorCode: "provider_unavailable",
+          finishReason: options.initialErrorCode === "model_contract_invalid"
+            ? "invalid_output" : "transport_error",
+          schemaOutcome: options.initialErrorCode === "model_contract_invalid"
+            ? "invalid" : "transport_error",
+          errorCode: options.initialErrorCode ?? "provider_unavailable",
         },
         interruptedAt: claimedAt + 2,
         mutationId: `interrupt:${token.epoch}`,
@@ -293,6 +301,25 @@ function fakeOpeningRuntime(
         leaseExpiresAt: resumedAt + 1_000,
         mutationId: `resume:${input.observedEpoch + 1}`,
       });
+      if (options.resumeSucceeds) {
+        repository.acceptModelArtifact({
+          token,
+          artifact: { plan: { summary: "Retry succeeded", steps: ["continue"] } },
+          evidence: {
+            actualProviderId: "provider-frozen",
+            actualModel: "planner-frozen",
+            actualStrategy: "strict_object",
+            inputTokens: 4,
+            outputTokens: 8,
+            durationMs: 2,
+            finishReason: "stop",
+          },
+          mutationDomain: "runtime",
+          acceptedAt: resumedAt + 2,
+          mutationId: `resume-accept:${token.epoch}`,
+        });
+        return snapshot(input.turnId, resumedAt + 2);
+      }
       repository.interruptExternal({
         token,
         evidence: {
@@ -302,9 +329,11 @@ function fakeOpeningRuntime(
           inputTokens: 4,
           outputTokens: 0,
           durationMs: 2,
-          finishReason: "transport_error",
-          schemaOutcome: "transport_error",
-          errorCode: "provider_unavailable",
+          finishReason: options.resumeErrorCode === "model_contract_invalid"
+            ? "invalid_output" : "transport_error",
+          schemaOutcome: options.resumeErrorCode === "model_contract_invalid"
+            ? "invalid" : "transport_error",
+          errorCode: options.resumeErrorCode ?? "provider_unavailable",
         },
         interruptedAt: resumedAt + 2,
         mutationId: `resume-interrupt:${token.epoch}`,
@@ -440,6 +469,174 @@ describe("CampaignPlayApplication", () => {
     }));
   });
 
+  it("automatically resumes one provider interruption on a fresh epoch and preserves turn identity", async () => {
+    createAcceptedCampaign();
+    const runNextStage = vi.fn();
+    const resumeStage = vi.fn();
+    const application = createCampaignPlayApplication({
+      now: () => 1_300,
+      runtimeFactory: {
+        createOpening: (handle) => fakeOpeningRuntime(handle, {
+          runNextStage,
+          resumeStage,
+          interruptOnRun: true,
+          resumeSucceeds: true,
+        }),
+        createTurn: () => { throw new Error("Player runtime is outside this test."); },
+      },
+    });
+    application.loadState(CAMPAIGN_ID);
+    bootstrapPlayer(application);
+    const request = openingRequest(application, "opening-auto-provider-recovery");
+    const admission = application.admitOpening(CAMPAIGN_ID, request);
+    await application.waitForIdle(CAMPAIGN_ID);
+
+    expect(resumeStage).toHaveBeenCalledTimes(1);
+    expect(resumeStage).toHaveBeenCalledWith({
+      turnId: admission.turnId,
+      interruptedStage: "admitted",
+      observedEpoch: 1,
+    });
+    expect(runNextStage).toHaveBeenCalledTimes(2);
+
+    const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
+    try {
+      const repository = createCampaignPlayTurnRepository(handle);
+      const turn = repository.loadTurn(admission.turnId)!;
+      expect(turn).toMatchObject({
+        turnId: admission.turnId,
+        idempotencyKey: request.idempotencyKey,
+        stage: "planned",
+        workerEpoch: 2,
+        resumeEligible: false,
+      });
+      const attempts = handle.sqlite.prepare(`SELECT attempt, status,
+          worker_epoch AS workerEpoch, turn_id AS turnId, error_code AS errorCode
+        FROM campaign_play_model_stages WHERE turn_id = ? ORDER BY attempt`).all(
+        admission.turnId,
+      );
+      expect(attempts).toEqual([
+        { attempt: 1, status: "interrupted", workerEpoch: 1, turnId: admission.turnId,
+          errorCode: "provider_unavailable" },
+        { attempt: 2, status: "accepted", workerEpoch: 2, turnId: admission.turnId,
+          errorCode: null },
+      ]);
+      expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+        FROM campaign_play_receipts WHERE campaign_id = ? AND turn_id = ?`).get(
+        CAMPAIGN_ID, admission.turnId,
+      )).toEqual({ count: 0 });
+      expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+        FROM campaign_play_narrations WHERE campaign_id = ? AND turn_id = ?`).get(
+        CAMPAIGN_ID, admission.turnId,
+      )).toEqual({ count: 0 });
+      expect(handle.sqlite.prepare("PRAGMA integrity_check").get()).toEqual({ integrity_check: "ok" });
+      expect(handle.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    } finally {
+      handle.close();
+    }
+  });
+
+  it("stops after one automatic resume when the resumed provider attempt fails", async () => {
+    createAcceptedCampaign();
+    const runNextStage = vi.fn();
+    const resumeStage = vi.fn();
+    const application = createCampaignPlayApplication({
+      now: () => 1_300,
+      runtimeFactory: {
+        createOpening: (handle) => fakeOpeningRuntime(handle, {
+          runNextStage,
+          resumeStage,
+          interruptOnRun: true,
+        }),
+        createTurn: () => { throw new Error("Player runtime is outside this test."); },
+      },
+    });
+    application.loadState(CAMPAIGN_ID);
+    bootstrapPlayer(application);
+    const request = openingRequest(application, "opening-auto-provider-failure");
+    const admission = application.admitOpening(CAMPAIGN_ID, request);
+    await application.waitForIdle(CAMPAIGN_ID);
+
+    expect(resumeStage).toHaveBeenCalledTimes(1);
+    expect(runNextStage).toHaveBeenCalledTimes(1);
+    const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
+    try {
+      const repository = createCampaignPlayTurnRepository(handle);
+      const turn = repository.loadTurn(admission.turnId)!;
+      expect(turn).toMatchObject({
+        stage: "interrupted",
+        interruptedStage: "admitted",
+        errorCode: "provider_unavailable",
+        workerEpoch: 2,
+        resumeEligible: true,
+        idempotencyKey: request.idempotencyKey,
+      });
+      expect(handle.sqlite.prepare(`SELECT attempt, status, worker_epoch AS workerEpoch,
+          turn_id AS turnId, error_code AS errorCode
+        FROM campaign_play_model_stages WHERE turn_id = ? ORDER BY attempt`).all(
+        admission.turnId,
+      )).toEqual([
+        { attempt: 1, status: "interrupted", workerEpoch: 1, turnId: admission.turnId,
+          errorCode: "provider_unavailable" },
+        { attempt: 2, status: "interrupted", workerEpoch: 2, turnId: admission.turnId,
+          errorCode: "provider_unavailable" },
+      ]);
+      expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+        FROM campaign_play_model_stages WHERE turn_id = ?`).get(admission.turnId))
+        .toEqual({ count: 2 });
+    } finally {
+      handle.close();
+    }
+  });
+
+  it.each([
+    "model_contract_invalid",
+    "stage_timeout",
+    "stage_budget_exceeded",
+  ] as const)("does not automatically resume %s", async (errorCode) => {
+    createAcceptedCampaign();
+    const runNextStage = vi.fn();
+    const resumeStage = vi.fn();
+    const application = createCampaignPlayApplication({
+      now: () => 1_300,
+      runtimeFactory: {
+        createOpening: (handle) => fakeOpeningRuntime(handle, {
+          runNextStage,
+          resumeStage,
+          interruptOnRun: true,
+          initialErrorCode: errorCode,
+        }),
+        createTurn: () => { throw new Error("Player runtime is outside this test."); },
+      },
+    });
+    application.loadState(CAMPAIGN_ID);
+    bootstrapPlayer(application);
+    const admission = application.admitOpening(
+      CAMPAIGN_ID,
+      openingRequest(application, `opening-no-auto-${errorCode}`),
+    );
+    await application.waitForIdle(CAMPAIGN_ID);
+
+    expect(resumeStage).not.toHaveBeenCalled();
+    expect(runNextStage).toHaveBeenCalledTimes(1);
+    const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
+    try {
+      const turn = createCampaignPlayTurnRepository(handle).loadTurn(admission.turnId)!;
+      expect(turn).toMatchObject({
+        stage: "interrupted",
+        workerEpoch: 1,
+        resumeEligible: true,
+        errorCode,
+      });
+      expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+        FROM campaign_play_model_stages WHERE turn_id = ? AND attempt = 2`).get(
+        admission.turnId,
+      )).toEqual({ count: 0 });
+    } finally {
+      handle.close();
+    }
+  });
+
   it("preserves frozen model identity across restart and calls the provider once on explicit resume", async () => {
     createAcceptedCampaign();
     const firstRun = vi.fn();
@@ -449,6 +646,7 @@ describe("CampaignPlayApplication", () => {
         createOpening: (handle) => fakeOpeningRuntime(handle, {
           runNextStage: firstRun,
           interruptOnRun: true,
+          initialErrorCode: "model_contract_invalid",
         }),
         createTurn: () => { throw new Error("Player runtime is outside this test."); },
       },
