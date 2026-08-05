@@ -395,7 +395,7 @@ describe("CampaignPlayApplication", () => {
     });
   });
 
-  it("uses bypass reasoning for player-action Narrator and keeps Opening Narrator default", () => {
+  it("keeps role model construction modes and identities explicit", () => {
     createAcceptedCampaign();
     const createModel = vi.fn((
       _config: unknown,
@@ -412,8 +412,28 @@ describe("CampaignPlayApplication", () => {
       expectedRuntimeRevision: openingApplication.loadState(CAMPAIGN_ID).runtimeRevision,
       startingConditions: { mode: "delegate" },
     })).toThrow(expect.objectContaining({ publicCode: "character_required" }));
-    expect(createModel.mock.calls.filter(([, options]) => options?.role === "storyteller"))
-      .toEqual([[expect.anything(), { role: "storyteller" }]]);
+    expect(createModel.mock.calls).toEqual([
+      [
+        {
+          id: "provider-test",
+          name: "Provider Test",
+          baseUrl: "http://localhost:1234",
+          apiKey: "",
+          model: "generator-model",
+        },
+        { role: "generator", reasoningMode: "bypass" },
+      ],
+      [
+        {
+          id: "provider-test",
+          name: "Provider Test",
+          baseUrl: "http://localhost:1234",
+          apiKey: "",
+          model: "storyteller-model",
+        },
+        { role: "storyteller" },
+      ],
+    ]);
 
     bootstrapPlayer(openingApplication);
     const state = openingApplication.loadState(CAMPAIGN_ID);
@@ -424,11 +444,78 @@ describe("CampaignPlayApplication", () => {
       source: "freeform",
       text: "I ask the keeper about the signal.",
     })).toThrow(expect.objectContaining({ publicCode: "opening_required" }));
-    expect(createModel.mock.calls.filter(([, options]) => options?.role === "storyteller"))
-      .toEqual([
-        [expect.anything(), { role: "storyteller" }],
-        [expect.anything(), { role: "storyteller", reasoningMode: "bypass" }],
-      ]);
+    expect(createModel.mock.calls).toEqual([
+      [
+        {
+          id: "provider-test",
+          name: "Provider Test",
+          baseUrl: "http://localhost:1234",
+          apiKey: "",
+          model: "generator-model",
+        },
+        { role: "generator", reasoningMode: "bypass" },
+      ],
+      [
+        {
+          id: "provider-test",
+          name: "Provider Test",
+          baseUrl: "http://localhost:1234",
+          apiKey: "",
+          model: "storyteller-model",
+        },
+        { role: "storyteller" },
+      ],
+      [
+        {
+          id: "provider-test",
+          name: "Provider Test",
+          baseUrl: "http://localhost:1234",
+          apiKey: "",
+          model: "judge-model",
+        },
+        { role: "judge" },
+      ],
+      [
+        {
+          id: "provider-test",
+          name: "Provider Test",
+          baseUrl: "http://localhost:1234",
+          apiKey: "",
+          model: "generator-model",
+        },
+        { role: "generator" },
+      ],
+      [
+        {
+          id: "provider-test",
+          name: "Provider Test",
+          baseUrl: "http://localhost:1234",
+          apiKey: "",
+          model: "generator-model",
+        },
+        { role: "generator", reasoningMode: "bypass" },
+      ],
+      [
+        {
+          id: "provider-test",
+          name: "Provider Test",
+          baseUrl: "http://localhost:1234",
+          apiKey: "",
+          model: "generator-model",
+        },
+        { role: "generator", reasoningMode: "bypass" },
+      ],
+      [
+        {
+          id: "provider-test",
+          name: "Provider Test",
+          baseUrl: "http://localhost:1234",
+          apiKey: "",
+          model: "storyteller-model",
+        },
+        { role: "storyteller", reasoningMode: "bypass" },
+      ],
+    ]);
   });
 
   it("initializes once and deduplicates same-key opening admission and its driver", async () => {

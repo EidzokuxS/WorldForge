@@ -458,7 +458,10 @@ export function createCampaignPlayApplication(
       leaseDurationMs: LEASE_DURATION_MS,
       heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
       openingPlannerModel: {
-        languageModel: dependencies.createModel(generator.provider, { role: "generator" }),
+        languageModel: dependencies.createModel(generator.provider, {
+          role: "generator",
+          reasoningMode: "bypass",
+        }),
         requested: openingRequested,
         temperature: generator.temperature,
         maxOutputTokens: openingMaximumOutputTokens,
