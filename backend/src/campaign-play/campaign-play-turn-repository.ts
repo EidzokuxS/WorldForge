@@ -1230,6 +1230,53 @@ function validateModelStages(
       .all(handle.campaignId, row.turnId) as Array<{ jobId: string; workerEpoch: number }>)
       .map((job) => [deriveCampaignPlayActorReplanStageId(job.jobId), job]),
   );
+  type LinkedActorReplanAttempt = {
+    modelStageRowId: string; stageId: string; jobId: string;
+    campaignId: string; turnId: string; actorId: string; attemptNumber: number;
+    modelWorkerEpoch: number; actorJobWorkerEpoch: number;
+    claimTurnWorkerEpoch: number; frameHash: string;
+    frozenBaseWorldVersion: number; deadlineAt: number;
+    requestedProviderId: string; requestedModel: string; requestedStrategy: string;
+    retryConsumedAt: number | null; createdAt: number;
+    jobCampaignId: string; jobTurnId: string;
+    jobActorId: string; jobFrozenBaseWorldVersion: number;
+    jobWorkerEpoch: number; jobClaimTurnWorkerEpoch: number | null;
+    turnCampaignId: string; turnFrameHash: string;
+  };
+  const linkedAttemptRows = (handle.sqlite.prepare(`SELECT attempt.model_stage_row_id AS modelStageRowId,
+        attempt.stage_id AS stageId, attempt.job_id AS jobId,
+        attempt.campaign_id AS campaignId, attempt.turn_id AS turnId,
+        attempt.actor_id AS actorId, attempt.attempt_number AS attemptNumber,
+        attempt.model_worker_epoch AS modelWorkerEpoch,
+        attempt.actor_job_worker_epoch AS actorJobWorkerEpoch,
+        attempt.claim_turn_worker_epoch AS claimTurnWorkerEpoch,
+        attempt.frame_hash AS frameHash,
+        attempt.frozen_base_world_version AS frozenBaseWorldVersion,
+        attempt.deadline_at AS deadlineAt,
+        attempt.requested_provider_id AS requestedProviderId,
+        attempt.requested_model AS requestedModel,
+        attempt.requested_strategy AS requestedStrategy,
+        attempt.retry_consumed_at AS retryConsumedAt,
+        attempt.created_at AS createdAt,
+        job.campaign_id AS jobCampaignId, job.turn_id AS jobTurnId, job.actor_id AS jobActorId,
+        job.frozen_base_world_version AS jobFrozenBaseWorldVersion,
+        job.worker_epoch AS jobWorkerEpoch,
+        job.claim_turn_worker_epoch AS jobClaimTurnWorkerEpoch,
+        turn_row.campaign_id AS turnCampaignId, turn_row.frame_hash AS turnFrameHash
+      FROM campaign_play_actor_replan_attempts attempt
+      JOIN campaign_play_actor_jobs job ON job.job_id = attempt.job_id
+      JOIN campaign_play_turns turn_row ON turn_row.id = attempt.turn_id
+      WHERE attempt.campaign_id = ? AND attempt.turn_id = ?`)
+      .all(handle.campaignId, row.turnId) as LinkedActorReplanAttempt[]);
+  const linkedAttempts = new Map(
+    linkedAttemptRows.map((attempt) => [attempt.modelStageRowId, attempt]),
+  );
+  const linkedAttemptChains = new Map<string, Map<number, LinkedActorReplanAttempt>>();
+  for (const attempt of linkedAttemptRows) {
+    const chain = linkedAttemptChains.get(attempt.jobId) ?? new Map<number, LinkedActorReplanAttempt>();
+    chain.set(attempt.attemptNumber, attempt);
+    linkedAttemptChains.set(attempt.jobId, chain);
+  }
   for (const stage of stages) {
     try {
       campaignPlayModelStageSchema.parse({
@@ -1262,8 +1309,70 @@ function validateModelStages(
     const actorJob = stage.kind === "actor_replanner"
       ? actorReplannerStages.get(stage.stageId)
       : undefined;
+    const linkedAttempt = stage.kind === "actor_replanner"
+      ? linkedAttempts.get(stage.id)
+      : undefined;
+    const linkedAttemptChain = linkedAttempt === undefined
+      ? undefined
+      : linkedAttemptChains.get(linkedAttempt.jobId);
+    const priorLinkedAttempt = linkedAttemptChain?.get(1);
+    const laterLinkedAttempt = linkedAttemptChain?.get(2);
+    const linkedAttemptChainValid = linkedAttempt === undefined
+      ? false
+      : linkedAttempt.attemptNumber === 1
+        ? laterLinkedAttempt === undefined || (
+            laterLinkedAttempt.deadlineAt === linkedAttempt.deadlineAt &&
+            laterLinkedAttempt.frameHash === linkedAttempt.frameHash &&
+            laterLinkedAttempt.frozenBaseWorldVersion === linkedAttempt.frozenBaseWorldVersion &&
+            laterLinkedAttempt.requestedProviderId === linkedAttempt.requestedProviderId &&
+            laterLinkedAttempt.requestedModel === linkedAttempt.requestedModel &&
+            laterLinkedAttempt.actorJobWorkerEpoch === linkedAttempt.actorJobWorkerEpoch &&
+            laterLinkedAttempt.claimTurnWorkerEpoch === linkedAttempt.claimTurnWorkerEpoch &&
+            laterLinkedAttempt.modelWorkerEpoch === linkedAttempt.modelWorkerEpoch + 1 &&
+            linkedAttempt.retryConsumedAt === laterLinkedAttempt.createdAt
+          )
+        : priorLinkedAttempt !== undefined &&
+          priorLinkedAttempt.attemptNumber === 1 &&
+          priorLinkedAttempt.retryConsumedAt === linkedAttempt.createdAt &&
+          priorLinkedAttempt.deadlineAt === linkedAttempt.deadlineAt &&
+          priorLinkedAttempt.frameHash === linkedAttempt.frameHash &&
+          priorLinkedAttempt.frozenBaseWorldVersion === linkedAttempt.frozenBaseWorldVersion &&
+          priorLinkedAttempt.requestedProviderId === linkedAttempt.requestedProviderId &&
+          priorLinkedAttempt.requestedModel === linkedAttempt.requestedModel &&
+          priorLinkedAttempt.actorJobWorkerEpoch === linkedAttempt.actorJobWorkerEpoch &&
+          priorLinkedAttempt.claimTurnWorkerEpoch === linkedAttempt.claimTurnWorkerEpoch &&
+          linkedAttempt.modelWorkerEpoch === priorLinkedAttempt.modelWorkerEpoch + 1;
+    const linkedStoredIdentityValid = linkedAttempt !== undefined &&
+      linkedAttempt.stageId === stage.stageId &&
+      linkedAttempt.stageId === deriveCampaignPlayActorReplanStageId(linkedAttempt.jobId) &&
+      linkedAttempt.campaignId === stage.campaignId &&
+      linkedAttempt.jobCampaignId === stage.campaignId &&
+      linkedAttempt.turnCampaignId === stage.campaignId &&
+      linkedAttempt.turnId === row.turnId &&
+      linkedAttempt.jobTurnId === row.turnId &&
+      linkedAttempt.actorId === linkedAttempt.jobActorId &&
+      linkedAttempt.attemptNumber === stage.attempt &&
+      linkedAttempt.modelWorkerEpoch === stage.workerEpoch &&
+      linkedAttempt.frameHash === row.frameHash &&
+      linkedAttempt.frameHash === linkedAttempt.turnFrameHash &&
+      linkedAttempt.frozenBaseWorldVersion === linkedAttempt.jobFrozenBaseWorldVersion &&
+      linkedAttempt.deadlineAt > linkedAttempt.createdAt &&
+      linkedAttemptChainValid &&
+      linkedAttempt.requestedProviderId === stage.requestedProviderId &&
+      linkedAttempt.requestedModel === stage.requestedModel &&
+      linkedAttempt.requestedStrategy === stage.requestedStrategy;
+    const linkedLeaseStillOwnsJob = linkedAttempt !== undefined &&
+      linkedAttempt.actorJobWorkerEpoch === linkedAttempt.jobWorkerEpoch &&
+      linkedAttempt.claimTurnWorkerEpoch === linkedAttempt.jobClaimTurnWorkerEpoch;
+    // A linked attempt is immutable evidence.  Once its stage is terminal, a
+    // later explicit turn resume may advance the actor-job/turn lease epoch;
+    // that must not make the original attempt row look corrupt.  Started
+    // attempts still have to be owned by the current claim so stale work is
+    // fenced before any new settlement.
+    const linkedIdentityValid = linkedStoredIdentityValid &&
+      (linkedLeaseStillOwnsJob || stage.status !== "started");
     const identityMatchesOwner = stage.kind === "actor_replanner"
-      ? actorJob !== undefined && stage.workerEpoch <= actorJob.workerEpoch
+      ? linkedIdentityValid || (linkedAttempt === undefined && actorJob !== undefined && stage.workerEpoch <= actorJob.workerEpoch)
       : stage.stageId === modelStageId(row.turnId, stage.kind);
     if (
       stage.campaignId !== handle.campaignId ||
@@ -1277,6 +1386,10 @@ function validateModelStages(
       throw corrupt("Campaign Play model stage identity or requested model has drifted.");
     }
     if (stage.status === "accepted") {
+      if (linkedAttempt !== undefined && (stage.completedAt === null
+        || stage.completedAt >= linkedAttempt.deadlineAt)) {
+        throw corrupt("Campaign Play actor replan acceptance is at or after its hard deadline.");
+      }
       try {
         const artifact = JSON.parse(stage.artifactJson ?? "") as unknown;
         if (
@@ -2054,19 +2167,46 @@ function loadRow(handle: CampaignPlayDatabaseHandle, row: TurnRow): LoadedCampai
         ? startedAttempts.filter((attempt) => attempt.kind === "actor_replanner")
         : [];
       const actorAttempt = actorAttempts[0];
-      const actorJob = actorAttempt && actorAttempts.length === 1 && startedAttempts.length === 1
+      const linkedActorAttempt = actorAttempt && actorAttempts.length === 1 && startedAttempts.length === 1
+        ? handle.sqlite.prepare(`SELECT attempt.job_id AS jobId,
+              attempt.stage_id AS stageId,
+              attempt.actor_job_worker_epoch AS actorJobWorkerEpoch,
+              attempt.claim_turn_worker_epoch AS claimTurnWorkerEpoch
+            FROM campaign_play_actor_replan_attempts attempt
+            WHERE attempt.model_stage_row_id = ? AND attempt.attempt_number IN (1, 2)`).get(
+              actorAttempt.id,
+            ) as {
+              jobId: string; stageId: string; actorJobWorkerEpoch: number; claimTurnWorkerEpoch: number;
+            } | undefined
+        : undefined;
+      const actorJob = linkedActorAttempt
         ? handle.sqlite.prepare(`SELECT job_id AS jobId
             FROM campaign_play_actor_jobs
-            WHERE campaign_id = ? AND turn_id = ? AND stage = 'claimed'
+            WHERE job_id = ? AND campaign_id = ? AND turn_id = ? AND stage = 'claimed'
               AND worker_epoch = ? AND claim_turn_worker_epoch = ?`).get(
+              linkedActorAttempt.jobId,
               handle.campaignId,
               row.turnId,
-              actorAttempt.workerEpoch,
-              row.workerEpoch,
+              linkedActorAttempt.actorJobWorkerEpoch,
+              linkedActorAttempt.claimTurnWorkerEpoch,
             ) as { jobId: string } | undefined
-        : undefined;
+        : actorAttempt && actorAttempts.length === 1 && startedAttempts.length === 1
+          ? handle.sqlite.prepare(`SELECT job_id AS jobId
+              FROM campaign_play_actor_jobs
+              WHERE campaign_id = ? AND turn_id = ? AND stage = 'claimed'
+                AND worker_epoch = ? AND claim_turn_worker_epoch = ?`).get(
+                handle.campaignId,
+                row.turnId,
+                actorAttempt.workerEpoch,
+                row.workerEpoch,
+              ) as { jobId: string } | undefined
+          : undefined;
       const ownedActorAttempt = actorAttempt !== undefined && actorJob !== undefined &&
-        actorAttempt.stageId === deriveCampaignPlayActorReplanStageId(actorJob.jobId);
+        actorAttempt.stageId === deriveCampaignPlayActorReplanStageId(actorJob.jobId) &&
+        (linkedActorAttempt === undefined || (
+          linkedActorAttempt.stageId === actorAttempt.stageId &&
+          linkedActorAttempt.claimTurnWorkerEpoch === row.workerEpoch
+        ));
       if (!ownedActorAttempt) {
         throw corrupt("Campaign Play deterministic worker lease has an unowned model attempt.");
       }

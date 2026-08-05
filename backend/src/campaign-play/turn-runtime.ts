@@ -325,6 +325,7 @@ export class CampaignPlayTurnRuntimeError extends Error {
 
 export interface CampaignPlayTurnRuntimeStageModel {
   languageModel: LanguageModel;
+  reasoningModel?: LanguageModel;
   requested: CampaignPlayRequestedModel;
   temperature: number;
   maximumInputTokens: number;
@@ -2209,9 +2210,15 @@ export function createCampaignPlayTurnRuntime(
         ON turn.id = job.turn_id AND turn.campaign_id = job.campaign_id
       JOIN campaign_play_model_stages model
         ON model.campaign_id = job.campaign_id AND model.turn_id = job.turn_id
-        AND model.kind = 'actor_replanner' AND model.worker_epoch = job.worker_epoch
-        AND model.status = 'started'
+        AND model.kind = 'actor_replanner' AND model.status = 'started'
+      LEFT JOIN campaign_play_actor_replan_attempts attempt
+        ON attempt.model_stage_row_id = model.id AND attempt.job_id = job.job_id
       WHERE job.campaign_id = ? AND job.stage = 'claimed'
+        AND (model.worker_epoch = job.worker_epoch OR (
+          attempt.attempt_number IN (1, 2)
+          AND attempt.actor_job_worker_epoch = job.worker_epoch
+          AND attempt.claim_turn_worker_epoch = job.claim_turn_worker_epoch
+        ))
         AND turn.stage = 'primary_settled'
         AND turn.worker_lease_owner IS NOT NULL
         AND turn.worker_lease_expires_at IS NOT NULL
@@ -2984,12 +2991,14 @@ export function createCampaignPlayTurnRuntime(
                 jobId: outcome.jobId,
                 token: context.token,
                 model: input.actorReplannerModel.languageModel,
+                recoveryModel: input.actorReplannerModel.reasoningModel,
                 temperature: input.actorReplannerModel.temperature,
                 maxOutputTokens: input.actorReplannerModel.maximumOutputTokens,
                 maximumInputTokens: input.actorReplannerModel.maximumInputTokens,
                 maximumOutputTokens: input.actorReplannerModel.maximumOutputTokens,
                 maximumTotalTokens: input.actorReplannerModel.maximumTotalTokens,
                 maximumCostMicros: input.actorReplannerModel.maximumCostMicros,
+                externalOperationDeadlineMs,
                 signal: context.signal,
                 createdAt: now(),
               });
@@ -3311,12 +3320,14 @@ export function createCampaignPlayTurnRuntime(
         jobId: interruptedJob.jobId,
         token,
         model: input.actorReplannerModel.languageModel,
+        recoveryModel: input.actorReplannerModel.reasoningModel,
         temperature: input.actorReplannerModel.temperature,
         maxOutputTokens: input.actorReplannerModel.maximumOutputTokens,
         maximumInputTokens: input.actorReplannerModel.maximumInputTokens,
         maximumOutputTokens: input.actorReplannerModel.maximumOutputTokens,
         maximumTotalTokens: input.actorReplannerModel.maximumTotalTokens,
         maximumCostMicros: input.actorReplannerModel.maximumCostMicros,
+        externalOperationDeadlineMs,
         signal: controller.signal,
         createdAt: now(),
       });

@@ -1,6 +1,8 @@
 import type { LanguageModel } from "ai";
 import {
+  getSafeGenerateObjectErrorCode,
   getSafeGenerateObjectTrace,
+  isSafeGenerateObjectContractErrorCode,
   safeGenerateObject,
   type SafeGenerateTrace,
 } from "../ai/generate-object-safe.js";
@@ -43,12 +45,14 @@ export interface CampaignPlayActorReplanRequest {
   jobId: string;
   token: CampaignPlayWorkerLeaseToken;
   model: LanguageModel;
+  recoveryModel?: LanguageModel;
   temperature: number;
   maxOutputTokens: number;
   maximumInputTokens: number;
   maximumOutputTokens: number;
   maximumTotalTokens: number;
   maximumCostMicros: number;
+  externalOperationDeadlineMs: number;
   signal?: AbortSignal;
   createdAt: number;
   injectFault?: (
@@ -97,6 +101,8 @@ export interface CampaignPlayActorReplanner {
 interface CampaignPlayActorReplannerDependencies {
   generateObject: typeof safeGenerateObject;
   now: () => number;
+  setTimer: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>;
+  clearTimer: (timer: ReturnType<typeof setTimeout>) => void;
 }
 
 export class CampaignPlayActorReplannerError extends Error {
@@ -106,11 +112,19 @@ export class CampaignPlayActorReplannerError extends Error {
       | "replan_state_invalid"
       | "replan_epoch_lost"
       | "replan_budget_exceeded"
-      | "replan_persistence_failed",
+      | "replan_persistence_failed"
+      | "replan_deadline_exceeded",
     options?: ErrorOptions,
   ) {
     super(code, options);
     this.name = "CampaignPlayActorReplannerError";
+  }
+}
+
+class CampaignPlayActorReplanDeadlineError extends Error {
+  constructor() {
+    super("actor_replan_deadline_exceeded");
+    this.name = "CampaignPlayActorReplanDeadlineError";
   }
 }
 
@@ -617,7 +631,13 @@ export function createCampaignPlayActorReplanner(
   handle: CampaignPlayDatabaseHandle,
   overrides: Partial<CampaignPlayActorReplannerDependencies> = {},
 ): CampaignPlayActorReplanner {
-  const dependencies = { generateObject: safeGenerateObject, now: Date.now, ...overrides };
+  const dependencies = {
+    generateObject: safeGenerateObject,
+    now: Date.now,
+    setTimer: (callback: () => void, delayMs: number) => setTimeout(callback, delayMs),
+    clearTimer: (timer: ReturnType<typeof setTimeout>) => clearTimeout(timer),
+    ...overrides,
+  };
   const scheduler = createCampaignPlayActorScheduler(handle);
   const turnRepository = createCampaignPlayTurnRepository(handle);
 
@@ -631,7 +651,8 @@ export function createCampaignPlayActorReplanner(
         || request.observedAt < request.observedTurnLeaseExpiresAt) {
         throw new CampaignPlayActorReplannerError("replan_input_invalid");
       }
-      const job = handle.sqlite.prepare(`SELECT turn_id AS turnId
+      const job = handle.sqlite.prepare(`SELECT turn_id AS turnId,
+          worker_epoch AS workerEpoch, claim_turn_worker_epoch AS claimTurnWorkerEpoch
         FROM campaign_play_actor_jobs
         WHERE job_id = ? AND campaign_id = ? AND stage = 'claimed'
           AND worker_epoch = ? AND claim_turn_worker_epoch = ?`).get(
@@ -639,7 +660,7 @@ export function createCampaignPlayActorReplanner(
         handle.campaignId,
         request.observedWorkerEpoch,
         request.observedTurnWorkerEpoch,
-      ) as { turnId: string } | undefined;
+      ) as { turnId: string; workerEpoch: number; claimTurnWorkerEpoch: number } | undefined;
       if (!job) throw new CampaignPlayActorReplannerError("replan_epoch_lost");
       const turn = handle.sqlite.prepare(`SELECT 1 AS owned FROM campaign_play_turns
         WHERE id = ? AND campaign_id = ? AND stage = 'primary_settled'
@@ -653,7 +674,22 @@ export function createCampaignPlayActorReplanner(
       ) as { owned: number } | undefined;
       if (!turn) throw new CampaignPlayActorReplannerError("replan_epoch_lost");
       const stageId = deriveCampaignPlayActorReplanStageId(request.jobId);
-      const started = handle.sqlite.prepare(`SELECT created_at AS createdAt
+      const linkedStarted = handle.sqlite.prepare(`SELECT attempt.model_stage_row_id AS modelStageRowId,
+          attempt.model_worker_epoch AS modelWorkerEpoch,
+          model.created_at AS createdAt
+        FROM campaign_play_actor_replan_attempts attempt
+        JOIN campaign_play_model_stages model ON model.id = attempt.model_stage_row_id
+        WHERE attempt.campaign_id = ? AND attempt.job_id = ?
+          AND attempt.actor_job_worker_epoch = ? AND attempt.claim_turn_worker_epoch = ?
+          AND model.status = 'started'
+        ORDER BY attempt.attempt_number DESC LIMIT 1`).get(
+        handle.campaignId,
+        request.jobId,
+        request.observedWorkerEpoch,
+        request.observedTurnWorkerEpoch,
+      ) as { modelStageRowId: string; modelWorkerEpoch: number; createdAt: number } | undefined;
+      const started = linkedStarted ?? handle.sqlite.prepare(`SELECT id AS modelStageRowId,
+          worker_epoch AS modelWorkerEpoch, created_at AS createdAt
         FROM campaign_play_model_stages
         WHERE campaign_id = ? AND turn_id = ? AND stage_id = ?
           AND kind = 'actor_replanner' AND worker_epoch = ? AND status = 'started'`).get(
@@ -661,7 +697,7 @@ export function createCampaignPlayActorReplanner(
         job.turnId,
         stageId,
         request.observedWorkerEpoch,
-      ) as { createdAt: number } | undefined;
+      ) as { modelStageRowId: string; modelWorkerEpoch: number; createdAt: number } | undefined;
       if (!started) throw new CampaignPlayActorReplannerError("replan_epoch_lost");
       turnRepository.commitActorTransition({
         token: {
@@ -689,14 +725,16 @@ export function createCampaignPlayActorReplanner(
           const model = context.sqlite.prepare(`UPDATE campaign_play_model_stages SET
             status = 'interrupted', duration_ms = ?, schema_outcome = 'transport_error',
             error_code = 'worker_lease_lost', completed_at = ?
-            WHERE campaign_id = ? AND turn_id = ? AND stage_id = ?
-              AND kind = 'actor_replanner' AND worker_epoch = ? AND status = 'started'`).run(
+            WHERE id = ? AND campaign_id = ? AND turn_id = ?
+              AND stage_id = ? AND kind = 'actor_replanner'
+              AND worker_epoch = ? AND status = 'started'`).run(
             Math.max(0, request.observedAt - started.createdAt),
             request.observedAt,
+            started.modelStageRowId,
             context.campaignId,
             job.turnId,
             stageId,
-            request.observedWorkerEpoch,
+            started.modelWorkerEpoch,
           );
           const actorJob = context.sqlite.prepare(`UPDATE campaign_play_actor_jobs
             SET stage = 'interrupted'
@@ -726,7 +764,9 @@ export function createCampaignPlayActorReplanner(
         || !Number.isSafeInteger(request.maximumInputTokens) || request.maximumInputTokens < 1
         || !Number.isSafeInteger(request.maximumOutputTokens) || request.maximumOutputTokens < 1
         || !Number.isSafeInteger(request.maximumTotalTokens) || request.maximumTotalTokens < 1
-        || !Number.isSafeInteger(request.maximumCostMicros) || request.maximumCostMicros < 0) {
+        || !Number.isSafeInteger(request.maximumCostMicros) || request.maximumCostMicros < 0
+        || !Number.isSafeInteger(request.externalOperationDeadlineMs)
+        || request.externalOperationDeadlineMs <= 0) {
         throw new CampaignPlayActorReplannerError("replan_input_invalid");
       }
       const frame = scheduler.buildActorFrame(request.jobId);
@@ -743,11 +783,17 @@ export function createCampaignPlayActorReplanner(
         throw new CampaignPlayActorReplannerError("replan_state_invalid");
       }
       const job = handle.sqlite.prepare(`SELECT worker_epoch AS workerEpoch,
-        claim_turn_worker_epoch AS claimTurnWorkerEpoch, stage
+        claim_turn_worker_epoch AS claimTurnWorkerEpoch, stage,
+        frozen_base_world_version AS frozenBaseWorldVersion
         FROM campaign_play_actor_jobs WHERE job_id = ? AND campaign_id = ?`).get(
         request.jobId,
         handle.campaignId,
-      ) as { workerEpoch: number; claimTurnWorkerEpoch: number | null; stage: string } | undefined;
+      ) as {
+        workerEpoch: number;
+        claimTurnWorkerEpoch: number | null;
+        stage: string;
+        frozenBaseWorldVersion: number;
+      } | undefined;
       if (!job || (job.stage !== "queued" && job.stage !== "interrupted")) {
         throw new CampaignPlayActorReplannerError("replan_state_invalid");
       }
@@ -761,20 +807,121 @@ export function createCampaignPlayActorReplanner(
       if (!proposalSchema) {
         throw new CampaignPlayActorReplannerError("replan_state_invalid");
       }
-      const workerEpoch = job.workerEpoch + 1;
+      const proposalPrompt = buildCampaignPlayActorReplanPrompt(compilation.promptFrame);
       const stageId = deriveCampaignPlayActorReplanStageId(request.jobId);
-      const attempt = (handle.sqlite.prepare(`SELECT count(*) AS count
+      const previousStageCount = (handle.sqlite.prepare(`SELECT count(*) AS count
         FROM campaign_play_model_stages WHERE campaign_id = ? AND stage_id = ?`).get(
         handle.campaignId,
         stageId,
-      ) as { count: number }).count + 1;
+      ) as { count: number }).count;
+      const existingLinkedAttemptCount = (handle.sqlite.prepare(`SELECT count(*) AS count
+        FROM campaign_play_actor_replan_attempts WHERE campaign_id = ? AND job_id = ?`).get(
+        handle.campaignId,
+        request.jobId,
+      ) as { count: number }).count;
+      const linkedCall = previousStageCount === 0 && existingLinkedAttemptCount === 0;
+      const firstAttemptNumber = previousStageCount + 1;
+      const workerEpoch = job.workerEpoch + 1;
+      const firstModelWorkerEpoch = workerEpoch;
+      const firstModelStageRowId = stableId("model-stage-row", {
+        stageId,
+        workerEpoch: firstModelWorkerEpoch,
+      });
+      const firstAttemptId = stableId("actor-replan-attempt", {
+        stageId,
+        attemptNumber: firstAttemptNumber,
+        modelWorkerEpoch: firstModelWorkerEpoch,
+      });
+      const providerStartedAt = dependencies.now();
+      const deadlineAt = providerStartedAt + request.externalOperationDeadlineMs;
+      if (!Number.isSafeInteger(deadlineAt) || deadlineAt <= providerStartedAt) {
+        throw new CampaignPlayActorReplannerError("replan_input_invalid");
+      }
+      const operationController = new AbortController();
+      let deadlineReached = false;
+      let deadlineSettled = false;
+      let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+      let resolveDeadline!: () => void;
+      const deadlineSignal = new Promise<void>((resolve) => {
+        resolveDeadline = resolve;
+      });
+      let upstreamAbortSettled = false;
+      let resolveUpstreamAbort!: () => void;
+      const upstreamAbortSignal = new Promise<void>((resolve) => {
+        resolveUpstreamAbort = resolve;
+      });
+      const markDeadline = (): void => {
+        if (deadlineReached) return;
+        deadlineReached = true;
+        operationController.abort();
+        if (!deadlineSettled) {
+          deadlineSettled = true;
+          resolveDeadline();
+        }
+      };
+      const onUpstreamAbort = (): void => {
+        operationController.abort();
+        if (!upstreamAbortSettled) {
+          upstreamAbortSettled = true;
+          resolveUpstreamAbort();
+        }
+      };
+      if (request.signal?.aborted) onUpstreamAbort();
+      else request.signal?.addEventListener("abort", onUpstreamAbort, { once: true });
+      const deadlineDelay = Math.max(0, deadlineAt - providerStartedAt);
+      deadlineTimer = dependencies.setTimer(markDeadline, deadlineDelay);
+      const clearDeadline = (): void => {
+        if (deadlineTimer !== undefined) {
+          dependencies.clearTimer(deadlineTimer);
+          deadlineTimer = undefined;
+        }
+        request.signal?.removeEventListener("abort", onUpstreamAbort);
+      };
+      const markDeadlineIfExpired = (): void => {
+        if (dependencies.now() >= deadlineAt) markDeadline();
+      };
+      const assertOperationLive = (): void => {
+        if (request.signal?.aborted) {
+          throw new CampaignPlayActorReplannerError("replan_epoch_lost");
+        }
+        markDeadlineIfExpired();
+        if (deadlineReached || operationController.signal.aborted) {
+          throw new CampaignPlayActorReplanDeadlineError();
+        }
+      };
+      const runProvider = async <T>(work: () => Promise<T>): Promise<T> => {
+        assertOperationLive();
+        const provider = Promise.resolve().then(work);
+        void provider.catch(() => undefined);
+        try {
+          return await Promise.race([
+            provider,
+            deadlineSignal.then(() => {
+              throw new CampaignPlayActorReplanDeadlineError();
+            }),
+            upstreamAbortSignal.then(() => {
+              throw new CampaignPlayActorReplannerError("replan_epoch_lost");
+            }),
+          ]);
+        } catch (error) {
+          if (request.signal?.aborted) {
+            throw new CampaignPlayActorReplannerError("replan_epoch_lost");
+          }
+          if (deadlineReached || dependencies.now() >= deadlineAt) {
+            markDeadline();
+            throw new CampaignPlayActorReplanDeadlineError();
+          }
+          throw error;
+        }
+      };
+      try {
       turnRepository.commitActorTransition({
         token: request.token,
         leaseMode: "live",
         worldVersionAdvance: 0,
         mutationId: stableId("actor-job-event", { jobId: request.jobId, stage: "replan_claimed", workerEpoch }),
         protectedPayloadHash: hashCampaignPlayProjection({ stageId, workerEpoch }),
-        committedAt: request.createdAt,
+        committedAt: providerStartedAt,
         mutate(context) {
           const claimed = context.sqlite.prepare(`UPDATE campaign_play_actor_jobs
             SET stage = 'claimed', worker_epoch = ?, claim_turn_worker_epoch = ?
@@ -791,258 +938,458 @@ export function createCampaignPlayActorReplanner(
             error_code, created_at, completed_at
           ) VALUES (?, ?, ?, ?, ?, 'actor_replanner', 'started', ?, ?, ?, 'strict_object',
             NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'pending', NULL, NULL, NULL, ?, NULL)`).run(
-            stableId("model-stage-row", { stageId, workerEpoch }),
+            firstModelStageRowId,
             stageId,
-            attempt,
+            firstAttemptNumber,
             context.campaignId,
             frame.turnId,
-            workerEpoch,
-            requestedModel.providerId,
-            requestedModel.model,
-            request.createdAt,
+            firstModelWorkerEpoch,
+              requestedModel.providerId,
+              requestedModel.model,
+            providerStartedAt,
           );
+          if (linkedCall) {
+            const attemptRow = context.sqlite.prepare(`INSERT INTO campaign_play_actor_replan_attempts (
+              attempt_id, campaign_id, job_id, stage_id, model_stage_row_id,
+              turn_id, actor_id, attempt_number, model_worker_epoch,
+              actor_job_worker_epoch, claim_turn_worker_epoch, frame_hash,
+              frozen_base_world_version, deadline_at, requested_provider_id, requested_model,
+              requested_strategy, retry_consumed_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'strict_object', NULL, ?)`).run(
+              firstAttemptId,
+              context.campaignId,
+              request.jobId,
+              stageId,
+              firstModelStageRowId,
+              frame.turnId,
+              frame.actorId,
+              firstAttemptNumber,
+              firstModelWorkerEpoch,
+              workerEpoch,
+              request.token.epoch,
+              turn.frameHash,
+              job.frozenBaseWorldVersion,
+              deadlineAt,
+              requestedModel.providerId,
+              requestedModel.model,
+              providerStartedAt,
+            );
+            if (attemptRow.changes !== 1) throw new CampaignPlayActorReplannerError("replan_epoch_lost");
+          }
         },
       });
-      const startedAt = dependencies.now();
-      requireTurnLease(handle, request.token, startedAt);
-      let observedTrace: Readonly<SafeGenerateTrace> | undefined;
-      let stageEvidence: ReturnType<typeof acceptedTrace> | undefined;
-      let rejectionArtifact: CampaignPlayActorPlanRejectionArtifact | undefined;
-      let processStoppedAfterProviderReturn = false;
-      try {
-        const generated = await dependencies.generateObject({
-          model: request.model,
-          schema: proposalSchema,
-          prompt: buildCampaignPlayActorReplanPrompt(compilation.promptFrame),
-          temperature: request.temperature,
-          maxOutputTokens: request.maxOutputTokens,
-          mode: "auto",
-          strictSchema: true,
-          allowRepair: false,
-          allowTextFallback: false,
-          retries: 1,
-          abortSignal: request.signal,
-        });
-        observedTrace = generated.trace;
+
+      type AttemptFailure = {
+        kind: "failed";
+        modelWorkerEpoch: number;
+        attemptNumber: number;
+        errorCode:
+          | "model_contract_invalid"
+          | "provider_unavailable"
+          | "stage_budget_exceeded"
+          | "stage_timeout"
+          | "persistence_failed"
+          | "worker_lease_lost";
+        schemaOutcome: "invalid" | "transport_error";
+        durationMs: number;
+        trace?: Readonly<SafeGenerateTrace>;
+        stageEvidence?: ReturnType<typeof acceptedTrace>;
+        rejectionArtifact?: CampaignPlayActorPlanRejectionArtifact;
+        contractInvalid: boolean;
+      };
+      type AttemptResult =
+        | { kind: "replanned"; plan: CampaignPlayActorPlan; modelWorkerEpoch: number; attemptNumber: number }
+        | AttemptFailure;
+      const isContractGenerationFailure = (error: unknown): boolean => {
+        const code = getSafeGenerateObjectErrorCode(error);
+        return isSafeGenerateObjectContractErrorCode(code);
+      };
+      const runAttempt = async (
+        model: LanguageModel,
+        modelWorkerEpoch: number,
+        attemptNumber: number,
+        modelStageRowId: string,
+        attemptId: string | null,
+      ): Promise<AttemptResult> => {
+        const startedAt = dependencies.now();
+        let observedTrace: Readonly<SafeGenerateTrace> | undefined;
+        let stageEvidence: ReturnType<typeof acceptedTrace> | undefined;
+        let rejectionArtifact: CampaignPlayActorPlanRejectionArtifact | undefined;
+        let contractInvalid = false;
+        let processStoppedAfterProviderReturn = false;
         try {
-          request.injectFault?.("after_provider_return");
-        } catch (cause) {
-          processStoppedAfterProviderReturn = true;
-          throw cause;
-        }
-        const proposerCompletedAt = dependencies.now();
-        if (proposerCompletedAt >= request.token.expiresAt) {
-          throw new CampaignPlayActorReplannerError("replan_epoch_lost");
-        }
-        const proposerEvidence = acceptedTrace(
-          generated.trace,
-          requestedModel.providerId,
-          requestedModel.model,
-        );
-        stageEvidence = proposerEvidence;
-        if (evidenceExceedsBudget(proposerEvidence, request, requestedModel)) {
-          throw new CampaignPlayActorReplannerError("replan_budget_exceeded");
-        }
-        const proposal = campaignPlayActorReplanProposalSchema.parse(generated.object);
-        const latestFrame = scheduler.buildActorFrame(request.jobId);
-        let plan: CampaignPlayActorPlan;
-        try {
-          plan = compilePlan(handle, latestFrame, compilation, proposal);
-        } catch (cause) {
-          if (cause instanceof CampaignPlayActorPlanRejectionError) {
-            rejectionArtifact = {
-              kind: "actor_plan_rejection",
-              phase: "compilation",
-              reason: cause.reason,
-              proposal,
-            };
-          }
-          throw cause;
-        }
-        stageEvidence = undefined;
-        const reviewed = await dependencies.generateObject({
-          model: request.model,
-          schema: campaignPlayActorPlanGroundingReviewSchema,
-          prompt: buildCampaignPlayActorPlanGroundingReviewPrompt(
-            compilation.promptFrame,
-            proposal,
-          ),
-          temperature: 0,
-          maxOutputTokens: request.maxOutputTokens,
-          mode: "tool",
-          strictSchema: true,
-          allowRepair: false,
-          allowTextFallback: false,
-          retries: 1,
-          abortSignal: request.signal,
-        });
-        observedTrace = reviewed.trace;
-        const reviewerCompletedAt = dependencies.now();
-        if (reviewerCompletedAt >= request.token.expiresAt) {
-          throw new CampaignPlayActorReplannerError("replan_epoch_lost");
-        }
-        const reviewerEvidence = acceptedTrace(
-          reviewed.trace,
-          requestedModel.providerId,
-          requestedModel.model,
-        );
-        const evidence = combineAcceptedEvidence(proposerEvidence, reviewerEvidence);
-        stageEvidence = evidence;
-        if (evidenceExceedsBudget(evidence, request, requestedModel)) {
-          throw new CampaignPlayActorReplannerError("replan_budget_exceeded");
-        }
-        if (reviewed.object.verdict !== "accepted") {
-          rejectionArtifact = {
-            kind: "actor_plan_rejection",
-            phase: "grounding_review",
-            reason: "grounding_review_rejected",
-            proposal,
-            review: {
-              verdict: "rejected",
-              violations: reviewed.object.violations,
-            },
-          };
-          throw new CampaignPlayActorReplannerError("replan_state_invalid");
-        }
-        const artifactJson = canonicalizeCampaignPlayProjection(plan);
-        const artifactHash = hashCampaignPlayProjection({
-          domain: "campaign_play_model_artifact",
-          stageId,
-          kind: "actor_replanner",
-          artifact: plan,
-        });
-        const durationMs = Math.max(0, reviewerCompletedAt - startedAt);
-        const schedule = handle.sqlite.prepare(`SELECT schedule_id AS scheduleId,
-          next_act_at_world_time_minutes AS nextActAtWorldTimeMinutes,
-          last_act_at_world_time_minutes AS lastActAtWorldTimeMinutes, agency_debt AS agencyDebt
-          FROM campaign_play_actor_schedules WHERE campaign_id = ? AND actor_id = ?`).get(
-          handle.campaignId,
-          frame.actorId,
-        ) as ScheduleRow | undefined;
-        if (!schedule) throw new CampaignPlayActorReplannerError("replan_state_invalid");
-        try {
-          request.injectFault?.("before_acceptance_commit");
-        } catch (cause) {
-          throw new CampaignPlayActorReplannerError("replan_persistence_failed", { cause });
-        }
-        const acceptedAt = dependencies.now();
-        requireTurnLease(handle, request.token, acceptedAt);
-        const stillOwned = handle.sqlite.prepare(`SELECT 1 AS found FROM campaign_play_actor_jobs
-          WHERE job_id = ? AND campaign_id = ? AND stage = 'claimed'
-            AND worker_epoch = ? AND claim_turn_worker_epoch = ?`).get(
-          request.jobId,
-          handle.campaignId,
-          workerEpoch,
-          request.token.epoch,
-        );
-        if (!stillOwned) throw new CampaignPlayActorReplannerError("replan_epoch_lost");
-        try {
-          turnRepository.commitActorTransition({
-            token: request.token,
-            leaseMode: "live",
-            worldVersionAdvance: 0,
-            mutationId: stableId("actor-job-event", { jobId: request.jobId, stage: "replanned", workerEpoch }),
-            protectedPayloadHash: hashCampaignPlayProjection({ artifactHash, actorWorkerEpoch: workerEpoch }),
-            committedAt: acceptedAt,
-            mutate(context) {
-            const fenced = context.sqlite.prepare(`SELECT 1 AS found FROM campaign_play_actor_jobs j
-              JOIN campaign_play_model_stages m ON m.stage_id = ? AND m.worker_epoch = ?
-                AND m.status = 'started' AND m.kind = 'actor_replanner'
-              WHERE j.job_id = ? AND j.campaign_id = ? AND j.stage = 'claimed'
-                AND j.worker_epoch = ? AND j.claim_turn_worker_epoch = ?
-                AND EXISTS (
-                  SELECT 1 FROM campaign_play_turns t
-                  WHERE t.id = j.turn_id AND t.campaign_id = j.campaign_id
-                    AND t.stage = 'primary_settled' AND t.worker_lease_owner = ?
-                    AND t.worker_epoch = ? AND t.worker_lease_expires_at = ?
-                )`).get(
-              stageId, workerEpoch, request.jobId, context.campaignId, workerEpoch,
-              request.token.epoch, request.token.owner, request.token.epoch,
-              request.token.expiresAt,
-            );
-            if (!fenced) throw new CampaignPlayActorReplannerError("replan_epoch_lost");
-            if (latestFrame.plan?.status === "active") {
-              const priorPlan = context.sqlite.prepare(`UPDATE campaign_play_actor_plans SET status = ?, updated_at = ?
-                WHERE plan_id = ? AND campaign_id = ? AND status = 'active'`).run(
-                latestFrame.selection.kind === "replan_required"
-                  && latestFrame.selection.reason === "precondition_failed" ? "blocked" : "completed",
-                acceptedAt,
-                latestFrame.plan.planId,
-                context.campaignId,
-              );
-              if (priorPlan.changes !== 1) {
-                throw new CampaignPlayActorReplannerError("replan_epoch_lost");
-              }
-            }
-            context.sqlite.prepare(`INSERT INTO campaign_play_actor_plans (
-              plan_id, campaign_id, actor_id, goal_id, plan_version, intent_json,
-              preconditions_json, cadence_minutes, priority, steps_json, status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`).run(
-              plan.planId, context.campaignId, plan.actorId, plan.goalId, plan.planVersion,
-              canonicalizeCampaignPlayProjection(plan.intent),
-              canonicalizeCampaignPlayProjection(plan.preconditions),
-              plan.cadenceMinutes, plan.priority,
-              canonicalizeCampaignPlayProjection(plan.steps),
-              acceptedAt, acceptedAt,
-            );
-            const scheduleUpdate = context.sqlite.prepare(`UPDATE campaign_play_actor_schedules SET plan_id = ?,
-              priority = ?, updated_at = ?
-              WHERE schedule_id = ? AND campaign_id = ? AND actor_id = ?`).run(
-              plan.planId,
-              plan.priority,
-              acceptedAt,
-              schedule.scheduleId,
-              context.campaignId,
-              frame.actorId,
-            );
-            const modelUpdate = context.sqlite.prepare(`UPDATE campaign_play_model_stages SET status = 'accepted',
-              actual_provider_id = ?, actual_model = ?, actual_strategy = 'strict_object',
-              input_tokens = ?, output_tokens = ?, duration_ms = ?, finish_reason = ?,
-              schema_outcome = 'valid', artifact_json = ?, artifact_hash = ?, completed_at = ?
-              WHERE stage_id = ? AND worker_epoch = ? AND status = 'started'`).run(
-              evidence.actualProviderId, evidence.actualModel, evidence.inputTokens,
-              evidence.outputTokens, durationMs, evidence.finishReason,
-              artifactJson, artifactHash, acceptedAt, stageId, workerEpoch,
-            );
-            const jobUpdate = context.sqlite.prepare(`UPDATE campaign_play_actor_jobs SET plan_id = ?
-              WHERE job_id = ? AND campaign_id = ? AND stage = 'claimed'
-                AND worker_epoch = ? AND claim_turn_worker_epoch = ?`).run(
-              plan.planId, request.jobId, context.campaignId,
-              workerEpoch, request.token.epoch,
-            );
-            if (scheduleUpdate.changes !== 1 || modelUpdate.changes !== 1 || jobUpdate.changes !== 1) {
-              throw new CampaignPlayActorReplannerError("replan_epoch_lost");
-            }
-            },
-          });
-        } catch (cause) {
-          if (cause instanceof CampaignPlayActorReplannerError
-            && cause.code === "replan_epoch_lost") {
+          requireTurnLease(handle, request.token, startedAt);
+          assertOperationLive();
+          let generated: Awaited<ReturnType<typeof safeGenerateObject>>;
+          try {
+            generated = await runProvider(() => dependencies.generateObject<CampaignPlayActorReplanProposal>({
+              model,
+              schema: proposalSchema,
+              prompt: proposalPrompt,
+              temperature: request.temperature,
+              maxOutputTokens: request.maxOutputTokens,
+              mode: "auto",
+              strictSchema: true,
+              allowRepair: false,
+              allowTextFallback: false,
+              retries: 1,
+              abortSignal: operationController.signal,
+            }));
+          } catch (cause) {
+            if (isContractGenerationFailure(cause)) contractInvalid = true;
             throw cause;
           }
-          throw new CampaignPlayActorReplannerError("replan_persistence_failed", { cause });
+          observedTrace = generated.trace;
+          assertOperationLive();
+          try {
+            request.injectFault?.("after_provider_return");
+          } catch (cause) {
+            processStoppedAfterProviderReturn = true;
+            throw cause;
+          }
+          const proposerCompletedAt = dependencies.now();
+          assertOperationLive();
+          if (proposerCompletedAt >= request.token.expiresAt) {
+            throw new CampaignPlayActorReplannerError("replan_epoch_lost");
+          }
+          const proposerEvidence = acceptedTrace(
+            generated.trace,
+            requestedModel.providerId,
+            requestedModel.model,
+          );
+          stageEvidence = proposerEvidence;
+          if (evidenceExceedsBudget(proposerEvidence, request, requestedModel)) {
+            throw new CampaignPlayActorReplannerError("replan_budget_exceeded");
+          }
+          let proposal: CampaignPlayActorReplanProposal;
+          try {
+            proposal = campaignPlayActorReplanProposalSchema.parse(generated.object);
+          } catch (cause) {
+            contractInvalid = true;
+            throw cause;
+          }
+          assertOperationLive();
+          let plan: CampaignPlayActorPlan;
+          try {
+            plan = compilePlan(handle, frame, compilation, proposal);
+          } catch (cause) {
+            if (cause instanceof CampaignPlayActorPlanRejectionError) {
+              rejectionArtifact = {
+                kind: "actor_plan_rejection",
+                phase: "compilation",
+                reason: cause.reason,
+                proposal,
+              };
+            }
+            contractInvalid = true;
+            throw cause;
+          }
+          assertOperationLive();
+          stageEvidence = undefined;
+          type GroundingReview = {
+            verdict: "accepted" | "rejected";
+            violations: Array<{
+              stepIndex: number;
+              kind: "other_actor_action_not_established" | "outcome_not_established" | "contradicts_accepted_frame";
+            }>;
+          };
+          let reviewed: { object: GroundingReview; trace: SafeGenerateTrace };
+          try {
+            reviewed = await runProvider(() => dependencies.generateObject<GroundingReview>({
+              model,
+              schema: campaignPlayActorPlanGroundingReviewSchema,
+              prompt: buildCampaignPlayActorPlanGroundingReviewPrompt(
+                compilation.promptFrame,
+                proposal,
+              ),
+              temperature: 0,
+              maxOutputTokens: request.maxOutputTokens,
+              mode: "tool",
+              strictSchema: true,
+              allowRepair: false,
+              allowTextFallback: false,
+              retries: 1,
+              abortSignal: operationController.signal,
+            }));
+          } catch (cause) {
+            if (isContractGenerationFailure(cause)) contractInvalid = true;
+            throw cause;
+          }
+          observedTrace = reviewed.trace;
+          assertOperationLive();
+          const reviewerCompletedAt = dependencies.now();
+          assertOperationLive();
+          if (reviewerCompletedAt >= request.token.expiresAt) {
+            throw new CampaignPlayActorReplannerError("replan_epoch_lost");
+          }
+          const reviewerEvidence = acceptedTrace(
+            reviewed.trace,
+            requestedModel.providerId,
+            requestedModel.model,
+          );
+          const evidence = combineAcceptedEvidence(proposerEvidence, reviewerEvidence);
+          stageEvidence = evidence;
+          if (evidenceExceedsBudget(evidence, request, requestedModel)) {
+            throw new CampaignPlayActorReplannerError("replan_budget_exceeded");
+          }
+          if (reviewed.object.verdict !== "accepted") {
+            rejectionArtifact = {
+              kind: "actor_plan_rejection",
+              phase: "grounding_review",
+              reason: "grounding_review_rejected",
+              proposal,
+              review: {
+                verdict: "rejected",
+                violations: reviewed.object.violations,
+              },
+            };
+            contractInvalid = true;
+            throw new CampaignPlayActorReplannerError("replan_state_invalid");
+          }
+          const artifactJson = canonicalizeCampaignPlayProjection(plan);
+          const artifactHash = hashCampaignPlayProjection({
+            domain: "campaign_play_model_artifact",
+            stageId,
+            kind: "actor_replanner",
+            artifact: plan,
+          });
+          const durationMs = Math.max(0, reviewerCompletedAt - startedAt);
+          const schedule = handle.sqlite.prepare(`SELECT schedule_id AS scheduleId,
+            next_act_at_world_time_minutes AS nextActAtWorldTimeMinutes,
+            last_act_at_world_time_minutes AS lastActAtWorldTimeMinutes, agency_debt AS agencyDebt
+            FROM campaign_play_actor_schedules WHERE campaign_id = ? AND actor_id = ?`).get(
+            handle.campaignId,
+            frame.actorId,
+          ) as ScheduleRow | undefined;
+          if (!schedule) throw new CampaignPlayActorReplannerError("replan_state_invalid");
+          try {
+            request.injectFault?.("before_acceptance_commit");
+          } catch (cause) {
+            throw new CampaignPlayActorReplannerError("replan_persistence_failed", { cause });
+          }
+          assertOperationLive();
+          const acceptedAt = dependencies.now();
+          assertOperationLive();
+          requireTurnLease(handle, request.token, acceptedAt);
+          const stillOwned = handle.sqlite.prepare(`SELECT 1 AS found FROM campaign_play_actor_jobs
+            WHERE job_id = ? AND campaign_id = ? AND stage = 'claimed'
+              AND worker_epoch = ? AND claim_turn_worker_epoch = ?`).get(
+            request.jobId,
+            handle.campaignId,
+            workerEpoch,
+            request.token.epoch,
+          );
+          if (!stillOwned) throw new CampaignPlayActorReplannerError("replan_epoch_lost");
+          try {
+            turnRepository.commitActorTransition({
+              token: request.token,
+              leaseMode: "live",
+              worldVersionAdvance: 0,
+              mutationId: stableId("actor-job-event", {
+                jobId: request.jobId,
+                stage: "replanned",
+                workerEpoch,
+                modelWorkerEpoch,
+                attemptNumber,
+              }),
+              protectedPayloadHash: hashCampaignPlayProjection({
+                artifactHash,
+                actorWorkerEpoch: workerEpoch,
+                modelWorkerEpoch,
+                attemptNumber,
+              }),
+              committedAt: acceptedAt,
+              mutate(context) {
+                const fenced = linkedCall && attemptId !== null
+                  ? context.sqlite.prepare(`SELECT 1 AS found
+                    FROM campaign_play_actor_replan_attempts attempt
+                    JOIN campaign_play_model_stages model ON model.id = attempt.model_stage_row_id
+                    JOIN campaign_play_actor_jobs job ON job.job_id = attempt.job_id
+                    JOIN campaign_play_turns turn_row ON turn_row.id = job.turn_id
+                    WHERE attempt.attempt_id = ? AND attempt.job_id = ?
+                      AND attempt.attempt_number IN (1, 2) AND attempt.attempt_number = ?
+                      AND attempt.model_worker_epoch = ?
+                      AND attempt.actor_job_worker_epoch = ?
+                      AND attempt.claim_turn_worker_epoch = ?
+                      AND attempt.frame_hash = ?
+                      AND attempt.frozen_base_world_version = ?
+                      AND attempt.deadline_at = ?
+                      AND ? < attempt.deadline_at
+                      AND attempt.requested_provider_id = ?
+                      AND attempt.requested_model = ?
+                      AND attempt.requested_strategy = 'strict_object'
+                      AND (attempt.attempt_number = 1 OR EXISTS (
+                        SELECT 1 FROM campaign_play_actor_replan_attempts prior_attempt
+                        WHERE prior_attempt.job_id = attempt.job_id
+                          AND prior_attempt.attempt_number = 1
+                          AND prior_attempt.retry_consumed_at IS NOT NULL
+                          AND prior_attempt.deadline_at = attempt.deadline_at
+                          AND prior_attempt.frame_hash = attempt.frame_hash
+                          AND prior_attempt.frozen_base_world_version = attempt.frozen_base_world_version
+                          AND prior_attempt.requested_provider_id = attempt.requested_provider_id
+                          AND prior_attempt.requested_model = attempt.requested_model
+                      ))
+                      AND model.status = 'started' AND model.id = attempt.model_stage_row_id
+                      AND model.stage_id = attempt.stage_id
+                      AND model.worker_epoch = attempt.model_worker_epoch
+                      AND job.campaign_id = ? AND job.turn_id = ? AND job.stage = 'claimed'
+                      AND job.worker_epoch = attempt.actor_job_worker_epoch
+                      AND job.claim_turn_worker_epoch = attempt.claim_turn_worker_epoch
+                      AND turn_row.campaign_id = job.campaign_id
+                      AND turn_row.stage = 'primary_settled'
+                      AND turn_row.frame_hash = attempt.frame_hash
+                      AND turn_row.worker_lease_owner = ?
+                      AND turn_row.worker_epoch = attempt.claim_turn_worker_epoch
+                      AND turn_row.worker_lease_expires_at = ?`).get(
+                    attemptId,
+                    request.jobId,
+                    attemptNumber,
+                    modelWorkerEpoch,
+                    workerEpoch,
+                    request.token.epoch,
+                    turn.frameHash,
+                    frame.baseWorldVersion,
+                    deadlineAt,
+                    acceptedAt,
+                    requestedModel.providerId,
+                    requestedModel.model,
+                    context.campaignId,
+                    frame.turnId,
+                    request.token.owner,
+                    request.token.expiresAt,
+                  )
+                  : context.sqlite.prepare(`SELECT 1 AS found
+                    FROM campaign_play_actor_jobs job
+                    JOIN campaign_play_model_stages model
+                      ON model.stage_id = ? AND model.worker_epoch = ?
+                      AND model.status = 'started' AND model.kind = 'actor_replanner'
+                    JOIN campaign_play_turns turn_row
+                      ON turn_row.id = job.turn_id AND turn_row.campaign_id = job.campaign_id
+                    WHERE job.job_id = ? AND job.campaign_id = ? AND job.turn_id = ?
+                      AND job.stage = 'claimed' AND job.worker_epoch = ?
+                      AND job.claim_turn_worker_epoch = ?
+                      AND turn_row.stage = 'primary_settled'
+                      AND turn_row.frame_hash = ?
+                      AND turn_row.worker_lease_owner = ?
+                      AND turn_row.worker_epoch = ?
+                      AND turn_row.worker_lease_expires_at = ?`).get(
+                    stageId,
+                    modelWorkerEpoch,
+                    request.jobId,
+                    context.campaignId,
+                    frame.turnId,
+                    workerEpoch,
+                    request.token.epoch,
+                    turn.frameHash,
+                    request.token.owner,
+                    request.token.epoch,
+                    request.token.expiresAt,
+                  );
+                if (!fenced) throw new CampaignPlayActorReplannerError("replan_epoch_lost");
+                if (frame.plan?.status === "active") {
+                  const priorPlan = context.sqlite.prepare(`UPDATE campaign_play_actor_plans SET status = ?, updated_at = ?
+                    WHERE plan_id = ? AND campaign_id = ? AND status = 'active'`).run(
+                    frame.selection.kind === "replan_required"
+                      && frame.selection.reason === "precondition_failed" ? "blocked" : "completed",
+                    acceptedAt,
+                    frame.plan.planId,
+                    context.campaignId,
+                  );
+                  if (priorPlan.changes !== 1) {
+                    throw new CampaignPlayActorReplannerError("replan_epoch_lost");
+                  }
+                }
+                context.sqlite.prepare(`INSERT INTO campaign_play_actor_plans (
+                  plan_id, campaign_id, actor_id, goal_id, plan_version, intent_json,
+                  preconditions_json, cadence_minutes, priority, steps_json, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`).run(
+                  plan.planId, context.campaignId, plan.actorId, plan.goalId, plan.planVersion,
+                  canonicalizeCampaignPlayProjection(plan.intent),
+                  canonicalizeCampaignPlayProjection(plan.preconditions),
+                  plan.cadenceMinutes, plan.priority,
+                  canonicalizeCampaignPlayProjection(plan.steps),
+                  acceptedAt, acceptedAt,
+                );
+                const scheduleUpdate = context.sqlite.prepare(`UPDATE campaign_play_actor_schedules SET plan_id = ?,
+                  priority = ?, updated_at = ?
+                  WHERE schedule_id = ? AND campaign_id = ? AND actor_id = ?`).run(
+                  plan.planId,
+                  plan.priority,
+                  acceptedAt,
+                  schedule.scheduleId,
+                  context.campaignId,
+                  frame.actorId,
+                );
+                const modelUpdate = context.sqlite.prepare(`UPDATE campaign_play_model_stages SET status = 'accepted',
+                  actual_provider_id = ?, actual_model = ?, actual_strategy = 'strict_object',
+                  input_tokens = ?, output_tokens = ?, duration_ms = ?, finish_reason = ?,
+                  schema_outcome = 'valid', artifact_json = ?, artifact_hash = ?, completed_at = ?
+                  WHERE id = ? AND stage_id = ? AND kind = 'actor_replanner'
+                    AND worker_epoch = ? AND status = 'started'`).run(
+                  evidence.actualProviderId, evidence.actualModel, evidence.inputTokens,
+                  evidence.outputTokens, durationMs, evidence.finishReason,
+                  artifactJson, artifactHash, acceptedAt, modelStageRowId, stageId, modelWorkerEpoch,
+                );
+                const jobUpdate = context.sqlite.prepare(`UPDATE campaign_play_actor_jobs SET plan_id = ?
+                  WHERE job_id = ? AND campaign_id = ? AND stage = 'claimed'
+                    AND worker_epoch = ? AND claim_turn_worker_epoch = ?`).run(
+                  plan.planId, request.jobId, context.campaignId,
+                  workerEpoch, request.token.epoch,
+                );
+                if (scheduleUpdate.changes !== 1 || modelUpdate.changes !== 1 || jobUpdate.changes !== 1) {
+                  throw new CampaignPlayActorReplannerError("replan_epoch_lost");
+                }
+              },
+            });
+          } catch (cause) {
+            if (cause instanceof CampaignPlayActorReplannerError
+              && cause.code === "replan_epoch_lost") {
+              throw cause;
+            }
+            throw new CampaignPlayActorReplannerError("replan_persistence_failed", { cause });
+          }
+          return { kind: "replanned", plan, modelWorkerEpoch, attemptNumber };
+        } catch (error) {
+          if (processStoppedAfterProviderReturn) throw error;
+          const interruptedAt = dependencies.now();
+          const durationMs = Math.max(0, interruptedAt - startedAt);
+          const trace = getSafeGenerateObjectTrace(error) ?? observedTrace ?? undefined;
+          const epochLost = (error instanceof CampaignPlayActorReplannerError
+            && error.code === "replan_epoch_lost") || request.signal?.aborted === true;
+          const deadlineExceeded = error instanceof CampaignPlayActorReplanDeadlineError
+            || (deadlineReached && !request.signal?.aborted);
+          const budgetExceeded = error instanceof CampaignPlayActorReplannerError
+            && error.code === "replan_budget_exceeded";
+          const persistenceFailed = error instanceof CampaignPlayActorReplannerError
+            && error.code === "replan_persistence_failed";
+          const errorCode = epochLost ? "worker_lease_lost" as const
+            : deadlineExceeded ? "stage_timeout" as const
+            : budgetExceeded ? "stage_budget_exceeded" as const
+            : persistenceFailed ? "persistence_failed" as const
+            : contractInvalid ? "model_contract_invalid" as const
+            : trace === undefined ? "provider_unavailable" as const
+            : "model_contract_invalid" as const;
+          const schemaOutcome = errorCode === "model_contract_invalid" || errorCode === "stage_budget_exceeded"
+            ? "invalid" as const
+            : "transport_error" as const;
+          return {
+            kind: "failed",
+            modelWorkerEpoch,
+            attemptNumber,
+            errorCode,
+            schemaOutcome,
+            durationMs,
+            trace,
+            stageEvidence,
+            rejectionArtifact,
+            contractInvalid: contractInvalid && errorCode === "model_contract_invalid",
+          };
         }
-        return { kind: "replanned", jobId: request.jobId, plan, workerEpoch };
-      } catch (error) {
-        if (processStoppedAfterProviderReturn) throw error;
+      };
+
+      const finalizeFailure = (failure: AttemptFailure): CampaignPlayActorReplanOutcome => {
         const interruptedAt = dependencies.now();
-        const durationMs = Math.max(0, interruptedAt - startedAt);
-        const trace = getSafeGenerateObjectTrace(error) ?? observedTrace ?? undefined;
-        const epochLost = (error instanceof CampaignPlayActorReplannerError
-          && error.code === "replan_epoch_lost") || request.signal?.aborted === true;
-        const budgetExceeded = error instanceof CampaignPlayActorReplannerError
-          && error.code === "replan_budget_exceeded";
-        const persistenceFailed = error instanceof CampaignPlayActorReplannerError
-          && error.code === "replan_persistence_failed";
-        const errorCode = epochLost ? "worker_lease_lost" as const
-          : budgetExceeded ? "stage_budget_exceeded" as const
-          : persistenceFailed ? "persistence_failed" as const
-          : trace === undefined ? "provider_unavailable" as const
-          : "model_contract_invalid" as const;
-        const schemaOutcome = errorCode === "model_contract_invalid" || errorCode === "stage_budget_exceeded"
-          ? "invalid" as const
-          : "transport_error" as const;
-        const rejectedSchedule = errorCode === "model_contract_invalid"
+        const rejectedSchedule = failure.errorCode === "model_contract_invalid"
           ? (() => {
               const row = handle.sqlite.prepare(`SELECT s.schedule_id AS scheduleId,
                 s.plan_id AS planId,
@@ -1054,9 +1401,9 @@ export function createCampaignPlayActorReplanner(
                 LEFT JOIN campaign_play_actor_plans p
                   ON p.campaign_id = s.campaign_id AND p.plan_id = s.plan_id
                 WHERE s.campaign_id = ? AND s.actor_id = ?`).get(
-                  handle.campaignId,
-                  frame.actorId,
-                ) as ScheduleRow | undefined;
+                handle.campaignId,
+                frame.actorId,
+              ) as ScheduleRow | undefined;
               if (!row || row.planId !== (frame.plan?.planId ?? null)) return null;
               return {
                 row,
@@ -1071,23 +1418,23 @@ export function createCampaignPlayActorReplanner(
             })()
           : null;
         const deferInvalidReplan = rejectedSchedule !== null;
-        if (rejectionArtifact !== undefined) {
+        if (failure.rejectionArtifact !== undefined) {
           log.event("actor_replan.rejected", {
             campaignId: handle.campaignId,
             turnId: frame.turnId,
             jobId: request.jobId,
             actorId: frame.actorId,
-            phase: rejectionArtifact.phase,
-            reason: rejectionArtifact.reason,
-            goalHandle: rejectionArtifact.proposal.goalHandle,
-            stepCount: rejectionArtifact.proposal.steps.length,
-            moveTargets: rejectionArtifact.proposal.steps
+            phase: failure.rejectionArtifact.phase,
+            reason: failure.rejectionArtifact.reason,
+            goalHandle: failure.rejectionArtifact.proposal.goalHandle,
+            stepCount: failure.rejectionArtifact.proposal.steps.length,
+            moveTargets: failure.rejectionArtifact.proposal.steps
               .map((step, index) => step.intent.kind === "move"
                 ? `${index}:${step.intent.targetHandles.join(",")}`
                 : null)
               .filter((value): value is string => value !== null)
               .join("|"),
-            reviewViolations: rejectionArtifact.review?.violations
+            reviewViolations: failure.rejectionArtifact.review?.violations
               .map((violation) => `${violation.stepIndex}:${violation.kind}`)
               .join("|") ?? "",
           });
@@ -1097,6 +1444,12 @@ export function createCampaignPlayActorReplanner(
         } catch {
           return { kind: "interrupted", jobId: request.jobId, errorCode: "worker_lease_lost", workerEpoch };
         }
+        const trace = failure.trace;
+        const actualProviderId = failure.stageEvidence?.actualProviderId
+          ?? trace?.capability?.providerId ?? null;
+        const actualModel = failure.stageEvidence?.actualModel
+          ?? trace?.response?.modelId ?? trace?.capability?.model ?? null;
+        const hasActual = actualProviderId !== null && actualModel !== null;
         turnRepository.commitActorTransition({
           token: request.token,
           leaseMode: "live",
@@ -1106,38 +1459,40 @@ export function createCampaignPlayActorReplanner(
             jobId: request.jobId,
             stage: deferInvalidReplan ? "replan_deferred" : "replan_interrupted",
             workerEpoch,
+            modelWorkerEpoch: failure.modelWorkerEpoch,
+            attemptNumber: failure.attemptNumber,
           }),
           protectedPayloadHash: hashCampaignPlayProjection({
-            errorCode,
+            errorCode: failure.errorCode,
             actorWorkerEpoch: workerEpoch,
+            modelWorkerEpoch: failure.modelWorkerEpoch,
+            attemptNumber: failure.attemptNumber,
             outcome: deferInvalidReplan ? "deferred" : "interrupted",
           }),
           committedAt: interruptedAt,
           mutate(context) {
-            const stage = context.sqlite.prepare(`SELECT status FROM campaign_play_model_stages
-              WHERE stage_id = ? AND worker_epoch = ?`).get(stageId, workerEpoch) as { status: string } | undefined;
-            if (stage?.status !== "started") throw new CampaignPlayActorReplannerError("replan_epoch_lost");
-            const hasActual = stageEvidence !== undefined || (
-              !!trace?.capability?.providerId &&
-              !!(trace.response?.modelId ?? trace.capability.model)
-            );
             const modelUpdate = context.sqlite.prepare(`UPDATE campaign_play_model_stages SET status = 'interrupted',
               actual_provider_id = ?, actual_model = ?, actual_strategy = ?,
               input_tokens = ?, output_tokens = ?, finish_reason = ?,
               duration_ms = ?, schema_outcome = ?, error_code = ?,
-              completed_at = ? WHERE stage_id = ? AND worker_epoch = ? AND status = 'started'`).run(
-              stageEvidence?.actualProviderId ?? (hasActual ? trace!.capability!.providerId : null),
-              stageEvidence?.actualModel ?? (hasActual ? (trace!.response?.modelId ?? trace!.capability!.model) : null),
+              completed_at = ? WHERE id = ? AND stage_id = ? AND kind = 'actor_replanner'
+                AND worker_epoch = ? AND status = 'started'`).run(
+              hasActual ? actualProviderId : null,
+              hasActual ? actualModel : null,
               hasActual ? "strict_object" : null,
-              stageEvidence?.inputTokens ?? trace?.usage?.inputTokens ?? null,
-              stageEvidence?.outputTokens ?? trace?.usage?.outputTokens ?? null,
-              stageEvidence?.finishReason ?? trace?.finishReason ?? null,
-              durationMs,
-              schemaOutcome,
-              errorCode,
+              failure.stageEvidence?.inputTokens ?? trace?.usage?.inputTokens ?? null,
+              failure.stageEvidence?.outputTokens ?? trace?.usage?.outputTokens ?? null,
+              failure.stageEvidence?.finishReason ?? trace?.finishReason ?? null,
+              failure.durationMs,
+              failure.schemaOutcome,
+              failure.errorCode,
               interruptedAt,
+              failure.kind === "failed" ? stableId("model-stage-row", {
+                stageId,
+                workerEpoch: failure.modelWorkerEpoch,
+              }) : "",
               stageId,
-              workerEpoch,
+              failure.modelWorkerEpoch,
             );
             let terminalChanges: number;
             if (deferInvalidReplan) {
@@ -1146,26 +1501,26 @@ export function createCampaignPlayActorReplanner(
                 WHERE job_id = ? AND campaign_id = ? AND stage = 'claimed'
                   AND proposal_id IS NULL AND worker_epoch = ?
                   AND claim_turn_worker_epoch = ?`).run(
-                  interruptedAt,
-                  request.jobId,
-                  context.campaignId,
-                  workerEpoch,
-                  request.token.epoch,
-                );
+                interruptedAt,
+                request.jobId,
+                context.campaignId,
+                workerEpoch,
+                request.token.epoch,
+              );
               terminalChanges = terminal.changes;
               const scheduleUpdate = context.sqlite.prepare(`UPDATE campaign_play_actor_schedules SET
                 next_act_at_world_time_minutes = ?, last_act_at_world_time_minutes = ?,
                 agency_debt = ?, updated_at = ?
                 WHERE schedule_id = ? AND campaign_id = ? AND actor_id = ? AND plan_id IS ?`).run(
-                  rejectedSchedule.transition.nextActAtWorldTimeMinutes,
-                  rejectedSchedule.transition.lastActAtWorldTimeMinutes,
-                  rejectedSchedule.transition.agencyDebt,
-                  interruptedAt,
-                  rejectedSchedule.row.scheduleId,
-                  context.campaignId,
-                  frame.actorId,
-                  rejectedSchedule.row.planId,
-                );
+                rejectedSchedule.transition.nextActAtWorldTimeMinutes,
+                rejectedSchedule.transition.lastActAtWorldTimeMinutes,
+                rejectedSchedule.transition.agencyDebt,
+                interruptedAt,
+                rejectedSchedule.row.scheduleId,
+                context.campaignId,
+                frame.actorId,
+                rejectedSchedule.row.planId,
+              );
               if (scheduleUpdate.changes !== 1) {
                 throw new CampaignPlayActorReplannerError("replan_state_invalid");
               }
@@ -1174,11 +1529,11 @@ export function createCampaignPlayActorReplanner(
                 SET stage = 'interrupted'
                 WHERE job_id = ? AND campaign_id = ? AND stage = 'claimed'
                   AND worker_epoch = ? AND claim_turn_worker_epoch = ?`).run(
-                  request.jobId,
-                  context.campaignId,
-                  workerEpoch,
-                  request.token.epoch,
-                ).changes;
+                request.jobId,
+                context.campaignId,
+                workerEpoch,
+                request.token.epoch,
+              ).changes;
             }
             if (modelUpdate.changes !== 1 || terminalChanges !== 1) {
               throw new CampaignPlayActorReplannerError("replan_epoch_lost");
@@ -1193,7 +1548,240 @@ export function createCampaignPlayActorReplanner(
               errorCode: "model_contract_invalid",
               workerEpoch,
             }
-          : { kind: "interrupted", jobId: request.jobId, errorCode, workerEpoch };
+          : { kind: "interrupted", jobId: request.jobId, errorCode: failure.errorCode, workerEpoch };
+      };
+
+      const firstResult = await runAttempt(
+        request.model,
+        firstModelWorkerEpoch,
+        firstAttemptNumber,
+        firstModelStageRowId,
+        linkedCall ? firstAttemptId : null,
+      );
+      if (firstResult.kind === "replanned") {
+        return { kind: "replanned", jobId: request.jobId, plan: firstResult.plan, workerEpoch };
+      }
+      if (request.signal?.aborted === true) {
+        return finalizeFailure({
+          ...firstResult,
+          errorCode: "worker_lease_lost",
+          schemaOutcome: "transport_error",
+          contractInvalid: false,
+        });
+      }
+      if (deadlineReached || dependencies.now() >= deadlineAt) {
+        return finalizeFailure({
+          ...firstResult,
+          errorCode: "stage_timeout",
+          schemaOutcome: "transport_error",
+          contractInvalid: false,
+        });
+      }
+      const recoveryModel = request.recoveryModel;
+      const mayEscalate = linkedCall && firstResult.contractInvalid &&
+        recoveryModel !== undefined &&
+        dependencies.now() < request.token.expiresAt && dependencies.now() < deadlineAt;
+      if (mayEscalate) {
+        const retryStartedAt = dependencies.now();
+        const secondModelWorkerEpoch = firstModelWorkerEpoch + 1;
+        const secondAttemptNumber = firstAttemptNumber + 1;
+        const secondModelStageRowId = stableId("model-stage-row", {
+          stageId,
+          workerEpoch: secondModelWorkerEpoch,
+        });
+        const secondAttemptId = stableId("actor-replan-attempt", {
+          stageId,
+          attemptNumber: secondAttemptNumber,
+          modelWorkerEpoch: secondModelWorkerEpoch,
+        });
+        try {
+          assertOperationLive();
+          requireTurnLease(handle, request.token, retryStartedAt);
+          turnRepository.commitActorTransition({
+            token: request.token,
+            leaseMode: "live",
+            worldVersionAdvance: 0,
+            mutationId: stableId("actor-job-event", {
+              jobId: request.jobId,
+              stage: "replan_reasoning_escalated",
+              workerEpoch,
+            }),
+            protectedPayloadHash: hashCampaignPlayProjection({
+              jobId: request.jobId,
+              stageId,
+              frameHash: turn.frameHash,
+              workerEpoch,
+              firstAttemptId,
+              secondAttemptId,
+            }),
+            committedAt: retryStartedAt,
+            mutate(context) {
+              const firstStage = context.sqlite.prepare(`SELECT model.status AS status,
+                  model.error_code AS errorCode, attempt.deadline_at AS deadlineAt,
+                  attempt.frame_hash AS frameHash,
+                  attempt.frozen_base_world_version AS frozenBaseWorldVersion,
+                  attempt.requested_provider_id AS requestedProviderId,
+                  attempt.requested_model AS requestedModel
+                FROM campaign_play_model_stages model
+                JOIN campaign_play_actor_replan_attempts attempt
+                  ON attempt.model_stage_row_id = model.id
+                WHERE model.id = ? AND model.stage_id = ? AND model.attempt = ?
+                  AND model.kind = 'actor_replanner' AND model.worker_epoch = ?
+                  AND attempt.attempt_id = ? AND attempt.job_id = ?
+                  AND attempt.attempt_number = 1`).get(
+                firstModelStageRowId,
+                stageId,
+                firstAttemptNumber,
+                firstModelWorkerEpoch,
+                firstAttemptId,
+                request.jobId,
+              ) as {
+                status: string;
+                errorCode: string | null;
+                deadlineAt: number;
+                frameHash: string;
+                frozenBaseWorldVersion: number;
+                requestedProviderId: string;
+                requestedModel: string;
+              } | undefined;
+              if (firstStage?.status !== "started"
+                || firstStage.errorCode !== null
+                || firstStage.deadlineAt !== deadlineAt
+                || firstStage.frameHash !== turn.frameHash
+                || firstStage.frozenBaseWorldVersion !== frame.baseWorldVersion
+                || firstStage.requestedProviderId !== requestedModel.providerId
+                || firstStage.requestedModel !== requestedModel.model
+                || retryStartedAt >= deadlineAt) {
+                throw new CampaignPlayActorReplannerError("replan_epoch_lost");
+              }
+              const firstTrace = firstResult.trace;
+              const actualProviderId = firstResult.stageEvidence?.actualProviderId
+                ?? firstTrace?.capability?.providerId ?? null;
+              const actualModel = firstResult.stageEvidence?.actualModel
+                ?? firstTrace?.response?.modelId ?? firstTrace?.capability?.model ?? null;
+              const hasActual = actualProviderId !== null && actualModel !== null;
+              const modelUpdate = context.sqlite.prepare(`UPDATE campaign_play_model_stages SET
+                status = 'interrupted', actual_provider_id = ?, actual_model = ?,
+                actual_strategy = ?, input_tokens = ?, output_tokens = ?, finish_reason = ?,
+                duration_ms = ?, schema_outcome = 'invalid', error_code = 'model_contract_invalid',
+                completed_at = ? WHERE id = ? AND stage_id = ? AND attempt = ?
+                  AND worker_epoch = ? AND status = 'started'`).run(
+                hasActual ? actualProviderId : null,
+                hasActual ? actualModel : null,
+                hasActual ? "strict_object" : null,
+                firstResult.stageEvidence?.inputTokens ?? firstTrace?.usage?.inputTokens ?? null,
+                firstResult.stageEvidence?.outputTokens ?? firstTrace?.usage?.outputTokens ?? null,
+                firstResult.stageEvidence?.finishReason ?? firstTrace?.finishReason ?? null,
+                firstResult.durationMs,
+                retryStartedAt,
+                firstModelStageRowId,
+                stageId,
+                firstAttemptNumber,
+                firstModelWorkerEpoch,
+              );
+              const retryMarker = context.sqlite.prepare(`UPDATE campaign_play_actor_replan_attempts
+                SET retry_consumed_at = ?
+                WHERE attempt_id = ? AND campaign_id = ? AND job_id = ?
+                  AND attempt_number = 1 AND retry_consumed_at IS NULL
+                  AND model_stage_row_id = ? AND actor_job_worker_epoch = ?
+                  AND claim_turn_worker_epoch = ? AND frame_hash = ?
+                  AND frozen_base_world_version = ? AND deadline_at = ?
+                  AND ? < deadline_at AND requested_provider_id = ?
+                  AND requested_model = ? AND requested_strategy = 'strict_object'`).run(
+                retryStartedAt,
+                firstAttemptId,
+                context.campaignId,
+                request.jobId,
+                firstModelStageRowId,
+                workerEpoch,
+                request.token.epoch,
+                turn.frameHash,
+                frame.baseWorldVersion,
+                deadlineAt,
+                retryStartedAt,
+                requestedModel.providerId,
+                requestedModel.model,
+              );
+              context.sqlite.prepare(`INSERT INTO campaign_play_model_stages (
+                id, stage_id, attempt, campaign_id, turn_id, kind, status, worker_epoch,
+                requested_provider_id, requested_model, requested_strategy,
+                actual_provider_id, actual_model, actual_strategy, input_tokens, output_tokens,
+                duration_ms, finish_reason, schema_outcome, artifact_json, artifact_hash,
+                error_code, created_at, completed_at
+              ) VALUES (?, ?, ?, ?, ?, 'actor_replanner', 'started', ?, ?, ?, 'strict_object',
+                NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'pending', NULL, NULL, NULL, ?, NULL)`).run(
+                secondModelStageRowId,
+                stageId,
+                secondAttemptNumber,
+                context.campaignId,
+                frame.turnId,
+                secondModelWorkerEpoch,
+                requestedModel.providerId,
+                requestedModel.model,
+                retryStartedAt,
+              );
+              const secondAttempt = context.sqlite.prepare(`INSERT INTO campaign_play_actor_replan_attempts (
+                attempt_id, campaign_id, job_id, stage_id, model_stage_row_id,
+                turn_id, actor_id, attempt_number, model_worker_epoch,
+                actor_job_worker_epoch, claim_turn_worker_epoch, frame_hash,
+                frozen_base_world_version, deadline_at, requested_provider_id, requested_model,
+                requested_strategy, retry_consumed_at, created_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'strict_object', NULL, ?)`).run(
+                secondAttemptId,
+                context.campaignId,
+                request.jobId,
+                stageId,
+                secondModelStageRowId,
+                frame.turnId,
+                frame.actorId,
+                secondAttemptNumber,
+                secondModelWorkerEpoch,
+                workerEpoch,
+                request.token.epoch,
+                turn.frameHash,
+                frame.baseWorldVersion,
+                deadlineAt,
+                requestedModel.providerId,
+                requestedModel.model,
+                retryStartedAt,
+              );
+              if (modelUpdate.changes !== 1 || retryMarker.changes !== 1 || secondAttempt.changes !== 1) {
+                throw new CampaignPlayActorReplannerError("replan_epoch_lost");
+              }
+            },
+          });
+        } catch (cause) {
+          if (cause instanceof CampaignPlayActorReplannerError
+            && cause.code === "replan_epoch_lost") {
+            return {
+              kind: "interrupted",
+              jobId: request.jobId,
+              errorCode: "worker_lease_lost",
+              workerEpoch,
+            };
+          }
+          return finalizeFailure({
+            ...firstResult,
+            errorCode: "persistence_failed",
+            schemaOutcome: "transport_error",
+            contractInvalid: false,
+          });
+        }
+        const secondResult = await runAttempt(
+          recoveryModel,
+          secondModelWorkerEpoch,
+          secondAttemptNumber,
+          secondModelStageRowId,
+          secondAttemptId,
+        );
+        if (secondResult.kind === "replanned") {
+          return { kind: "replanned", jobId: request.jobId, plan: secondResult.plan, workerEpoch };
+        }
+        return finalizeFailure(secondResult);
+      }
+      return finalizeFailure(firstResult);
+      } finally {
+        clearDeadline();
       }
     },
   };

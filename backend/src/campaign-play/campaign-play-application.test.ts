@@ -511,6 +511,16 @@ describe("CampaignPlayApplication", () => {
           name: "Provider Test",
           baseUrl: "http://localhost:1234",
           apiKey: "",
+          model: "generator-model",
+        },
+        { role: "generator" },
+      ],
+      [
+        {
+          id: "provider-test",
+          name: "Provider Test",
+          baseUrl: "http://localhost:1234",
+          apiKey: "",
           model: "storyteller-model",
         },
         { role: "storyteller", reasoningMode: "bypass" },

@@ -551,11 +551,14 @@ export function createCampaignPlayApplication(
         gameMasterRequested,
         dependencies.createModel(generator.provider, { role: "generator", reasoningMode: "bypass" }),
       ),
-      actorReplannerModel: stageModel(
-        actorGenerator,
-        actorRequested,
-        dependencies.createModel(actorGenerator.provider, { role: "generator", reasoningMode: "bypass" }),
-      ),
+      actorReplannerModel: {
+        ...stageModel(
+          actorGenerator,
+          actorRequested,
+          dependencies.createModel(actorGenerator.provider, { role: "generator", reasoningMode: "bypass" }),
+        ),
+        reasoningModel: dependencies.createModel(actorGenerator.provider, { role: "generator" }),
+      },
       narratorModel: stageModel(
         storyteller,
         narratorRequested,

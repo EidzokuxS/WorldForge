@@ -31,6 +31,7 @@ const REQUIRED_CAMPAIGN_PLAY_TABLES = [
   "campaign_play_actor_schedules",
   "campaign_play_actor_due_sets",
   "campaign_play_actor_jobs",
+  "campaign_play_actor_replan_attempts",
   "campaign_play_actor_proposals",
   "campaign_play_actor_knowledge",
   "campaign_play_observations",

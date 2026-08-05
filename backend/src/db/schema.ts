@@ -3684,6 +3684,81 @@ export const campaignPlayActorJobs = sqliteTable(
   ],
 );
 
+export const campaignPlayActorReplanAttempts = sqliteTable(
+  "campaign_play_actor_replan_attempts",
+  {
+    attemptId: text("attempt_id").primaryKey(),
+    campaignId: text("campaign_id").notNull()
+      .references(() => campaignPlayStates.campaignId, { onDelete: "cascade" }),
+    jobId: text("job_id").notNull()
+      .references(() => campaignPlayActorJobs.jobId, { onDelete: "restrict" }),
+    stageId: text("stage_id").notNull(),
+    modelStageRowId: text("model_stage_row_id").notNull()
+      .references(() => campaignPlayModelStages.id, { onDelete: "restrict" }),
+    turnId: text("turn_id").notNull()
+      .references(() => campaignPlayTurns.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").notNull()
+      .references(() => actors.id, { onDelete: "cascade" }),
+    attemptNumber: integer("attempt_number").notNull(),
+    modelWorkerEpoch: integer("model_worker_epoch").notNull(),
+    actorJobWorkerEpoch: integer("actor_job_worker_epoch").notNull(),
+    claimTurnWorkerEpoch: integer("claim_turn_worker_epoch").notNull(),
+    frameHash: text("frame_hash").notNull(),
+    frozenBaseWorldVersion: integer("frozen_base_world_version").notNull(),
+    deadlineAt: integer("deadline_at", { mode: "number" }).notNull(),
+    requestedProviderId: text("requested_provider_id").notNull(),
+    requestedModel: text("requested_model").notNull(),
+    requestedStrategy: text("requested_strategy").notNull(),
+    retryConsumedAt: integer("retry_consumed_at", { mode: "number" }),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("campaign_play_actor_replan_attempts_job_attempt_unique").on(
+      table.jobId,
+      table.attemptNumber,
+    ),
+    uniqueIndex("campaign_play_actor_replan_attempts_model_stage_unique").on(
+      table.modelStageRowId,
+    ),
+    uniqueIndex("campaign_play_actor_replan_attempts_job_retry_unique")
+      .on(table.jobId)
+      .where(sql`${table.attemptNumber} = 2`),
+    index("idx_campaign_play_actor_replan_attempts_job_order").on(
+      table.campaignId,
+      table.jobId,
+      table.attemptNumber,
+    ),
+    index("idx_campaign_play_actor_replan_attempts_job_stage").on(
+      table.jobId,
+      table.stageId,
+      table.attemptNumber,
+    ),
+    index("idx_campaign_play_actor_replan_attempts_model_stage").on(
+      table.campaignId,
+      table.modelStageRowId,
+    ),
+    check(
+      "campaign_play_actor_replan_attempts_identity_valid",
+      sql`${table.attemptNumber} IN (1, 2)
+        AND ${table.modelWorkerEpoch} > 0
+        AND ${table.actorJobWorkerEpoch} > 0
+        AND ${table.claimTurnWorkerEpoch} > 0
+        AND ${table.frozenBaseWorldVersion} > 0
+        AND ${table.deadlineAt} > ${table.createdAt}
+        AND length(${table.stageId}) > 0
+        AND length(${table.frameHash}) > 0
+        AND length(${table.requestedProviderId}) > 0
+        AND length(${table.requestedModel}) > 0
+        AND ${table.requestedStrategy} = 'strict_object'
+        AND (${table.retryConsumedAt} IS NULL OR ${table.retryConsumedAt} >= ${table.createdAt})`,
+    ),
+    check(
+      "campaign_play_actor_replan_attempts_retry_marker_valid",
+      sql`${table.attemptNumber} = 1 OR ${table.retryConsumedAt} IS NULL`,
+    ),
+  ],
+);
+
 export const campaignPlayActorProposals = sqliteTable(
   "campaign_play_actor_proposals",
   {
