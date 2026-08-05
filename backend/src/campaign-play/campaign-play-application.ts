@@ -700,14 +700,37 @@ export function createCampaignPlayApplication(
         failedOperation.currentAttemptId !== operation.attemptId ||
         failedOperation.errorCode !== "narration_invalid"
       ) return;
-      const recoveryToken = runtime.prepareNarrationRecovery({
+      // Rebuild only the recovery runtime so its Narrator uses the same selected
+      // provider/model with normal reasoning; the first runtime and manual Restore
+      // retain their existing bypass construction.
+      const originalCreateModel = dependencies.createModel;
+      let recoveryStorytellerModelCreated = false;
+      dependencies.createModel = ((provider, options = {}) => {
+        if (
+          !recoveryStorytellerModelCreated &&
+          options.role === "storyteller" &&
+          options.reasoningMode === "bypass"
+        ) {
+          recoveryStorytellerModelCreated = true;
+          const { reasoningMode: _reasoningMode, ...defaultReasoningOptions } = options;
+          return originalCreateModel(provider, defaultReasoningOptions);
+        }
+        return originalCreateModel(provider, options);
+      }) as typeof originalCreateModel;
+      let recoveryRuntime: CampaignPlayTurnRuntime;
+      try {
+        recoveryRuntime = runtimeFactory.createTurn(handle, turn.modelSelection);
+      } finally {
+        dependencies.createModel = originalCreateModel;
+      }
+      const recoveryToken = recoveryRuntime.prepareNarrationRecovery({
         operationId: operation.operationId,
         resultId: operation.resultId,
         narrationId: operation.narrationId,
         packetHash: operation.packetHash,
         receiptIds: operation.receiptIds,
       });
-      await runtime.runNarration(turnId, recoveryToken);
+      await recoveryRuntime.runNarration(turnId, recoveryToken);
     } finally {
       handle.close();
     }

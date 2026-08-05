@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { LanguageModel } from "ai";
+import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CAMPAIGN_PLAY_LIMITS,
@@ -75,6 +76,10 @@ import {
   safeGenerateObject,
   type SafeGenerateTrace,
 } from "../ai/generate-object-safe.js";
+import {
+  buildStructuredOutputModelMetadata,
+  rememberStructuredOutputModelMetadata,
+} from "../ai/structured-output-capabilities.js";
 
 const CAMPAIGN_ID = "79797979-7979-4797-8797-797979797979";
 const PLAYER_ID = "actor-player-turn-runtime";
@@ -2819,6 +2824,276 @@ describe("Campaign Play player-action turn runtime", () => {
       turnId: result.turnId,
       displayText: expect.stringContaining("I ask the signal keeper"),
     });
+    expect(result.handle.sqlite.prepare("PRAGMA integrity_check").get())
+      .toEqual({ integrity_check: "ok" });
+    expect(result.handle.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
+  it("constructs automatic recovery with default storyteller reasoning after bypass fails", async () => {
+    const prepared = await createCompletedPlayerActionForApplication();
+    closeTracked(prepared.handle);
+
+    const provider = {
+      id: "test",
+      name: "Test Provider",
+      baseUrl: "http://localhost:1234",
+      apiKey: "",
+      defaultModel: "test-model",
+    };
+    const role = (model: string) => ({
+      providerId: provider.id,
+      model,
+      temperature: 0.3,
+      maxTokens: 32_768,
+    });
+    const settings = {
+      providers: [provider],
+      judge: role("test-judge"),
+      storyteller: role("test-narrator"),
+      generator: role("test-game-master"),
+      embedder: { providerId: provider.id, model: "test-embedder", enabled: false },
+      images: { providerId: provider.id, model: "test-image", stylePrompt: "", enabled: false },
+      research: { enabled: false, maxSearchSteps: 1, searchProvider: "duckduckgo" as const },
+      ui: { showRawReasoning: false },
+      observability: {
+        enabled: false,
+        dumpFullPrompts: false,
+        roles: {
+          judge: false,
+          storyteller: false,
+          oracle: false,
+          npcAgent: false,
+          reflection: false,
+          embedder: false,
+        },
+      },
+    };
+
+    let generatedCalls = 0;
+    const model = new MockLanguageModelV3({
+      provider: provider.id,
+      modelId: "test-narrator",
+      doGenerate: async (options) => {
+        generatedCalls += 1;
+        type PromptPacket = {
+          actionContext: {
+            disposition: string;
+            clarificationQuestion: string | null;
+          } | null;
+          availableIntents: Array<{ kind: string }>;
+          currentLocation: { name: string; handle: string };
+          newObservations: Array<{
+            consequence?: { performingActorName?: string | null } | null;
+          }>;
+          observationSubjects?: Array<{ actors: Array<{ name: string }> }>;
+        };
+        const promptText = (options.prompt as Array<{
+          content?: Array<{ type?: string; text?: string }>;
+        }>)
+          .flatMap((message) => message.content ?? [])
+          .filter((part) => part.type === "text")
+          .map((part) => part.text ?? "")
+          .join("\n");
+        const marker = "NARRATOR_PACKET\n";
+        const markerStart = promptText.indexOf(marker);
+        const markerEnd = promptText.indexOf("\nEND_NARRATOR_PACKET", markerStart);
+        const packet = JSON.parse(promptText.slice(markerStart + marker.length, markerEnd)) as PromptPacket;
+        const requiredMatch = promptText.match(/REQUIRED_REPLY_INTENT_INDEX=(null|\d+)/u);
+        const requiredIndex = requiredMatch?.[1] === undefined || requiredMatch[1] === "null"
+          ? null
+          : Number(requiredMatch[1]);
+        const expectedActionCount = Math.min(4, packet.availableIntents.length);
+        const selectedIndexes = [...new Set([
+          ...(requiredIndex === null ? [] : [requiredIndex]),
+          ...packet.availableIntents.map((_intent, index) => index),
+        ])].slice(0, expectedActionCount);
+        const actionSelections = selectedIndexes.map((intentIndex) => ({
+          intentIndex,
+          detail: packet.availableIntents[intentIndex]?.kind === "move" ||
+            packet.availableIntents[intentIndex]?.kind === "wait"
+            ? null
+            : "the immediate situation",
+        }));
+        if (generatedCalls === 1) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                beats: [{
+                  purpose: "moment",
+                  observationIndexes: packet.newObservations.map((_observation, index) => index),
+                  text: packet.currentLocation.handle,
+                }],
+                actionSelections,
+              }),
+            }],
+            finishReason: { unified: "stop", raw: undefined },
+            response: { modelId: "test-narrator" },
+            usage: {
+              inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
+              outputTokens: { total: 12, text: 12, reasoning: undefined },
+            },
+            warnings: [],
+          };
+        }
+        const actorNames = [...new Set([
+          ...packet.newObservations.flatMap((observation) =>
+            observation.consequence?.performingActorName
+              ? [observation.consequence.performingActorName]
+              : []),
+          ...(packet.observationSubjects ?? []).flatMap((binding) =>
+            binding.actors.map((actor) => actor.name)),
+        ])];
+        const clarification = packet.actionContext?.disposition === "clarification_required"
+          ? packet.actionContext.clarificationQuestion
+          : null;
+        const proposal = clarification
+          ? {
+              beats: [{ purpose: "action_handoff", observationIndexes: [], text: clarification }],
+              actionSelections,
+            }
+          : {
+              beats: [{
+                purpose: "consequence",
+                observationIndexes: packet.newObservations.map((_observation, index) => index),
+                text: `You see the accepted result at ${packet.currentLocation.name}.${
+                  actorNames.length > 0 ? ` ${actorNames.join(" and ")} remain visible.` : ""}`,
+              }],
+              actionSelections,
+            };
+        return {
+          content: [{ type: "text", text: JSON.stringify(proposal) }],
+          finishReason: { unified: "stop", raw: undefined },
+          response: { modelId: "test-narrator" },
+          usage: {
+            inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 30, text: 30, reasoning: undefined },
+          },
+          warnings: [],
+        };
+      },
+    });
+    const createModel = vi.fn((
+      config: { id: string; name: string; baseUrl: string; model: string },
+      options: { role?: string; reasoningMode?: string } = {},
+    ) => {
+      rememberStructuredOutputModelMetadata(model, buildStructuredOutputModelMetadata({
+        providerId: config.id,
+        providerName: config.name,
+        model: config.model,
+        protocol: "openai-compatible",
+        baseUrl: config.baseUrl,
+        transport: "chat-completions",
+      }));
+      return model as never;
+    });
+    const application = createCampaignPlayApplication({
+      now: prepared.time.clock.now,
+      loadSettings: () => settings as never,
+      createModel: createModel as never,
+    });
+
+    await application.recoverCampaign(CAMPAIGN_ID);
+    await application.waitForIdle(CAMPAIGN_ID);
+
+    const storytellerModels = createModel.mock.calls
+      .map(([config, options]) => ({
+        providerId: config.id,
+        model: config.model,
+        options,
+      }))
+      .filter(({ options }) => options?.role === "storyteller");
+    expect(storytellerModels).toEqual([
+      {
+        providerId: provider.id,
+        model: "test-narrator",
+        options: { role: "storyteller", reasoningMode: "bypass" },
+      },
+      {
+        providerId: provider.id,
+        model: "test-narrator",
+        options: { role: "storyteller" },
+      },
+    ]);
+    expect(generatedCalls).toBe(2);
+    const handle = track(openCampaignPlayDatabase(CAMPAIGN_ID));
+    const operation = handle.sqlite.prepare(`SELECT operation_id AS operationId,
+        result_id AS resultId, turn_id AS turnId, narration_id AS narrationId,
+        packet_hash AS packetHash, receipt_ids_json AS receiptIdsJson,
+        status, current_attempt AS currentAttempt, error_code AS errorCode
+      FROM campaign_play_narration_operations
+      WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, prepared.turnId);
+    expect(operation).toMatchObject({
+      operationId: prepared.pending.operationId,
+      resultId: prepared.pending.resultId,
+      turnId: prepared.pending.turnId,
+      narrationId: prepared.pending.narrationId,
+      packetHash: prepared.pending.packetHash,
+      status: "complete",
+      currentAttempt: 2,
+      errorCode: null,
+    });
+    expect(JSON.parse((operation as { receiptIdsJson: string }).receiptIdsJson))
+      .toEqual(prepared.pending.receiptIds);
+    const attempts = handle.sqlite.prepare(`SELECT attempt_id AS attemptId,
+        operation_id AS operationId, campaign_id AS campaignId, turn_id AS turnId,
+        attempt, status, error_code AS errorCode
+      FROM campaign_play_narration_attempts
+      WHERE campaign_id = ? AND operation_id = ? ORDER BY attempt`).all(
+      CAMPAIGN_ID,
+      (operation as { operationId: string }).operationId,
+    ) as Array<{
+      attemptId: string;
+      operationId: string;
+      campaignId: string;
+      turnId: string;
+      attempt: number;
+      status: string;
+      errorCode: string | null;
+    }>;
+    expect(attempts).toHaveLength(2);
+    expect(new Set(attempts.map((attempt) => attempt.attemptId)).size).toBe(2);
+    expect(attempts).toEqual([
+      expect.objectContaining({
+        operationId: prepared.pending.operationId,
+        campaignId: CAMPAIGN_ID,
+        turnId: prepared.turnId,
+        attempt: 1,
+        status: "failed",
+        errorCode: "narration_invalid",
+      }),
+      expect.objectContaining({
+        operationId: prepared.pending.operationId,
+        campaignId: CAMPAIGN_ID,
+        turnId: prepared.turnId,
+        attempt: 2,
+        status: "accepted",
+        errorCode: null,
+      }),
+    ]);
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_narration_attempts WHERE campaign_id = ?`).get(CAMPAIGN_ID))
+      .toEqual({ count: 2 });
+    expect(handle.sqlite.prepare(`SELECT operation_id AS operationId, narration_id AS narrationId,
+        turn_id AS turnId, packet_hash AS packetHash, attempt_id AS attemptId
+      FROM campaign_play_proper_scenes
+      WHERE campaign_id = ? AND operation_id = ?`).get(
+      CAMPAIGN_ID,
+      prepared.pending.operationId,
+    )).toMatchObject({
+      operationId: prepared.pending.operationId,
+      narrationId: prepared.pending.narrationId,
+      turnId: prepared.turnId,
+      packetHash: prepared.pending.packetHash,
+      attemptId: attempts[1]!.attemptId,
+    });
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_proper_scenes WHERE campaign_id = ?`).get(CAMPAIGN_ID))
+      .toEqual({ count: 1 });
+    expect(playerActionMechanicsSnapshot(handle, prepared.turnId)).toEqual(prepared.mechanics);
+    expect(handle.sqlite.prepare("PRAGMA integrity_check").get())
+      .toEqual({ integrity_check: "ok" });
+    expect(handle.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 
   it("stops after one automatic retry when both narration attempts are invalid", async () => {
@@ -2865,6 +3140,71 @@ describe("Campaign Play player-action turn runtime", () => {
       narration: null,
       narrationOperation: { status: "failed", attempt: 2 },
     });
+    const failedState = createCampaignPlayReadModel(result.handle).loadState();
+    expect(failedState.narrationOperation?.conciseResult).toMatchObject({
+      displayText: expect.any(String),
+      suggestedActions: expect.arrayContaining([
+        expect.objectContaining({ choiceHandle: expect.any(String), label: expect.any(String) }),
+      ]),
+    });
+    expect(result.handle.sqlite.prepare("PRAGMA integrity_check").get())
+      .toEqual({ integrity_check: "ok" });
+    expect(result.handle.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
+  it("stops automatic recovery when attempt 2 times out and leaves concise result/actions", async () => {
+    const successful = playerNarratorFixture();
+    let calls = 0;
+    const narrator: TestNarrator = {
+      compile: successful.compile,
+      narrate: vi.fn(async (request) => {
+        calls += 1;
+        if (calls === 1) throw new CampaignPlayNarratorError("narration_invalid", null);
+        throw new CampaignPlayNarratorError("stage_timeout", null);
+      }),
+    };
+    const result = await runPendingNarrationThroughApplication(narrator);
+    const operation = result.handle.sqlite.prepare(`SELECT operation_id AS operationId,
+        status, current_attempt AS currentAttempt, error_code AS errorCode
+      FROM campaign_play_narration_operations
+      WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, result.turnId) as {
+        operationId: string;
+        status: string;
+        currentAttempt: number;
+        errorCode: string | null;
+      };
+    const attempts = result.handle.sqlite.prepare(`SELECT attempt, status, error_code AS errorCode
+      FROM campaign_play_narration_attempts
+      WHERE campaign_id = ? AND operation_id = ? ORDER BY attempt`).all(
+      CAMPAIGN_ID,
+      operation.operationId,
+    ) as Array<{ attempt: number; status: string; errorCode: string | null }>;
+    expect(narrator.narrate).toHaveBeenCalledTimes(2);
+    expect(attempts).toEqual([
+      { attempt: 1, status: "failed", errorCode: "narration_invalid" },
+      { attempt: 2, status: "failed", errorCode: "stage_timeout" },
+    ]);
+    expect(operation).toMatchObject({
+      status: "failed",
+      currentAttempt: 2,
+      errorCode: "stage_timeout",
+    });
+    const state = createCampaignPlayReadModel(result.handle).loadState();
+    expect(state.narration).toBeNull();
+    expect(state.narrationOperation).toMatchObject({ status: "failed", attempt: 2 });
+    expect(state.narrationOperation?.conciseResult).toMatchObject({
+      displayText: expect.any(String),
+      suggestedActions: expect.arrayContaining([
+        expect.objectContaining({ choiceHandle: expect.any(String), label: expect.any(String) }),
+      ]),
+    });
+    expect(result.handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_proper_scenes WHERE campaign_id = ?`).get(CAMPAIGN_ID))
+      .toEqual({ count: 0 });
+    expect(playerActionMechanicsSnapshot(result.handle, result.turnId)).toEqual(result.mechanics);
+    expect(result.handle.sqlite.prepare("PRAGMA integrity_check").get())
+      .toEqual({ integrity_check: "ok" });
+    expect(result.handle.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 
   it("keeps a normal application narration success to one attempt", async () => {
