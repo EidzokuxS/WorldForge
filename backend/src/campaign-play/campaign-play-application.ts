@@ -661,7 +661,38 @@ export function createCampaignPlayApplication(
       const turn = createCampaignPlayTurnRepository(handle).loadTurn(turnId);
       if (!turn || turn.turnKind !== "player_action" || turn.stage !== "completed") return;
       const runtime = runtimeFactory.createTurn(handle, turn.modelSelection);
-      await runtime.runNarration(turnId, token ?? undefined);
+      const operation = await runtime.runNarration(turnId, token ?? undefined);
+      if (
+        token !== null || operation === null || operation.status !== "failed" ||
+        operation.attempt !== 1
+      ) return;
+      const failedOperation = handle.sqlite.prepare(`SELECT status,
+          current_attempt AS currentAttempt, current_attempt_id AS currentAttemptId,
+          error_code AS errorCode
+        FROM campaign_play_narration_operations
+        WHERE campaign_id = ? AND operation_id = ? AND turn_id = ?`).get(
+          campaignId,
+          operation.operationId,
+          operation.turnId,
+        ) as {
+          status: string;
+          currentAttempt: number;
+          currentAttemptId: string | null;
+          errorCode: string | null;
+        } | undefined;
+      if (
+        failedOperation?.status !== "failed" || failedOperation.currentAttempt !== 1 ||
+        failedOperation.currentAttemptId !== operation.attemptId ||
+        failedOperation.errorCode !== "narration_invalid"
+      ) return;
+      const recoveryToken = runtime.prepareNarrationRecovery({
+        operationId: operation.operationId,
+        resultId: operation.resultId,
+        narrationId: operation.narrationId,
+        packetHash: operation.packetHash,
+        receiptIds: operation.receiptIds,
+      });
+      await runtime.runNarration(turnId, recoveryToken);
     } finally {
       handle.close();
     }

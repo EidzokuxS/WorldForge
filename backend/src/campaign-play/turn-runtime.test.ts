@@ -818,6 +818,79 @@ function turnRuntime(
   });
 }
 
+type TestNarrator = NonNullable<Parameters<typeof createCampaignPlayTurnRuntime>[0]["narrator"]>;
+
+function playerActionMechanicsSnapshot(handle: CampaignPlayDatabaseHandle, turnId: string) {
+  const receiptIds = (handle.sqlite.prepare(`SELECT receipt_id AS receiptId
+    FROM campaign_play_receipts WHERE campaign_id = ? AND turn_id = ? ORDER BY receipt_id`)
+    .all(CAMPAIGN_ID, turnId) as Array<{ receiptId: string }>).map((row) => row.receiptId);
+  return {
+    modelStages: countForTurn(handle, "campaign_play_model_stages", turnId),
+    commands: countForTurn(handle, "campaign_play_commands", turnId),
+    receipts: countForTurn(handle, "campaign_play_receipts", turnId),
+    turnResults: countForTurn(handle, "campaign_play_turn_results", turnId),
+    runtimeEvents: countForTurn(handle, "campaign_play_runtime_events", turnId),
+    receiptIds,
+    authority: handle.sqlite.prepare(`SELECT world_version AS worldVersion,
+        runtime_revision AS runtimeRevision
+      FROM campaign_play_states WHERE campaign_id = ?`).get(CAMPAIGN_ID) as {
+        worldVersion: number;
+        runtimeRevision: number;
+      },
+  };
+}
+
+async function createCompletedPlayerActionForApplication() {
+  const fixture = await createReadyCampaignWithOpening();
+  const time = fixedClock(7_500);
+  const mechanicsRuntime = turnRuntime(
+    fixture.handle,
+    time,
+    judgeFixture("deterministic"),
+    gameMasterFixture(),
+    { narrator: playerNarratorFixture() },
+  );
+  const admission = mechanicsRuntime.admitAction({
+    request: admissionRequest(fixture.state, "application-driver-action"),
+    submittedAt: 7_500,
+  });
+  await advanceUntilStage(mechanicsRuntime, time, admission.turnId, "completed");
+  const pending = createCampaignPlayReadModel(fixture.handle).loadState().narrationOperation;
+  if (!pending) throw new Error("Application driver fixture did not create a pending narration operation.");
+  return {
+    time,
+    turnId: admission.turnId,
+    pending,
+    mechanics: playerActionMechanicsSnapshot(fixture.handle, admission.turnId),
+    handle: fixture.handle,
+  };
+}
+
+async function runPendingNarrationThroughApplication(narrator: TestNarrator) {
+  const prepared = await createCompletedPlayerActionForApplication();
+  closeTracked(prepared.handle);
+  const application = createCampaignPlayApplication({
+    now: prepared.time.clock.now,
+    runtimeFactory: {
+      createOpening: () => { throw new Error("Opening is outside narration recovery."); },
+      createTurn: (handle) => turnRuntime(
+        handle,
+        prepared.time,
+        judgeFixture("deterministic"),
+        gameMasterFixture(),
+        { narrator },
+      ),
+    },
+  });
+  await application.recoverCampaign(CAMPAIGN_ID);
+  await application.waitForIdle(CAMPAIGN_ID);
+  return {
+    ...prepared,
+    application,
+    handle: track(openCampaignPlayDatabase(CAMPAIGN_ID)),
+  };
+}
+
 function admissionRequest(
   state: ReturnType<typeof createCampaignPlayStateRepository>["loadState"] extends () => infer T
     ? NonNullable<T>
@@ -2633,6 +2706,283 @@ describe("Campaign Play player-action turn runtime", () => {
           )).toEqual({ value: 0 });
     },
   );
+
+  it("automatically retries one receipt-keyed narration_invalid failure without replaying mechanics", async () => {
+    const successful = playerNarratorFixture();
+    let calls = 0;
+    const requests: Parameters<typeof successful.narrate>[0][] = [];
+    const narrator: TestNarrator = {
+      compile: successful.compile,
+      narrate: vi.fn(async (request) => {
+        calls += 1;
+        requests.push(request);
+        if (calls === 1) throw new CampaignPlayNarratorError("narration_invalid", null);
+        return successful.narrate(request);
+      }),
+    };
+    const result = await runPendingNarrationThroughApplication(narrator);
+    const operation = result.handle.sqlite.prepare(`SELECT operation_id AS operationId,
+        result_id AS resultId, turn_id AS turnId, narration_id AS narrationId,
+        packet_hash AS packetHash, receipt_ids_json AS receiptIdsJson,
+        status, current_attempt AS currentAttempt, current_attempt_id AS currentAttemptId,
+        error_code AS errorCode
+      FROM campaign_play_narration_operations
+      WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, result.turnId) as {
+        operationId: string;
+        resultId: string;
+        turnId: string;
+        narrationId: string;
+        packetHash: string;
+        receiptIdsJson: string;
+        status: string;
+        currentAttempt: number;
+        currentAttemptId: string;
+        errorCode: string | null;
+      };
+    const attempts = result.handle.sqlite.prepare(`SELECT attempt_id AS attemptId,
+        operation_id AS operationId, campaign_id AS campaignId, turn_id AS turnId,
+        attempt, status, error_code AS errorCode
+      FROM campaign_play_narration_attempts
+      WHERE campaign_id = ? AND operation_id = ? ORDER BY attempt`).all(
+      CAMPAIGN_ID,
+      operation.operationId,
+    ) as Array<{
+      attemptId: string;
+      operationId: string;
+      campaignId: string;
+      turnId: string;
+      attempt: number;
+      status: string;
+      errorCode: string | null;
+    }>;
+    const packet = result.handle.sqlite.prepare(`SELECT packet_hash AS packetHash,
+        packet_json AS packetJson FROM campaign_play_narrations
+      WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, result.turnId) as {
+        packetHash: string;
+        packetJson: string;
+      };
+    expect(narrator.narrate).toHaveBeenCalledTimes(2);
+    expect(attempts).toHaveLength(2);
+    expect(attempts.map((attempt) => attempt.attempt)).toEqual([1, 2]);
+    expect(new Set(attempts.map((attempt) => attempt.attemptId)).size).toBe(2);
+    expect(attempts).toEqual([
+      expect.objectContaining({
+        operationId: operation.operationId,
+        campaignId: CAMPAIGN_ID,
+        turnId: result.turnId,
+        attempt: 1,
+        status: "failed",
+        errorCode: "narration_invalid",
+      }),
+      expect.objectContaining({
+        operationId: operation.operationId,
+        campaignId: CAMPAIGN_ID,
+        turnId: result.turnId,
+        attempt: 2,
+        status: "accepted",
+        errorCode: null,
+      }),
+    ]);
+    expect(operation).toMatchObject({
+      resultId: result.pending.resultId,
+      turnId: result.pending.turnId,
+      narrationId: result.pending.narrationId,
+      packetHash: result.pending.packetHash,
+      status: "complete",
+      currentAttempt: 2,
+      errorCode: null,
+    });
+    expect(JSON.parse(operation.receiptIdsJson)).toEqual(result.pending.receiptIds);
+    expect(packet).toMatchObject({ packetHash: result.pending.packetHash });
+    expect(result.handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_proper_scenes WHERE campaign_id = ? AND operation_id = ?`).get(
+        CAMPAIGN_ID,
+        operation.operationId,
+      )).toEqual({ count: 1 });
+    expect(result.handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_narration_operations WHERE campaign_id = ?`).get(CAMPAIGN_ID))
+      .toEqual({ count: 1 });
+    expect(result.handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_narration_attempts WHERE campaign_id = ?`).get(CAMPAIGN_ID))
+      .toEqual({ count: 2 });
+    expect(playerActionMechanicsSnapshot(result.handle, result.turnId)).toEqual(result.mechanics);
+    expect(requests[0]!.narrationId).toBe(requests[1]!.narrationId);
+    expect(requests[0]!.packetBytes).toBe(requests[1]!.packetBytes);
+    expect(requests[0]!.packetBytes).toBe(packet.packetJson);
+    const state = createCampaignPlayReadModel(result.handle).loadState();
+    expect(state.narrationOperation).toMatchObject({
+      operationId: result.pending.operationId,
+      status: "complete",
+      attempt: 2,
+    });
+    expect(state.narration).toMatchObject({
+      turnId: result.turnId,
+      displayText: expect.stringContaining("I ask the signal keeper"),
+    });
+  });
+
+  it("stops after one automatic retry when both narration attempts are invalid", async () => {
+    const fixtureNarrator = playerNarratorFixture();
+    const narrator: TestNarrator = {
+      compile: fixtureNarrator.compile,
+      narrate: vi.fn(async () => {
+        throw new CampaignPlayNarratorError("narration_invalid", null);
+      }),
+    };
+    const result = await runPendingNarrationThroughApplication(narrator);
+    const operation = result.handle.sqlite.prepare(`SELECT operation_id AS operationId,
+        status, current_attempt AS currentAttempt, error_code AS errorCode
+      FROM campaign_play_narration_operations
+      WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, result.turnId) as {
+        operationId: string;
+        status: string;
+        currentAttempt: number;
+        errorCode: string | null;
+      };
+    const attempts = result.handle.sqlite.prepare(`SELECT attempt_id AS attemptId,
+        attempt, status, error_code AS errorCode
+      FROM campaign_play_narration_attempts
+      WHERE campaign_id = ? AND operation_id = ? ORDER BY attempt`).all(
+      CAMPAIGN_ID,
+      operation.operationId,
+    ) as Array<{ attemptId: string; attempt: number; status: string; errorCode: string | null }>;
+    expect(narrator.narrate).toHaveBeenCalledTimes(2);
+    expect(attempts).toHaveLength(2);
+    expect(new Set(attempts.map((attempt) => attempt.attemptId)).size).toBe(2);
+    expect(attempts.map((attempt) => attempt.attempt)).toEqual([1, 2]);
+    expect(attempts[0]).toMatchObject({ status: "failed", errorCode: "narration_invalid" });
+    expect(attempts[1]).toMatchObject({ status: "failed", errorCode: "narration_invalid" });
+    expect(operation).toMatchObject({
+      status: "failed",
+      currentAttempt: 2,
+      errorCode: "narration_invalid",
+    });
+    expect(result.handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_proper_scenes WHERE campaign_id = ?`).get(CAMPAIGN_ID))
+      .toEqual({ count: 0 });
+    expect(playerActionMechanicsSnapshot(result.handle, result.turnId)).toEqual(result.mechanics);
+    expect(createCampaignPlayReadModel(result.handle).loadState()).toMatchObject({
+      narration: null,
+      narrationOperation: { status: "failed", attempt: 2 },
+    });
+  });
+
+  it("keeps a normal application narration success to one attempt", async () => {
+    const narrator = playerNarratorFixture();
+    const result = await runPendingNarrationThroughApplication(narrator);
+    const operation = result.handle.sqlite.prepare(`SELECT status,
+        current_attempt AS currentAttempt FROM campaign_play_narration_operations
+      WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, result.turnId) as {
+        status: string;
+        currentAttempt: number;
+      };
+    expect(narrator.narrate).toHaveBeenCalledTimes(1);
+    expect(operation).toEqual({ status: "complete", currentAttempt: 1 });
+    expect(result.handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_narration_attempts WHERE campaign_id = ?`).get(CAMPAIGN_ID))
+      .toEqual({ count: 1 });
+    expect(result.handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_proper_scenes WHERE campaign_id = ?`).get(CAMPAIGN_ID))
+      .toEqual({ count: 1 });
+    expect(playerActionMechanicsSnapshot(result.handle, result.turnId)).toEqual(result.mechanics);
+  });
+
+  const nonRetryableNarrationFailures = [
+    { label: "transport", expectedErrorCode: "provider_unavailable", createError: () => new Error("transport interrupted") },
+    { label: "provider", expectedErrorCode: "provider_unavailable", createError: () => new CampaignPlayNarratorError("transport_interrupted", null) },
+    { label: "timeout", expectedErrorCode: "stage_timeout", createError: () => new CampaignPlayNarratorError("stage_timeout", null) },
+    { label: "budget", expectedErrorCode: "stage_budget_exceeded", createError: () => new CampaignPlayNarratorError("stage_budget_exceeded", null) },
+  ] as const;
+
+  it.each(nonRetryableNarrationFailures)(
+    "does not automatically retry a $label narration failure",
+    async ({ createError, expectedErrorCode }) => {
+      const fixtureNarrator = playerNarratorFixture();
+      const narrator: TestNarrator = {
+        compile: fixtureNarrator.compile,
+        narrate: vi.fn(async () => {
+          throw createError();
+        }),
+      };
+      const result = await runPendingNarrationThroughApplication(narrator);
+      const operation = result.handle.sqlite.prepare(`SELECT status,
+          current_attempt AS currentAttempt, error_code AS errorCode
+        FROM campaign_play_narration_operations
+        WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, result.turnId) as {
+          status: string;
+          currentAttempt: number;
+          errorCode: string | null;
+        };
+      expect(narrator.narrate).toHaveBeenCalledTimes(1);
+      expect(operation).toEqual({
+        status: "failed",
+        currentAttempt: 1,
+        errorCode: expectedErrorCode,
+      });
+      expect(result.handle.sqlite.prepare(`SELECT COUNT(*) AS count
+        FROM campaign_play_narration_attempts WHERE campaign_id = ?`).get(CAMPAIGN_ID))
+        .toEqual({ count: 1 });
+      expect(result.handle.sqlite.prepare(`SELECT COUNT(*) AS count
+        FROM campaign_play_proper_scenes WHERE campaign_id = ?`).get(CAMPAIGN_ID))
+        .toEqual({ count: 0 });
+      expect(playerActionMechanicsSnapshot(result.handle, result.turnId)).toEqual(result.mechanics);
+    },
+  );
+
+  it("does not append an automatic attempt after an explicitly triggered Restore failure", async () => {
+    const prepared = await createCompletedPlayerActionForApplication();
+    const fixtureNarrator = playerNarratorFixture();
+    const narrator: TestNarrator = {
+      compile: fixtureNarrator.compile,
+      narrate: vi.fn(async () => {
+        throw new CampaignPlayNarratorError("narration_invalid", null);
+      }),
+    };
+    const firstRuntime = turnRuntime(
+      prepared.handle,
+      prepared.time,
+      judgeFixture("deterministic"),
+      gameMasterFixture(),
+      { narrator },
+    );
+    const failed = await firstRuntime.runNarration(prepared.turnId);
+    expect(failed).toMatchObject({ status: "failed", attempt: 1 });
+    closeTracked(prepared.handle);
+    const application = createCampaignPlayApplication({
+      now: prepared.time.clock.now,
+      runtimeFactory: {
+        createOpening: () => { throw new Error("Opening is outside narration recovery."); },
+        createTurn: (handle) => turnRuntime(
+          handle,
+          prepared.time,
+          judgeFixture("deterministic"),
+          gameMasterFixture(),
+          { narrator },
+        ),
+      },
+    });
+    const response = application.recoverNarration(CAMPAIGN_ID, prepared.turnId, {
+      operationId: failed!.operationId,
+      resultId: failed!.resultId,
+      narrationId: failed!.narrationId,
+      packetHash: failed!.packetHash,
+      receiptIds: failed!.receiptIds,
+    });
+    expect(response).toMatchObject({ attempt: 2, status: "running" });
+    await application.waitForIdle(CAMPAIGN_ID);
+    const handle = track(openCampaignPlayDatabase(CAMPAIGN_ID));
+    expect(narrator.narrate).toHaveBeenCalledTimes(2);
+    expect(handle.sqlite.prepare(`SELECT attempt, status, error_code AS errorCode
+      FROM campaign_play_narration_attempts WHERE campaign_id = ?
+      ORDER BY attempt`).all(CAMPAIGN_ID)).toEqual([
+      { attempt: 1, status: "failed", errorCode: "narration_invalid" },
+      { attempt: 2, status: "failed", errorCode: "narration_invalid" },
+    ]);
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_narration_attempts WHERE campaign_id = ?`).get(CAMPAIGN_ID))
+      .toEqual({ count: 2 });
+    expect(playerActionMechanicsSnapshot(handle, prepared.turnId)).toEqual(prepared.mechanics);
+  });
 
   it("reopens at visibility with byte-identical narrator input and zero mechanical replay", async () => {
     const fixture = await createReadyCampaignWithOpening();
