@@ -22,6 +22,12 @@ import type {
   CampaignPlayRequestedModel,
 } from "./campaign-play-turn-repository.js";
 
+export const CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS = 90_000;
+export const CAMPAIGN_PLAY_SUBMISSION_NARRATION_WINDOW_MS = 115_000;
+export const CAMPAIGN_PLAY_MANUAL_NARRATION_WINDOW_MS = 90_000;
+
+export type CampaignPlayNarrationRecoveryKind = "automatic" | "manual";
+
 export class CampaignPlayNarrationOperationError extends Error {
   constructor(
     readonly code:
@@ -51,6 +57,7 @@ export interface CampaignPlayNarrationAttemptToken {
   workerEpoch: number;
   owner: string;
   expiresAt: number;
+  deadlineAt: number;
   createdAt: number;
 }
 
@@ -71,6 +78,8 @@ interface OperationRow {
   leaseOwner: string | null;
   leaseEpoch: number;
   leaseExpiresAt: number | null;
+  automaticDeadlineAt: number;
+  activeDeadlineAt: number;
   createdAt: number;
   updatedAt: number;
   completedAt: number | null;
@@ -140,7 +149,10 @@ function selectOperation(
       concise_suggested_actions_json AS conciseSuggestedActionsJson, status,
       current_attempt AS currentAttempt, current_attempt_id AS currentAttemptId,
       error_code AS errorCode, lease_owner AS leaseOwner, lease_epoch AS leaseEpoch,
-      lease_expires_at AS leaseExpiresAt, created_at AS createdAt,
+      lease_expires_at AS leaseExpiresAt,
+      automatic_deadline_at AS automaticDeadlineAt,
+      active_deadline_at AS activeDeadlineAt,
+      created_at AS createdAt,
       updated_at AS updatedAt, completed_at AS completedAt
     FROM campaign_play_narration_operations
     WHERE campaign_id = ? AND ${key} = ?`).get(handle.campaignId, value) as OperationRow | undefined) ?? null;
@@ -225,7 +237,7 @@ export function createCampaignPlayNarrationOperationRepository(
     const turn = handle.sqlite.prepare(`SELECT id AS turnId, stage, turn_kind AS turnKind,
         public_packet_hash AS publicPacketHash, worker_epoch AS workerEpoch,
         worker_lease_owner AS workerLeaseOwner, worker_lease_expires_at AS workerLeaseExpiresAt,
-        next_event_sequence AS nextEventSequence, updated_at AS updatedAt
+        submitted_at AS submittedAt, next_event_sequence AS nextEventSequence, updated_at AS updatedAt
       FROM campaign_play_turns WHERE campaign_id = ? AND id = ?`).get(
         handle.campaignId,
         turnId,
@@ -235,10 +247,11 @@ export function createCampaignPlayNarrationOperationRepository(
         turnKind: string;
         publicPacketHash: string | null;
         workerEpoch: number;
-        workerLeaseOwner: string | null;
-        workerLeaseExpiresAt: number | null;
-        nextEventSequence: number;
-        updatedAt: number;
+      workerLeaseOwner: string | null;
+      workerLeaseExpiresAt: number | null;
+      submittedAt: number;
+      nextEventSequence: number;
+      updatedAt: number;
       } | undefined;
     if (
       !state || !turn || turn.turnKind !== "player_action" || turn.stage !== "visibility_projected" ||
@@ -262,6 +275,16 @@ export function createCampaignPlayNarrationOperationRepository(
       throw new CampaignPlayNarrationOperationError(
         "operation_corrupt",
         "Campaign Play visible result lacks its immutable narration packet.",
+      );
+    }
+    const automaticDeadlineAt = Math.min(
+      completedAt + CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS,
+      turn.submittedAt + CAMPAIGN_PLAY_SUBMISSION_NARRATION_WINDOW_MS,
+    );
+    if (!Number.isSafeInteger(automaticDeadlineAt) || automaticDeadlineAt < completedAt) {
+      throw new CampaignPlayNarrationOperationError(
+        "operation_fence_lost",
+        "Campaign Play narration operation has an invalid hard deadline.",
       );
     }
     const receiptIds = (handle.sqlite.prepare(`SELECT receipt_id AS receiptId
@@ -345,8 +368,9 @@ export function createCampaignPlayNarrationOperationRepository(
         context.sqlite.prepare(`INSERT INTO campaign_play_narration_operations (
           operation_id, campaign_id, turn_id, result_id, narration_id, packet_hash,
           receipt_ids_json, concise_display_text, concise_suggested_actions_json,
-          status, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`).run(
+          status, lease_expires_at, automatic_deadline_at, active_deadline_at,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, ?, ?, ?, ?)`).run(
           operationId,
           handle.campaignId,
           turnId,
@@ -356,6 +380,8 @@ export function createCampaignPlayNarrationOperationRepository(
           receiptsJson,
           concise.displayText,
           canonicalizeCampaignPlayProjection(concise.suggestedActions),
+          automaticDeadlineAt,
+          automaticDeadlineAt,
           completedAt,
           completedAt,
         );
@@ -427,6 +453,53 @@ export function createCampaignPlayNarrationOperationRepository(
       attempt,
       workerEpoch,
     }).slice(0, 40)}`;
+    if (input.claimedAt >= operation.activeDeadlineAt) {
+      const attemptUpdate = handle.sqlite.prepare(`INSERT INTO campaign_play_narration_attempts (
+        attempt_id, operation_id, campaign_id, turn_id, attempt, status, worker_epoch,
+        requested_provider_id, requested_model, requested_strategy, duration_ms,
+        schema_outcome, error_code, created_at, completed_at
+      ) VALUES (?, ?, ?, ?, ?, 'failed', ?, ?, ?, 'strict_object', 0,
+        'transport_error', 'stage_timeout', ?, ?)`).run(
+          attemptId,
+          operation.operationId,
+          handle.campaignId,
+          operation.turnId,
+          attempt,
+          workerEpoch,
+          input.requested.providerId,
+          input.requested.model,
+          input.claimedAt,
+          input.claimedAt,
+        );
+      const operationUpdate = handle.sqlite.prepare(`UPDATE campaign_play_narration_operations
+        SET status = 'failed', current_attempt = ?, current_attempt_id = ?,
+          error_code = 'stage_timeout', lease_owner = NULL,
+          lease_expires_at = NULL, updated_at = ?
+        WHERE operation_id = ? AND campaign_id = ? AND status = 'pending'
+          AND current_attempt = ? AND current_attempt_id IS NULL
+          AND lease_owner IS NULL AND lease_expires_at IS NULL`).run(
+            attempt,
+            attemptId,
+            input.claimedAt,
+            operation.operationId,
+            handle.campaignId,
+            operation.currentAttempt,
+          );
+      if (attemptUpdate.changes !== 1 || operationUpdate.changes !== 1) {
+        throw new CampaignPlayNarrationOperationError(
+          "operation_fence_lost",
+          "Campaign Play narration deadline claim lost its pending operation.",
+        );
+      }
+      return null;
+    }
+    const effectiveLeaseExpiresAt = Math.min(input.leaseExpiresAt, operation.activeDeadlineAt);
+    if (effectiveLeaseExpiresAt <= input.claimedAt) {
+      throw new CampaignPlayNarrationOperationError(
+        "operation_fence_lost",
+        "Campaign Play narration claim has no remaining hard-deadline lease.",
+      );
+    }
     const update = handle.sqlite.prepare(`UPDATE campaign_play_narration_operations
       SET status = 'running', current_attempt = ?, current_attempt_id = ?,
         lease_owner = ?, lease_epoch = ?, lease_expires_at = ?, updated_at = ?
@@ -437,7 +510,7 @@ export function createCampaignPlayNarrationOperationRepository(
           attemptId,
           input.owner,
           workerEpoch,
-          input.leaseExpiresAt,
+          effectiveLeaseExpiresAt,
           input.claimedAt,
           operation.operationId,
           handle.campaignId,
@@ -470,7 +543,8 @@ export function createCampaignPlayNarrationOperationRepository(
       attempt,
       workerEpoch,
       owner: input.owner,
-      expiresAt: input.leaseExpiresAt,
+      expiresAt: effectiveLeaseExpiresAt,
+      deadlineAt: operation.activeDeadlineAt,
       createdAt: packet.createdAt,
     };
   }).immediate();
@@ -480,7 +554,11 @@ export function createCampaignPlayNarrationOperationRepository(
     renewedAt: number,
     leaseExpiresAt: number,
   ): CampaignPlayNarrationAttemptToken => handle.sqlite.transaction(() => {
-    if (renewedAt >= token.expiresAt || leaseExpiresAt <= renewedAt) {
+    const effectiveLeaseExpiresAt = Math.min(leaseExpiresAt, token.deadlineAt);
+    if (
+      renewedAt >= token.expiresAt || renewedAt >= token.deadlineAt ||
+      effectiveLeaseExpiresAt <= renewedAt
+    ) {
       throw new CampaignPlayNarrationOperationError(
         "operation_fence_lost",
         "Campaign Play narration lease renewal missed its boundary.",
@@ -491,7 +569,7 @@ export function createCampaignPlayNarrationOperationRepository(
       WHERE operation_id = ? AND campaign_id = ? AND status = 'running'
         AND current_attempt_id = ? AND lease_owner = ? AND lease_epoch = ?
         AND lease_expires_at = ?`).run(
-          leaseExpiresAt,
+          effectiveLeaseExpiresAt,
           renewedAt,
           token.operationId,
           handle.campaignId,
@@ -506,7 +584,7 @@ export function createCampaignPlayNarrationOperationRepository(
         "Campaign Play narration lease renewal lost its compare-and-swap.",
       );
     }
-    return { ...token, expiresAt: leaseExpiresAt };
+    return { ...token, expiresAt: effectiveLeaseExpiresAt };
   }).immediate();
 
   const failAttempt = (input: {
@@ -549,6 +627,15 @@ export function createCampaignPlayNarrationOperationRepository(
           token.owner,
           token.workerEpoch,
         );
+    if (attemptUpdate.changes === 0 && operationUpdate.changes === 0) {
+      const current = selectOperation(handle, "operation_id", token.operationId);
+      if (
+        current?.status === "failed" && current.currentAttemptId === token.attemptId &&
+        current.currentAttempt === token.attempt
+      ) {
+        return operationView(current);
+      }
+    }
     if (attemptUpdate.changes !== 1 || operationUpdate.changes !== 1) {
       throw new CampaignPlayNarrationOperationError(
         "operation_fence_lost",
@@ -595,7 +682,8 @@ export function createCampaignPlayNarrationOperationRepository(
     if (
       operation.status !== "running" || operation.currentAttemptId !== token.attemptId ||
       operation.leaseOwner !== token.owner || operation.leaseEpoch !== token.workerEpoch ||
-      operation.leaseExpiresAt !== token.expiresAt || input.acceptedAt >= token.expiresAt
+      operation.leaseExpiresAt !== token.expiresAt || operation.activeDeadlineAt !== token.deadlineAt ||
+      input.acceptedAt >= token.expiresAt || input.acceptedAt >= operation.activeDeadlineAt
     ) {
       throw new CampaignPlayNarrationOperationError(
         "operation_fence_lost",
@@ -681,7 +769,8 @@ export function createCampaignPlayNarrationOperationRepository(
       SET status = 'complete', error_code = NULL, lease_owner = NULL,
         lease_expires_at = NULL, updated_at = ?, completed_at = ?
       WHERE operation_id = ? AND campaign_id = ? AND status = 'running'
-        AND current_attempt_id = ? AND lease_owner = ? AND lease_epoch = ?`).run(
+        AND current_attempt_id = ? AND lease_owner = ? AND lease_epoch = ?
+        AND ? < active_deadline_at`).run(
           input.acceptedAt,
           input.acceptedAt,
           token.operationId,
@@ -689,6 +778,7 @@ export function createCampaignPlayNarrationOperationRepository(
           token.attemptId,
           token.owner,
           token.workerEpoch,
+          input.acceptedAt,
         );
     if (operationUpdate.changes !== 1) {
       throw new CampaignPlayNarrationOperationError(
@@ -702,6 +792,7 @@ export function createCampaignPlayNarrationOperationRepository(
   const prepareRecovery = (
     request: CampaignPlayNarrationRecoveryRequest,
     preparedAt: number,
+    kind: CampaignPlayNarrationRecoveryKind = "manual",
   ): CampaignPlayNarrationOperation => handle.sqlite.transaction(() => {
     const operation = selectOperation(handle, "operation_id", request.operationId);
     if (!operation) {
@@ -727,11 +818,24 @@ export function createCampaignPlayNarrationOperationRepository(
       );
     }
     packetForOperation(handle, operation);
+    const activeDeadlineAt = kind === "automatic"
+      ? operation.automaticDeadlineAt
+      : preparedAt + CAMPAIGN_PLAY_MANUAL_NARRATION_WINDOW_MS;
+    if (
+      !Number.isSafeInteger(activeDeadlineAt) || activeDeadlineAt <= preparedAt ||
+      (kind === "automatic" && preparedAt >= operation.automaticDeadlineAt)
+    ) {
+      throw new CampaignPlayNarrationOperationError(
+        "operation_not_recoverable",
+        "Campaign Play narration recovery window has expired.",
+      );
+    }
     const updated = handle.sqlite.prepare(`UPDATE campaign_play_narration_operations
       SET status = 'pending', current_attempt_id = NULL, error_code = NULL,
-        lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+        lease_owner = NULL, lease_expires_at = NULL, active_deadline_at = ?, updated_at = ?
       WHERE operation_id = ? AND campaign_id = ? AND status = 'failed'
         AND current_attempt = ? AND current_attempt_id = ?`).run(
+          activeDeadlineAt,
           preparedAt,
           operation.operationId,
           handle.campaignId,
@@ -752,9 +856,13 @@ export function createCampaignPlayNarrationOperationRepository(
   ): CampaignPlayNarrationOperation | null => handle.sqlite.transaction(() => {
     const operation = handle.sqlite.prepare(`SELECT operation_id AS operationId
       FROM campaign_play_narration_operations
-      WHERE campaign_id = ? AND status = 'running' AND lease_expires_at <= ?
-      ORDER BY lease_expires_at, operation_id LIMIT 1`).get(
+      WHERE campaign_id = ? AND status = 'running'
+        AND (active_deadline_at <= ? OR lease_expires_at <= ?)
+      ORDER BY CASE WHEN active_deadline_at <= ? THEN 0 ELSE 1 END,
+        lease_expires_at, operation_id LIMIT 1`).get(
         handle.campaignId,
+        observedAt,
+        observedAt,
         observedAt,
       ) as { operationId: string } | undefined;
     if (!operation) return null;
@@ -771,28 +879,36 @@ export function createCampaignPlayNarrationOperationRepository(
         "Expired narration operation lacks its running attempt authority.",
       );
     }
+    const errorCode = row.activeDeadlineAt <= observedAt
+      ? "stage_timeout"
+      : "provider_unavailable";
     const attemptUpdate = handle.sqlite.prepare(`UPDATE campaign_play_narration_attempts
       SET status = 'failed', duration_ms = ?, schema_outcome = 'transport_error',
-        error_code = 'provider_unavailable', completed_at = ?
+        error_code = ?, completed_at = ?
       WHERE campaign_id = ? AND attempt_id = ? AND status = 'running'
         AND worker_epoch = ?`).run(
-          observedAt - attempt.createdAt,
+          Math.max(0, observedAt - attempt.createdAt),
+          errorCode,
           observedAt,
           handle.campaignId,
           row.currentAttemptId,
           row.leaseEpoch,
         );
     const operationUpdate = handle.sqlite.prepare(`UPDATE campaign_play_narration_operations
-      SET status = 'failed', error_code = 'provider_unavailable', lease_owner = NULL,
+      SET status = 'failed', error_code = ?, lease_owner = NULL,
         lease_expires_at = NULL, updated_at = ?
       WHERE campaign_id = ? AND operation_id = ? AND status = 'running'
-        AND current_attempt_id = ? AND lease_epoch = ? AND lease_expires_at = ?`).run(
+        AND current_attempt_id = ? AND lease_epoch = ? AND lease_expires_at = ?
+        AND (active_deadline_at <= ? OR lease_expires_at <= ?)`).run(
+          errorCode,
           observedAt,
           handle.campaignId,
           row.operationId,
           row.currentAttemptId,
           row.leaseEpoch,
           row.leaseExpiresAt,
+          observedAt,
+          observedAt,
         );
     if (attemptUpdate.changes !== 1 || operationUpdate.changes !== 1) {
       throw new CampaignPlayNarrationOperationError(

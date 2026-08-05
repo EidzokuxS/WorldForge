@@ -748,7 +748,7 @@ describe("Campaign Play core and Rulebook storage", () => {
       .get() as { sql: string };
     expect(after.sql).toContain("job.defer_reason = 'actor_capacity'");
     expect(opened.sqlite.prepare(`SELECT max(created_at) AS latest
-      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_785_729_600_000 });
+      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_785_816_000_000 });
     expect((opened.sqlite.pragma("table_info('campaign_play_actor_schedules')") as Array<{
       name: string;
       notnull: number;
@@ -761,6 +761,87 @@ describe("Campaign Play core and Rulebook storage", () => {
         expect.objectContaining({ name: "admitted_plan_id", notnull: 0 }),
         expect.objectContaining({ name: "plan_id", notnull: 0 }),
       ]);
+  });
+
+  it("backfills narration deadlines for an operation created before the hard-deadline migration", () => {
+    const databasePath = path.join(root, "narration-before-hard-deadline.db");
+    const sqlite = new Database(databasePath);
+    try {
+      sqlite.pragma("foreign_keys = ON");
+      const db = drizzle(sqlite, { schema });
+      runForeignKeySafeMigrations(db, sqlite, migrationFolderThrough(48));
+      sqlite.prepare(`INSERT INTO campaigns (
+        id, name, premise, created_at, updated_at
+      ) VALUES (?, 'Before Narrator Deadline', 'Premise', 1, 1)`).run(CAMPAIGN_A);
+      const repository = createCampaignWorldRepository({
+        campaignId: CAMPAIGN_A,
+        databasePath,
+        sqlite,
+        db,
+        close() {},
+      });
+      const source = sourceFixture(CAMPAIGN_A);
+      repository.acquireBuild({
+        buildId: "build-before-narrator-deadline",
+        source,
+        expectedSourceDigest: source.sourceDigest,
+        providerId: "test-provider",
+        model: "test-model",
+        startedAt: 1_000,
+      });
+      advanceBuildToPersistence(repository, "build-before-narrator-deadline");
+      const review = repository.completeBuild({
+        buildId: "build-before-narrator-deadline",
+        candidate: candidateFixture(source),
+        completedAt: 1_100,
+      });
+      repository.acceptWorld({
+        expectedVersion: review.version,
+        expectedContentHash: review.contentHash,
+        acceptedAt: 1_200,
+      });
+      const handle = {
+        campaignId: CAMPAIGN_A,
+        databasePath,
+        sqlite,
+        db,
+        close() {},
+      } satisfies CampaignPlayDatabaseHandle;
+      insertPlayState(handle);
+      insertTurn(handle, {
+        stage: "visibility_projected",
+        publicPacketHash: HASH_A,
+      });
+      sqlite.prepare(`INSERT INTO campaign_play_narrations (
+        narration_id, campaign_id, turn_id, status, packet_hash, packet_json, created_at
+      ) VALUES ('narration-before-hard-deadline', ?, 'turn-one', 'pending', ?, '{}', 1450)`)
+        .run(CAMPAIGN_A, HASH_A);
+      sqlite.prepare(`INSERT INTO campaign_play_narration_operations (
+        operation_id, campaign_id, turn_id, result_id, narration_id, packet_hash,
+        receipt_ids_json, concise_display_text, concise_suggested_actions_json,
+        status, current_attempt, lease_epoch, created_at, updated_at
+      ) VALUES ('narration-operation:before-hard-deadline', ?, 'turn-one',
+        'result:before-hard-deadline', 'narration-before-hard-deadline', ?, '[]',
+        'A concise result.', '[]', 'pending', 0, 0, 1500, 1500)`)
+        .run(CAMPAIGN_A, HASH_A);
+
+      runForeignKeySafeMigrations(db, sqlite, migrationFolderThrough(49));
+
+      expect(sqlite.prepare(`SELECT operation_id AS operationId,
+          automatic_deadline_at AS automaticDeadlineAt,
+          active_deadline_at AS activeDeadlineAt, status, created_at AS createdAt
+        FROM campaign_play_narration_operations`).get()).toEqual({
+        operationId: "narration-operation:before-hard-deadline",
+        automaticDeadlineAt: 91_500,
+        activeDeadlineAt: 91_500,
+        status: "pending",
+        createdAt: 1_500,
+      });
+      expect(sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
+      expect(sqlite.pragma("foreign_key_check")).toEqual([]);
+    } finally {
+      sqlite.close();
+    }
   });
 
   it("adds core play storage to an accepted Campaign World without changing provenance", () => {

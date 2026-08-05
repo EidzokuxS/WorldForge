@@ -286,6 +286,47 @@ function fixedClock(initial: number) {
   };
 }
 
+function deadlineClock(initial: number) {
+  let value = initial;
+  const waiters: Array<{
+    dueAt: number;
+    resolve: () => void;
+    reject: (error: unknown) => void;
+    signal: AbortSignal;
+  }> = [];
+  const clock: CampaignPlayTurnServiceClock = {
+    now: () => value,
+    wait: (delayMs, signal) => new Promise<void>((resolve, reject) => {
+      const waiter = {
+        dueAt: value + delayMs,
+        resolve,
+        reject,
+        signal,
+      };
+      const onAbort = () => {
+        const index = waiters.indexOf(waiter);
+        if (index >= 0) waiters.splice(index, 1);
+        reject(new Error("aborted"));
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      waiters.push(waiter);
+    }),
+  };
+  const settleDue = () => {
+    for (const waiter of [...waiters]) {
+      if (waiter.dueAt > value || waiter.signal.aborted) continue;
+      const index = waiters.indexOf(waiter);
+      if (index >= 0) waiters.splice(index, 1);
+      waiter.resolve();
+    }
+  };
+  return {
+    clock,
+    advance: () => { value += 10; settleDue(); },
+    advanceBy: (durationMs: number) => { value += durationMs; settleDue(); },
+  };
+}
+
 function countForCampaign(handle: CampaignPlayDatabaseHandle, table: string): number {
   return (handle.sqlite.prepare(`SELECT count(*) AS value FROM ${table}
     WHERE campaign_id = ?`).get(CAMPAIGN_ID) as { value: number }).value;
@@ -845,9 +886,10 @@ function playerActionMechanicsSnapshot(handle: CampaignPlayDatabaseHandle, turnI
   };
 }
 
-async function createCompletedPlayerActionForApplication() {
+async function createCompletedPlayerActionForApplication(
+  time = fixedClock(7_500),
+) {
   const fixture = await createReadyCampaignWithOpening();
-  const time = fixedClock(7_500);
   const mechanicsRuntime = turnRuntime(
     fixture.handle,
     time,
@@ -857,7 +899,7 @@ async function createCompletedPlayerActionForApplication() {
   );
   const admission = mechanicsRuntime.admitAction({
     request: admissionRequest(fixture.state, "application-driver-action"),
-    submittedAt: 7_500,
+    submittedAt: time.clock.now(),
   });
   await advanceUntilStage(mechanicsRuntime, time, admission.turnId, "completed");
   const pending = createCampaignPlayReadModel(fixture.handle).loadState().narrationOperation;
@@ -3205,6 +3247,179 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(result.handle.sqlite.prepare("PRAGMA integrity_check").get())
       .toEqual({ integrity_check: "ok" });
     expect(result.handle.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
+  it("enforces one persisted automatic deadline when a late provider ignores abort", async () => {
+    const time = deadlineClock(7_500);
+    const prepared = await createCompletedPlayerActionForApplication(time);
+    const successful = playerNarratorFixture();
+    let calls = 0;
+    let releaseLate: (() => Promise<void>) | null = null;
+    let lateCandidate: Awaited<ReturnType<typeof successful.narrate>> | null = null;
+    const narrator: TestNarrator = {
+      compile: successful.compile,
+      narrate: vi.fn((request) => {
+        calls += 1;
+        if (calls === 1) throw new CampaignPlayNarratorError("narration_invalid", null);
+        if (calls === 3) return successful.narrate(request);
+        return new Promise<Awaited<ReturnType<typeof successful.narrate>>>((resolve) => {
+          releaseLate = async () => {
+            const candidate = await successful.narrate(request);
+            lateCandidate = candidate;
+            resolve(candidate);
+          };
+        });
+      }),
+    };
+    const runtime = turnRuntime(
+      prepared.handle,
+      time,
+      judgeFixture("deterministic"),
+      gameMasterFixture(),
+      { narrator },
+    );
+    const first = await runtime.runNarration(prepared.turnId);
+    expect(first).toMatchObject({ status: "failed", attempt: 1 });
+    const secondToken = runtime.prepareNarrationRecovery({
+      operationId: first!.operationId,
+      resultId: first!.resultId,
+      narrationId: first!.narrationId,
+      packetHash: first!.packetHash,
+      receiptIds: first!.receiptIds,
+    }, "automatic");
+    const persistedDeadline = prepared.handle.sqlite.prepare(`SELECT
+        automatic_deadline_at AS automaticDeadlineAt,
+        active_deadline_at AS activeDeadlineAt
+      FROM campaign_play_narration_operations WHERE campaign_id = ? AND turn_id = ?`).get(
+      CAMPAIGN_ID,
+      prepared.turnId,
+    ) as { automaticDeadlineAt: number; activeDeadlineAt: number };
+    expect(persistedDeadline.automaticDeadlineAt).toBe(97_590);
+    expect(persistedDeadline.activeDeadlineAt).toBe(persistedDeadline.automaticDeadlineAt);
+    const inFlight = runtime.runNarration(prepared.turnId, secondToken);
+    expect(narrator.narrate).toHaveBeenCalledTimes(2);
+    time.advanceBy(persistedDeadline.activeDeadlineAt - time.clock.now());
+    const failed = await inFlight;
+    expect(failed).toMatchObject({ status: "failed", attempt: 2 });
+    const secondRequest = vi.mocked(narrator.narrate).mock.calls[1]?.[0];
+    expect(secondRequest).toBeDefined();
+    expect(secondRequest!.signal).toBeDefined();
+    expect(secondRequest!.signal!.aborted).toBe(true);
+    expect(releaseLate).not.toBeNull();
+    await releaseLate!();
+    expect(lateCandidate).not.toBeNull();
+    expect(prepared.handle.sqlite.prepare(`SELECT attempt, status, error_code AS errorCode
+      FROM campaign_play_narration_attempts WHERE campaign_id = ? AND operation_id = ?
+      ORDER BY attempt`).all(CAMPAIGN_ID, first!.operationId)).toEqual([
+      { attempt: 1, status: "failed", errorCode: "narration_invalid" },
+      { attempt: 2, status: "failed", errorCode: "stage_timeout" },
+    ]);
+    expect(prepared.handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_proper_scenes WHERE campaign_id = ? AND operation_id = ?`).get(
+      CAMPAIGN_ID,
+      first!.operationId,
+    )).toEqual({ count: 0 });
+    closeTracked(prepared.handle);
+    const reloaded = track(openCampaignPlayDatabase(CAMPAIGN_ID));
+    expect(createCampaignPlayReadModel(reloaded).loadState()).toMatchObject({
+      narration: null,
+      narrationOperation: {
+        operationId: first!.operationId,
+        status: "failed",
+        attempt: 2,
+        conciseResult: { displayText: expect.any(String), suggestedActions: expect.any(Array) },
+      },
+    });
+    expect(reloaded.sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
+    expect(reloaded.sqlite.pragma("foreign_key_check")).toEqual([]);
+
+    const reloadedRuntime = turnRuntime(
+      reloaded,
+      time,
+      judgeFixture("deterministic"),
+      gameMasterFixture(),
+      { narrator },
+    );
+    const automaticDeadline = persistedDeadline.automaticDeadlineAt;
+    const manualToken = reloadedRuntime.prepareNarrationRecovery({
+      operationId: first!.operationId,
+      resultId: first!.resultId,
+      narrationId: first!.narrationId,
+      packetHash: first!.packetHash,
+      receiptIds: first!.receiptIds,
+    });
+    expect(manualToken).toMatchObject({
+      operationId: first!.operationId,
+      resultId: first!.resultId,
+      turnId: first!.turnId,
+      narrationId: first!.narrationId,
+      packetHash: first!.packetHash,
+      receiptIds: first!.receiptIds,
+      attempt: 3,
+      deadlineAt: time.clock.now() + 90_000,
+    });
+    const manualDeadlines = reloaded.sqlite.prepare(`SELECT
+        automatic_deadline_at AS automaticDeadlineAt,
+        active_deadline_at AS activeDeadlineAt,
+        result_id AS resultId, narration_id AS narrationId, packet_hash AS packetHash,
+        receipt_ids_json AS receiptIdsJson
+      FROM campaign_play_narration_operations WHERE campaign_id = ? AND operation_id = ?`).get(
+      CAMPAIGN_ID,
+      first!.operationId,
+    ) as {
+      automaticDeadlineAt: number;
+      activeDeadlineAt: number;
+      resultId: string;
+      narrationId: string;
+      packetHash: string;
+      receiptIdsJson: string;
+    };
+    expect(manualDeadlines).toEqual({
+      automaticDeadlineAt: automaticDeadline,
+      activeDeadlineAt: time.clock.now() + 90_000,
+      resultId: first!.resultId,
+      narrationId: first!.narrationId,
+      packetHash: first!.packetHash,
+      receiptIdsJson: JSON.stringify(first!.receiptIds),
+    });
+    expect(() => createCampaignPlayNarrationOperationRepository(reloaded).accept({
+      token: secondToken,
+      narration: lateCandidate!.narration,
+      evidence: {
+        actualProviderId: "test",
+        actualModel: "test-narrator",
+        actualStrategy: "strict_object",
+        inputTokens: 15,
+        outputTokens: 25,
+        durationMs: 5,
+        finishReason: "stop",
+      },
+      acceptedAt: time.clock.now(),
+    })).toThrowError(expect.objectContaining({ code: "operation_fence_lost" }));
+    const manual = await reloadedRuntime.runNarration(prepared.turnId, manualToken);
+    expect(manual).toMatchObject({
+      operationId: first!.operationId,
+      resultId: first!.resultId,
+      turnId: first!.turnId,
+      narrationId: first!.narrationId,
+      packetHash: first!.packetHash,
+      receiptIds: first!.receiptIds,
+      status: "complete",
+      attempt: 3,
+    });
+    expect(reloaded.sqlite.prepare(`SELECT attempt, status, error_code AS errorCode
+      FROM campaign_play_narration_attempts WHERE campaign_id = ? AND operation_id = ?
+      ORDER BY attempt`).all(CAMPAIGN_ID, first!.operationId)).toEqual([
+      { attempt: 1, status: "failed", errorCode: "narration_invalid" },
+      { attempt: 2, status: "failed", errorCode: "stage_timeout" },
+      { attempt: 3, status: "accepted", errorCode: null },
+    ]);
+    expect(reloaded.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_proper_scenes WHERE campaign_id = ? AND operation_id = ?`).get(
+      CAMPAIGN_ID,
+      first!.operationId,
+    )).toEqual({ count: 1 });
+    expect(playerActionMechanicsSnapshot(reloaded, prepared.turnId)).toEqual(prepared.mechanics);
   });
 
   it("keeps a normal application narration success to one attempt", async () => {

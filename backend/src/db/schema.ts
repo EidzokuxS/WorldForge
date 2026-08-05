@@ -2722,6 +2722,8 @@ export const campaignPlayNarrationOperations = sqliteTable(
     leaseOwner: text("lease_owner"),
     leaseEpoch: integer("lease_epoch").notNull().default(0),
     leaseExpiresAt: integer("lease_expires_at", { mode: "number" }),
+    automaticDeadlineAt: integer("automatic_deadline_at", { mode: "number" }).notNull(),
+    activeDeadlineAt: integer("active_deadline_at", { mode: "number" }).notNull(),
     createdAt: integer("created_at", { mode: "number" }).notNull(),
     updatedAt: integer("updated_at", { mode: "number" }).notNull(),
     completedAt: integer("completed_at", { mode: "number" }),
@@ -2734,6 +2736,11 @@ export const campaignPlayNarrationOperations = sqliteTable(
       table.campaignId,
       table.status,
     ),
+    index("idx_campaign_play_narration_operations_active_deadline").on(
+      table.campaignId,
+      table.status,
+      table.activeDeadlineAt,
+    ),
     check(
       "campaign_play_narration_operations_payload_valid",
       sql`length(${table.operationId}) > 0
@@ -2745,7 +2752,9 @@ export const campaignPlayNarrationOperations = sqliteTable(
         AND json_valid(${table.conciseSuggestedActionsJson})
         AND json_type(${table.conciseSuggestedActionsJson}) = 'array'
         AND ${table.currentAttempt} >= 0
-        AND ${table.leaseEpoch} >= 0`,
+        AND ${table.leaseEpoch} >= 0
+        AND ${table.automaticDeadlineAt} >= 0
+        AND ${table.activeDeadlineAt} >= 0`,
     ),
     check(
       "campaign_play_narration_operations_status_valid",

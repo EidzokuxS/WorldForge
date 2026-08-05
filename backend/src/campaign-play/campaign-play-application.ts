@@ -501,11 +501,34 @@ export function createCampaignPlayApplication(
     const gameMasterRequested = turnSelection?.gameMaster ?? requestedModel(generator);
     const actorRequested = turnSelection?.actorReplanner ?? requestedModel(actorGenerator);
     const narratorRequested = turnSelection?.narrator ?? requestedModel(storyteller);
+    const clock = {
+      now: dependencies.now,
+      wait: (delayMilliseconds: number, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
+        let settled = false;
+        let timer: ReturnType<typeof dependencies.setTimer> | undefined;
+        const finish = (error?: unknown) => {
+          if (settled) return;
+          settled = true;
+          if (timer !== undefined) dependencies.clearTimer(timer);
+          signal.removeEventListener("abort", onAbort);
+          if (error === undefined) resolve();
+          else reject(error);
+        };
+        const onAbort = () => finish(new Error("aborted"));
+        if (signal.aborted) {
+          onAbort();
+          return;
+        }
+        signal.addEventListener("abort", onAbort, { once: true });
+        timer = dependencies.setTimer(() => finish(), delayMilliseconds);
+      }),
+    };
     return createCampaignPlayTurnRuntime({
       handle,
       owner: dependencies.owner,
       leaseDurationMs: LEASE_DURATION_MS,
       heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
+      clock,
       uncertaintySeedKey: dependencies.uncertaintySeedKey(
         handle.campaignId,
         state.authority.acceptedContentHash,
@@ -729,7 +752,7 @@ export function createCampaignPlayApplication(
         narrationId: operation.narrationId,
         packetHash: operation.packetHash,
         receiptIds: operation.receiptIds,
-      });
+      }, "automatic");
       await recoveryRuntime.runNarration(turnId, recoveryToken);
     } finally {
       handle.close();

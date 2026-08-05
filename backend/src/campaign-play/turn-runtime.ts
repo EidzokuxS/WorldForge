@@ -125,6 +125,7 @@ import {
 } from "./visibility-service.js";
 import {
   createCampaignPlayNarrationOperationRepository,
+  type CampaignPlayNarrationRecoveryKind,
   type CampaignPlayNarrationAttemptToken,
 } from "./narration-operation-repository.js";
 
@@ -381,6 +382,7 @@ export interface CampaignPlayTurnRuntime {
   ): Promise<CampaignPlayNarrationOperation | null>;
   prepareNarrationRecovery(
     request: CampaignPlayNarrationRecoveryRequest,
+    kind?: CampaignPlayNarrationRecoveryKind,
   ): CampaignPlayNarrationAttemptToken;
   loadTurn(turnId: string): LoadedCampaignPlayTurn | null;
   loadTelemetry(turnId: string): CampaignPlayTurnTelemetry;
@@ -2258,7 +2260,9 @@ export function createCampaignPlayTurnRuntime(
     let token = initialToken;
     let providerReturned = false;
     let heartbeatStopped = false;
+    let deadlineTriggered = false;
     const controller = new AbortController();
+    const deadlineTimerController = new AbortController();
     const heartbeat = (async () => {
       while (!heartbeatStopped) {
         try {
@@ -2283,6 +2287,26 @@ export function createCampaignPlayTurnRuntime(
       void heartbeat.catch(reject);
     });
     const startedAt = now();
+    const remainingDeadlineMs = initialToken.deadlineAt - startedAt;
+    const deadlineFailure = new Promise<never>((_resolve, reject) => {
+      const trigger = () => {
+        if (deadlineTimerController.signal.aborted) return;
+        deadlineTriggered = true;
+        controller.abort();
+        reject(new CampaignPlayNarratorError("stage_timeout", null));
+      };
+      if (remainingDeadlineMs <= 0) {
+        trigger();
+        return;
+      }
+      void waitForHeartbeat(remainingDeadlineMs, deadlineTimerController.signal).then(
+        trigger,
+        (error) => {
+          if (!deadlineTimerController.signal.aborted) reject(error);
+        },
+      );
+    });
+    void deadlineFailure.catch(() => undefined);
     try {
       const turn = repository.loadTurn(token.turnId);
       if (!turn || turn.stage !== "completed" || turn.turnKind !== "player_action") {
@@ -2301,6 +2325,10 @@ export function createCampaignPlayTurnRuntime(
           "Campaign Play narration operation disagrees with its immutable visible packet.",
         );
       }
+      if (now() >= token.deadlineAt) {
+        deadlineTriggered = true;
+        throw new CampaignPlayNarratorError("stage_timeout", null);
+      }
       const request = narrator.narrate({
         narrationId: token.narrationId,
         packetBytes: token.packetJson,
@@ -2311,7 +2339,7 @@ export function createCampaignPlayTurnRuntime(
         signal: controller.signal,
       });
       void request.catch(() => undefined);
-      const candidate = await Promise.race([request, heartbeatFailure]);
+      const candidate = await Promise.race([request, heartbeatFailure, deadlineFailure]);
       validateNarrationAgainstPacket(candidate.narration, pending.packet);
       const evidence = acceptedNarratorEvidence(
         input.narratorModel.requested,
@@ -2320,6 +2348,11 @@ export function createCampaignPlayTurnRuntime(
       providerReturned = true;
       input.injectNarratorFault?.("after_provider_return");
       const acceptedAt = now();
+      if (acceptedAt >= token.deadlineAt) {
+        deadlineTriggered = true;
+        controller.abort();
+        throw new CampaignPlayNarratorError("stage_timeout", null);
+      }
       input.injectNarratorFault?.("during_terminal_commit");
       return narrationOperations.accept({
         token,
@@ -2328,10 +2361,17 @@ export function createCampaignPlayTurnRuntime(
         acceptedAt,
       });
     } catch (cause) {
-      if (providerReturned) throw cause;
+      const deadlineExpired = deadlineTriggered || now() >= token.deadlineAt;
+      if (providerReturned && !deadlineExpired) throw cause;
       const interruption = cause instanceof CampaignPlayExternalStageInterruption
         ? cause
-        : narratorInterruption(input.narratorModel.requested, cause, now() - startedAt);
+        : narratorInterruption(
+          input.narratorModel.requested,
+          deadlineExpired
+            ? new CampaignPlayNarratorError("stage_timeout", null, { cause })
+            : cause,
+          Math.max(0, now() - startedAt),
+        );
       return narrationOperations.failAttempt({
         token,
         evidence: interruption.evidence,
@@ -2340,6 +2380,7 @@ export function createCampaignPlayTurnRuntime(
     } finally {
       heartbeatStopped = true;
       controller.abort();
+      deadlineTimerController.abort();
       await heartbeat.catch(() => undefined);
     }
   };
@@ -3300,8 +3341,8 @@ export function createCampaignPlayTurnRuntime(
       const token = claimedToken ?? claimNarration(turnId);
       return token ? executeNarration(token) : narrationOperations.loadByTurn(turnId);
     },
-    prepareNarrationRecovery(request) {
-      const operation = narrationOperations.prepareRecovery(request, now());
+    prepareNarrationRecovery(request, kind = "manual") {
+      const operation = narrationOperations.prepareRecovery(request, now(), kind);
       const token = claimNarration(operation.turnId);
       if (!token) {
         throw new CampaignPlayTurnRuntimeError(
