@@ -236,6 +236,8 @@ export function buildCampaignPlayActorReplanRecoveryPrompt(
 ACTOR_REPLAN_RECOVERY
 Regenerate a fresh proposal from ACTOR_FRAME. Correct the listed invariant. Do not copy the rejected target arrangement. Satisfy every unchanged schema, compiler, and grounding-review rule.
 
+When reason is route_not_traversable_from_step_location, every move target listed in moveTargets is invalid for that step and must not be reused. Choose a different directly reachable destination supplied by ACTOR_FRAME, or replace that step with a non-move action grounded at its established location.
+
 SAFE_REJECTION_FEEDBACK
 ${JSON.stringify(safeFeedback)}
 END_SAFE_REJECTION_FEEDBACK`;

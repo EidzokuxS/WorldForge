@@ -92,6 +92,12 @@ describe("campaign play actor replan prompt", () => {
     });
 
     expect(prompt.startsWith(`${basePrompt}\n\nACTOR_REPLAN_RECOVERY\n`)).toBe(true);
+    expect(prompt).toContain(
+      "every move target listed in moveTargets is invalid for that step and must not be reused",
+    );
+    expect(prompt).toContain(
+      "Choose a different directly reachable destination supplied by ACTOR_FRAME, or replace that step with a non-move action grounded at its established location",
+    );
     const start = prompt.indexOf("SAFE_REJECTION_FEEDBACK\n") + "SAFE_REJECTION_FEEDBACK\n".length;
     const end = prompt.indexOf("\nEND_SAFE_REJECTION_FEEDBACK", start);
     const feedback = JSON.parse(prompt.slice(start, end)) as Record<string, unknown>;
