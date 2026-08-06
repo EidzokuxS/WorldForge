@@ -454,6 +454,67 @@ describe("Campaign Play narrator", () => {
     expect(narratorWarn).not.toHaveBeenCalled();
   });
 
+  it("rejects a null attempt detail with the safe nullability diagnostic", () => {
+    const narrator = createCampaignPlayNarrator();
+    const packet: CampaignPlayNarratorPacket = {
+      ...packetFixture(),
+      campaignId: "campaign-attempt-detail",
+      turnId: "turn-attempt-detail",
+      turnKind: "player_action",
+      openingContext: null,
+      sourceMoment: "A swollen tenement door stands closed in front of you.",
+      actionContext: {
+        submittedText: "Work the jammed latch.",
+        intentKind: "attempt",
+        disposition: "deterministic",
+        result: "limited",
+        clarificationQuestion: null,
+      },
+      availableIntents: [{
+        handle: "choice_public_attempt",
+        label: "Work the jammed latch",
+        kind: "attempt",
+        targets: [{ handle: "route_public_gate", kind: "route" }],
+      }],
+    };
+    narratorWarn.mockClear();
+
+    expect(() => narrator.compile({
+      narrationId: "narration-attempt-detail-null",
+      packet,
+      proposal: {
+        actionSelections: [{ intentIndex: 0, detail: null }],
+        beats: [{
+          purpose: "consequence",
+          observationIndexes: [],
+          text: "The swollen door remains closed beneath your hand.",
+        }],
+      },
+      createdAt: 1_000,
+    })).toThrowError(expect.objectContaining({
+      code: "narration_invalid",
+      modelEvidence: null,
+    }));
+
+    expect(narratorWarn).toHaveBeenCalledWith(
+      "narrator_packet_validation_mismatch",
+      expect.objectContaining({
+        diagnostic: "narrator_packet_validation_mismatch",
+        campaignId: "campaign-attempt-detail",
+        turnId: "turn-attempt-detail",
+        failedChecks: [{
+          check: "action_selection_detail_nullability",
+          violations: [{
+            actionSelectionIndex: 0,
+            intentIndex: 0,
+            intentKind: "attempt",
+            detailIsNull: true,
+          }],
+        }],
+      }),
+    );
+  });
+
   it("selects a noncontiguous subset from the frozen intent catalog", () => {
     const packet = {
       ...packetFixture(),
@@ -1308,6 +1369,9 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("include a supported local intent for the chosen thread");
     expect(prompt).toContain("grounded fragment of three to eight words");
     expect(prompt).toContain("never a sentence or explanation");
+    expect(prompt).toContain(
+      "Never set detail to null for observe, contact, or attempt. If you cannot supply a grounded three-to-eight-word detail, do not select that intentIndex; select another supported intent instead.",
+    );
     expect(prompt).toContain("must authorize one concrete player action when clicked");
     expect(prompt).toContain("mutually exclusive alternatives");
     expect(prompt).toContain("must name exactly one supported alternative");
@@ -1328,7 +1392,7 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("direction receivable means that counterparty owes the player");
     expect(prompt).toContain("prose cannot create, reverse, increase, reduce, pay, or settle an obligation");
     expect(prompt).toContain("Treat the latest explicit object relation in newObservations or consequences as final");
-    expect(prompt).toContain("already at that fixture or inside that container");
+    expect(prompt).toContain("already at that fixture or inside a container");
     expect(prompt).toContain("Never make a detail load, haul, insert, or move it there again");
     expect(prompt).toContain("Do not infer a changed object position when the packet does not state one");
     expect(prompt).toContain("Do not point an intent back at any other observation, question, or attempt that already resolved");
