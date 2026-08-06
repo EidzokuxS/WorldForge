@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCampaignPlayActorPlanGroundingReviewPrompt,
+  buildCampaignPlayActorReplanRecoveryPrompt,
   buildCampaignPlayActorReplanPrompt,
   campaignPlayActorPlanGroundingReviewSchema,
   campaignPlayActorReplanProposalSchema,
@@ -77,6 +78,39 @@ describe("campaign play actor replan prompt", () => {
     expect(prompt).toContain(
       "each item in the top-level steps array contains its own intent",
     );
+  });
+
+  it("appends only safe indexed rejection coordinates to the unchanged base prompt", () => {
+    const basePrompt = buildCampaignPlayActorReplanPrompt(frame);
+    const prompt = buildCampaignPlayActorReplanRecoveryPrompt(basePrompt, {
+      phase: "grounding_review",
+      reason: "grounding_review_rejected",
+      goalHandle: "goal:keep-gate-open",
+      stepCount: 3,
+      moveTargets: "0:location:gate|2:location:river",
+      reviewViolations: "1:outcome_not_established|2:contradicts_accepted_frame",
+    });
+
+    expect(prompt.startsWith(`${basePrompt}\n\nACTOR_REPLAN_RECOVERY\n`)).toBe(true);
+    const start = prompt.indexOf("SAFE_REJECTION_FEEDBACK\n") + "SAFE_REJECTION_FEEDBACK\n".length;
+    const end = prompt.indexOf("\nEND_SAFE_REJECTION_FEEDBACK", start);
+    const feedback = JSON.parse(prompt.slice(start, end)) as Record<string, unknown>;
+    expect(Object.keys(feedback).sort()).toEqual([
+      "goalHandle",
+      "moveTargets",
+      "phase",
+      "reason",
+      "reviewViolations",
+      "stepCount",
+    ]);
+    expect(feedback).toEqual({
+      phase: "grounding_review",
+      reason: "grounding_review_rejected",
+      goalHandle: "goal:keep-gate-open",
+      stepCount: 3,
+      moveTargets: "0:location:gate|2:location:river",
+      reviewViolations: "1:outcome_not_established|2:contradicts_accepted_frame",
+    });
   });
 
   it("treats known recent scenes as binding continuity without forcing one outcome", () => {

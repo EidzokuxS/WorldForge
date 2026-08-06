@@ -30,10 +30,12 @@ import {
 } from "./campaign-play-turn-repository.js";
 import {
   buildCampaignPlayActorPlanGroundingReviewPrompt,
+  buildCampaignPlayActorReplanRecoveryPrompt,
   buildCampaignPlayActorReplanPrompt,
   campaignPlayActorPlanGroundingReviewSchema,
   campaignPlayActorReplanProposalSchema,
   campaignPlayActorReplanProposalSchemaForFrame,
+  type CampaignPlayActorReplanRecoveryFeedback,
   type CampaignPlayActorReplanPromptEntity,
   type CampaignPlayActorReplanPromptFrame,
   type CampaignPlayActorReplanProposal,
@@ -1001,6 +1003,23 @@ export function createCampaignPlayActorReplanner(
         | { kind: "replanned"; plan: CampaignPlayActorPlan; modelWorkerEpoch: number; attemptNumber: number }
         | AttemptFailure;
       const loggedRejectionAttempts = new Set<string>();
+      const recoveryFeedbackFromArtifact = (
+        artifact: CampaignPlayActorPlanRejectionArtifact,
+      ): CampaignPlayActorReplanRecoveryFeedback => ({
+        phase: artifact.phase,
+        reason: artifact.reason,
+        goalHandle: artifact.proposal.goalHandle,
+        stepCount: artifact.proposal.steps.length,
+        moveTargets: artifact.proposal.steps
+          .map((step, index) => step.intent.kind === "move"
+            ? `${index}:${step.intent.targetHandles.join(",")}`
+            : null)
+          .filter((value): value is string => value !== null)
+          .join("|"),
+        reviewViolations: artifact.review?.violations
+          .map((violation) => `${violation.stepIndex}:${violation.kind}`)
+          .join("|") ?? "",
+      });
       const emitRejectionDiagnostic = (failure: AttemptFailure): void => {
         const artifact = failure.rejectionArtifact;
         if (artifact === undefined) return;
@@ -1014,19 +1033,7 @@ export function createCampaignPlayActorReplanner(
           actorId: frame.actorId,
           attemptNumber: failure.attemptNumber,
           modelWorkerEpoch: failure.modelWorkerEpoch,
-          phase: artifact.phase,
-          reason: artifact.reason,
-          goalHandle: artifact.proposal.goalHandle,
-          stepCount: artifact.proposal.steps.length,
-          moveTargets: artifact.proposal.steps
-            .map((step, index) => step.intent.kind === "move"
-              ? `${index}:${step.intent.targetHandles.join(",")}`
-              : null)
-            .filter((value): value is string => value !== null)
-            .join("|"),
-          reviewViolations: artifact.review?.violations
-            .map((violation) => `${violation.stepIndex}:${violation.kind}`)
-            .join("|") ?? "",
+          ...recoveryFeedbackFromArtifact(artifact),
         });
       };
       const isContractGenerationFailure = (error: unknown): boolean => {
@@ -1039,6 +1046,7 @@ export function createCampaignPlayActorReplanner(
         attemptNumber: number,
         modelStageRowId: string,
         attemptId: string | null,
+        prompt: string,
       ): Promise<AttemptResult> => {
         const startedAt = dependencies.now();
         let observedTrace: Readonly<SafeGenerateTrace> | undefined;
@@ -1054,7 +1062,7 @@ export function createCampaignPlayActorReplanner(
             generated = await runProvider(() => dependencies.generateObject<CampaignPlayActorReplanProposal>({
               model,
               schema: proposalSchema,
-              prompt: proposalPrompt,
+              prompt,
               temperature: request.temperature,
               maxOutputTokens: request.maxOutputTokens,
               mode: "auto",
@@ -1566,6 +1574,7 @@ export function createCampaignPlayActorReplanner(
         firstAttemptNumber,
         firstModelStageRowId,
         linkedCall ? firstAttemptId : null,
+        proposalPrompt,
       );
       if (firstResult.kind === "replanned") {
         return { kind: "replanned", jobId: request.jobId, plan: firstResult.plan, workerEpoch };
@@ -1783,6 +1792,12 @@ export function createCampaignPlayActorReplanner(
           secondAttemptNumber,
           secondModelStageRowId,
           secondAttemptId,
+          firstResult.rejectionArtifact === undefined
+            ? proposalPrompt
+            : buildCampaignPlayActorReplanRecoveryPrompt(
+                proposalPrompt,
+                recoveryFeedbackFromArtifact(firstResult.rejectionArtifact),
+              ),
         );
         if (secondResult.kind === "replanned") {
           return { kind: "replanned", jobId: request.jobId, plan: secondResult.plan, workerEpoch };

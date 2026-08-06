@@ -205,6 +205,15 @@ function replanProposalFromPrompt(prompt: string) {
   };
 }
 
+function recoveryFeedbackFromPrompt(prompt: string): Record<string, unknown> {
+  const startMarker = "SAFE_REJECTION_FEEDBACK\n";
+  const endMarker = "\nEND_SAFE_REJECTION_FEEDBACK";
+  const start = prompt.indexOf(startMarker);
+  const end = prompt.indexOf(endMarker, start + startMarker.length);
+  if (start < 0 || end < 0) throw new Error("Actor recovery feedback markers are missing.");
+  return JSON.parse(prompt.slice(start + startMarker.length, end)) as Record<string, unknown>;
+}
+
 function reverseMoveProposalFromPrompt(prompt: string) {
   const startMarker = "ACTOR_FRAME\n";
   const endMarker = "\nEND_ACTOR_FRAME";
@@ -772,6 +781,7 @@ describe("Campaign Play actor replanner", () => {
     await flushActorReplanLogs();
     expect(rejectionDiagnostics(logCapture)).toEqual([]);
     expect(generateObject.mock.calls[0]![0].prompt).toContain(knownScene);
+    expect(generateObject.mock.calls[0]![0].prompt).not.toContain("ACTOR_REPLAN_RECOVERY");
     expect(generateObject.mock.calls[0]![0].prompt).toContain(
       "occurred at world time 0; learned at world time 0",
     );
@@ -923,6 +933,9 @@ describe("Campaign Play actor replanner", () => {
       recoveryModel,
       recoveryModel,
     ]);
+    expect(generateObject.mock.calls[1]![0].prompt)
+      .toBe(generateObject.mock.calls[0]![0].prompt);
+    expect(generateObject.mock.calls[1]![0].prompt).not.toContain("ACTOR_REPLAN_RECOVERY");
     expect(handle.sqlite.prepare(`SELECT attempt, status, worker_epoch AS workerEpoch,
         schema_outcome AS schemaOutcome, error_code AS errorCode
       FROM campaign_play_model_stages
@@ -1176,6 +1189,17 @@ describe("Campaign Play actor replanner", () => {
       recoveryModel,
       recoveryModel,
     ]);
+    const firstPrompt = generateObject.mock.calls[0]![0].prompt;
+    const recoveryPrompt = generateObject.mock.calls[2]![0].prompt;
+    expect(recoveryPrompt.startsWith(`${firstPrompt}\n\nACTOR_REPLAN_RECOVERY\n`)).toBe(true);
+    expect(recoveryFeedbackFromPrompt(recoveryPrompt)).toEqual({
+      phase: "grounding_review",
+      reason: "grounding_review_rejected",
+      goalHandle: expect.stringMatching(/^goal:/),
+      stepCount: 1,
+      moveTargets: "",
+      reviewViolations: "0:outcome_not_established",
+    });
     expect(handle.sqlite.prepare(`SELECT attempt, status, schema_outcome AS schemaOutcome,
         error_code AS errorCode FROM campaign_play_model_stages
       WHERE campaign_id = ? AND turn_id = 'turn-player' AND kind = 'actor_replanner'
@@ -1188,6 +1212,73 @@ describe("Campaign Play actor replanner", () => {
     expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_plans
       WHERE campaign_id = ? AND actor_id = 'actor-b' AND status = 'active'`).get(CAMPAIGN_ID))
       .toEqual({ count: 1 });
+  });
+
+  it("recovers one compilation rejection with the exact safe move coordinates", async () => {
+    const { handle, token, jobId } = createReplanFixture();
+    const bypassModel = {} as LanguageModel;
+    const recoveryModel = {} as LanguageModel;
+    let callNumber = 0;
+    const generateObject = vi.fn(async (request: { prompt: string; model: LanguageModel }) => {
+      callNumber += 1;
+      if (request.prompt.includes("ACTOR_PLAN_REVIEW\n")) {
+        return { object: { verdict: "accepted", violations: [] }, trace: acceptedTrace() };
+      }
+      return {
+        object: callNumber === 1
+          ? reverseMoveProposalFromPrompt(request.prompt)
+          : singleStepProposalFromPrompt(request.prompt),
+        trace: acceptedTrace(),
+      };
+    });
+    const replanner = createCampaignPlayActorReplanner(handle, {
+      now: () => 1_600,
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const outcome = await replanner.replan({
+      jobId,
+      token,
+      model: bypassModel,
+      recoveryModel,
+      temperature: 0.2,
+      maxOutputTokens: 100,
+      maximumInputTokens: 1_000,
+      maximumOutputTokens: 100,
+      maximumTotalTokens: 2_000,
+      maximumCostMicros: 10_000,
+      externalOperationDeadlineMs: 90_000,
+      signal: new AbortController().signal,
+      createdAt: 1_590,
+    });
+
+    expect(outcome).toMatchObject({ kind: "replanned", jobId, workerEpoch: 1 });
+    expect(generateObject).toHaveBeenCalledTimes(3);
+    expect(generateObject.mock.calls.map((call) => call[0]!.model)).toEqual([
+      bypassModel,
+      recoveryModel,
+      recoveryModel,
+    ]);
+    const firstPrompt = generateObject.mock.calls[0]![0].prompt;
+    const recoveryPrompt = generateObject.mock.calls[1]![0].prompt;
+    expect(recoveryPrompt.startsWith(`${firstPrompt}\n\nACTOR_REPLAN_RECOVERY\n`)).toBe(true);
+    const feedback = recoveryFeedbackFromPrompt(recoveryPrompt);
+    expect(feedback).toMatchObject({
+      phase: "compilation",
+      reason: "route_not_traversable_from_step_location",
+      goalHandle: expect.stringMatching(/^goal:/),
+      stepCount: 3,
+      reviewViolations: "",
+    });
+    expect(feedback.moveTargets).toMatch(/^0:route:[^|]+\|1:route:[^|]+\|2:route:[^|]+$/);
+    expect(recoveryPrompt).not.toContain("Follow the supplied route away from the current scene");
+    expect(handle.sqlite.prepare(`SELECT attempt, status, schema_outcome AS schemaOutcome,
+        error_code AS errorCode FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = 'turn-player' AND kind = 'actor_replanner'
+      ORDER BY attempt`).all(CAMPAIGN_ID)).toEqual([
+      { attempt: 1, status: "interrupted", schemaOutcome: "invalid", errorCode: "model_contract_invalid" },
+      { attempt: 2, status: "accepted", schemaOutcome: "valid", errorCode: null },
+    ]);
   });
 
   it("keeps move and review rejection coordinates opaque and index-stable", async () => {
@@ -1306,6 +1397,17 @@ describe("Campaign Play actor replanner", () => {
       [1, 1, "0:outcome_not_established"],
       [2, 2, "0:contradicts_accepted_frame"],
     ]);
+    const firstPrompt = generateObject.mock.calls[0]![0].prompt;
+    const recoveryPrompt = generateObject.mock.calls[2]![0].prompt;
+    expect(recoveryPrompt.startsWith(`${firstPrompt}\n\nACTOR_REPLAN_RECOVERY\n`)).toBe(true);
+    expect(recoveryFeedbackFromPrompt(recoveryPrompt)).toEqual({
+      phase: "grounding_review",
+      reason: "grounding_review_rejected",
+      goalHandle: expect.stringMatching(/^goal:/),
+      stepCount: 1,
+      moveTargets: "",
+      reviewViolations: "0:outcome_not_established",
+    });
     expect(generateObject).toHaveBeenCalledTimes(4);
     expect(generateObject.mock.calls.map((call) => call[0]!.model)).toEqual([
       bypassModel,

@@ -132,6 +132,23 @@ export interface CampaignPlayActorReplanPromptFrame {
   entities: CampaignPlayActorReplanPromptEntity[];
 }
 
+export type CampaignPlayActorReplanRecoveryFeedback = {
+  phase: "compilation" | "grounding_review";
+  reason:
+    | "active_goal_unavailable"
+    | "target_unavailable"
+    | "route_not_traversable_from_step_location"
+    | "target_outside_step_location"
+    | "obligation_transition_invalid"
+    | "observable_trace_names_actor"
+    | "compiled_plan_invalid"
+    | "grounding_review_rejected";
+  goalHandle?: string;
+  stepCount?: number;
+  moveTargets: string;
+  reviewViolations: string;
+};
+
 function frameHandleSchema(handles: readonly string[]) {
   const [first, ...rest] = handles;
   return first === undefined ? null : z.enum([first, ...rest]);
@@ -200,6 +217,28 @@ Every step must include possessionOutcome. Use {"kind":"none"} unless a non-move
 Every step must include obligationOutcome. Use {"kind":"none"} unless this actor becomes the debtor for a definite new copper obligation or pays one existing debt from its own supplied copper possession. To incur its own debt, use {"kind":"incur","creditorActorHandle":"...","unitKey":"copper","amount":1}. To pay, use {"kind":"pay","creditorActorHandle":"...","obligationHandle":"...","paymentPossessionHandle":"...","unitKey":"copper","amount":1}. Copy every handle from ACTOR_FRAME. Payment amount cannot exceed either the supplied possession quantity or outstanding debt. This actor cannot create debt for another debtor, pay from another actor's possession, or declare another actor's payment. A quote, request, offer, promise, or visible handling is not an obligation transition. If obligationOutcome is not none, possessionOutcome must be none.
 
 Code owns canonical identifiers, plan versions, step identifiers, preconditions, scheduling, command scopes, visibility, and settlement.`;
+}
+
+export function buildCampaignPlayActorReplanRecoveryPrompt(
+  basePrompt: string,
+  feedback: CampaignPlayActorReplanRecoveryFeedback,
+): string {
+  const safeFeedback = {
+    phase: feedback.phase,
+    reason: feedback.reason,
+    ...(feedback.goalHandle === undefined ? {} : { goalHandle: feedback.goalHandle }),
+    ...(feedback.stepCount === undefined ? {} : { stepCount: feedback.stepCount }),
+    moveTargets: feedback.moveTargets,
+    reviewViolations: feedback.reviewViolations,
+  };
+  return `${basePrompt}
+
+ACTOR_REPLAN_RECOVERY
+Regenerate a fresh proposal from ACTOR_FRAME. Correct the listed invariant. Do not copy the rejected target arrangement. Satisfy every unchanged schema, compiler, and grounding-review rule.
+
+SAFE_REJECTION_FEEDBACK
+${JSON.stringify(safeFeedback)}
+END_SAFE_REJECTION_FEEDBACK`;
 }
 
 export function buildCampaignPlayActorPlanGroundingReviewPrompt(
