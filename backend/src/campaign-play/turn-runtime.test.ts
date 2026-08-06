@@ -4466,6 +4466,49 @@ describe("Campaign Play player-action turn runtime", () => {
       .find((job) => job.jobId === jobId)).toMatchObject({ stage: "claimed", workerEpoch: 1 });
   });
 
+  it("keeps the Actor Replanner deadline independent from player external stages", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening();
+    const time = fixedClock(4_475);
+    let observedDeadlineMs: number | null = null;
+    const baseReplanner = createCampaignPlayActorReplanner(handle, {
+      now: time.clock.now,
+      generateObject: (async (request: { prompt: string }) => ({
+        object: actorReplanModelObjectFromPrompt(request.prompt),
+        trace: actorReplanTrace(),
+      })) as unknown as typeof safeGenerateObject,
+    });
+    const actorReplanner = {
+      interruptExpired: baseReplanner.interruptExpired,
+      replan: (request: Parameters<typeof baseReplanner.replan>[0]) => {
+        observedDeadlineMs = request.externalOperationDeadlineMs;
+        return baseReplanner.replan(request);
+      },
+    };
+    const runtime = turnRuntime(
+      handle,
+      time,
+      judgeFixture("deterministic"),
+      gameMasterFixture(),
+      {
+        actorReplanner,
+        externalOperationDeadlineMs: 30_000,
+        actorReplannerOperationDeadlineMs: 90_000,
+      },
+    );
+    const admission = runtime.admitAction({
+      request: admissionRequest(state, "independent-actor-deadline"),
+      submittedAt: 4_475,
+    });
+    await advanceToPrimarySettlement(runtime, time, admission.turnId);
+    time.advance();
+    await runtime.runNextStage(admission.turnId);
+    forceFirstActorReplan(handle, time, admission.turnId);
+
+    time.advance();
+    await runtime.runNextStage(admission.turnId);
+    expect(observedDeadlineMs).toBe(90_000);
+  });
+
   it("interrupts an expired claimed replanner before recovery and rejects its late result", async () => {
     const { handle, state } = await createReadyCampaignWithOpening();
     const time = fixedClock(4_500);

@@ -4,7 +4,9 @@
 
 Player-action Judge and Game Master external attempts use a 30-second hard deadline. The application may automatically resume exactly one first-attempt `stage_timeout` on a fresh worker epoch, preserving the admitted turn and frozen provider/model identity. A second timeout remains interrupted and exposes the existing explicit Resume state.
 
-Opening keeps its existing 90-second per-stage deadline and does not gain automatic timeout recovery. Existing provider-unavailable recovery remains unchanged. Model-contract and budget failures remain non-recoverable. No mechanics, receipt, actor, narration, prompt, schema, provider, model, UI, or visible-copy behavior changes.
+Actor Replanner attempts keep their separate 90-second shared attempt window. The r72 regression proved that reusing the 30-second external deadline here starved a valid recovery after a 14.1-second semantic rejection; the runtime now carries an explicit Actor Replanner deadline instead of coupling it to Judge/Game Master timing.
+
+Opening keeps its existing 90-second per-stage deadline and does not gain automatic timeout recovery. Existing provider-unavailable recovery remains unchanged. Model-contract and budget failures remain non-recoverable. No mechanics, receipt, actor-planning semantics, narration, prompt, schema, provider, model, UI, or visible-copy behavior changes.
 
 ## Evidence before implementation
 
@@ -23,7 +25,9 @@ The exact frozen r70 Judge evaluation accepted all bypass samples in at most 7,2
 ## Verification
 
 - `campaign-play-application.test.ts`: 13/13 passed, including the one-time player-action timeout policy and unchanged Opening exclusion.
-- `turn-runtime.test.ts`: 63/63 passed, covering the existing external-stage deadline, interruption, resume, epoch, and late-write fences.
+- `turn-runtime.test.ts`: 64/64 passed, covering the existing external-stage deadline, interruption, resume, epoch, late-write fences, and the separate Actor Replanner window.
 - Backend typecheck and build passed; shared and frontend production builds passed.
 - `git diff --check` passed with only existing line-ending warnings.
 - Semantic review: the change adds no prompt, model instruction, narrative prose, or visible copy, so humanizer/deslop review is not applicable.
+
+The follow-up runtime regression asserts a 30-second player external deadline and a distinct 90-second Actor Replanner deadline reach their respective stages without cross-coupling.

@@ -91,6 +91,7 @@ import {
 const LEASE_DURATION_MS = 150_000;
 const HEARTBEAT_INTERVAL_MS = 10_000;
 const PLAYER_ACTION_EXTERNAL_OPERATION_DEADLINE_MS = 30_000;
+const ACTOR_REPLANNER_OPERATION_DEADLINE_MS = 90_000;
 const MAXIMUM_INPUT_TOKENS = 64_000;
 export const CAMPAIGN_PLAY_MINIMUM_OUTPUT_TOKENS = 32_768;
 const MAXIMUM_COST_MICROS = Number.MAX_SAFE_INTEGER;
@@ -545,6 +546,7 @@ export function createCampaignPlayApplication(
       leaseDurationMs: LEASE_DURATION_MS,
       heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
       externalOperationDeadlineMs: PLAYER_ACTION_EXTERNAL_OPERATION_DEADLINE_MS,
+      actorReplannerOperationDeadlineMs: ACTOR_REPLANNER_OPERATION_DEADLINE_MS,
       clock,
       uncertaintySeedKey: dependencies.uncertaintySeedKey(
         handle.campaignId,

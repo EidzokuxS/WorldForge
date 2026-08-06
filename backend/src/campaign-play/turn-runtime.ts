@@ -349,6 +349,7 @@ export interface CreateCampaignPlayTurnRuntimeInput {
   leaseDurationMs: number;
   heartbeatIntervalMs: number;
   externalOperationDeadlineMs?: number;
+  actorReplannerOperationDeadlineMs?: number;
   actorCriticalPathReplanLimit?: number;
   uncertaintySeedKey: string;
   judgeModel: CampaignPlayTurnRuntimeStageModel;
@@ -2141,11 +2142,21 @@ export function createCampaignPlayTurnRuntime(
   const frozenSelection = selection(input);
   const certifiedGameMasterModel = input.certifiedGameMasterModel ?? input.gameMasterModel;
   const externalOperationDeadlineMs = input.externalOperationDeadlineMs ?? 90_000;
+  const actorReplannerOperationDeadlineMs = input.actorReplannerOperationDeadlineMs ?? 90_000;
   const actorCriticalPathReplanLimit = input.actorCriticalPathReplanLimit ?? 1;
   if (!Number.isSafeInteger(externalOperationDeadlineMs) || externalOperationDeadlineMs <= 0) {
     throw new CampaignPlayTurnRuntimeError(
       "turn_state_invalid",
       "Campaign Play player-action provider deadline is invalid.",
+    );
+  }
+  if (
+    !Number.isSafeInteger(actorReplannerOperationDeadlineMs) ||
+    actorReplannerOperationDeadlineMs <= 0
+  ) {
+    throw new CampaignPlayTurnRuntimeError(
+      "turn_state_invalid",
+      "Campaign Play Actor Replanner provider deadline is invalid.",
     );
   }
   if (!Number.isSafeInteger(actorCriticalPathReplanLimit) || actorCriticalPathReplanLimit < 0) {
@@ -3014,7 +3025,7 @@ export function createCampaignPlayTurnRuntime(
                 maximumOutputTokens: input.actorReplannerModel.maximumOutputTokens,
                 maximumTotalTokens: input.actorReplannerModel.maximumTotalTokens,
                 maximumCostMicros: input.actorReplannerModel.maximumCostMicros,
-                externalOperationDeadlineMs,
+                externalOperationDeadlineMs: actorReplannerOperationDeadlineMs,
                 signal: context.signal,
                 createdAt: now(),
               });
@@ -3343,7 +3354,7 @@ export function createCampaignPlayTurnRuntime(
         maximumOutputTokens: input.actorReplannerModel.maximumOutputTokens,
         maximumTotalTokens: input.actorReplannerModel.maximumTotalTokens,
         maximumCostMicros: input.actorReplannerModel.maximumCostMicros,
-        externalOperationDeadlineMs,
+        externalOperationDeadlineMs: actorReplannerOperationDeadlineMs,
         signal: controller.signal,
         createdAt: now(),
       });
