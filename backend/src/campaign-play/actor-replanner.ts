@@ -1000,6 +1000,35 @@ export function createCampaignPlayActorReplanner(
       type AttemptResult =
         | { kind: "replanned"; plan: CampaignPlayActorPlan; modelWorkerEpoch: number; attemptNumber: number }
         | AttemptFailure;
+      const loggedRejectionAttempts = new Set<string>();
+      const emitRejectionDiagnostic = (failure: AttemptFailure): void => {
+        const artifact = failure.rejectionArtifact;
+        if (artifact === undefined) return;
+        const attemptKey = `${failure.attemptNumber}:${failure.modelWorkerEpoch}`;
+        if (loggedRejectionAttempts.has(attemptKey)) return;
+        loggedRejectionAttempts.add(attemptKey);
+        log.event("actor_replan.rejected", {
+          campaignId: handle.campaignId,
+          turnId: frame.turnId,
+          jobId: request.jobId,
+          actorId: frame.actorId,
+          attemptNumber: failure.attemptNumber,
+          modelWorkerEpoch: failure.modelWorkerEpoch,
+          phase: artifact.phase,
+          reason: artifact.reason,
+          goalHandle: artifact.proposal.goalHandle,
+          stepCount: artifact.proposal.steps.length,
+          moveTargets: artifact.proposal.steps
+            .map((step, index) => step.intent.kind === "move"
+              ? `${index}:${step.intent.targetHandles.join(",")}`
+              : null)
+            .filter((value): value is string => value !== null)
+            .join("|"),
+          reviewViolations: artifact.review?.violations
+            .map((violation) => `${violation.stepIndex}:${violation.kind}`)
+            .join("|") ?? "",
+        });
+      };
       const isContractGenerationFailure = (error: unknown): boolean => {
         const code = getSafeGenerateObjectErrorCode(error);
         return isSafeGenerateObjectContractErrorCode(code);
@@ -1418,27 +1447,7 @@ export function createCampaignPlayActorReplanner(
             })()
           : null;
         const deferInvalidReplan = rejectedSchedule !== null;
-        if (failure.rejectionArtifact !== undefined) {
-          log.event("actor_replan.rejected", {
-            campaignId: handle.campaignId,
-            turnId: frame.turnId,
-            jobId: request.jobId,
-            actorId: frame.actorId,
-            phase: failure.rejectionArtifact.phase,
-            reason: failure.rejectionArtifact.reason,
-            goalHandle: failure.rejectionArtifact.proposal.goalHandle,
-            stepCount: failure.rejectionArtifact.proposal.steps.length,
-            moveTargets: failure.rejectionArtifact.proposal.steps
-              .map((step, index) => step.intent.kind === "move"
-                ? `${index}:${step.intent.targetHandles.join(",")}`
-                : null)
-              .filter((value): value is string => value !== null)
-              .join("|"),
-            reviewViolations: failure.rejectionArtifact.review?.violations
-              .map((violation) => `${violation.stepIndex}:${violation.kind}`)
-              .join("|") ?? "",
-          });
-        }
+        emitRejectionDiagnostic(failure);
         try {
           requireTurnLease(handle, request.token, interruptedAt);
         } catch {
@@ -1561,6 +1570,7 @@ export function createCampaignPlayActorReplanner(
       if (firstResult.kind === "replanned") {
         return { kind: "replanned", jobId: request.jobId, plan: firstResult.plan, workerEpoch };
       }
+      emitRejectionDiagnostic(firstResult);
       if (request.signal?.aborted === true) {
         return finalizeFailure({
           ...firstResult,

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { Writable } from "node:stream";
 import type { LanguageModel } from "ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDb } from "../db/index.js";
@@ -17,6 +18,10 @@ import {
 } from "../campaign-world/world-repository.test-support.js";
 import { calculateCampaignWorldContentHash } from "../campaign-world/world-snapshot.js";
 import { safeGenerateObject, type SafeGenerateTrace } from "../ai/generate-object-safe.js";
+import {
+  __setTurnFileDispatchForTest,
+  resetLoggerForTest,
+} from "../lib/logger-test-utils.js";
 import { createCampaignPlayActorReplanner } from "./actor-replanner.js";
 import { createCampaignPlayActorScheduler } from "./actor-scheduler.js";
 import {
@@ -49,6 +54,41 @@ const TEST_MODEL_PRICING = {
 let root = "";
 let previousCampaignsRoot: string | undefined;
 let handles: Array<CampaignWorldDatabaseHandle | CampaignPlayDatabaseHandle> = [];
+
+class ActorReplanLogCapture extends Writable {
+  private readonly chunks: string[] = [];
+
+  override _write(
+    chunk: Buffer | string,
+    _encoding: BufferEncoding,
+    callback: (error?: Error | null) => void,
+  ): void {
+    this.chunks.push(typeof chunk === "string" ? chunk : chunk.toString("utf8"));
+    callback();
+  }
+
+  records(): Array<Record<string, unknown>> {
+    return this.chunks.join("")
+      .split(/\r?\n/)
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+  }
+}
+
+function captureActorReplanLogs(): ActorReplanLogCapture {
+  const capture = new ActorReplanLogCapture();
+  resetLoggerForTest({ logRoot: root });
+  __setTurnFileDispatchForTest(capture);
+  return capture;
+}
+
+async function flushActorReplanLogs(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+function rejectionDiagnostics(capture: ActorReplanLogCapture): Array<Record<string, unknown>> {
+  return capture.records().filter((record) => record.event === "actor_replan.rejected");
+}
 
 beforeEach(() => {
   previousCampaignsRoot = process.env.GSD_CAMPAIGNS_ROOT;
@@ -666,6 +706,7 @@ function persistKnownScene(
 describe("Campaign Play actor replanner", () => {
   it("accepts one strict job-owned attempt and atomically replaces its completed plan", async () => {
     const { handle, token, jobId } = createReplanFixture();
+    const logCapture = captureActorReplanLogs();
     const knownScene = "Magda promised to stay through second bell and change the patients' dressings.";
     expect(handle.sqlite.prepare(`SELECT count(*) AS count
       FROM campaign_play_actor_knowledge
@@ -728,6 +769,8 @@ describe("Campaign Play actor replanner", () => {
       }] },
     });
     expect(generateObject).toHaveBeenCalledTimes(2);
+    await flushActorReplanLogs();
+    expect(rejectionDiagnostics(logCapture)).toEqual([]);
     expect(generateObject.mock.calls[0]![0].prompt).toContain(knownScene);
     expect(generateObject.mock.calls[0]![0].prompt).toContain(
       "occurred at world time 0; learned at world time 0",
@@ -940,6 +983,7 @@ describe("Campaign Play actor replanner", () => {
 
   it("defers an ungrounded replan without interrupting the player turn", async () => {
     const { handle, token, jobId } = createReplanFixture();
+    const logCapture = captureActorReplanLogs();
     const generateObject = vi.fn(async (request: { prompt: string }) => {
       if (request.prompt.includes("ACTOR_PLAN_REVIEW\n")) {
         return {
@@ -1001,6 +1045,39 @@ describe("Campaign Play actor replanner", () => {
       errorCode: "model_contract_invalid",
       workerEpoch: 1,
     });
+    await flushActorReplanLogs();
+    const diagnostics = rejectionDiagnostics(logCapture);
+    expect(diagnostics).toHaveLength(1);
+    const diagnosticPayload = diagnostics[0]!.payload as Record<string, unknown>;
+    expect(Object.keys(diagnosticPayload).sort()).toEqual([
+      "actorId",
+      "attemptNumber",
+      "campaignId",
+      "goalHandle",
+      "jobId",
+      "modelWorkerEpoch",
+      "moveTargets",
+      "phase",
+      "reason",
+      "reviewViolations",
+      "stepCount",
+      "turnId",
+    ]);
+    expect(diagnosticPayload).toMatchObject({
+      campaignId: CAMPAIGN_ID,
+      turnId: "turn-player",
+      jobId,
+      actorId: "actor-b",
+      attemptNumber: 1,
+      modelWorkerEpoch: 1,
+      phase: "grounding_review",
+      reason: "grounding_review_rejected",
+      goalHandle: expect.stringMatching(/^goal:/),
+      stepCount: 3,
+      moveTargets: "",
+      reviewViolations: "0:other_actor_action_not_established",
+    });
+    expect(JSON.stringify(diagnosticPayload)).not.toContain("visitor");
     expect(generateObject).toHaveBeenCalledTimes(2);
     expect(generateObject.mock.calls[1]![0].prompt).toContain(
       "Watch the visitor finish reseating the wick",
@@ -1032,6 +1109,7 @@ describe("Campaign Play actor replanner", () => {
 
   it("recovers one grounding-review contract failure with the same linked job identity", async () => {
     const { handle, token, jobId } = createReplanFixture();
+    const logCapture = captureActorReplanLogs();
     const bypassModel = {} as LanguageModel;
     const recoveryModel = {} as LanguageModel;
     let callNumber = 0;
@@ -1072,6 +1150,23 @@ describe("Campaign Play actor replanner", () => {
     });
 
     expect(outcome).toMatchObject({ kind: "replanned", jobId, workerEpoch: 1 });
+    await flushActorReplanLogs();
+    const diagnostics = rejectionDiagnostics(logCapture);
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]!.payload).toMatchObject({
+      campaignId: CAMPAIGN_ID,
+      turnId: "turn-player",
+      jobId,
+      actorId: "actor-b",
+      attemptNumber: 1,
+      modelWorkerEpoch: 1,
+      phase: "grounding_review",
+      reason: "grounding_review_rejected",
+      goalHandle: expect.stringMatching(/^goal:/),
+      stepCount: 1,
+      moveTargets: "",
+      reviewViolations: "0:outcome_not_established",
+    });
     expect(generateObject).toHaveBeenCalledTimes(4);
     expect(generateObject.mock.calls.slice(0, 2).map((call) => call[0]!.model)).toEqual([
       bypassModel,
@@ -1095,14 +1190,84 @@ describe("Campaign Play actor replanner", () => {
       .toEqual({ count: 1 });
   });
 
+  it("keeps move and review rejection coordinates opaque and index-stable", async () => {
+    const { handle, token, jobId } = createReplanFixture();
+    const logCapture = captureActorReplanLogs();
+    const generateObject = vi.fn(async (request: { prompt: string }) => {
+      if (request.prompt.includes("ACTOR_PLAN_REVIEW\n")) {
+        return {
+          object: {
+            verdict: "rejected",
+            violations: [{ stepIndex: 2, kind: "contradicts_accepted_frame" }],
+          },
+          trace: acceptedTrace(),
+        };
+      }
+      return {
+        object: destinationMoveProposalFromPrompt(request.prompt).proposal,
+        trace: acceptedTrace(),
+      };
+    });
+    const replanner = createCampaignPlayActorReplanner(handle, {
+      now: () => 1_600,
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const outcome = await replanner.replan({
+      jobId,
+      token,
+      model: {} as LanguageModel,
+      temperature: 0.2,
+      maxOutputTokens: 100,
+      maximumInputTokens: 1_000,
+      maximumOutputTokens: 100,
+      maximumTotalTokens: 2_000,
+      maximumCostMicros: 10_000,
+      externalOperationDeadlineMs: 90_000,
+      signal: new AbortController().signal,
+      createdAt: 1_590,
+    });
+
+    expect(outcome).toMatchObject({
+      kind: "deferred",
+      jobId,
+      reason: "replan_invalid",
+      errorCode: "model_contract_invalid",
+    });
+    await flushActorReplanLogs();
+    const diagnostics = rejectionDiagnostics(logCapture);
+    expect(diagnostics).toHaveLength(1);
+    const payload = diagnostics[0]!.payload as Record<string, unknown>;
+    expect(payload.moveTargets).toMatch(/^0:[^|]+$/);
+    expect(payload.reviewViolations).toBe("2:contradicts_accepted_frame");
+    expect(JSON.stringify(payload)).not.toContain("Walk to the connected market");
+    expect(JSON.stringify(payload)).not.toContain("The next lead is there");
+  });
+
   it("consumes the one retry for two invalid attempts and defers without a third call", async () => {
     const { handle, token, jobId } = createReplanFixture();
+    const logCapture = captureActorReplanLogs();
     const bypassModel = {} as LanguageModel;
     const recoveryModel = {} as LanguageModel;
-    const generateObject = vi.fn(async (_request: { model: LanguageModel }) => ({
-      object: {},
-      trace: acceptedTrace(),
-    }));
+    let callNumber = 0;
+    const generateObject = vi.fn(async (request: { model: LanguageModel; prompt: string }) => {
+      callNumber += 1;
+      if (request.prompt.includes("ACTOR_PLAN_REVIEW\n")) {
+        return {
+          object: {
+            verdict: "rejected",
+            violations: [{
+              stepIndex: 0,
+              kind: callNumber === 2
+                ? "outcome_not_established"
+                : "contradicts_accepted_frame",
+            }],
+          },
+          trace: acceptedTrace(),
+        };
+      }
+      return { object: singleStepProposalFromPrompt(request.prompt), trace: acceptedTrace() };
+    });
     const replanner = createCampaignPlayActorReplanner(handle, {
       now: () => 1_600,
       generateObject: generateObject as unknown as typeof safeGenerateObject,
@@ -1131,9 +1296,21 @@ describe("Campaign Play actor replanner", () => {
       errorCode: "model_contract_invalid",
       workerEpoch: 1,
     });
-    expect(generateObject).toHaveBeenCalledTimes(2);
+    await flushActorReplanLogs();
+    const diagnostics = rejectionDiagnostics(logCapture);
+    expect(diagnostics).toHaveLength(2);
+    expect(diagnostics.map((diagnostic) => {
+      const payload = diagnostic.payload as Record<string, unknown>;
+      return [payload.attemptNumber, payload.modelWorkerEpoch, payload.reviewViolations];
+    })).toEqual([
+      [1, 1, "0:outcome_not_established"],
+      [2, 2, "0:contradicts_accepted_frame"],
+    ]);
+    expect(generateObject).toHaveBeenCalledTimes(4);
     expect(generateObject.mock.calls.map((call) => call[0]!.model)).toEqual([
       bypassModel,
+      bypassModel,
+      recoveryModel,
       recoveryModel,
     ]);
     expect(handle.sqlite.prepare(`SELECT attempt, status, schema_outcome AS schemaOutcome,
@@ -1155,6 +1332,9 @@ describe("Campaign Play actor replanner", () => {
       .toEqual({ count: 0 });
     expect(createCampaignPlayActorScheduler(handle).listTurnJobs("turn-player")[0])
       .toMatchObject({ stage: "deferred", deferReason: "replan_invalid" });
+    expect(handle.sqlite.prepare(`SELECT proposal_id AS proposalId FROM campaign_play_actor_jobs
+      WHERE campaign_id = ? AND job_id = ?`).get(CAMPAIGN_ID, jobId))
+      .toEqual({ proposalId: null });
   });
 
   it("does not escalate provider unavailability even when a recovery model is available", async () => {
@@ -1349,6 +1529,7 @@ describe("Campaign Play actor replanner", () => {
 
   it("times out the second actor replan attempt without accepting a late provider result", async () => {
     const { handle, token, jobId } = createReplanFixture();
+    const logCapture = captureActorReplanLogs();
     type Generated = { object: unknown; trace: SafeGenerateTrace };
     let resolveSecond: ((value: Generated) => void) | undefined;
     let fireDeadline: (() => void) | undefined;
@@ -1358,7 +1539,21 @@ describe("Campaign Play actor replanner", () => {
     const recoveryModel = {} as LanguageModel;
     const generateObject = vi.fn((request: { prompt: string; model: LanguageModel; abortSignal?: AbortSignal }) => {
       callNumber += 1;
-      if (callNumber === 1) return Promise.resolve({ object: {}, trace: acceptedTrace() });
+      if (callNumber === 1) {
+        return Promise.resolve({
+          object: singleStepProposalFromPrompt(request.prompt),
+          trace: acceptedTrace(),
+        });
+      }
+      if (callNumber === 2) {
+        return Promise.resolve({
+          object: {
+            verdict: "rejected",
+            violations: [{ stepIndex: 0, kind: "outcome_not_established" }],
+          },
+          trace: acceptedTrace(),
+        });
+      }
       return new Promise<Generated>((resolve) => {
         resolveSecond = resolve;
       });
@@ -1390,15 +1585,16 @@ describe("Campaign Play actor replanner", () => {
       signal: new AbortController().signal,
       createdAt: 1_590,
     });
-    await vi.waitFor(() => expect(generateObject).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(generateObject).toHaveBeenCalledTimes(3));
     expect(generateObject.mock.calls.map((call) => call[0]!.model)).toEqual([
+      bypassModel,
       bypassModel,
       recoveryModel,
     ]);
     fireDeadline!();
     const outcome = await pending;
     resolveSecond!({
-      object: singleStepProposalFromPrompt(generateObject.mock.calls[1]![0].prompt),
+      object: singleStepProposalFromPrompt(generateObject.mock.calls[2]![0].prompt),
       trace: acceptedTrace(),
     });
     await Promise.resolve();
@@ -1409,8 +1605,17 @@ describe("Campaign Play actor replanner", () => {
       errorCode: "stage_timeout",
       workerEpoch: 1,
     });
-    expect(generateObject).toHaveBeenCalledTimes(2);
-    expect(generateObject.mock.calls[1]![0].abortSignal?.aborted).toBe(true);
+    await flushActorReplanLogs();
+    expect(rejectionDiagnostics(logCapture)).toHaveLength(1);
+    expect(rejectionDiagnostics(logCapture)[0]!.payload).toMatchObject({
+      attemptNumber: 1,
+      modelWorkerEpoch: 1,
+      phase: "grounding_review",
+      reason: "grounding_review_rejected",
+      reviewViolations: "0:outcome_not_established",
+    });
+    expect(generateObject).toHaveBeenCalledTimes(3);
+    expect(generateObject.mock.calls[2]![0].abortSignal?.aborted).toBe(true);
     expect(clearCount).toBe(1);
     expect(handle.sqlite.prepare(`SELECT attempt, status, schema_outcome AS schemaOutcome,
         error_code AS errorCode FROM campaign_play_model_stages
