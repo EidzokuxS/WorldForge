@@ -20,6 +20,7 @@ import { openCampaignPlayDatabase, type CampaignPlayDatabaseHandle } from "./cam
 import {
   CAMPAIGN_PLAY_MINIMUM_OUTPUT_TOKENS,
   CampaignPlayApplicationError,
+  campaignPlayMayAutomaticallyResumeExternalStage,
   campaignPlayMaximumOutputTokens,
   createCampaignPlayApplication,
   resolveCampaignPlayRequestedModel,
@@ -358,6 +359,30 @@ function openingRequest(
 }
 
 describe("CampaignPlayApplication", () => {
+  it("allows one player-action timeout recovery without widening Opening recovery", () => {
+    expect(campaignPlayMayAutomaticallyResumeExternalStage({
+      turnKind: "player_action",
+      errorCode: "stage_timeout",
+      attempt: 1,
+      wasResume: false,
+      alreadyAttempted: false,
+    })).toBe(true);
+    expect(campaignPlayMayAutomaticallyResumeExternalStage({
+      turnKind: "opening",
+      errorCode: "stage_timeout",
+      attempt: 1,
+      wasResume: false,
+      alreadyAttempted: false,
+    })).toBe(false);
+    expect(campaignPlayMayAutomaticallyResumeExternalStage({
+      turnKind: "player_action",
+      errorCode: "stage_timeout",
+      attempt: 2,
+      wasResume: true,
+      alreadyAttempted: true,
+    })).toBe(false);
+  });
+
   it("gives every Campaign Play model at least a 32k output window", () => {
     expect(campaignPlayMaximumOutputTokens(512)).toBe(CAMPAIGN_PLAY_MINIMUM_OUTPUT_TOKENS);
     expect(campaignPlayMaximumOutputTokens(65_536)).toBe(65_536);

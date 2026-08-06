@@ -90,6 +90,7 @@ import {
 
 const LEASE_DURATION_MS = 150_000;
 const HEARTBEAT_INTERVAL_MS = 10_000;
+const PLAYER_ACTION_EXTERNAL_OPERATION_DEADLINE_MS = 30_000;
 const MAXIMUM_INPUT_TOKENS = 64_000;
 export const CAMPAIGN_PLAY_MINIMUM_OUTPUT_TOKENS = 32_768;
 const MAXIMUM_COST_MICROS = Number.MAX_SAFE_INTEGER;
@@ -113,6 +114,18 @@ export class CampaignPlayApplicationError extends Error {
     super(message, options);
     this.name = "CampaignPlayApplicationError";
   }
+}
+
+export function campaignPlayMayAutomaticallyResumeExternalStage(input: {
+  turnKind: LoadedCampaignPlayTurn["turnKind"];
+  errorCode: string;
+  attempt: number;
+  wasResume: boolean;
+  alreadyAttempted: boolean;
+}): boolean {
+  if (input.wasResume || input.alreadyAttempted || input.attempt !== 1) return false;
+  if (input.errorCode === "provider_unavailable") return true;
+  return input.turnKind === "player_action" && input.errorCode === "stage_timeout";
 }
 
 interface CampaignPlayRuntimeFactory {
@@ -531,6 +544,7 @@ export function createCampaignPlayApplication(
       owner: dependencies.owner,
       leaseDurationMs: LEASE_DURATION_MS,
       heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
+      externalOperationDeadlineMs: PLAYER_ACTION_EXTERNAL_OPERATION_DEADLINE_MS,
       clock,
       uncertaintySeedKey: dependencies.uncertaintySeedKey(
         handle.campaignId,
@@ -661,12 +675,14 @@ export function createCampaignPlayApplication(
             })
           : await runtime.runNextStage(turnId);
         pendingResume = null;
-        if (
-          !wasResume && !automaticResumeAttempted &&
-          result.recovery.kind === "explicit_resume_required" &&
-          result.recovery.errorCode === "provider_unavailable" &&
-          result.recovery.attempt === 1
-        ) {
+        if (result.recovery.kind === "explicit_resume_required" &&
+          campaignPlayMayAutomaticallyResumeExternalStage({
+            turnKind: before.turnKind,
+            errorCode: result.recovery.errorCode,
+            attempt: result.recovery.attempt,
+            wasResume,
+            alreadyAttempted: automaticResumeAttempted,
+          })) {
           automaticResumeAttempted = true;
           pendingResume = {
             interruptedStage: result.recovery.interruptedStage,
