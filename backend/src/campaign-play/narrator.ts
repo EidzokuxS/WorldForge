@@ -163,6 +163,15 @@ export type CampaignPlayNarratorPacketValidationFailure =
         intentKind: string | null;
         detailIsNull: boolean;
       }>;
+    }
+  | {
+      check: "action_selection_repeated_action_verb";
+      violations: Array<{
+        actionSelectionIndex: number;
+        intentIndex: number;
+        intentKind: "observe" | "contact" | "attempt";
+        repeatedVerb: "examine" | "talk" | "try";
+      }>;
     };
 
 export interface CampaignPlayNarratorRecoveryFeedback {
@@ -509,6 +518,31 @@ function assertProposalForPacket(
         }]
       : [];
   });
+  const repeatedActionVerbViolations = proposal.actionSelections.flatMap(
+    (selection, actionSelectionIndex) => {
+      const intent = packet.availableIntents[selection.intentIndex];
+      if (selection.detail === null || intent === undefined) return [];
+      if (
+        intent.kind !== "observe" &&
+        intent.kind !== "contact" &&
+        intent.kind !== "attempt"
+      ) return [];
+      const repeatedVerb = intent.kind === "observe"
+        ? "examine" as const
+        : intent.kind === "contact"
+          ? "talk" as const
+          : "try" as const;
+      if (
+        !new RegExp(`^${repeatedVerb}(?:\\s|$)`, "iu").test(selection.detail)
+      ) return [];
+      return [{
+        actionSelectionIndex,
+        intentIndex: selection.intentIndex,
+        intentKind: intent.kind,
+        repeatedVerb,
+      }];
+    },
+  );
   const failedChecks: CampaignPlayNarratorPacketValidationFailure[] = [];
   if (proposal.actionSelections.length !== expectedActionCount) {
     failedChecks.push({
@@ -585,6 +619,12 @@ function assertProposalForPacket(
     failedChecks.push({
       check: "action_selection_detail_nullability",
       violations: detailNullabilityViolations,
+    });
+  }
+  if (repeatedActionVerbViolations.length > 0) {
+    failedChecks.push({
+      check: "action_selection_repeated_action_verb",
+      violations: repeatedActionVerbViolations,
     });
   }
   if (failedChecks.length > 0) {

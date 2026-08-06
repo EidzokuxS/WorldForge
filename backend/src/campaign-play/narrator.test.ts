@@ -527,6 +527,42 @@ describe("Campaign Play narrator", () => {
     );
   });
 
+  it("rejects details that repeat the code-owned action verb", () => {
+    const narrator = createCampaignPlayNarrator();
+    narratorWarn.mockClear();
+
+    expect(() => narrator.compile({
+      narrationId: "narration-repeated-observe-verb",
+      packet: packetFixture(),
+      proposal: {
+        ...proposalFixture(),
+        actionSelections: [{ intentIndex: 0, detail: "examine the shuttered window" }],
+      },
+      createdAt: 1_000,
+    })).toThrowError(expect.objectContaining({
+      code: "narration_invalid",
+      modelEvidence: null,
+    }));
+
+    expect(narratorWarn).toHaveBeenCalledWith(
+      "narrator_packet_validation_mismatch",
+      expect.objectContaining({
+        diagnostic: "narrator_packet_validation_mismatch",
+        campaignId: "campaign-harbor",
+        turnId: "turn-opening",
+        failedChecks: [{
+          check: "action_selection_repeated_action_verb",
+          violations: [{
+            actionSelectionIndex: 0,
+            intentIndex: 0,
+            intentKind: "observe",
+            repeatedVerb: "examine",
+          }],
+        }],
+      }),
+    );
+  });
+
   it("selects a noncontiguous subset from the frozen intent catalog", () => {
     const packet = {
       ...packetFixture(),
