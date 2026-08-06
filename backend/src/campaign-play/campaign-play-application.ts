@@ -759,7 +759,11 @@ export function createCampaignPlayApplication(
         packetHash: operation.packetHash,
         receiptIds: operation.receiptIds,
       }, "automatic");
-      await recoveryRuntime.runNarration(turnId, recoveryToken);
+      await recoveryRuntime.runNarration(
+        turnId,
+        recoveryToken,
+        operation.recoveryFeedback,
+      );
     } finally {
       handle.close();
     }

@@ -118,6 +118,7 @@ import {
   createCampaignPlayNarrator,
   type CampaignPlayNarrator,
   type CampaignPlayNarratorModelEvidence,
+  type CampaignPlayNarratorRecoveryFeedback,
 } from "./narrator.js";
 import {
   createCampaignPlayVisibilityService,
@@ -380,7 +381,8 @@ export interface CampaignPlayTurnRuntime {
   runNarration(
     turnId: string,
     claimedToken?: CampaignPlayNarrationAttemptToken,
-  ): Promise<CampaignPlayNarrationOperation | null>;
+    recoveryFeedback?: CampaignPlayNarratorRecoveryFeedback,
+  ): Promise<CampaignPlayNarrationExecution | null>;
   prepareNarrationRecovery(
     request: CampaignPlayNarrationRecoveryRequest,
     kind?: CampaignPlayNarrationRecoveryKind,
@@ -388,6 +390,10 @@ export interface CampaignPlayTurnRuntime {
   loadTurn(turnId: string): LoadedCampaignPlayTurn | null;
   loadTelemetry(turnId: string): CampaignPlayTurnTelemetry;
 }
+
+export type CampaignPlayNarrationExecution = CampaignPlayNarrationOperation & {
+  recoveryFeedback?: CampaignPlayNarratorRecoveryFeedback;
+};
 
 interface CompletedPublicMomentRow {
   sourceTurnId: string;
@@ -2263,7 +2269,8 @@ export function createCampaignPlayTurnRuntime(
 
   const executeNarration = async (
     initialToken: CampaignPlayNarrationAttemptToken,
-  ): Promise<CampaignPlayNarrationOperation> => {
+    recoveryFeedback?: CampaignPlayNarratorRecoveryFeedback,
+  ): Promise<CampaignPlayNarrationExecution> => {
     let token = initialToken;
     let providerReturned = false;
     let heartbeatStopped = false;
@@ -2343,6 +2350,7 @@ export function createCampaignPlayTurnRuntime(
         model: input.narratorModel.languageModel,
         temperature: input.narratorModel.temperature,
         budget: modelBudget(input.narratorModel),
+        ...(recoveryFeedback === undefined ? {} : { recoveryFeedback }),
         signal: controller.signal,
       });
       void request.catch(() => undefined);
@@ -2379,11 +2387,19 @@ export function createCampaignPlayTurnRuntime(
             : cause,
           Math.max(0, now() - startedAt),
         );
-      return narrationOperations.failAttempt({
+      const failedOperation = narrationOperations.failAttempt({
         token,
         evidence: interruption.evidence,
         failedAt: now(),
       });
+      const safeRecoveryFeedback = !deadlineExpired &&
+          cause instanceof CampaignPlayNarratorError &&
+          cause.code === "narration_invalid"
+        ? cause.recoveryFeedback
+        : null;
+      return safeRecoveryFeedback === null
+        ? failedOperation
+        : { ...failedOperation, recoveryFeedback: safeRecoveryFeedback };
     } finally {
       heartbeatStopped = true;
       controller.abort();
@@ -3348,9 +3364,11 @@ export function createCampaignPlayTurnRuntime(
         telemetry: null,
       };
     },
-    async runNarration(turnId, claimedToken) {
+    async runNarration(turnId, claimedToken, recoveryFeedback) {
       const token = claimedToken ?? claimNarration(turnId);
-      return token ? executeNarration(token) : narrationOperations.loadByTurn(turnId);
+      return token
+        ? executeNarration(token, recoveryFeedback)
+        : narrationOperations.loadByTurn(turnId);
     },
     prepareNarrationRecovery(request, kind = "manual") {
       const operation = narrationOperations.prepareRecovery(request, now(), kind);

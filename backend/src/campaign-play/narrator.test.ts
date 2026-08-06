@@ -327,15 +327,21 @@ describe("Campaign Play narrator", () => {
     };
     narratorWarn.mockClear();
 
-    expect(() => createCampaignPlayNarrator().compile({
-      narrationId: "narration-diagnostic",
-      packet,
-      proposal,
-      createdAt: 1_000,
-    })).toThrowError(expect.objectContaining({
+    let compileError: unknown;
+    try {
+      createCampaignPlayNarrator().compile({
+        narrationId: "narration-diagnostic",
+        packet,
+        proposal,
+        createdAt: 1_000,
+      });
+    } catch (cause) {
+      compileError = cause;
+    }
+    expect(compileError).toMatchObject({
       code: "narration_invalid",
       modelEvidence: null,
-    }));
+    });
     expect(narratorWarn).toHaveBeenCalledOnce();
     const [warningName, warningPayload] = narratorWarn.mock.calls[0] as [
       string,
@@ -387,6 +393,12 @@ describe("Campaign Play narrator", () => {
           ],
         },
       ],
+    });
+    expect(compileError).toMatchObject({
+      recoveryFeedback: {
+        diagnostic: "narrator_packet_validation_mismatch",
+        failedChecks: warningPayload.failedChecks,
+      },
     });
     expect("narrationId" in warningPayload).toBe(false);
     const recorded = JSON.stringify(narratorWarn.mock.calls);
@@ -1497,6 +1509,48 @@ describe("Campaign Play narrator", () => {
     expect(prompt).not.toContain('"monogram"');
     expect(prompt).not.toContain("amber-7");
     expect(prompt).not.toContain("records every signal before acting");
+  });
+
+  it("appends only safe packet-check coordinates to a recovery prompt", async () => {
+    const generateObject = vi.fn(async (
+      _options: Parameters<typeof safeGenerateObject>[0],
+    ) => ({
+      object: proposalFixture(),
+      trace: trace(),
+    }));
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    const request = {
+      narrationId: "narration-recovery-prompt",
+      packetBytes: canonicalizeCampaignPlayProjection(packetFixture()),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+    };
+    await narrator.narrate(request);
+    const basePrompt = String(generateObject.mock.calls[0]![0].prompt);
+    expect(basePrompt).not.toContain("NARRATOR_RECOVERY");
+
+    const recoveryFeedback = {
+      diagnostic: "narrator_packet_validation_mismatch" as const,
+      failedChecks: [
+        { check: "covered_observation_count" as const, actual: 1, expected: 2 },
+        { check: "missing_expected_observation_indexes" as const, indexes: [1] },
+      ],
+    };
+    await narrator.narrate({ ...request, recoveryFeedback });
+    const recoveryPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    expect(recoveryPrompt).toBe(`${basePrompt}
+
+NARRATOR_RECOVERY
+The prior proposal failed the safe checks below. Regenerate a fresh proposal from NARRATOR_PACKET. Correct every listed check. Do not reuse the rejected observation-index or action-selection arrangement. Every schema, grounding, identity, visibility, and action rule above remains unchanged.
+RECOVERY_DIAGNOSTIC
+${canonicalizeCampaignPlayProjection(recoveryFeedback)}
+END_RECOVERY_DIAGNOSTIC`);
+    expect(recoveryPrompt).not.toContain("rejected prose");
+    expect(recoveryPrompt).not.toContain("provider response");
   });
 
   it("bounds an opening model proposal to the two beats its scene contract can use", async () => {

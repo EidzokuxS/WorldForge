@@ -102,6 +102,7 @@ export interface CampaignPlayNarratorRequest {
   model: LanguageModel;
   temperature: number;
   budget: CampaignPlayNarratorBudget;
+  recoveryFeedback?: CampaignPlayNarratorRecoveryFeedback;
   signal?: AbortSignal;
 }
 
@@ -123,14 +124,67 @@ export type CampaignPlayNarratorErrorCode =
   | "model_contract_failed"
   | "narration_invalid";
 
+export type CampaignPlayNarratorPacketValidationFailure =
+  | { check: "selected_action_count"; actual: number; expected: number }
+  | { check: "duplicate_selected_intent_indexes"; indexes: number[] }
+  | {
+      check: "selected_intent_indexes_out_of_range";
+      indexes: number[];
+      availableIntentCount: number;
+    }
+  | {
+      check: "required_reply_intent_mismatch";
+      requiredIntentIndex: number;
+      firstSelectedIntentIndex: number | null;
+    }
+  | { check: "covered_observation_count"; actual: number; expected: number }
+  | { check: "duplicate_covered_observation_indexes"; indexes: number[] }
+  | {
+      check: "covered_observation_indexes_out_of_range";
+      indexes: number[];
+      observationCount: number;
+    }
+  | { check: "missing_expected_observation_indexes"; indexes: number[] }
+  | {
+      check: "opening_first_beat_purpose";
+      actualPurpose: string | null;
+      expectedPurpose: "orientation";
+    }
+  | {
+      check: "missing_consequence_beat";
+      beatPurposes: string[];
+      requiredPurpose: "consequence";
+    }
+  | {
+      check: "action_selection_detail_nullability";
+      violations: Array<{
+        actionSelectionIndex: number;
+        intentIndex: number;
+        intentKind: string | null;
+        detailIsNull: boolean;
+      }>;
+    };
+
+export interface CampaignPlayNarratorRecoveryFeedback {
+  diagnostic: "narrator_packet_validation_mismatch";
+  failedChecks: CampaignPlayNarratorPacketValidationFailure[];
+}
+
+interface CampaignPlayNarratorErrorOptions extends ErrorOptions {
+  recoveryFeedback?: CampaignPlayNarratorRecoveryFeedback;
+}
+
 export class CampaignPlayNarratorError extends Error {
+  readonly recoveryFeedback: CampaignPlayNarratorRecoveryFeedback | null;
+
   constructor(
     readonly code: CampaignPlayNarratorErrorCode,
     readonly modelEvidence: CampaignPlayNarratorModelEvidence | null,
-    options?: ErrorOptions,
+    options?: CampaignPlayNarratorErrorOptions,
   ) {
     super(code, options);
     this.name = "CampaignPlayNarratorError";
+    this.recoveryFeedback = options?.recoveryFeedback ?? null;
   }
 }
 
@@ -299,7 +353,10 @@ function narratorProposalSchemaForPacket(packet: CampaignPlayNarratorPacket) {
   });
 }
 
-function buildPrompt(packet: CampaignPlayNarratorPacket): string {
+function buildPrompt(
+  packet: CampaignPlayNarratorPacket,
+  recoveryFeedback?: CampaignPlayNarratorRecoveryFeedback,
+): string {
   const requiredIntentIndex = requiredReplyIntentIndex(packet);
   const observationSubjects = new Map(
     (packet.observationSubjects ?? []).map((binding) => [binding.observationHandle, binding.actors]),
@@ -400,7 +457,13 @@ On non-opening turns, use consequence for any visible result or newly observed d
 
 Treat visibleActors as authoritative current placement: these people remain in the current place and available to encounter. They do not have to stay beside the player or inside the immediate moment. Local gestures and stepping aside do not change placement. Never describe a visible actor as departed, arrived elsewhere, or unavailable, even when sourceMoment, consequences, or an observation summary says or implies otherwise. A completed accepted actor movement removes that actor from visibleActors. Apply this silently: never explain the continuity rule in the prose.
 
-Keep distant events, hidden actors, private goals, protected state, Judge reasoning, random seeds, internal identifiers, handles, metadata, rules, and system language out of the prose. Do not summarize the world, list the cast, explain lore for its own sake, decide the player's thoughts or actions, resolve a future choice, or imply movement or state changes absent from the packet.`;
+Keep distant events, hidden actors, private goals, protected state, Judge reasoning, random seeds, internal identifiers, handles, metadata, rules, and system language out of the prose. Do not summarize the world, list the cast, explain lore for its own sake, decide the player's thoughts or actions, resolve a future choice, or imply movement or state changes absent from the packet.${recoveryFeedback === undefined ? "" : `
+
+NARRATOR_RECOVERY
+The prior proposal failed the safe checks below. Regenerate a fresh proposal from NARRATOR_PACKET. Correct every listed check. Do not reuse the rejected observation-index or action-selection arrangement. Every schema, grounding, identity, visibility, and action rule above remains unchanged.
+RECOVERY_DIAGNOSTIC
+${canonicalizeCampaignPlayProjection(recoveryFeedback)}
+END_RECOVERY_DIAGNOSTIC`}`;
 }
 
 function assertProposalForPacket(
@@ -446,7 +509,7 @@ function assertProposalForPacket(
         }]
       : [];
   });
-  const failedChecks: Array<Record<string, unknown>> = [];
+  const failedChecks: CampaignPlayNarratorPacketValidationFailure[] = [];
   if (proposal.actionSelections.length !== expectedActionCount) {
     failedChecks.push({
       check: "selected_action_count",
@@ -531,7 +594,12 @@ function assertProposalForPacket(
       turnId: packet.turnId,
       failedChecks,
     });
-    throw new CampaignPlayNarratorError("narration_invalid", null);
+    throw new CampaignPlayNarratorError("narration_invalid", null, {
+      recoveryFeedback: {
+        diagnostic: "narrator_packet_validation_mismatch",
+        failedChecks,
+      },
+    });
   }
   if (packet.actionContext?.disposition === "clarification_required") {
     const beat = proposal.beats[0];
@@ -785,7 +853,7 @@ export function createCampaignPlayNarrator(
         generated = await dependencies.generateObject({
           model: request.model,
           schema: narratorProposalSchemaForPacket(packet),
-          prompt: buildPrompt(packet),
+          prompt: buildPrompt(packet, request.recoveryFeedback),
           temperature: request.temperature,
           maxOutputTokens: request.budget.maximumOutputTokens,
           abortSignal: request.signal,
@@ -849,7 +917,10 @@ export function createCampaignPlayNarrator(
           throw new CampaignPlayNarratorError(cause.code, {
             ...modelEvidence,
             errorCode: "narration_invalid",
-          }, { cause });
+          }, {
+            cause,
+            recoveryFeedback: cause.recoveryFeedback ?? undefined,
+          });
         }
         throw cause;
       }

@@ -2756,6 +2756,13 @@ describe("Campaign Play player-action turn runtime", () => {
 
   it("automatically retries one receipt-keyed narration_invalid failure without replaying mechanics", async () => {
     const successful = playerNarratorFixture();
+    const recoveryFeedback = {
+      diagnostic: "narrator_packet_validation_mismatch" as const,
+      failedChecks: [
+        { check: "covered_observation_count" as const, actual: 1, expected: 2 },
+        { check: "missing_expected_observation_indexes" as const, indexes: [1] },
+      ],
+    };
     let calls = 0;
     const requests: Parameters<typeof successful.narrate>[0][] = [];
     const narrator: TestNarrator = {
@@ -2763,7 +2770,11 @@ describe("Campaign Play player-action turn runtime", () => {
       narrate: vi.fn(async (request) => {
         calls += 1;
         requests.push(request);
-        if (calls === 1) throw new CampaignPlayNarratorError("narration_invalid", null);
+        if (calls === 1) {
+          throw new CampaignPlayNarratorError("narration_invalid", null, {
+            recoveryFeedback,
+          });
+        }
         return successful.narrate(request);
       }),
     };
@@ -2856,6 +2867,8 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(requests[0]!.narrationId).toBe(requests[1]!.narrationId);
     expect(requests[0]!.packetBytes).toBe(requests[1]!.packetBytes);
     expect(requests[0]!.packetBytes).toBe(packet.packetJson);
+    expect(requests[0]!.recoveryFeedback).toBeUndefined();
+    expect(requests[1]!.recoveryFeedback).toEqual(recoveryFeedback);
     const state = createCampaignPlayReadModel(result.handle).loadState();
     expect(state.narrationOperation).toMatchObject({
       operationId: result.pending.operationId,
@@ -3140,9 +3153,11 @@ describe("Campaign Play player-action turn runtime", () => {
 
   it("stops after one automatic retry when both narration attempts are invalid", async () => {
     const fixtureNarrator = playerNarratorFixture();
+    const requests: Parameters<typeof fixtureNarrator.narrate>[0][] = [];
     const narrator: TestNarrator = {
       compile: fixtureNarrator.compile,
-      narrate: vi.fn(async () => {
+      narrate: vi.fn(async (request) => {
+        requests.push(request);
         throw new CampaignPlayNarratorError("narration_invalid", null);
       }),
     };
@@ -3164,6 +3179,10 @@ describe("Campaign Play player-action turn runtime", () => {
       operation.operationId,
     ) as Array<{ attemptId: string; attempt: number; status: string; errorCode: string | null }>;
     expect(narrator.narrate).toHaveBeenCalledTimes(2);
+    expect(requests.map((request) => request.recoveryFeedback)).toEqual([
+      undefined,
+      undefined,
+    ]);
     expect(attempts).toHaveLength(2);
     expect(new Set(attempts.map((attempt) => attempt.attemptId)).size).toBe(2);
     expect(attempts.map((attempt) => attempt.attempt)).toEqual([1, 2]);
