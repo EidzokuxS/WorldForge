@@ -351,6 +351,7 @@ export interface CreateCampaignPlayTurnRuntimeInput {
   leaseDurationMs: number;
   heartbeatIntervalMs: number;
   externalOperationDeadlineMs?: number;
+  gameMasterOperationDeadlineMs?: number;
   actorReplannerOperationDeadlineMs?: number;
   actorCriticalPathReplanLimit?: number;
   uncertaintySeedKey: string;
@@ -2312,12 +2313,23 @@ export function createCampaignPlayTurnRuntime(
   const frozenSelection = selection(input);
   const certifiedGameMasterModel = input.certifiedGameMasterModel ?? input.gameMasterModel;
   const externalOperationDeadlineMs = input.externalOperationDeadlineMs ?? 90_000;
+  const gameMasterOperationDeadlineMs = input.gameMasterOperationDeadlineMs
+    ?? externalOperationDeadlineMs;
   const actorReplannerOperationDeadlineMs = input.actorReplannerOperationDeadlineMs ?? 90_000;
   const actorCriticalPathReplanLimit = input.actorCriticalPathReplanLimit ?? 1;
   if (!Number.isSafeInteger(externalOperationDeadlineMs) || externalOperationDeadlineMs <= 0) {
     throw new CampaignPlayTurnRuntimeError(
       "turn_state_invalid",
       "Campaign Play player-action provider deadline is invalid.",
+    );
+  }
+  if (
+    !Number.isSafeInteger(gameMasterOperationDeadlineMs) ||
+    gameMasterOperationDeadlineMs <= 0
+  ) {
+    throw new CampaignPlayTurnRuntimeError(
+      "turn_state_invalid",
+      "Campaign Play Game Master provider deadline is invalid.",
     );
   }
   if (
@@ -2599,8 +2611,12 @@ export function createCampaignPlayTurnRuntime(
     resolveStage({ turn, stage, artifacts }) {
       if (turn.turnKind !== "player_action") return null;
       if (stage === "admitted") {
+        const admitted = loadCampaignPlayPlayerActionAdmissionFrame(turn);
         return {
           kind: "external",
+          externalOperationDeadlineMs: isCertifiedRoute(admitted.executionRoute)
+            ? gameMasterOperationDeadlineMs
+            : externalOperationDeadlineMs,
           async execute(context) {
             const startedAt = now();
             let routeKind: "full_authority" | "certified_move" | "certified_wait" |
@@ -2798,6 +2814,7 @@ export function createCampaignPlayTurnRuntime(
       if (stage === "judged") {
         return {
           kind: "external",
+          externalOperationDeadlineMs: gameMasterOperationDeadlineMs,
           async execute(context) {
             const startedAt = now();
             try {

@@ -633,11 +633,12 @@ describe("Campaign Play turn service", () => {
       owner: "deadline-worker",
       leaseDurationMs: 200,
       heartbeatIntervalMs: 50,
-      externalOperationDeadlineMs: 40,
+      externalOperationDeadlineMs: 80,
       clock,
       resolveStage: ({ stage }) => stage === "admitted"
         ? {
             kind: "external",
+            externalOperationDeadlineMs: 40,
             async execute({ signal }) {
               providerState.signal = signal;
               return lateCompletion.promise;

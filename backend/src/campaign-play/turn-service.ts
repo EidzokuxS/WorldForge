@@ -62,6 +62,7 @@ export interface CampaignPlayDeterministicStageContext {
 
 export interface CampaignPlayExternalStageHandler {
   kind: "external";
+  externalOperationDeadlineMs?: number;
   execute(
     context: CampaignPlayExternalStageContext,
   ): Promise<CampaignPlayExternalStageCompletion>;
@@ -401,6 +402,17 @@ export function createCampaignPlayTurnService(
         outcome: "stale",
       });
     };
+    const externalOperationDeadlineMs = handler.externalOperationDeadlineMs
+      ?? input.externalOperationDeadlineMs;
+    if (
+      externalOperationDeadlineMs !== undefined &&
+      !isSafePositiveInteger(externalOperationDeadlineMs)
+    ) {
+      throw new CampaignPlayTurnServiceError(
+        "turn_service_invalid",
+        "Campaign Play external stage handler requires a positive deadline when configured.",
+      );
+    }
     const controller = new AbortController();
     let heartbeatStopped = false;
     const heartbeat = (async () => {
@@ -442,9 +454,9 @@ export function createCampaignPlayTurnService(
     const heartbeatFailure = new Promise<never>((_resolve, reject) => {
       void heartbeat.catch(reject);
     });
-    const deadline = input.externalOperationDeadlineMs === undefined
+    const deadline = externalOperationDeadlineMs === undefined
       ? null
-      : clock.wait(input.externalOperationDeadlineMs, controller.signal)
+      : clock.wait(externalOperationDeadlineMs, controller.signal)
         .then(() => ({ kind: "deadline" as const }))
         .catch((error) => {
           if (controller.signal.aborted) return { kind: "cancelled" as const };

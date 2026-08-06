@@ -1389,11 +1389,26 @@ describe("Campaign Play player-action turn runtime", () => {
     const { handle, state } = await createReadyCampaignWithOpening(10_000, {
       contactDetail: "ask about the immediate situation",
     });
-    const time = fixedClock(1_945);
+    const baseTime = fixedClock(1_945);
+    const waitDelays: number[] = [];
+    const time = {
+      ...baseTime,
+      clock: {
+        ...baseTime.clock,
+        wait(delayMs: number, signal: AbortSignal) {
+          waitDelays.push(delayMs);
+          return baseTime.clock.wait(delayMs, signal);
+        },
+      },
+    };
     const judge = judgeFixture("deterministic");
     const gameMaster = gameMasterFixture(1, true);
     const narrator = playerNarratorFixture();
-    const runtime = turnRuntime(handle, time, judge, gameMaster, { narrator });
+    const runtime = turnRuntime(handle, time, judge, gameMaster, {
+      narrator,
+      externalOperationDeadlineMs: 30_000,
+      gameMasterOperationDeadlineMs: 45_000,
+    });
     const contact = renderedContactSuggestion(handle);
     const admission = runtime.admitAction({
       request: {
@@ -1434,6 +1449,8 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "planned" });
     expect(judge.judge).toHaveBeenCalledTimes(0);
     expect(gameMaster.plan).toHaveBeenCalledTimes(1);
+    expect(waitDelays).toContain(45_000);
+    expect(waitDelays).not.toContain(30_000);
     expect(runtime.loadTelemetry(admission.turnId)).toMatchObject({
       routeKind: "certified_contact",
       modelCallCounts: { judge: 0, gameMaster: 1 },
@@ -1448,11 +1465,19 @@ describe("Campaign Play player-action turn runtime", () => {
       request: admissionRequest(nextState, "same-contact-as-freeform", contact.label),
       submittedAt: time.clock.now(),
     });
+    waitDelays.length = 0;
     expect(loadCampaignPlayPlayerActionAdmissionFrame(runtime.loadTurn(freeform.turnId)!)
       .executionRoute).toEqual({ kind: "full_authority" });
     time.advance();
     await runtime.runNextStage(freeform.turnId);
     expect(judge.judge).toHaveBeenCalledTimes(1);
+    expect(waitDelays).toContain(30_000);
+    expect(waitDelays).not.toContain(45_000);
+    waitDelays.length = 0;
+    time.advance();
+    await runtime.runNextStage(freeform.turnId);
+    expect(gameMaster.plan).toHaveBeenCalledTimes(2);
+    expect(waitDelays).toContain(45_000);
   });
 
   it("resumes a certified contact under a fresh epoch without Judge or duplicate settlement", async () => {
@@ -4596,6 +4621,7 @@ describe("Campaign Play player-action turn runtime", () => {
       {
         actorReplanner,
         externalOperationDeadlineMs: 30_000,
+        gameMasterOperationDeadlineMs: 45_000,
         actorReplannerOperationDeadlineMs: 90_000,
       },
     );
