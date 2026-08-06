@@ -544,7 +544,7 @@ export function createCampaignPlayApplication(
       gameMasterModel: stageModel(
         generator,
         gameMasterRequested,
-        dependencies.createModel(generator.provider, { role: "generator" }),
+        dependencies.createModel(generator.provider, { role: "generator", reasoningMode: "bypass" }),
       ),
       certifiedGameMasterModel: stageModel(
         generator,
