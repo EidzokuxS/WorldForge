@@ -747,28 +747,30 @@ export function createCampaignPlayApplication(
         failedOperation.currentAttemptId !== operation.attemptId ||
         failedOperation.errorCode !== "narration_invalid"
       ) return;
-      // Rebuild only the recovery runtime so its Narrator uses the same selected
-      // provider/model with normal reasoning; the first runtime and manual Restore
-      // retain their existing bypass construction.
-      const originalCreateModel = dependencies.createModel;
-      let recoveryStorytellerModelCreated = false;
-      dependencies.createModel = ((provider, options = {}) => {
-        if (
-          !recoveryStorytellerModelCreated &&
-          options.role === "storyteller" &&
-          options.reasoningMode === "bypass"
-        ) {
-          recoveryStorytellerModelCreated = true;
-          const { reasoningMode: _reasoningMode, ...defaultReasoningOptions } = options;
-          return originalCreateModel(provider, defaultReasoningOptions);
+      // Safe compiler coordinates let the existing bypass Narrator correct the
+      // rejected arrangement directly. Without them, retain the broader
+      // default-reasoning recovery introduced for opaque narration failures.
+      let recoveryRuntime = runtime;
+      if (operation.recoveryFeedback === undefined) {
+        const originalCreateModel = dependencies.createModel;
+        let recoveryStorytellerModelCreated = false;
+        dependencies.createModel = ((provider, options = {}) => {
+          if (
+            !recoveryStorytellerModelCreated &&
+            options.role === "storyteller" &&
+            options.reasoningMode === "bypass"
+          ) {
+            recoveryStorytellerModelCreated = true;
+            const { reasoningMode: _reasoningMode, ...defaultReasoningOptions } = options;
+            return originalCreateModel(provider, defaultReasoningOptions);
+          }
+          return originalCreateModel(provider, options);
+        }) as typeof originalCreateModel;
+        try {
+          recoveryRuntime = runtimeFactory.createTurn(handle, turn.modelSelection);
+        } finally {
+          dependencies.createModel = originalCreateModel;
         }
-        return originalCreateModel(provider, options);
-      }) as typeof originalCreateModel;
-      let recoveryRuntime: CampaignPlayTurnRuntime;
-      try {
-        recoveryRuntime = runtimeFactory.createTurn(handle, turn.modelSelection);
-      } finally {
-        dependencies.createModel = originalCreateModel;
       }
       const recoveryToken = recoveryRuntime.prepareNarrationRecovery({
         operationId: operation.operationId,

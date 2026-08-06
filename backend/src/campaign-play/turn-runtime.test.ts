@@ -1267,7 +1267,7 @@ describe("Campaign Play player-action turn runtime", () => {
     const narrator = playerNarratorFixture();
     const runtime = turnRuntime(handle, time, judge, gameMaster, { narrator });
     const wait = renderedWaitSuggestion(handle);
-    expect(createCampaignPlayReadModel(handle).loadState().utilityActions).toEqual([wait]);
+    expect(createCampaignPlayReadModel(handle).loadState().utilityActions).toEqual([]);
     const admission = runtime.admitAction({
       request: {
         idempotencyKey: "certified-rendered-wait",
@@ -2973,7 +2973,18 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(result.handle.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 
-  it("constructs automatic recovery with default storyteller reasoning after bypass fails", async () => {
+  it.each([
+    {
+      label: "keeps bypass when safe compiler feedback identifies the failed checks",
+      safeCompilerFeedback: true,
+      expectedRecoveryOptions: { role: "storyteller", reasoningMode: "bypass" },
+    },
+    {
+      label: "uses default reasoning when the semantic failure has no safe feedback",
+      safeCompilerFeedback: false,
+      expectedRecoveryOptions: { role: "storyteller" },
+    },
+  ])("$label", async ({ safeCompilerFeedback, expectedRecoveryOptions }) => {
     const prepared = await createCompletedPlayerActionForApplication();
     closeTracked(prepared.handle);
 
@@ -3064,9 +3075,13 @@ describe("Campaign Play player-action turn runtime", () => {
               type: "text",
               text: JSON.stringify({
                 beats: [{
-                  purpose: "moment",
-                  observationIndexes: packet.newObservations.map((_observation, index) => index),
-                  text: packet.currentLocation.handle,
+                  purpose: "consequence",
+                  observationIndexes: safeCompilerFeedback
+                    ? []
+                    : packet.newObservations.map((_observation, index) => index),
+                  text: safeCompilerFeedback
+                    ? `You see the first accepted result at ${packet.currentLocation.name}.`
+                    : packet.currentLocation.handle,
                 }],
                 actionSelections,
               }),
@@ -3153,11 +3168,11 @@ describe("Campaign Play player-action turn runtime", () => {
         model: "test-narrator",
         options: { role: "storyteller", reasoningMode: "bypass" },
       },
-      {
+      ...(safeCompilerFeedback ? [] : [{
         providerId: provider.id,
         model: "test-narrator",
-        options: { role: "storyteller" },
-      },
+        options: expectedRecoveryOptions,
+      }]),
     ]);
     expect(generatedCalls).toBe(2);
     const handle = track(openCampaignPlayDatabase(CAMPAIGN_ID));
