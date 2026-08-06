@@ -120,6 +120,9 @@ export class CampaignPlayApplicationError extends Error {
 
 export function campaignPlayMayAutomaticallyResumeExternalStage(input: {
   turnKind: LoadedCampaignPlayTurn["turnKind"];
+  interruptedStage: LoadedCampaignPlayTurn["interruptedStage"];
+  routeKind: "full_authority" | "certified_move" | "certified_wait" | "certified_contact"
+    | "certified_observe" | undefined;
   errorCode: string;
   attempt: number;
   wasResume: boolean;
@@ -127,7 +130,11 @@ export function campaignPlayMayAutomaticallyResumeExternalStage(input: {
 }): boolean {
   if (input.wasResume || input.alreadyAttempted || input.attempt !== 1) return false;
   if (input.errorCode === "provider_unavailable") return true;
-  return input.turnKind === "player_action" && input.errorCode === "stage_timeout";
+  if (input.turnKind !== "player_action") return false;
+  if (input.errorCode === "stage_timeout") return true;
+  return input.errorCode === "model_contract_invalid"
+    && input.interruptedStage === "admitted"
+    && input.routeKind === "full_authority";
 }
 
 interface CampaignPlayRuntimeFactory {
@@ -554,11 +561,14 @@ export function createCampaignPlayApplication(
         handle.campaignId,
         state.authority.acceptedContentHash,
       ),
-      judgeModel: stageModel(
-        judge,
-        judgeRequested,
-        dependencies.createModel(judge.provider, { role: "judge", reasoningMode: "bypass" }),
-      ),
+      judgeModel: {
+        ...stageModel(
+          judge,
+          judgeRequested,
+          dependencies.createModel(judge.provider, { role: "judge", reasoningMode: "bypass" }),
+        ),
+        reasoningModel: dependencies.createModel(judge.provider, { role: "judge" }),
+      },
       gameMasterModel: stageModel(
         generator,
         gameMasterRequested,
@@ -682,6 +692,10 @@ export function createCampaignPlayApplication(
         if (result.recovery.kind === "explicit_resume_required" &&
           campaignPlayMayAutomaticallyResumeExternalStage({
             turnKind: before.turnKind,
+            interruptedStage: result.recovery.interruptedStage,
+            routeKind: before.modelSelection.turnKind === "player_action"
+              ? before.modelSelection.routeKind
+              : undefined,
             errorCode: result.recovery.errorCode,
             attempt: result.recovery.attempt,
             wasResume,

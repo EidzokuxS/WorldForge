@@ -2747,7 +2747,9 @@ export function createCampaignPlayTurnRuntime(
                     ? { kind: frozenChoice.kind, targets: frozenChoice.targets }
                     : null,
                 },
-                model: input.judgeModel.languageModel,
+                model: context.attempt > 1 && input.judgeModel.reasoningModel !== undefined
+                  ? input.judgeModel.reasoningModel
+                  : input.judgeModel.languageModel,
                 temperature: input.judgeModel.temperature,
                 budget: modelBudget(input.judgeModel),
                 signal: context.signal,

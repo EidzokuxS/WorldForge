@@ -362,6 +362,8 @@ describe("CampaignPlayApplication", () => {
   it("allows one player-action timeout recovery without widening Opening recovery", () => {
     expect(campaignPlayMayAutomaticallyResumeExternalStage({
       turnKind: "player_action",
+      interruptedStage: "admitted",
+      routeKind: "full_authority",
       errorCode: "stage_timeout",
       attempt: 1,
       wasResume: false,
@@ -369,6 +371,8 @@ describe("CampaignPlayApplication", () => {
     })).toBe(true);
     expect(campaignPlayMayAutomaticallyResumeExternalStage({
       turnKind: "opening",
+      interruptedStage: "admitted",
+      routeKind: undefined,
       errorCode: "stage_timeout",
       attempt: 1,
       wasResume: false,
@@ -376,10 +380,39 @@ describe("CampaignPlayApplication", () => {
     })).toBe(false);
     expect(campaignPlayMayAutomaticallyResumeExternalStage({
       turnKind: "player_action",
+      interruptedStage: "admitted",
+      routeKind: "full_authority",
       errorCode: "stage_timeout",
       attempt: 2,
       wasResume: true,
       alreadyAttempted: true,
+    })).toBe(false);
+    expect(campaignPlayMayAutomaticallyResumeExternalStage({
+      turnKind: "player_action",
+      interruptedStage: "admitted",
+      routeKind: "full_authority",
+      errorCode: "model_contract_invalid",
+      attempt: 1,
+      wasResume: false,
+      alreadyAttempted: false,
+    })).toBe(true);
+    expect(campaignPlayMayAutomaticallyResumeExternalStage({
+      turnKind: "player_action",
+      interruptedStage: "admitted",
+      routeKind: "certified_contact",
+      errorCode: "model_contract_invalid",
+      attempt: 1,
+      wasResume: false,
+      alreadyAttempted: false,
+    })).toBe(false);
+    expect(campaignPlayMayAutomaticallyResumeExternalStage({
+      turnKind: "player_action",
+      interruptedStage: "judged",
+      routeKind: "full_authority",
+      errorCode: "model_contract_invalid",
+      attempt: 1,
+      wasResume: false,
+      alreadyAttempted: false,
     })).toBe(false);
   });
 
@@ -499,6 +532,16 @@ describe("CampaignPlayApplication", () => {
           model: "judge-model",
         },
         { role: "judge", reasoningMode: "bypass" },
+      ],
+      [
+        {
+          id: "provider-test",
+          name: "Provider Test",
+          baseUrl: "http://localhost:1234",
+          apiKey: "",
+          model: "judge-model",
+        },
+        { role: "judge" },
       ],
       [
         {
