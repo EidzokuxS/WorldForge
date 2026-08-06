@@ -492,6 +492,24 @@ function publicJournalEntry(entry: CampaignPlayJournalEntry): CampaignPlayJourna
   };
 }
 
+function narratedChoiceHandles(
+  narration: CampaignPlayProjectionRecord | null,
+): Set<string> {
+  const suggestedActions = narration?.suggestedActions;
+  if (!Array.isArray(suggestedActions)) return new Set();
+
+  const handles = new Set<string>();
+  for (const action of suggestedActions) {
+    if (action === null || typeof action !== "object" || Array.isArray(action)) {
+      continue;
+    }
+    if (typeof action.choiceHandle === "string") {
+      handles.add(action.choiceHandle);
+    }
+  }
+  return handles;
+}
+
 function activeAcceptedActors(review: CampaignWorldReview) {
   return review.actors.filter((actor) =>
     actor.controller === "agent"
@@ -884,6 +902,7 @@ export function projectCampaignPlayProtectedAudit(
 export function projectCampaignPlayPublicState(
   input: CampaignPlayPublicProjectionInput,
 ): CampaignPlayProjection<object> {
+  const narratedHandles = narratedChoiceHandles(input.narration);
   return wrapProjection({
     domain: "campaign_play_player_public",
     campaignId: input.campaignId,
@@ -938,9 +957,11 @@ export function projectCampaignPlayPublicState(
       .map((row) => publicJournalEntry(row.entry)),
     narration: input.narration,
     narrationOperation: input.narrationOperation ?? null,
-    utilityActions: (input.utilityActions ?? []).map((action) => ({
-      choiceHandle: action.choiceHandle,
-      label: action.label,
-    })),
+    utilityActions: (input.utilityActions ?? [])
+      .filter((action) => !narratedHandles.has(action.choiceHandle))
+      .map((action) => ({
+        choiceHandle: action.choiceHandle,
+        label: action.label,
+      })),
   });
 }

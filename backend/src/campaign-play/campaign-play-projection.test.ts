@@ -938,6 +938,48 @@ describe("mechanical and runtime truth", () => {
     expect(projected.canonicalBytes).not.toContain("stored-observation");
   });
 
+  it("omits utility actions already present in narrated suggestions by exact handle", () => {
+    const projected = projectCampaignPlayPublicState({
+      campaignId: CAMPAIGN_ID,
+      acceptedWorldVersion: 7,
+      worldVersion: 8,
+      runtimeRevision: 3,
+      phase: "ready",
+      worldTimeMinutes: 1,
+      currentLocation: null,
+      visibleActors: [],
+      visibleRoutes: [],
+      visiblePressures: [],
+      possessions: [],
+      obligations: [],
+      consequences: [],
+      journal: [],
+      narration: {
+        suggestedActions: [{
+          choiceHandle: "wait-shared",
+          label: "Wait 10 minutes",
+        }],
+      },
+      utilityActions: [
+        { choiceHandle: "wait-shared", label: "Wait 10 minutes" },
+        { choiceHandle: "wait-distinct", label: "Wait 10 minutes" },
+      ],
+    });
+
+    const projection = projected.projection as {
+      narration: { suggestedActions: Array<{ choiceHandle: string }> };
+      utilityActions: Array<{ choiceHandle: string }>;
+    };
+    expect(projection.narration.suggestedActions).toEqual([{
+      choiceHandle: "wait-shared",
+      label: "Wait 10 minutes",
+    }]);
+    expect(projection.utilityActions).toEqual([{
+      choiceHandle: "wait-distinct",
+      label: "Wait 10 minutes",
+    }]);
+  });
+
   it("orders model stage attempts numerically within each stage regardless input order", () => {
     const modelStages: CampaignPlayProjectionRecord[] = [
       { id: "row-b-2", stageId: "stage-b", attempt: 2 },
