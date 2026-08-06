@@ -590,6 +590,9 @@ describe("Campaign Play Judge", () => {
     );
     expect(sentPrompt).toContain('uncertainty must be exactly {"kind":"none"}');
     expect(sentPrompt).toContain("resultBounds must not contain no_effect");
+    expect(sentPrompt).toContain(
+      "resultBounds.minimum and resultBounds.maximum must be different result tiers",
+    );
     expect(sentPrompt).toContain("clarificationQuestion must be non-null only");
     expect(sentPrompt).toContain("modifier range must contain zero");
     expect(sentPrompt).toContain("uncertainty.kind must be check");
@@ -1028,6 +1031,27 @@ describe("Campaign Play Judge", () => {
       originalText: "I force the gate.", source: "freeform", choiceHandle: null,
     }, proposal({ disposition, resultBounds, uncertainty, clarificationQuestion }));
     expect(ruling.disposition).toBe(disposition);
+  });
+
+  it("requires an uncertain ruling to preserve a meaningful result range", () => {
+    const judge = createCampaignPlayJudge();
+    const input = {
+      originalText: "I force the gate.",
+      source: "freeform" as const,
+      choiceHandle: null,
+    };
+
+    expect(() => judge.compile(frame(), input, proposal({
+      disposition: "uncertain",
+      resultBounds: { minimum: "limited", maximum: "limited" },
+      uncertainty: {
+        kind: "check",
+        dieSides: 20,
+        difficulty: 12,
+        modifierMinimum: -2,
+        modifierMaximum: 2,
+      },
+    }))).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
   });
 
   it("allows route clarification before a move has route authority", () => {

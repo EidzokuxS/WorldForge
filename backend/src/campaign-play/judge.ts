@@ -427,6 +427,7 @@ function prompt(frame: CampaignPlayJudgeFrame, input: CampaignPlayJudgeInput): s
     "For deterministic rulings, resultBounds.minimum and resultBounds.maximum must be the same literal result tier. Never return a range for deterministic. For impossible or clarification use no_effect for both bounds.",
     "For deterministic, impossible, or clarification_required rulings, uncertainty must be exactly {\"kind\":\"none\"}.",
     "For deterministic or uncertain rulings, resultBounds must not contain no_effect. Impossible and clarification_required use no_effect for both bounds.",
+    "For uncertain rulings, resultBounds.minimum and resultBounds.maximum must be different result tiers so the code-owned check can change the outcome. Never return a fixed result for an uncertain ruling.",
     "clarificationQuestion must be non-null only for clarification_required and null for every other disposition.",
     "Write clarificationQuestion as a concise in-world question the player character can understand. Refer only to perceivable details and in-world destination names. Never mention models, scenes, packets, handles, typed routes, schemas, code, or game mechanics.",
     "For uncertain rulings, uncertainty.kind must be check and must include dieSides=20, difficulty, modifierMinimum, and modifierMaximum. Every one of those four values must be an unquoted JSON integer. difficulty must be from 1 through 20; never return a difficulty word or quoted number. Example shape: {\"kind\":\"check\",\"dieSides\":20,\"difficulty\":12,\"modifierMinimum\":-2,\"modifierMaximum\":2}. The modifier range must contain zero. Code performs the roll; never claim a roll result.",
@@ -745,6 +746,10 @@ function compile(
   }
   if (proposal.disposition === "deterministic"
     && proposal.resultBounds.minimum !== proposal.resultBounds.maximum) {
+    throw new CampaignPlayJudgeError("model_contract_failed", null);
+  }
+  if (proposal.disposition === "uncertain"
+    && proposal.resultBounds.minimum === proposal.resultBounds.maximum) {
     throw new CampaignPlayJudgeError("model_contract_failed", null);
   }
   if ((proposal.disposition === "impossible" || proposal.disposition === "clarification_required")

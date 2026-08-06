@@ -539,7 +539,7 @@ export function createCampaignPlayApplication(
       judgeModel: stageModel(
         judge,
         judgeRequested,
-        dependencies.createModel(judge.provider, { role: "judge" }),
+        dependencies.createModel(judge.provider, { role: "judge", reasoningMode: "bypass" }),
       ),
       gameMasterModel: stageModel(
         generator,

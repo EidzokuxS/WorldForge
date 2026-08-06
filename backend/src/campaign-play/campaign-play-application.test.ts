@@ -473,7 +473,7 @@ describe("CampaignPlayApplication", () => {
           apiKey: "",
           model: "judge-model",
         },
-        { role: "judge" },
+        { role: "judge", reasoningMode: "bypass" },
       ],
       [
         {
