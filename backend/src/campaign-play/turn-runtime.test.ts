@@ -1026,6 +1026,28 @@ function renderedContactSuggestion(
   return suggestion;
 }
 
+function renderedObserveSuggestion(handle: CampaignPlayDatabaseHandle): {
+  choiceHandle: string;
+  label: string;
+} {
+  const row = handle.sqlite.prepare(`SELECT packet_json AS packetJson,
+      suggested_actions_json AS suggestedActionsJson
+    FROM campaign_play_narrations WHERE campaign_id = ? AND status = 'complete'
+    ORDER BY completed_at DESC LIMIT 1`).get(CAMPAIGN_ID) as {
+      packetJson: string;
+      suggestedActionsJson: string;
+    };
+  const packet = JSON.parse(row.packetJson) as CampaignPlayNarratorPacket;
+  const observe = packet.availableIntents.find((intent) => intent.kind === "observe");
+  if (!observe) throw new Error("Opening fixture has no rendered observe intent.");
+  const suggestion = (JSON.parse(row.suggestedActionsJson) as Array<{
+    choiceHandle: string;
+    label: string;
+  }>).find((candidate) => candidate.choiceHandle === observe.handle);
+  if (!suggestion) throw new Error("Opening fixture did not render its observe intent.");
+  return suggestion;
+}
+
 function actorReplanProposalFromPrompt(prompt: string) {
   const startMarker = "ACTOR_FRAME\n";
   const endMarker = "\nEND_ACTOR_FRAME";
@@ -1170,6 +1192,73 @@ async function advanceUntilStage(
 }
 
 describe("Campaign Play player-action turn runtime", () => {
+  it("routes the exact current rendered inspection directly to Game Master and keeps freeform on Judge", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening(10_000);
+    const time = fixedClock(1_925);
+    const judge = judgeFixture("deterministic");
+    const gameMaster = gameMasterFixture();
+    const narrator = playerNarratorFixture();
+    const runtime = turnRuntime(handle, time, judge, gameMaster, { narrator });
+    const observe = renderedObserveSuggestion(handle);
+    const admission = runtime.admitAction({
+      request: {
+        idempotencyKey: "certified-rendered-observe",
+        expectedWorldVersion: state.authority.worldVersion,
+        expectedRuntimeRevision: state.authority.runtimeRevision,
+        source: "suggested",
+        choiceHandle: observe.choiceHandle,
+      },
+      submittedAt: 1_925,
+    });
+    const frame = loadCampaignPlayPlayerActionAdmissionFrame(runtime.loadTurn(admission.turnId)!);
+    expect(frame.executionRoute).toMatchObject({
+      kind: "certified_observe",
+      certificate: {
+        actionSchemaVersion: 1,
+        resolver: "game_master",
+        choiceHandle: observe.choiceHandle,
+        label: observe.label,
+        detail: "the immediate situation",
+        ruling: {
+          normalizedIntent: {
+            kind: "observe",
+            method: "the immediate situation",
+          },
+          elapsedBounds: { minimumMinutes: 1, maximumMinutes: 1 },
+        },
+      },
+      certificateHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(runtime.loadTurn(admission.turnId)).toMatchObject({
+      modelSelection: { routeKind: "certified_observe" },
+    });
+
+    time.advance();
+    await runtime.runNextStage(admission.turnId);
+    expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "planned" });
+    expect(judge.judge).toHaveBeenCalledTimes(0);
+    expect(gameMaster.plan).toHaveBeenCalledTimes(1);
+    expect(runtime.loadTelemetry(admission.turnId)).toMatchObject({
+      routeKind: "certified_observe",
+      modelCallCounts: { judge: 0, gameMaster: 1 },
+    });
+    await advanceUntilStage(runtime, time, admission.turnId, "completed");
+    await runtime.runNarration(admission.turnId);
+    expect(countForTurn(handle, "campaign_play_turn_results", admission.turnId)).toBe(1);
+    expect(countForTurn(handle, "campaign_play_receipts", admission.turnId)).toBeGreaterThan(0);
+
+    const nextState = createCampaignPlayStateRepository(handle).loadState()!;
+    const freeform = runtime.admitAction({
+      request: admissionRequest(nextState, "same-observe-as-freeform", observe.label),
+      submittedAt: time.clock.now(),
+    });
+    expect(loadCampaignPlayPlayerActionAdmissionFrame(runtime.loadTurn(freeform.turnId)!)
+      .executionRoute).toEqual({ kind: "full_authority" });
+    time.advance();
+    await runtime.runNextStage(freeform.turnId);
+    expect(judge.judge).toHaveBeenCalledTimes(1);
+  });
+
   it("routes the exact current rendered wait directly to Game Master and keeps same-text freeform on Judge", async () => {
     const { handle, state } = await createReadyCampaignWithOpening(10_000, { includeWait: true });
     const time = fixedClock(1_930);

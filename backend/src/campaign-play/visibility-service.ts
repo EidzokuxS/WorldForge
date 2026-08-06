@@ -1248,7 +1248,9 @@ function actionContextForTurn(
         ? "campaign_play_certified_move"
         : executionRoute.kind === "certified_wait"
           ? "campaign_play_certified_wait"
-          : "campaign_play_certified_contact";
+          : executionRoute.kind === "certified_contact"
+            ? "campaign_play_certified_contact"
+            : "campaign_play_certified_observe";
       if (
         executionRoute.certificateHash !== hashCampaignPlayProjection({
           domain,

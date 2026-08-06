@@ -18,6 +18,7 @@ import {
   campaignPlaySseEventSchema,
   campaignPlayTurnAdmissionRequestSchema,
   CAMPAIGN_PLAY_INTERNAL_ERROR_CODE_VALUES,
+  type CampaignPlayActionExecutionRoute,
 } from "./contracts.js";
 import {
   canonicalizeCampaignPlayProjection,
@@ -38,6 +39,8 @@ export type CampaignPlayTurnRepositoryErrorCode =
   | "turn_fence_lost"
   | "turn_stage_invalid"
   | "turn_corrupt";
+
+type CampaignPlayActionExecutionRouteKind = CampaignPlayActionExecutionRoute["kind"];
 
 export class CampaignPlayTurnRepositoryError extends Error {
   constructor(
@@ -78,7 +81,7 @@ export type CampaignPlayTurnModelSelection =
       gameMaster: CampaignPlayRequestedModel;
       actorReplanner: CampaignPlayRequestedModel;
       narrator: CampaignPlayRequestedModel;
-      routeKind?: "full_authority" | "certified_move" | "certified_wait" | "certified_contact";
+      routeKind?: CampaignPlayActionExecutionRouteKind;
     };
 
 export type CampaignPlayTurnAdmissionDocument =
@@ -333,7 +336,7 @@ export interface CampaignPlayModelAttemptTelemetry {
 
 export interface CampaignPlayTurnTelemetry {
   turnId: string;
-  routeKind: "full_authority" | "certified_move" | "certified_wait" | "certified_contact";
+  routeKind: CampaignPlayActionExecutionRouteKind;
   submittedAt: number;
   completedAt: number | null;
   totalLatencyMs: number | null;
@@ -569,7 +572,7 @@ function parseModelSelection(value: string, turnKind: TurnRow["turnKind"]): Camp
     isRequestedModel(record.narrator) &&
     (record.routeKind === undefined || record.routeKind === "full_authority" ||
       record.routeKind === "certified_move" || record.routeKind === "certified_wait" ||
-      record.routeKind === "certified_contact")
+      record.routeKind === "certified_contact" || record.routeKind === "certified_observe")
   ) {
     return record as unknown as CampaignPlayTurnModelSelection;
   }
@@ -588,7 +591,7 @@ function validateAdmissionDocument(document: CampaignPlayTurnAdmissionDocument):
 function resolveActionExecutionRoute(
   document: CampaignPlayTurnAdmissionDocument,
   selection: CampaignPlayTurnModelSelection,
-): "full_authority" | "certified_move" | "certified_wait" | "certified_contact" {
+): CampaignPlayActionExecutionRouteKind {
   if (document.turnKind !== "player_action" || selection.turnKind !== "player_action") {
     return "full_authority";
   }
@@ -609,7 +612,9 @@ function resolveActionExecutionRoute(
       ? "campaign_play_certified_move"
       : route.kind === "certified_wait"
         ? "campaign_play_certified_wait"
-        : "campaign_play_certified_contact";
+        : route.kind === "certified_contact"
+          ? "campaign_play_certified_contact"
+          : "campaign_play_certified_observe";
     if (route.certificateHash !== hashCampaignPlayProjection({ domain, certificate: route.certificate })) {
       throw new Error("certified route hash is invalid");
     }
@@ -667,7 +672,7 @@ function resolveStageClaimRoute(
   if (
     turnKind === "player_action" && selection.turnKind === "player_action" &&
     (selection.routeKind === "certified_move" || selection.routeKind === "certified_wait" ||
-      selection.routeKind === "certified_contact") &&
+      selection.routeKind === "certified_contact" || selection.routeKind === "certified_observe") &&
     stage === "admitted"
   ) {
     return {
@@ -942,7 +947,7 @@ function nextStageAfterAcceptedModel(
   stage: CampaignPlayClaimableTurnStage,
   kind: CampaignPlayTurnModelStageKind,
   artifact: unknown,
-  authorityKind: "full_authority" | "certified_move" | "certified_wait" | "certified_contact",
+  authorityKind: CampaignPlayActionExecutionRouteKind,
   acceptedAuthorityHash: string | null,
 ): CampaignPlayClaimableTurnStage {
   if (turnKind === "opening" && stage === "admitted" && kind === "opening_planner") {
@@ -959,7 +964,7 @@ function nextStageAfterAcceptedModel(
     turnKind === "player_action" && kind === "game_master" &&
     ((authorityKind === "full_authority" && stage === "judged") ||
       ((authorityKind === "certified_move" || authorityKind === "certified_wait" ||
-        authorityKind === "certified_contact") &&
+        authorityKind === "certified_contact" || authorityKind === "certified_observe") &&
         stage === "admitted"))
   ) {
     const gameMaster = campaignPlayGameMasterArtifactSchema.safeParse(artifact);
@@ -976,8 +981,11 @@ function nextStageAfterAcceptedModel(
         : authorityKind === "certified_wait"
           ? "certifiedWaitHash" in gameMaster.data &&
             gameMaster.data.certifiedWaitHash === acceptedAuthorityHash
-          : "certifiedContactHash" in gameMaster.data &&
-            gameMaster.data.certifiedContactHash === acceptedAuthorityHash;
+          : authorityKind === "certified_contact"
+            ? "certifiedContactHash" in gameMaster.data &&
+              gameMaster.data.certifiedContactHash === acceptedAuthorityHash
+            : "certifiedObserveHash" in gameMaster.data &&
+              gameMaster.data.certifiedObserveHash === acceptedAuthorityHash;
       if (!authorityMatches) {
         throw stageInvalid("Campaign Play Game Master artifact references another certified route.");
       }
@@ -1171,7 +1179,7 @@ function telemetryStageForProgress(
   progress: CampaignPlayPublicProgress,
   workerEpoch: number,
   modelStages: readonly ModelStageRow[],
-  routeKind: "full_authority" | "certified_move" | "certified_wait" | "certified_contact",
+  routeKind: CampaignPlayActionExecutionRouteKind,
 ): CampaignPlayClaimableTurnStage {
   if (progress === "settling") return "planned";
   if (progress === "world_acting") return "primary_settled";
@@ -1818,7 +1826,9 @@ function advanceReplayStageForAcceptedModel(
             ? !("certifiedMoveHash" in artifact) || artifact.certifiedMoveHash !== route.certificateHash
             : routeKind === "certified_wait"
               ? !("certifiedWaitHash" in artifact) || artifact.certifiedWaitHash !== route.certificateHash
-              : !("certifiedContactHash" in artifact) || artifact.certifiedContactHash !== route.certificateHash)
+              : routeKind === "certified_contact"
+                ? !("certifiedContactHash" in artifact) || artifact.certifiedContactHash !== route.certificateHash
+                : !("certifiedObserveHash" in artifact) || artifact.certifiedObserveHash !== route.certificateHash)
         ) {
           throw new Error("game master certified route authority");
         }

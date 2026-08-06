@@ -20,6 +20,7 @@ import {
   campaignPlayActionContextSchema,
   campaignPlayCertifiedContactSchema,
   campaignPlayCertifiedMoveSchema,
+  campaignPlayCertifiedObserveSchema,
   campaignPlayCertifiedWaitSchema,
   campaignPlayEntityRefSchema,
   campaignPlayGameMasterArtifactSchema,
@@ -36,6 +37,7 @@ import {
   type CampaignPlayEntityRef,
   type CampaignPlayCertifiedContact,
   type CampaignPlayCertifiedMove,
+  type CampaignPlayCertifiedObserve,
   type CampaignPlayCertifiedWait,
   type CampaignPlayGameMasterArtifact,
   type CampaignPlayJudgeArtifact,
@@ -554,7 +556,8 @@ function selection(input: CreateCampaignPlayTurnRuntimeInput): CampaignPlayTurnM
 
 function selectionForRoute(
   base: CampaignPlayTurnModelSelection,
-  routeKind: "full_authority" | "certified_move" | "certified_wait" | "certified_contact",
+  routeKind: "full_authority" | "certified_move" | "certified_wait" | "certified_contact" |
+    "certified_observe",
 ): CampaignPlayTurnModelSelection {
   if (base.turnKind !== "player_action") return base;
   return { ...base, routeKind };
@@ -1028,12 +1031,20 @@ function certifiedContactHash(certificate: CampaignPlayCertifiedContact): string
   });
 }
 
+function certifiedObserveHash(certificate: CampaignPlayCertifiedObserve): string {
+  return hashCampaignPlayProjection({
+    domain: "campaign_play_certified_observe",
+    certificate,
+  });
+}
+
 function isCertifiedRoute(
   route: CampaignPlayPlayerActionAdmissionFrame["executionRoute"],
 ): route is Exclude<CampaignPlayPlayerActionAdmissionFrame["executionRoute"], { kind: "full_authority" }> {
   return route.kind === "certified_move" ||
     route.kind === "certified_wait" ||
-    route.kind === "certified_contact";
+    route.kind === "certified_contact" ||
+    route.kind === "certified_observe";
 }
 
 function certifyPureRenderedMove(input: {
@@ -1378,6 +1389,118 @@ function certifyPureRenderedContact(input: {
   });
 }
 
+function certifyPureRenderedObserve(input: {
+  campaignId: string;
+  turnId: string;
+  acceptedWorldVersion: number;
+  baseWorldVersion: number;
+  baseRuntimeRevision: number;
+  sourceTurnId: string;
+  sourceMomentId: string;
+  sourceMomentHash: string;
+  sourcePacketHash: string;
+  packet: CampaignPlayNarratorPacket;
+  moment: z.infer<typeof publicMomentSchema>;
+  mechanicalFrame: CampaignPlayRulebookFrame;
+  publicAuthority: Pick<CampaignPlayPlayerActionAdmissionFrame,
+    "player" | "visibleFacts" | "handleBindings" | "choiceBindings" | "authority">;
+  judgeInput: CampaignPlayJudgeInput;
+}): CampaignPlayCertifiedObserve | null {
+  const { judgeInput, packet, moment, mechanicalFrame, publicAuthority } = input;
+  if (judgeInput.source !== "suggested" || judgeInput.choiceHandle === null) return null;
+  const suggestion = moment.suggestedActions.find((candidate) =>
+    candidate.choiceHandle === judgeInput.choiceHandle);
+  const intent = packet.availableIntents.find((candidate) =>
+    candidate.handle === judgeInput.choiceHandle);
+  const choice = publicAuthority.choiceBindings.find((candidate) =>
+    candidate.handle === judgeInput.choiceHandle);
+  if (
+    !suggestion || !intent || !choice || intent.kind !== "observe" ||
+    intent.targets.length !== 1 || intent.targets[0]?.kind !== "location" ||
+    suggestion.label !== judgeInput.originalText
+  ) return null;
+  const locationHandle = intent.targets[0]!.handle;
+  if (locationHandle !== packet.currentLocation.handle) return null;
+  const prefix = campaignPlaySuggestedActionLabelPrefix(packet, intent);
+  if (!suggestion.label.startsWith(prefix)) return null;
+  const detail = suggestion.label.slice(prefix.length);
+  const detailWords = detail.split(/\s+/u);
+  if (
+    detail.length === 0 || detail !== detail.trim() || detail.includes("\n") || detail.includes("\r") ||
+    detailWords.length < 3 || detailWords.length > 8 ||
+    canonicalizeCampaignPlayProjection(choice) !== canonicalizeCampaignPlayProjection({
+      ...intent,
+      label: suggestion.label,
+    })
+  ) return null;
+  const locationBinding = publicAuthority.handleBindings.find((binding) =>
+    binding.handle === locationHandle && binding.reference.kind === "location");
+  if (!locationBinding) return null;
+  const playerPlacement = mechanicalFrame.placements.find((placement) =>
+    placement.actorId === publicAuthority.player.actorId &&
+    placement.placementKind === "present" &&
+    placement.locationId === locationBinding.reference.id);
+  const playerHasActiveCondition = mechanicalFrame.actorConditions.some((condition) =>
+    condition.actorId === publicAuthority.player.actorId && condition.present);
+  const authorized = (kind: CampaignPlayEntityRef["kind"], id: string) =>
+    publicAuthority.authority.authorizedRefs.some((reference) =>
+      reference.kind === kind && reference.id === id);
+  if (
+    !playerPlacement || playerHasActiveCondition ||
+    !authorized("actor", publicAuthority.player.actorId) ||
+    !authorized("location", locationBinding.reference.id) ||
+    !publicAuthority.visibleFacts.some((fact) => fact.handle === locationHandle)
+  ) return null;
+  return campaignPlayCertifiedObserveSchema.parse({
+    actionSchemaVersion: 1,
+    resolver: "game_master",
+    campaignId: input.campaignId,
+    turnId: input.turnId,
+    sourceTurnId: input.sourceTurnId,
+    sourceMomentId: input.sourceMomentId,
+    sourceMomentHash: input.sourceMomentHash,
+    sourcePacketHash: input.sourcePacketHash,
+    acceptedWorldVersion: input.acceptedWorldVersion,
+    baseWorldVersion: input.baseWorldVersion,
+    baseRuntimeRevision: input.baseRuntimeRevision,
+    actorId: publicAuthority.player.actorId,
+    actorHandle: publicAuthority.player.actorHandle,
+    choiceHandle: intent.handle,
+    label: suggestion.label,
+    locationId: locationBinding.reference.id,
+    locationHandle,
+    detail,
+    ruling: {
+      disposition: "deterministic",
+      normalizedIntent: {
+        originalText: suggestion.label,
+        source: "suggested",
+        choiceHandle: intent.handle,
+        kind: "observe",
+        targets: intent.targets,
+        method: detail,
+        stakes: null,
+      },
+      movementRouteHandle: null,
+      possessionEffectAuthority: { kind: "none" },
+      requiredObligationEffect: { kind: "none" },
+      citedVisibleFactHandles: [locationHandle],
+      resultBounds: { minimum: "success", maximum: "success" },
+      elapsedBounds: { minimumMinutes: 1, maximumMinutes: 1 },
+      uncertainty: { kind: "none" },
+      reason: "Current rendered inspection is bound to the player's visible current location.",
+      clarificationQuestion: null,
+    },
+    resolution: { kind: "deterministic", result: "success" },
+    publicResult: {
+      intentKind: "observe",
+      disposition: "deterministic",
+      result: "success",
+      clarificationQuestion: null,
+    },
+  });
+}
+
 function buildAdmissionFrame(input: {
   handle: CampaignPlayDatabaseHandle;
   turnId: string;
@@ -1496,6 +1619,25 @@ function buildAdmissionFrame(input: {
       publicAuthority,
       judgeInput,
     }) : null;
+  const observeCertificate = moveCertificate === null && waitCertificate === null &&
+    contactCertificate === null
+    ? certifyPureRenderedObserve({
+      campaignId: baseFrame.campaignId,
+      turnId: baseFrame.turnId,
+      acceptedWorldVersion: baseFrame.acceptedWorldVersion,
+      baseWorldVersion: baseFrame.baseWorldVersion,
+      baseRuntimeRevision: baseFrame.baseRuntimeRevision,
+      sourceTurnId: baseFrame.sourceTurnId,
+      sourceMomentId: baseFrame.sourceMomentId,
+      sourceMomentHash: baseFrame.sourceMomentHash,
+      sourcePacketHash: baseFrame.sourcePacketHash,
+      packet: baseFrame.sourcePacket,
+      moment: baseFrame.sourceMoment,
+      mechanicalFrame,
+      publicAuthority,
+      judgeInput,
+    })
+    : null;
   return playerActionAdmissionFrameSchema.parse({
     ...baseFrame,
     executionRoute: moveCertificate !== null
@@ -1516,6 +1658,12 @@ function buildAdmissionFrame(input: {
               certificate: contactCertificate,
               certificateHash: certifiedContactHash(contactCertificate),
             }
+          : observeCertificate !== null
+            ? {
+                kind: "certified_observe",
+                certificate: observeCertificate,
+                certificateHash: certifiedObserveHash(observeCertificate),
+              }
         : { kind: "full_authority" },
   });
 }
@@ -1629,7 +1777,8 @@ function currentGameMasterFrame(
 function revalidateCertifiedRoute(
   handle: CampaignPlayDatabaseHandle,
   turn: LoadedCampaignPlayTurn,
-): CampaignPlayCertifiedMove | CampaignPlayCertifiedWait | CampaignPlayCertifiedContact {
+): CampaignPlayCertifiedMove | CampaignPlayCertifiedWait | CampaignPlayCertifiedContact |
+  CampaignPlayCertifiedObserve {
   const current = currentGameMasterFrame(handle, turn);
   const admission = current.admission;
   if (!isCertifiedRoute(admission.executionRoute)) {
@@ -1678,7 +1827,8 @@ function revalidateCertifiedRoute(
       publicAuthority,
       judgeInput: admission.judgeInput,
       })
-      : certifyPureRenderedContact({
+      : admission.executionRoute.kind === "certified_contact"
+        ? certifyPureRenderedContact({
         campaignId: admission.campaignId,
         turnId: admission.turnId,
         acceptedWorldVersion: admission.acceptedWorldVersion,
@@ -1693,14 +1843,32 @@ function revalidateCertifiedRoute(
         mechanicalFrame: current.frame.rulebookFrame,
         publicAuthority,
         judgeInput: admission.judgeInput,
-      });
+        })
+        : certifyPureRenderedObserve({
+          campaignId: admission.campaignId,
+          turnId: admission.turnId,
+          acceptedWorldVersion: admission.acceptedWorldVersion,
+          baseWorldVersion: admission.baseWorldVersion,
+          baseRuntimeRevision: admission.baseRuntimeRevision,
+          sourceTurnId: admission.sourceTurnId,
+          sourceMomentId: admission.sourceMomentId,
+          sourceMomentHash: admission.sourceMomentHash,
+          sourcePacketHash: admission.sourcePacketHash,
+          packet: admission.sourcePacket,
+          moment: admission.sourceMoment,
+          mechanicalFrame: current.frame.rulebookFrame,
+          publicAuthority,
+          judgeInput: admission.judgeInput,
+        });
   const hash = fresh === null
     ? null
     : admission.executionRoute.kind === "certified_move"
       ? certifiedMoveHash(fresh as CampaignPlayCertifiedMove)
       : admission.executionRoute.kind === "certified_wait"
         ? certifiedWaitHash(fresh as CampaignPlayCertifiedWait)
-        : certifiedContactHash(fresh as CampaignPlayCertifiedContact);
+        : admission.executionRoute.kind === "certified_contact"
+          ? certifiedContactHash(fresh as CampaignPlayCertifiedContact)
+          : certifiedObserveHash(fresh as CampaignPlayCertifiedObserve);
   if (
     fresh === null ||
     hash !== admission.executionRoute.certificateHash ||
@@ -1960,7 +2128,9 @@ function playerActionContext(
       ? certifiedMoveHash(admission.executionRoute.certificate)
       : admission.executionRoute.kind === "certified_wait"
         ? certifiedWaitHash(admission.executionRoute.certificate)
-        : certifiedContactHash(admission.executionRoute.certificate);
+        : admission.executionRoute.kind === "certified_contact"
+          ? certifiedContactHash(admission.executionRoute.certificate)
+          : certifiedObserveHash(admission.executionRoute.certificate);
     if (
       certificateHash !== admission.executionRoute.certificateHash ||
       repository.loadAcceptedModelArtifact(turn.turnId, "judge") !== null
@@ -2433,7 +2603,8 @@ export function createCampaignPlayTurnRuntime(
           kind: "external",
           async execute(context) {
             const startedAt = now();
-            let routeKind: "full_authority" | "certified_move" | "certified_wait" | "certified_contact" = "full_authority";
+            let routeKind: "full_authority" | "certified_move" | "certified_wait" |
+              "certified_contact" | "certified_observe" = "full_authority";
             try {
               const admission = loadCampaignPlayPlayerActionAdmissionFrame(context.turn);
               routeKind = admission.executionRoute.kind;
@@ -2455,7 +2626,9 @@ export function createCampaignPlayTurnRuntime(
                     ? { certifiedMoveHash: admission.executionRoute.certificateHash }
                     : admission.executionRoute.kind === "certified_wait"
                       ? { certifiedWaitHash: admission.executionRoute.certificateHash }
-                      : { certifiedContactHash: admission.executionRoute.certificateHash }),
+                      : admission.executionRoute.kind === "certified_contact"
+                        ? { certifiedContactHash: admission.executionRoute.certificateHash }
+                        : { certifiedObserveHash: admission.executionRoute.certificateHash }),
                   batch: candidate.batch,
                   batchHash: candidate.batchHash,
                   semanticReview: candidate.semanticReview,
@@ -2743,15 +2916,20 @@ export function createCampaignPlayTurnRuntime(
                   ? certifiedMoveHash(certificate as CampaignPlayCertifiedMove)
                   : admission.executionRoute.kind === "certified_wait"
                     ? certifiedWaitHash(certificate as CampaignPlayCertifiedWait)
-                    : certifiedContactHash(certificate as CampaignPlayCertifiedContact);
+                    : admission.executionRoute.kind === "certified_contact"
+                      ? certifiedContactHash(certificate as CampaignPlayCertifiedContact)
+                      : certifiedObserveHash(certificate as CampaignPlayCertifiedObserve);
                 const artifactReferencesCertificate = admission.executionRoute.kind === "certified_move"
                   ? "certifiedMoveHash" in acceptedGameMaster &&
                     acceptedGameMaster.certifiedMoveHash === certificateHash
                   : admission.executionRoute.kind === "certified_wait"
                     ? "certifiedWaitHash" in acceptedGameMaster &&
                       acceptedGameMaster.certifiedWaitHash === certificateHash
-                    : "certifiedContactHash" in acceptedGameMaster &&
-                      acceptedGameMaster.certifiedContactHash === certificateHash;
+                    : admission.executionRoute.kind === "certified_contact"
+                      ? "certifiedContactHash" in acceptedGameMaster &&
+                        acceptedGameMaster.certifiedContactHash === certificateHash
+                      : "certifiedObserveHash" in acceptedGameMaster &&
+                        acceptedGameMaster.certifiedObserveHash === certificateHash;
                 if (!artifactReferencesCertificate) {
                   throw new Error("game master references another certified route");
                 }

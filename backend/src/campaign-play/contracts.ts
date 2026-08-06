@@ -2388,6 +2388,66 @@ export const campaignPlayCertifiedContactSchema = z.object({
   }
 });
 
+export const campaignPlayCertifiedObserveSchema = z.object({
+  actionSchemaVersion: z.literal(1),
+  resolver: z.literal("game_master"),
+  campaignId: idSchema,
+  turnId: idSchema,
+  sourceTurnId: idSchema,
+  sourceMomentId: idSchema,
+  sourceMomentHash: hashSchema,
+  sourcePacketHash: hashSchema,
+  acceptedWorldVersion: positiveIntegerSchema,
+  baseWorldVersion: positiveIntegerSchema,
+  baseRuntimeRevision: positiveIntegerSchema,
+  actorId: idSchema,
+  actorHandle: handleSchema,
+  choiceHandle: handleSchema,
+  label: labelSchema,
+  locationId: idSchema,
+  locationHandle: handleSchema,
+  detail: labelSchema,
+  ruling: campaignPlayJudgeRulingSchema,
+  resolution: campaignPlayUncertaintyResolutionSchema,
+  publicResult: campaignPlayJudgePublicResultSchema,
+}).strict().superRefine((certificate, context) => {
+  const intent = certificate.ruling.normalizedIntent;
+  const detailWords = certificate.detail.split(/\s+/u);
+  if (
+    certificate.ruling.disposition !== "deterministic" ||
+    intent.source !== "suggested" || intent.kind !== "observe" ||
+    intent.choiceHandle !== certificate.choiceHandle ||
+    intent.originalText !== certificate.label ||
+    intent.targets.length !== 1 || intent.targets[0]?.kind !== "location" ||
+    intent.targets[0]?.handle !== certificate.locationHandle ||
+    intent.method !== certificate.detail || intent.stakes !== null ||
+    certificate.label !== `Examine ${certificate.detail}` ||
+    detailWords.length < 3 || detailWords.length > 8 ||
+    certificate.ruling.movementRouteHandle !== null ||
+    certificate.ruling.possessionEffectAuthority.kind !== "none" ||
+    certificate.ruling.requiredObligationEffect.kind !== "none" ||
+    certificate.ruling.citedVisibleFactHandles.length !== 1 ||
+    certificate.ruling.citedVisibleFactHandles[0] !== certificate.locationHandle ||
+    certificate.ruling.uncertainty.kind !== "none" ||
+    certificate.ruling.resultBounds.minimum !== "success" ||
+    certificate.ruling.resultBounds.maximum !== "success" ||
+    certificate.ruling.elapsedBounds.minimumMinutes !== 1 ||
+    certificate.ruling.elapsedBounds.maximumMinutes !== 1 ||
+    certificate.resolution.kind !== "deterministic" ||
+    certificate.resolution.result !== "success" ||
+    certificate.publicResult.intentKind !== "observe" ||
+    certificate.publicResult.disposition !== "deterministic" ||
+    certificate.publicResult.result !== "success" ||
+    certificate.publicResult.clarificationQuestion !== null
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["ruling"],
+      message: "Certified observe authority must describe one deterministic current-location inspection.",
+    });
+  }
+});
+
 export const campaignPlayActionExecutionRouteSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("full_authority") }).strict(),
   z.object({
@@ -2403,6 +2463,11 @@ export const campaignPlayActionExecutionRouteSchema = z.discriminatedUnion("kind
   z.object({
     kind: z.literal("certified_contact"),
     certificate: campaignPlayCertifiedContactSchema,
+    certificateHash: hashSchema,
+  }).strict(),
+  z.object({
+    kind: z.literal("certified_observe"),
+    certificate: campaignPlayCertifiedObserveSchema,
     certificateHash: hashSchema,
   }).strict(),
 ]);
@@ -2903,6 +2968,10 @@ export const campaignPlayGameMasterArtifactSchema = z.union([
   }).strict(),
   z.object({
     certifiedContactHash: hashSchema,
+    ...campaignPlayGameMasterArtifactBaseShape,
+  }).strict(),
+  z.object({
+    certifiedObserveHash: hashSchema,
     ...campaignPlayGameMasterArtifactBaseShape,
   }).strict(),
 ]);
@@ -4191,6 +4260,8 @@ export type CampaignPlayCertifiedWait =
   z.infer<typeof campaignPlayCertifiedWaitSchema>;
 export type CampaignPlayCertifiedContact =
   z.infer<typeof campaignPlayCertifiedContactSchema>;
+export type CampaignPlayCertifiedObserve =
+  z.infer<typeof campaignPlayCertifiedObserveSchema>;
 export type CampaignPlayActionExecutionRoute =
   z.infer<typeof campaignPlayActionExecutionRouteSchema>;
 export type CampaignPlayGameMasterArtifact =
