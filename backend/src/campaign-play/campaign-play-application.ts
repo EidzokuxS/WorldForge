@@ -573,7 +573,7 @@ export function createCampaignPlayApplication(
           actorRequested,
           dependencies.createModel(actorGenerator.provider, { role: "generator", reasoningMode: "bypass" }),
         ),
-        reasoningModel: dependencies.createModel(actorGenerator.provider, { role: "generator" }),
+        reasoningModel: dependencies.createModel(actorGenerator.provider, { role: "generator", reasoningMode: "bypass" }),
       },
       narratorModel: stageModel(
         storyteller,

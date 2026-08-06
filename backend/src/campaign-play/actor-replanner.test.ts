@@ -890,7 +890,7 @@ describe("Campaign Play actor replanner", () => {
     });
   });
 
-  it("escalates one schema-invalid bypass attempt to default reasoning and settles once", async () => {
+  it("runs one schema-invalid recovery attempt and settles once", async () => {
     const { handle, token, jobId } = createReplanFixture();
     const bypassModel = {} as LanguageModel;
     const recoveryModel = {} as LanguageModel;
@@ -1483,7 +1483,7 @@ describe("Campaign Play actor replanner", () => {
     ]);
   });
 
-  it("fences a late default-reasoning result after the outer abort", async () => {
+  it("fences a late recovery result after the outer abort", async () => {
     const { handle, token, jobId } = createReplanFixture();
     const controller = new AbortController();
     const bypassModel = {} as LanguageModel;
