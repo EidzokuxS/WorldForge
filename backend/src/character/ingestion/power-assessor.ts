@@ -87,5 +87,6 @@ export async function assessPowerStats(opts: {
     overrideText: sources.overrideText ?? undefined,
     role: ctx.gen,
     premise: ctx.campaign.premise,
+    isImportedCharacter: status === "imported",
   });
 }

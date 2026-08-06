@@ -141,6 +141,7 @@ describe("assessPowerStats dispatcher", () => {
     const call = assessOrigCalls[0];
     expect(call.cardText).toContain("The strongest sorcerer");
     expect(call.overrideText).toBe("civilian");
+    expect(call.isImportedCharacter).toBe(true);
   });
 
   it("throws IngestionPipelineError when canon branch has no franchise", async () => {

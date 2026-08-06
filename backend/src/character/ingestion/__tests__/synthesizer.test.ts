@@ -19,11 +19,12 @@ const canonDigest = fs.readFileSync(
 
 // Mock generateObject: capture prompt, return canned rich output
 const captured: { prompt?: string } = {};
-const { mockBuildCharacterPromptContract, mockGenerateObject } = vi.hoisted(() => ({
+const { mockBuildCharacterPromptContract, mockGenerateObject, mockCreateModel } = vi.hoisted(() => ({
   mockBuildCharacterPromptContract: vi.fn((opts?: { marker?: string }) =>
     `STRUCTURED_OUTPUT_CONTRACT: ${opts?.marker ?? "character.v1"}\nCONTRACT`
   ),
   mockGenerateObject: vi.fn(),
+  mockCreateModel: vi.fn(() => ({ modelId: "mock" })),
 }));
 const richOutput = {
   name: "Gojo Satoru",
@@ -49,7 +50,7 @@ vi.mock("../../../ai/generate-object-safe.js", () => ({
 }));
 
 vi.mock("../../../ai/index.js", () => ({
-  createModel: vi.fn(() => ({ modelId: "mock" })),
+  createModel: mockCreateModel,
 }));
 
 // Mock the promoted exports from generator.ts
@@ -133,6 +134,7 @@ beforeEach(() => {
   captured.prompt = undefined;
   mockBuildCharacterPromptContract.mockClear();
   mockGenerateObject.mockReset();
+  mockCreateModel.mockClear();
   mockGenerateObject.mockImplementation(async (opts: Record<string, unknown>) => {
     captured.prompt = opts.prompt as string;
     return { object: richOutput };
@@ -163,6 +165,25 @@ describe("synthesizeDraftFromSources priority merge", () => {
     expect(captured.prompt).toContain("her eyes are red not blue");
     expect(captured.prompt).toContain("CARD[Gojo Satoru]");
     expect(mockGenerateObject.mock.calls[0]?.[0]).toMatchObject({ retries: 1 });
+    expect(mockCreateModel).toHaveBeenCalledWith(ctx.gen.provider, {
+      role: "generator",
+      reasoningMode: "bypass",
+    });
+    expect(mockGenerateObject.mock.calls[0]?.[0]).toMatchObject({
+      timeout: { totalMs: 45_000 },
+    });
+  });
+
+  it("preserves default reasoning and retry behavior outside import", async () => {
+    await synthesizeDraftFromSources({
+      sources: sources({ mode: "parse", freeText: "A careful dock worker." }),
+      classification: { ...baseClassification, canonicalStatus: "original", franchise: null },
+      researchDigest: null,
+      ctx,
+    });
+
+    expect(mockCreateModel).toHaveBeenCalledWith(ctx.gen.provider);
+    expect(mockGenerateObject.mock.calls[0]?.[0]).toMatchObject({ timeout: undefined });
   });
 
   it("override text appears in PRIORITY 1 section before PRIORITY 2", async () => {
@@ -308,4 +329,17 @@ describe("synthesizeDraftFromSources priority merge", () => {
     expect((caught as IngestionPipelineError).stage).toBe("synthesize");
     expect((caught as IngestionPipelineError).attempts).toBe(3);
   }, 30000);
+
+  it("does not retry a failed imported-card synthesis", async () => {
+    mockGenerateObject.mockRejectedValue(new Error("provider stalled"));
+
+    await expect(synthesizeDraftFromSources({
+      sources: sources({ mode: "import", card: gojoCard as never }),
+      classification: { ...baseClassification, canonicalStatus: "imported", franchise: null },
+      researchDigest: null,
+      ctx,
+    })).rejects.toThrow(IngestionPipelineError);
+
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+  });
 });

@@ -19,6 +19,7 @@ import type { CharacterDraft, PowerStats } from "@worldforge/shared";
 import type { ResolvedRole } from "../../ai/resolve-role-model.js";
 
 const log = createLogger("assess-original-powerstats");
+const IMPORT_GENERATION_TIMEOUT_MS = 45_000;
 
 /**
  * Stage 4 (original branch) — LLM-only PowerStats inference for ORIGINAL or
@@ -36,8 +37,9 @@ export async function assessOriginalCharacterPowerStats(opts: {
   overrideText?: string;
   role: ResolvedRole;
   premise: string;
+  isImportedCharacter?: boolean;
 }): Promise<CharacterDraft> {
-  const { draft, cardText, overrideText, role, premise } = opts;
+  const { draft, cardText, overrideText, role, premise, isImportedCharacter = false } = opts;
 
   const prompt = `You are assessing the power level of an ORIGINAL (non-canonical) WorldForge character using VS Battles Wiki tier conventions.
 
@@ -96,12 +98,15 @@ GROUNDING RULES:
       hasOverride: !!overrideText,
     });
     const { object: rawObject } = await generateObject({
-      model: createModel(role.provider),
+      model: isImportedCharacter
+        ? createModel(role.provider, { role: "generator", reasoningMode: "bypass" })
+        : createModel(role.provider),
       schema: loosePowerStatsSchema,
       prompt,
       temperature: Math.min(role.temperature, 0.3),
       maxOutputTokens: clampTokens(role.maxTokens),
       retries: 1,
+      timeout: isImportedCharacter ? { totalMs: IMPORT_GENERATION_TIMEOUT_MS } : undefined,
     });
 
     try {
@@ -120,7 +125,7 @@ GROUNDING RULES:
         overrideText,
       });
     }
-  });
+  }, { maxAttempts: isImportedCharacter ? 1 : undefined });
 
   return { ...draft, powerStats };
 }

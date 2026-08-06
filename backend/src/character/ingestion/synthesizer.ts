@@ -21,6 +21,7 @@ import type {
 } from "./types.js";
 
 const log = createLogger("ingestion-synthesizer");
+const IMPORT_GENERATION_TIMEOUT_MS = 45_000;
 
 const looseRichCharacterSchema = richCharacterSchema.extend({
   race: z.string().default(""),
@@ -287,6 +288,7 @@ export async function synthesizeDraftFromSources(opts: {
   ctx: IngestionContext;
 }): Promise<CharacterDraft> {
   const { sources, classification, researchDigest, ctx } = opts;
+  const isImportedCharacter = sources.mode === "import";
 
   const roleEmphasis =
     sources.mode === "import"
@@ -367,18 +369,21 @@ FIELD LIMITS (must be respected literally):
       hasResearch: !!researchDigest,
     });
     const result = await generateObject({
-      model: createModel(ctx.gen.provider),
+      model: isImportedCharacter
+        ? createModel(ctx.gen.provider, { role: "generator", reasoningMode: "bypass" })
+        : createModel(ctx.gen.provider),
       schema: looseRichCharacterSchema,
       prompt,
       temperature: ctx.gen.temperature,
       maxOutputTokens: clampTokens(ctx.gen.maxTokens),
       retries: 1,
+      timeout: isImportedCharacter ? { totalMs: IMPORT_GENERATION_TIMEOUT_MS } : undefined,
     });
     return normalizeLooseRichOutput(result.object, {
       fallbackTags: sources.card?.tags ?? [],
       knownLocations: ctx.locationNames,
     });
-  });
+  }, { maxAttempts: isImportedCharacter ? 1 : undefined });
 
   const draft = toCharacterDraftFromRich(rich, {
     sourceKind: sourceKindForMode(sources.mode),

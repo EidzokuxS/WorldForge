@@ -12,14 +12,15 @@ const humanStats = {
   vulnerabilities: [{ description: "No combat training for duels", severity: "minor" }],
 };
 
-const { mockGenerateObject } = vi.hoisted(() => ({
+const { mockGenerateObject, mockCreateModel } = vi.hoisted(() => ({
   mockGenerateObject: vi.fn(),
+  mockCreateModel: vi.fn(() => ({ modelId: "mock" })),
 }));
 
 vi.mock("../../../ai/generate-object-safe.js", () => ({
   safeGenerateObject: mockGenerateObject,
 }));
-vi.mock("../../../ai/index.js", () => ({ createModel: vi.fn(() => ({ modelId: "mock" })) }));
+vi.mock("../../../ai/index.js", () => ({ createModel: mockCreateModel }));
 vi.mock("../../../lib/clamp.js", () => ({ clampTokens: (n: number) => n ?? 2048 }));
 vi.mock("../../../lib/index.js", () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), event: vi.fn() }),
@@ -41,6 +42,7 @@ import { IngestionPipelineError } from "../errors.js";
 beforeEach(() => {
   captured.prompt = undefined;
   mockGenerateObject.mockReset();
+  mockCreateModel.mockClear();
   mockGenerateObject.mockImplementation(async (opts: any) => {
     captured.prompt = opts.prompt;
     return { object: humanStats };
@@ -59,6 +61,25 @@ describe("assessOriginalCharacterPowerStats", () => {
     expect(out.powerStats!.attackPotency.tier).toBe("Street");
     expect(Array.isArray(out.powerStats!.hax)).toBe(true);
     expect(mockGenerateObject.mock.calls[0]?.[0]).toMatchObject({ retries: 1 });
+  });
+
+  it("bounds imported-card assessment with bypass reasoning and one provider attempt", async () => {
+    await assessOriginalCharacterPowerStats({
+      draft: rogueDraft as unknown as CharacterDraft,
+      cardText: "A cat-burglar with a grappling hook.",
+      role,
+      premise: "A port city",
+      isImportedCharacter: true,
+    });
+
+    expect(mockCreateModel).toHaveBeenCalledWith(role.provider, {
+      role: "generator",
+      reasoningMode: "bypass",
+    });
+    expect(mockGenerateObject.mock.calls[0]?.[0]).toMatchObject({
+      retries: 1,
+      timeout: { totalMs: 45_000 },
+    });
   });
 
   it("prompt marks character as ORIGINAL and names it", async () => {
@@ -134,4 +155,18 @@ describe("assessOriginalCharacterPowerStats", () => {
       })
     ).rejects.toThrow(IngestionPipelineError);
   }, 30000);
+
+  it("does not retry a failed imported-card power assessment", async () => {
+    mockGenerateObject.mockRejectedValue(new Error("provider stalled"));
+
+    await expect(assessOriginalCharacterPowerStats({
+      draft: rogueDraft as unknown as CharacterDraft,
+      cardText: "A cat-burglar with a grappling hook.",
+      role,
+      premise: "A port city",
+      isImportedCharacter: true,
+    })).rejects.toThrow(IngestionPipelineError);
+
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+  });
 });
