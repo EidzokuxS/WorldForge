@@ -1911,6 +1911,12 @@ describe("Campaign Play Game Master", () => {
       "places the player inside the destination's shared location scene",
     );
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
+      "PLAYER_MOVEMENT already places the player in its known destination scene; never add enter_local_scene merely for that arrival",
+    );
+    expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
+      "When maximumMinutes equals travelCost, omit enter_local_scene even for observe or attempt",
+    );
+    expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
       'DESTINATION_SCENE={"locationName":"South Harbor Market","description":"A market beyond the passage.","presentPeople":["Mara Quay"]}',
     );
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
@@ -1928,6 +1934,47 @@ describe("Campaign Play Game Master", () => {
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
       "do not claim that the destination is empty or inaccessible",
     );
+  });
+
+  it("rejects a destination local scene when an attempt has no time beyond route travel", () => {
+    const travelAttempt = ruling({
+      movementRouteHandle: "passage",
+      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 5 },
+      normalizedIntent: {
+        originalText: "I try to reach South Harbor.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "attempt",
+        targets: [{ handle: "passage", kind: "route" }, { handle: "south", kind: "location" }],
+        method: "Pass through the crowd and cross the open passage",
+        stakes: "Reach South Harbor",
+      },
+    });
+
+    expect(() => createCampaignPlayGameMaster().compile(
+      frame(),
+      travelAttempt,
+      resolution,
+      null,
+      {
+        elapsedMinutes: 5,
+        effects: [
+          { kind: "move_actor", actorHandle: null },
+          {
+            kind: "enter_local_scene",
+            name: "South Harbor Market Interior",
+            description: "A narrow market interior with stacked crates and damp stone.",
+          },
+          {
+            kind: "record_world_event",
+            eventClass: "scene",
+            performingActorHandle: null,
+            summary: "The player reaches South Harbor.",
+            affectedHandles: ["south"],
+          },
+        ],
+      },
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
   });
 
   it("compiles grounded route-less traversal into one code-owned local topology move", () => {
