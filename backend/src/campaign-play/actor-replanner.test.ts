@@ -727,6 +727,7 @@ describe("Campaign Play actor replanner", () => {
     const generateObject = vi.fn(async (request: {
       prompt: string;
       abortSignal?: AbortSignal;
+      mode: "auto" | "tool";
       schema: { safeParse(value: unknown): { success: boolean } };
     }) => request.prompt.includes("ACTOR_PLAN_REVIEW\n")
       ? {
@@ -778,6 +779,10 @@ describe("Campaign Play actor replanner", () => {
       }] },
     });
     expect(generateObject).toHaveBeenCalledTimes(2);
+    expect(generateObject.mock.calls.map((call) => call[0]!.mode)).toEqual([
+      "auto",
+      "tool",
+    ]);
     await flushActorReplanLogs();
     expect(rejectionDiagnostics(logCapture)).toEqual([]);
     expect(generateObject.mock.calls[0]![0].prompt).toContain(knownScene);
@@ -895,7 +900,11 @@ describe("Campaign Play actor replanner", () => {
     const bypassModel = {} as LanguageModel;
     const recoveryModel = {} as LanguageModel;
     let callNumber = 0;
-    const generateObject = vi.fn(async (request: { prompt: string; model: LanguageModel }) => {
+    const generateObject = vi.fn(async (request: {
+      prompt: string;
+      model: LanguageModel;
+      mode: "auto" | "tool";
+    }) => {
       callNumber += 1;
       if (callNumber === 1) {
         return { object: {}, trace: acceptedTrace() };
@@ -928,6 +937,11 @@ describe("Campaign Play actor replanner", () => {
 
     expect(outcome).toMatchObject({ kind: "replanned", jobId, workerEpoch: 1 });
     expect(generateObject).toHaveBeenCalledTimes(3);
+    expect(generateObject.mock.calls.map((call) => call[0]!.mode)).toEqual([
+      "auto",
+      "tool",
+      "tool",
+    ]);
     expect(generateObject.mock.calls.map((call) => call[0]!.model)).toEqual([
       bypassModel,
       recoveryModel,

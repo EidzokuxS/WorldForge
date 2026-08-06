@@ -1046,6 +1046,7 @@ export function createCampaignPlayActorReplanner(
         attemptNumber: number,
         modelStageRowId: string,
         attemptId: string | null,
+        proposalMode: "auto" | "tool",
         prompt: string,
       ): Promise<AttemptResult> => {
         const startedAt = dependencies.now();
@@ -1065,7 +1066,7 @@ export function createCampaignPlayActorReplanner(
               prompt,
               temperature: request.temperature,
               maxOutputTokens: request.maxOutputTokens,
-              mode: "auto",
+              mode: proposalMode,
               strictSchema: true,
               allowRepair: false,
               allowTextFallback: false,
@@ -1574,6 +1575,7 @@ export function createCampaignPlayActorReplanner(
         firstAttemptNumber,
         firstModelStageRowId,
         linkedCall ? firstAttemptId : null,
+        "auto",
         proposalPrompt,
       );
       if (firstResult.kind === "replanned") {
@@ -1792,6 +1794,7 @@ export function createCampaignPlayActorReplanner(
           secondAttemptNumber,
           secondModelStageRowId,
           secondAttemptId,
+          "tool",
           firstResult.rejectionArtifact === undefined
             ? proposalPrompt
             : buildCampaignPlayActorReplanRecoveryPrompt(
