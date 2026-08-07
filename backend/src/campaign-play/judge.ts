@@ -304,6 +304,7 @@ export interface CampaignPlayJudgeRequest {
   model: LanguageModel;
   temperature: number;
   budget: CampaignPlayModelBudget;
+  structuredOutputMode?: "auto" | "tool";
   signal?: AbortSignal;
 }
 
@@ -792,7 +793,8 @@ export function createCampaignPlayJudge(
       const parsedFrame = campaignPlayJudgeFrameSchema.safeParse(request.frame);
       if (!parsedFrame.success) throw new CampaignPlayJudgeError("judge_frame_invalid", null, { cause: parsedFrame.error });
       const capability = resolveStructuredOutputCapability({
-        metadata: getStructuredOutputModelMetadata(request.model), requestedMode: "auto",
+        metadata: getStructuredOutputModelMetadata(request.model),
+        requestedMode: request.structuredOutputMode ?? "auto",
       });
       if (capability.primaryStrategy === "text_fallback") {
         throw new CampaignPlayJudgeError("structured_output_unavailable", null);
@@ -807,7 +809,7 @@ export function createCampaignPlayJudge(
           temperature: request.temperature,
           maxOutputTokens: request.budget.maximumOutputTokens,
           abortSignal: request.signal,
-          mode: "auto",
+          mode: request.structuredOutputMode ?? "auto",
           strictSchema: true,
           allowRepair: false,
           allowTextFallback: false,

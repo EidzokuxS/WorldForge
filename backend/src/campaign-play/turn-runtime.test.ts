@@ -2368,10 +2368,12 @@ describe("Campaign Play player-action turn runtime", () => {
     const bypassJudgeModel = { specificationVersion: "v3" } as unknown as LanguageModel;
     const reasoningJudgeModel = { specificationVersion: "v3" } as unknown as LanguageModel;
     const observedJudgeModels: LanguageModel[] = [];
+    const observedJudgeModes: Array<"auto" | "tool" | undefined> = [];
     let interrupted = false;
     const judge = {
       judge: vi.fn(async (...args: Parameters<typeof acceptedJudge.judge>) => {
         observedJudgeModels.push(args[0].model);
+        observedJudgeModes.push(args[0].structuredOutputMode);
         if (!interrupted) {
           interrupted = true;
           throw new CampaignPlayJudgeError("stage_timeout", {
@@ -2448,6 +2450,7 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "primary_settled" });
     expect(judge.judge).toHaveBeenCalledTimes(2);
     expect(observedJudgeModels).toEqual([bypassJudgeModel, bypassJudgeModel]);
+    expect(observedJudgeModes).toEqual(["auto", "tool"]);
     expect(gameMaster.plan).toHaveBeenCalledTimes(1);
     expect(countForTurn(handle, "campaign_play_commands", admission.turnId)).toBe(2);
   });

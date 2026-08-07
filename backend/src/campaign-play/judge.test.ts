@@ -26,19 +26,24 @@ function model(): LanguageModel {
   return value;
 }
 
-function trace(strategy: SafeGenerateTrace["strategy"] = "native_schema"): SafeGenerateTrace {
+function trace(
+  strategy: SafeGenerateTrace["strategy"] = "native_schema",
+  requestedMode: SafeGenerateTrace["requestedMode"] = "auto",
+): SafeGenerateTrace {
+  const primaryStrategy: SafeGenerateTrace["primaryStrategy"] =
+    strategy === "repair" || strategy === "full_retry" ? "native_schema" : strategy;
   return {
     text: "private",
     cleanedText: "private",
-    requestedMode: "auto",
+    requestedMode,
     strategy,
-    primaryStrategy: "native_schema",
+    primaryStrategy,
     fallbackStrategy: "text_fallback",
     capability: {
-      requestedMode: "auto",
-      primaryStrategy: "native_schema",
+      requestedMode,
+      primaryStrategy,
       fallbackStrategy: "text_fallback",
-      actualMode: "native_schema",
+      actualMode: primaryStrategy,
       reason: "test",
       providerId: "test-provider",
       providerName: "Test Provider",
@@ -364,6 +369,30 @@ describe("Campaign Play Judge", () => {
     expect(options.schema.safeParse(proposal({
       movementRouteHandle: "route-hidden",
     })).success).toBe(false);
+  });
+
+  it("accepts a strict tool-mode ruling against the requested capability", async () => {
+    const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
+      object: proposal(),
+      trace: trace("tool_mode", "tool"),
+    }));
+    const judge = createCampaignPlayJudge({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    await judge.judge({
+      frame: frame(),
+      input: {
+        originalText: "I ask the guard why the road is closed.",
+        source: "freeform",
+        choiceHandle: null,
+      },
+      model: model(),
+      temperature: 0.2,
+      budget,
+      structuredOutputMode: "tool",
+    });
+    expect(generateObject).toHaveBeenCalledOnce();
+    expect(generateObject.mock.calls[0]![0].mode).toBe("tool");
   });
 
   it("normalizes a model-authored immediate actor reaction into targets even for no effect", () => {

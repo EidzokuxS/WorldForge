@@ -2383,6 +2383,7 @@ export function createCampaignPlayTurnRuntime(
     attempt: number,
   ): "auto" | "tool" => {
     if (attempt <= 1) return "auto";
+    if (kind === "judge") return "tool";
     const previous = input.handle.sqlite.prepare(`SELECT error_code AS errorCode
       FROM campaign_play_model_stages
       WHERE campaign_id = ? AND turn_id = ? AND kind = ? AND attempt = ?`).get(
@@ -2802,6 +2803,11 @@ export function createCampaignPlayTurnRuntime(
                 ),
                 temperature: input.judgeModel.temperature,
                 budget: modelBudget(input.judgeModel),
+                structuredOutputMode: structuredOutputModeForExternalAttempt(
+                  context.turn.turnId,
+                  "judge",
+                  context.attempt,
+                ),
                 signal: context.signal,
               });
               const artifact = judgeArtifact({
