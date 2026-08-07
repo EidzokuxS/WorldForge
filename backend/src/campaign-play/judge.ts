@@ -38,6 +38,113 @@ import { hashCampaignPlayProjection } from "./campaign-play-projection.js";
 const log = createLogger("campaign-play-judge");
 const CAMPAIGN_PLAY_MIN_ACTION_MINUTES = 1;
 
+const JUDGE_CONTRACT_DIAGNOSTIC_EVENT = "judge.contract_rejected";
+const JUDGE_SCHEMA_PATH_SEGMENTS = new Set([
+  "normalizedIntent",
+  "originalText",
+  "source",
+  "choiceHandle",
+  "kind",
+  "targets",
+  "handle",
+  "method",
+  "stakes",
+  "movementRouteHandle",
+  "possessionEffectAuthority",
+  "enforcement",
+  "operation",
+  "possessionHandle",
+  "quantity",
+  "minimumResult",
+  "requiredObligationEffect",
+  "debtorHandle",
+  "creditorHandle",
+  "unitKey",
+  "amount",
+  "obligationHandle",
+  "paymentPossessionHandle",
+  "citedVisibleFactHandles",
+  "resultBounds",
+  "minimum",
+  "maximum",
+  "elapsedBounds",
+  "minimumMinutes",
+  "maximumMinutes",
+  "uncertainty",
+  "dieSides",
+  "difficulty",
+  "modifierMinimum",
+  "modifierMaximum",
+  "disposition",
+  "visibleActorReactions",
+  "actorHandle",
+  "reaction",
+  "supportingVisibleFactHandle",
+  "reason",
+  "clarificationQuestion",
+]);
+const JUDGE_SCHEMA_OWNED_MESSAGES = new Set([
+  "An actionable wait must advance world time.",
+  "An actionable move requires an explicit movement route handle.",
+  "Cited visible fact handles must be unique.",
+  "Uncertain judgment requires a code-owned check.",
+  "Only uncertain judgment may request a check.",
+  "Clarification question must match the judgment disposition.",
+  "Impossible and clarification judgments have no mechanical result range.",
+  "Actionable judgments require a mechanical result range.",
+  "The current code-owned uncertainty modifier requires a range containing zero.",
+  "No-effect rulings cannot require a possession or obligation effect.",
+  "Required possession effect must be reachable inside the result bounds.",
+  "Required obligation effect must be reachable inside the result bounds.",
+]);
+
+type CampaignPlayJudgeContractIssue = {
+  readonly code: string;
+  readonly path: readonly unknown[];
+  readonly message?: string;
+};
+
+type CampaignPlayJudgeContractDiagnosticEmitter = (
+  issues: readonly CampaignPlayJudgeContractIssue[],
+) => void;
+
+function isSafePositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function sanitizeJudgeSchemaPath(path: readonly unknown[]): Array<string | number> | undefined {
+  const sanitized: Array<string | number> = [];
+  for (const segment of path) {
+    if (typeof segment === "string" && JUDGE_SCHEMA_PATH_SEGMENTS.has(segment)) {
+      sanitized.push(segment);
+      continue;
+    }
+    if (typeof segment === "number" && Number.isSafeInteger(segment) && segment >= 0) {
+      sanitized.push(segment);
+      continue;
+    }
+    return undefined;
+  }
+  return sanitized;
+}
+
+function sanitizeJudgeContractIssues(
+  issues: readonly CampaignPlayJudgeContractIssue[],
+): Array<Record<string, unknown>> {
+  return issues.map((issue, issueIndex) => {
+    const sanitized: Record<string, unknown> = {
+      issueIndex,
+      code: issue.code,
+    };
+    const path = sanitizeJudgeSchemaPath(issue.path);
+    if (path !== undefined) sanitized.path = path;
+    if (issue.message !== undefined && JUDGE_SCHEMA_OWNED_MESSAGES.has(issue.message)) {
+      sanitized.message = issue.message;
+    }
+    return sanitized;
+  });
+}
+
 const line = (maximum: number) => z.string().min(1).max(maximum)
   .refine((value) => value === value.trim())
   .refine((value) => !value.includes("\n") && !value.includes("\r"));
@@ -305,6 +412,8 @@ export interface CampaignPlayJudgeRequest {
   temperature: number;
   budget: CampaignPlayModelBudget;
   structuredOutputMode?: "auto" | "tool";
+  attempt?: number;
+  workerEpoch?: number;
   signal?: AbortSignal;
 }
 
@@ -491,6 +600,7 @@ function compile(
   frame: CampaignPlayJudgeFrame,
   input: CampaignPlayJudgeInput,
   raw: unknown,
+  emitContractDiagnostic?: CampaignPlayJudgeContractDiagnosticEmitter,
 ): CampaignPlayJudgeRuling {
   const frameResult = campaignPlayJudgeFrameSchema.safeParse(frame);
   if (!frameResult.success) throw new CampaignPlayJudgeError("judge_frame_invalid", null, { cause: frameResult.error });
@@ -779,7 +889,10 @@ function compile(
     elapsedBounds,
     normalizedIntent,
   });
-  if (!rulingResult.success) throw new CampaignPlayJudgeError("model_contract_failed", null, { cause: rulingResult.error });
+  if (!rulingResult.success) {
+    emitContractDiagnostic?.(rulingResult.error.issues);
+    throw new CampaignPlayJudgeError("model_contract_failed", null, { cause: rulingResult.error });
+  }
   return freeze(rulingResult.data);
 }
 
@@ -787,6 +900,7 @@ export function createCampaignPlayJudge(
   overrides: Partial<CampaignPlayJudgeDependencies> = {},
 ) {
   const dependencies = { generateObject: safeGenerateObject, ...overrides };
+  const emittedDiagnosticEpochs = new Set<string>();
   return {
     compile,
     async judge(request: CampaignPlayJudgeRequest): Promise<CampaignPlayJudgeResult> {
@@ -842,9 +956,30 @@ export function createCampaignPlayJudge(
       )) {
         throw new CampaignPlayJudgeError("stage_budget_exceeded", { ...modelEvidence, errorCode: "stage_budget_exceeded" });
       }
+      const emitContractDiagnostic = isSafePositiveInteger(request.attempt)
+        && isSafePositiveInteger(request.workerEpoch)
+        ? (issues: readonly CampaignPlayJudgeContractIssue[]) => {
+            const key = [
+              parsedFrame.data.campaignId,
+              parsedFrame.data.turnId,
+              request.attempt,
+              request.workerEpoch,
+            ].join("\u0000");
+            if (emittedDiagnosticEpochs.has(key)) return;
+            emittedDiagnosticEpochs.add(key);
+            log.event(JUDGE_CONTRACT_DIAGNOSTIC_EVENT, {
+              campaignId: parsedFrame.data.campaignId,
+              turnId: parsedFrame.data.turnId,
+              stage: "judge",
+              attempt: request.attempt,
+              epoch: request.workerEpoch,
+              issues: sanitizeJudgeContractIssues(issues),
+            });
+          }
+        : undefined;
       let ruling: CampaignPlayJudgeRuling;
       try {
-        ruling = compile(parsedFrame.data, request.input, generated.object);
+        ruling = compile(parsedFrame.data, request.input, generated.object, emitContractDiagnostic);
       } catch (cause) {
         if (cause instanceof CampaignPlayJudgeError) {
           log.warn("Judge proposal failed semantic compilation.", {

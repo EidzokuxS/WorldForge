@@ -1,3 +1,4 @@
+import { Writable } from "node:stream";
 import type { LanguageModel } from "ai";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -6,6 +7,10 @@ import {
   rememberStructuredOutputModelMetadata,
 } from "../ai/structured-output-capabilities.js";
 import { safeGenerateObject, type SafeGenerateTrace } from "../ai/generate-object-safe.js";
+import {
+  __setTurnFileDispatchForTest,
+  resetLoggerForTest,
+} from "../lib/logger-test-utils.js";
 import {
   createCampaignPlayJudge,
   resolveCampaignPlayUncertainty,
@@ -129,6 +134,80 @@ function proposal(overrides: Record<string, unknown> = {}) {
     clarificationQuestion: null,
     ...overrides,
   };
+}
+
+class JudgeLogCapture extends Writable {
+  private readonly chunks: string[] = [];
+
+  override _write(
+    chunk: Buffer | string,
+    _encoding: BufferEncoding,
+    callback: (error?: Error | null) => void,
+  ): void {
+    this.chunks.push(typeof chunk === "string" ? chunk : chunk.toString("utf8"));
+    callback();
+  }
+
+  records(): Array<Record<string, unknown>> {
+    return this.chunks.join("")
+      .split(/\r?\n/)
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+  }
+}
+
+function captureJudgeLogs(): JudgeLogCapture {
+  const capture = new JudgeLogCapture();
+  resetLoggerForTest();
+  __setTurnFileDispatchForTest(capture);
+  return capture;
+}
+
+async function flushJudgeLogs(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+function contractDiagnostics(capture: JudgeLogCapture): Array<Record<string, unknown>> {
+  return capture.records().filter((record) => record.event === "judge.contract_rejected");
+}
+
+async function withJudgeLogs<T>(
+  run: (capture: JudgeLogCapture) => Promise<T>,
+): Promise<T> {
+  const capture = captureJudgeLogs();
+  try {
+    return await run(capture);
+  } finally {
+    resetLoggerForTest();
+  }
+}
+
+function finalInvalidProposal() {
+  return proposal({
+    kind: "attempt",
+    targets: [{ handle: "actor-guard", kind: "actor" }],
+    method: "player-prose-secret-123",
+    stakes: "player-prose-secret-123",
+    possessionEffectAuthority: {
+      kind: "adjust_actor_possession",
+      enforcement: "required",
+      operation: "transform",
+      possessionHandle: "notebook",
+      quantity: 1,
+      minimumResult: "strong_success",
+    },
+    citedVisibleFactHandles: ["actor-guard", "notebook", "actor-guard"],
+    disposition: "uncertain",
+    resultBounds: { minimum: "setback", maximum: "success" },
+    uncertainty: {
+      kind: "check",
+      dieSides: 20,
+      difficulty: 12,
+      modifierMinimum: -2,
+      modifierMaximum: 2,
+    },
+    reason: "player-prose-secret-123",
+  });
 }
 
 describe("Campaign Play Judge", () => {
@@ -1292,5 +1371,101 @@ describe("Campaign Play Judge", () => {
       model: model(), temperature: 0.2, budget,
     })).rejects.toMatchObject({ code: "transport_interrupted" });
     expect(generateObject).toHaveBeenCalledOnce();
+  });
+
+  it("emits no Judge contract diagnostic for a valid ruling", async () => {
+    await withJudgeLogs(async (capture) => {
+      const generateObject = vi.fn(async () => ({ object: proposal(), trace: trace() }));
+      const judge = createCampaignPlayJudge({ generateObject: generateObject as unknown as typeof safeGenerateObject });
+      await judge.judge({
+        frame: frame(),
+        input: { originalText: "I ask.", source: "freeform", choiceHandle: null },
+        model: model(), temperature: 0.2, budget,
+        attempt: 1,
+        workerEpoch: 3,
+      });
+      await flushJudgeLogs();
+      expect(contractDiagnostics(capture)).toEqual([]);
+    });
+  });
+
+  it("emits one safe, ordered diagnostic for a final ruling contract failure", async () => {
+    await withJudgeLogs(async (capture) => {
+      const unsafe = "player-prose-secret-123";
+      const generateObject = vi.fn(async () => ({ object: finalInvalidProposal(), trace: trace() }));
+      const judge = createCampaignPlayJudge({ generateObject: generateObject as unknown as typeof safeGenerateObject });
+      await expect(judge.judge({
+        frame: frame(),
+        input: { originalText: unsafe, source: "freeform", choiceHandle: null },
+        model: model(), temperature: 0.2, budget,
+        attempt: 2,
+        workerEpoch: 7,
+      })).rejects.toMatchObject({ code: "model_contract_failed" });
+      await flushJudgeLogs();
+
+      const diagnostics = contractDiagnostics(capture);
+      expect(diagnostics).toHaveLength(1);
+      const payload = diagnostics[0]!.payload as Record<string, unknown>;
+      expect(Object.keys(payload).sort()).toEqual([
+        "attempt",
+        "campaignId",
+        "epoch",
+        "issues",
+        "stage",
+        "turnId",
+      ]);
+      expect(payload).toMatchObject({
+        campaignId: "campaign-one",
+        turnId: "turn-one",
+        stage: "judge",
+        attempt: 2,
+        epoch: 7,
+      });
+      expect(payload.issues).toEqual([
+        {
+          issueIndex: 0,
+          code: "custom",
+          path: ["citedVisibleFactHandles"],
+          message: "Cited visible fact handles must be unique.",
+        },
+        {
+          issueIndex: 1,
+          code: "custom",
+          path: ["possessionEffectAuthority", "minimumResult"],
+          message: "Required possession effect must be reachable inside the result bounds.",
+        },
+      ]);
+      expect(JSON.stringify(diagnostics)).not.toContain(unsafe);
+    });
+  });
+
+  it("keeps timeout then invalid Judge attempts truthful without a third attempt or late diagnostic", async () => {
+    await withJudgeLogs(async (capture) => {
+      let calls = 0;
+      const generateObject = vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) throw new Error("local deadline");
+        return { object: finalInvalidProposal(), trace: trace() };
+      });
+      const judge = createCampaignPlayJudge({ generateObject: generateObject as unknown as typeof safeGenerateObject });
+      const input = { originalText: "player-prose-secret-123", source: "freeform" as const, choiceHandle: null };
+      await expect(judge.judge({
+        frame: frame(), input, model: model(), temperature: 0.2, budget,
+        attempt: 1, workerEpoch: 11,
+      })).rejects.toMatchObject({ code: "transport_interrupted" });
+      await expect(judge.judge({
+        frame: frame(), input, model: model(), temperature: 0.2, budget,
+        attempt: 2, workerEpoch: 12,
+      })).rejects.toMatchObject({ code: "model_contract_failed" });
+      await flushJudgeLogs();
+      await flushJudgeLogs();
+
+      expect(generateObject).toHaveBeenCalledTimes(2);
+      const diagnostics = contractDiagnostics(capture);
+      expect(diagnostics).toHaveLength(1);
+      expect((diagnostics[0]!.payload as Record<string, unknown>).attempt).toBe(2);
+      expect((diagnostics[0]!.payload as Record<string, unknown>).epoch).toBe(12);
+      expect(JSON.stringify(diagnostics)).not.toContain("player-prose-secret-123");
+    });
   });
 });

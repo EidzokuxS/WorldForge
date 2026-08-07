@@ -2811,6 +2811,8 @@ export function createCampaignPlayTurnRuntime(
                   "judge",
                   context.attempt,
                 ),
+                attempt: context.attempt,
+                workerEpoch: context.token.epoch,
                 signal: context.signal,
               });
               const artifact = judgeArtifact({
