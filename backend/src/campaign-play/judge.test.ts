@@ -679,6 +679,7 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("Transform the complete quantity-1 stack");
     expect(sentPrompt).toContain('Its exact shape is {"kind":"pay_actor_obligation"');
     expect(sentPrompt).toContain('"paymentPossessionHandle":"copied visible possession handle"');
+    expect(sentPrompt).toContain("Accepting offered work, including work that quotes an upfront or completion fee, is not completed work");
     expect(sentPrompt).toContain("A request, offer, promise, quote, cargo movement, or narration without an authoritative transfer neither incurs nor pays debt");
     expect(sentPrompt).toContain("SOURCE_MOMENT is the exact accepted player-visible scene");
     expect(sentPrompt).toContain(
