@@ -98,6 +98,12 @@ describe("campaign play actor replan prompt", () => {
     expect(prompt).toContain(
       "Choose a different directly reachable destination supplied by ACTOR_FRAME, or replace that step with a non-move action grounded at its established location",
     );
+    expect(prompt).toContain(
+      "When reviewViolations lists outcome_not_established, rebuild each flagged step so its method and observableTrace describe only this actor's own attempt or a physical trace directly caused by that method and established by ACTOR_FRAME or an earlier accepted step",
+    );
+    expect(prompt).toContain(
+      "Remove claims that another actor responded, consented, worked, moved, paid, or that a requested, visible, or possible result already occurred",
+    );
     const start = prompt.indexOf("SAFE_REJECTION_FEEDBACK\n") + "SAFE_REJECTION_FEEDBACK\n".length;
     const end = prompt.indexOf("\nEND_SAFE_REJECTION_FEEDBACK", start);
     const feedback = JSON.parse(prompt.slice(start, end)) as Record<string, unknown>;

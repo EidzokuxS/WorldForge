@@ -238,6 +238,8 @@ Regenerate a fresh proposal from ACTOR_FRAME. Correct the listed invariant. Do n
 
 When reason is route_not_traversable_from_step_location, every move target listed in moveTargets is invalid for that step and must not be reused. Choose a different directly reachable destination supplied by ACTOR_FRAME, or replace that step with a non-move action grounded at its established location.
 
+When reviewViolations lists outcome_not_established, rebuild each flagged step so its method and observableTrace describe only this actor's own attempt or a physical trace directly caused by that method and established by ACTOR_FRAME or an earlier accepted step. Remove claims that another actor responded, consented, worked, moved, paid, or that a requested, visible, or possible result already occurred; do not replace the claim with another unestablished outcome. Prefer one grounded step.
+
 SAFE_REJECTION_FEEDBACK
 ${JSON.stringify(safeFeedback)}
 END_SAFE_REJECTION_FEEDBACK`;
