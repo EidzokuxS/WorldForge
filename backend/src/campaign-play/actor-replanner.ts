@@ -1041,7 +1041,8 @@ export function createCampaignPlayActorReplanner(
         return isSafeGenerateObjectContractErrorCode(code);
       };
       const runAttempt = async (
-        model: LanguageModel,
+        proposalModel: LanguageModel,
+        reviewModel: LanguageModel,
         modelWorkerEpoch: number,
         attemptNumber: number,
         modelStageRowId: string,
@@ -1061,7 +1062,7 @@ export function createCampaignPlayActorReplanner(
           let generated: Awaited<ReturnType<typeof safeGenerateObject>>;
           try {
             generated = await runProvider(() => dependencies.generateObject<CampaignPlayActorReplanProposal>({
-              model,
+              model: proposalModel,
               schema: proposalSchema,
               prompt,
               temperature: request.temperature,
@@ -1134,7 +1135,7 @@ export function createCampaignPlayActorReplanner(
           let reviewed: { object: GroundingReview; trace: SafeGenerateTrace };
           try {
             reviewed = await runProvider(() => dependencies.generateObject<GroundingReview>({
-              model,
+              model: reviewModel,
               schema: campaignPlayActorPlanGroundingReviewSchema,
               prompt: buildCampaignPlayActorPlanGroundingReviewPrompt(
                 compilation.promptFrame,
@@ -1571,6 +1572,7 @@ export function createCampaignPlayActorReplanner(
 
       const firstResult = await runAttempt(
         request.model,
+        request.model,
         firstModelWorkerEpoch,
         firstAttemptNumber,
         firstModelStageRowId,
@@ -1790,6 +1792,7 @@ export function createCampaignPlayActorReplanner(
         }
         const secondResult = await runAttempt(
           recoveryModel,
+          request.model,
           secondModelWorkerEpoch,
           secondAttemptNumber,
           secondModelStageRowId,

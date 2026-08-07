@@ -945,7 +945,7 @@ describe("Campaign Play actor replanner", () => {
     expect(generateObject.mock.calls.map((call) => call[0]!.model)).toEqual([
       bypassModel,
       recoveryModel,
-      recoveryModel,
+      bypassModel,
     ]);
     expect(generateObject.mock.calls[1]![0].prompt)
       .toBe(generateObject.mock.calls[0]![0].prompt);
@@ -1201,7 +1201,7 @@ describe("Campaign Play actor replanner", () => {
     ]);
     expect(generateObject.mock.calls.slice(2).map((call) => call[0]!.model)).toEqual([
       recoveryModel,
-      recoveryModel,
+      bypassModel,
     ]);
     const firstPrompt = generateObject.mock.calls[0]![0].prompt;
     const recoveryPrompt = generateObject.mock.calls[2]![0].prompt;
@@ -1271,7 +1271,7 @@ describe("Campaign Play actor replanner", () => {
     expect(generateObject.mock.calls.map((call) => call[0]!.model)).toEqual([
       bypassModel,
       recoveryModel,
-      recoveryModel,
+      bypassModel,
     ]);
     const firstPrompt = generateObject.mock.calls[0]![0].prompt;
     const recoveryPrompt = generateObject.mock.calls[1]![0].prompt;
@@ -1427,7 +1427,7 @@ describe("Campaign Play actor replanner", () => {
       bypassModel,
       bypassModel,
       recoveryModel,
-      recoveryModel,
+      bypassModel,
     ]);
     expect(handle.sqlite.prepare(`SELECT attempt, status, schema_outcome AS schemaOutcome,
         error_code AS errorCode FROM campaign_play_model_stages
