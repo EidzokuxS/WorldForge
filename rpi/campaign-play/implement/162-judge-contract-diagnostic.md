@@ -52,6 +52,35 @@ The frozen r109 action-4 lane remains preserved and was not resumed, replayed, r
 
 Product entry and reload evidence are pending the fresh lane. The smallest positive diagnostic journey remains one valid Judge ruling followed by one final-schema rejection carrying one safe event, with a separate interrupted attempt proving no third call or late write. The positive r110 journey covered exact setup admission and four completed player actions before the Actor Replanner recovery timeout; no reload acceptance was attempted after the defect.
 
+## Fresh rendered journey: r111
+
+Run: `pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r111` (fresh lane)
+
+Campaign: `6b85a49e-fef5-4359-95e2-051383f6fb66`
+
+Entry and setup: the lane used commit `8c292b713c025425671a1282c709dd63fe2f14db`, materialized only from `lowwater-ledger-pristine-93a09e46-20260719`, with state SHA256 `6cb291d11ce6578e3395a10d2c5d590070e3ccdd8b2b67451410869ce97897d2`, config SHA256 `d8362b1af976c00cb8f14c564c8196a2d1ab137743ff368ea83d762a4ad2e065`, and canonical Brina card `R:\Projects\WorldForge\output\playtests\character-cards\brina-porter-v2.json` SHA256 `4b48de7a32df6a6be5a91ab12f09bb87926b40d5940348c7581e298eaa12b60a`. A preflight marker mismatch was reconciled read-only; setup then performed exactly one card import and one Save, and the actual PUT route was read back without a second import or Save. Begin was performed once with lower-wards / Local / Already here / Looking for work. Setup integrity was `ok` with no foreign-key violations.
+
+Live result: the rendered loop admitted 29 player actions and stopped at the first genuine defect on action 29. Actions 1-28 each returned an enabled control and a proper scene. Action 29 selected `8ac7f80424f562c17c6d96909b8e6a10985139f4:choice_e7b6a774a2b36cb8bf866264` once; its turn `turn-player-action:066998837c84a3f2063847a3dd467a51bb91b8f3` completed at the turn layer, but its narration operation failed and no new proper scene was rendered. All 29 admitted actions have unique turn/idempotency/choice bindings; no duplicate or unbound admission was observed. The loop issued no action after 29 and created no checkpoint-30/60 or action-60 reload evidence.
+
+Action 29 authoritative records: narration operation `narration-operation:80f9e0c919092c5d7fa4f7860d51d40233da7aff` ended `failed` on attempt 2. Attempt 1 `narration-attempt:ee3db67b3dd9766dface509dd34eb6c7d3c6b57a` ended `provider_unavailable` after 1,566 ms; the structured backend log records `safeGenerateObject tool_mode` failing with `Invalid API parameter, please check the documentation.` Attempt 2 `narration-attempt:3906843316026ba7529f5b908deba416781ac4ca` ended `stage_timeout` after 25,371 ms; its `safeGenerateObject native_json` call ended with `This operation was aborted`. Game Master and Actor Replanner stages were accepted before narration. No `judge.contract_rejected` event or Judge final-ruling failure occurred. Raw provider response bytes/body and the exact rejected parameter were not retained.
+
+Rendered evidence showed the preceding proper winch-platform scene and controls, then the action-29 page retained that prior scene and showed “What happened” / “Restore the telling” with Wait rather than a new proper scene. SQLite readback: `campaign_play_turns` total 30 including opening, `campaign_play_turn_results` 30, player turns 29, narration operations 29, attempts 41, proper scenes 28, receipts 88; integrity `ok`; foreign keys `[]`; all 29 player turns had unique idempotency keys, `stage=completed`, `error_code=null`, and `resume_eligible=0`.
+
+## r111 diagnosis and acceptance update
+
+The narrowest proven boundary is an external structured-output request rejection on the Narrator tool-mode attempt followed by the existing provider-unavailable recovery path's native-JSON attempt being locally aborted. This is not evidence of a provider outage, and it is not a proven prompt, Judge schema, compiler, or persistence defect. The existing recovery seam already selects `auto`/native JSON for a Narrator `provider_unavailable` recovery. Because the raw provider response is absent, the exact invalid parameter is unknown; changing the first-attempt request strategy or provider/configuration surface would be a material Main decision under the packet. No source repair was made after r111.
+
+| Criterion | Evidence | Result |
+| --- | --- | --- |
+| First genuine defect freezes the lane without another player action | r111 action-loop terminal record at action 29; no action 30 request | Pass |
+| Task-owned runtime cleanup is independently verified | r111 roots/descendants, ports, and browser profile absent after bottom-up stop | Pass |
+| 60/60 unique bound actions plus same-page reload | r111 stopped at action 29 with 28 proper scenes | Not met; Needs attention |
+| Continue without an unapproved architecture/provider decision | Exact Narrator request parameter is unknown and no narrow prompt/runtime repair is proven | Main decision required |
+
+Required Main decision: authorize or decline a bounded Narrator structured-output request-strategy/provider-parameter investigation or change despite the missing raw provider bytes; the current worker cannot choose that provider/configuration boundary.
+
 ## Cleanup
 
 The frozen r109 evidence and runtime remain preserved. r110 owned backend PID 12948 (child esbuild 53032), frontend PID 59144 (child Next 70984), Chrome PID 47308 and its exact descendants, ports 3970/3971/3972, and browser profile `output/playtests/campaign-play/pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r110.session/browser-profile`; all were stopped bottom-up and independently verified absent, with no listeners remaining. The session/run evidence was retained. The next lane must record every task-owned root PID, descendant, listener, browser page/profile, and helper, stop and verify all owned resources at the first genuine defect or terminal completion, and leave unrelated `AGENTS.md` and `CLAUDE.md` changes untouched and unstaged.
+
+r111 owned backend PID 35808 (children esbuild 56436 and conhost 41784), frontend PID 64884 (children Next 60252 and conhost 65096), Chrome PID 60092 and exact descendants 62412, 44244, 66328, 56156, 63700, and 36548, ports 3980/3981/3982, and browser profile `R:\Projects\WorldForge\output\playtests\campaign-play\pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r111.session\browser-profile`; all were stopped bottom-up and independently verified absent, with no listeners remaining. The r111 session/run evidence was retained. Frozen r109 remains untouched.
