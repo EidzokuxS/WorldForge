@@ -2581,6 +2581,7 @@ export function createCampaignPlayTurnRuntime(
         model: input.narratorModel.languageModel,
         temperature: input.narratorModel.temperature,
         budget: modelBudget(input.narratorModel),
+        structuredOutputMode: "tool",
         ...(recoveryFeedback === undefined ? {} : { recoveryFeedback }),
         signal: controller.signal,
       });
@@ -3338,6 +3339,7 @@ export function createCampaignPlayTurnRuntime(
                 model: input.narratorModel.languageModel,
                 temperature: input.narratorModel.temperature,
                 budget: modelBudget(input.narratorModel),
+                structuredOutputMode: "tool",
                 signal: context.signal,
               });
               validateNarrationAgainstPacket(candidate.narration, pending.packet);

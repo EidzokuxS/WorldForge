@@ -1621,6 +1621,41 @@ END_RECOVERY_DIAGNOSTIC`);
     expect(generateObject).toHaveBeenCalledOnce();
   });
 
+  it("uses explicit tool transport without changing the narration contract", async () => {
+    const toolTrace = trace("tool_mode");
+    toolTrace.requestedMode = "tool";
+    toolTrace.primaryStrategy = "tool_mode";
+    toolTrace.capability = {
+      requestedMode: "tool",
+      primaryStrategy: "tool_mode",
+      fallbackStrategy: "text_fallback",
+      actualMode: "tool_mode",
+      reason: "test tool capability",
+    };
+    const generateObject = vi.fn(async (
+      options: Parameters<typeof safeGenerateObject>[0],
+    ) => {
+      expect(options.mode).toBe("tool");
+      return { object: proposalFixture(), trace: toolTrace };
+    });
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    await expect(narrator.narrate({
+      narrationId: "narration-tool-transport",
+      packetBytes: canonicalizeCampaignPlayProjection(packetFixture()),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+      structuredOutputMode: "tool",
+    })).resolves.toMatchObject({
+      modelEvidence: { actualStrategy: "tool_mode" },
+    });
+    expect(generateObject).toHaveBeenCalledOnce();
+  });
+
   it("does not treat macro placement as immediate-scene custody", () => {
     const narrator = createCampaignPlayNarrator();
     const packet = {

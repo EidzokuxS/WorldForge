@@ -102,6 +102,7 @@ export interface CampaignPlayNarratorRequest {
   model: LanguageModel;
   temperature: number;
   budget: CampaignPlayNarratorBudget;
+  structuredOutputMode?: "auto" | "tool";
   recoveryFeedback?: CampaignPlayNarratorRecoveryFeedback;
   signal?: AbortSignal;
 }
@@ -875,9 +876,10 @@ export function createCampaignPlayNarrator(
       ) {
         throw new CampaignPlayNarratorError("narrator_request_invalid", null);
       }
+      const structuredOutputMode = request.structuredOutputMode ?? "auto";
       const capability = resolveStructuredOutputCapability({
         metadata: getStructuredOutputModelMetadata(request.model),
-        requestedMode: "auto",
+        requestedMode: structuredOutputMode,
       });
       if (capability.primaryStrategy === "text_fallback") {
         throw new CampaignPlayNarratorError("structured_output_unavailable", {
@@ -897,7 +899,7 @@ export function createCampaignPlayNarrator(
           temperature: request.temperature,
           maxOutputTokens: request.budget.maximumOutputTokens,
           abortSignal: request.signal,
-          mode: "auto",
+          mode: structuredOutputMode,
           strictSchema: true,
           allowRepair: false,
           allowTextFallback: false,

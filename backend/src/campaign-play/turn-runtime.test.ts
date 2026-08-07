@@ -3402,6 +3402,10 @@ describe("Campaign Play player-action turn runtime", () => {
       undefined,
       undefined,
     ]);
+    expect(requests.map((request) => request.structuredOutputMode)).toEqual([
+      "tool",
+      "tool",
+    ]);
     expect(attempts).toHaveLength(2);
     expect(new Set(attempts.map((attempt) => attempt.attemptId)).size).toBe(2);
     expect(attempts.map((attempt) => attempt.attempt)).toEqual([1, 2]);
