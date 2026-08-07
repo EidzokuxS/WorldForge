@@ -386,6 +386,7 @@ export interface CampaignPlayTurnRuntime {
     turnId: string,
     claimedToken?: CampaignPlayNarrationAttemptToken,
     recoveryFeedback?: CampaignPlayNarratorRecoveryFeedback,
+    structuredOutputMode?: "auto" | "tool",
   ): Promise<CampaignPlayNarrationExecution | null>;
   prepareNarrationRecovery(
     request: CampaignPlayNarrationRecoveryRequest,
@@ -2501,6 +2502,7 @@ export function createCampaignPlayTurnRuntime(
   const executeNarration = async (
     initialToken: CampaignPlayNarrationAttemptToken,
     recoveryFeedback?: CampaignPlayNarratorRecoveryFeedback,
+    structuredOutputMode: "auto" | "tool" = "tool",
   ): Promise<CampaignPlayNarrationExecution> => {
     let token = initialToken;
     let providerReturned = false;
@@ -2581,7 +2583,7 @@ export function createCampaignPlayTurnRuntime(
         model: input.narratorModel.languageModel,
         temperature: input.narratorModel.temperature,
         budget: modelBudget(input.narratorModel),
-        structuredOutputMode: "tool",
+        structuredOutputMode,
         ...(recoveryFeedback === undefined ? {} : { recoveryFeedback }),
         signal: controller.signal,
       });
@@ -3640,10 +3642,15 @@ export function createCampaignPlayTurnRuntime(
         telemetry: null,
       };
     },
-    async runNarration(turnId, claimedToken, recoveryFeedback) {
+    async runNarration(
+      turnId,
+      claimedToken,
+      recoveryFeedback,
+      structuredOutputMode = "tool",
+    ) {
       const token = claimedToken ?? claimNarration(turnId);
       return token
-        ? executeNarration(token, recoveryFeedback)
+        ? executeNarration(token, recoveryFeedback, structuredOutputMode)
         : narrationOperations.loadByTurn(turnId);
     },
     prepareNarrationRecovery(request, kind = "manual") {

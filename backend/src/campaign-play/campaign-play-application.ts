@@ -813,6 +813,7 @@ export function createCampaignPlayApplication(
         turnId,
         recoveryToken,
         operation.recoveryFeedback,
+        failedOperation.errorCode === "provider_unavailable" ? "auto" : "tool",
       );
     } finally {
       handle.close();

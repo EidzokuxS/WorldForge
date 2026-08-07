@@ -3700,9 +3700,11 @@ describe("Campaign Play player-action turn runtime", () => {
     async (_label, createError) => {
       const successful = playerNarratorFixture();
       let calls = 0;
+      const requests: Parameters<typeof successful.narrate>[0][] = [];
       const narrator: TestNarrator = {
         compile: successful.compile,
         narrate: vi.fn(async (request) => {
+          requests.push(request);
           calls += 1;
           if (calls === 1) throw createError();
           return successful.narrate(request);
@@ -3735,6 +3737,10 @@ describe("Campaign Play player-action turn runtime", () => {
         );
 
       expect(narrator.narrate).toHaveBeenCalledTimes(2);
+      expect(requests.map((request) => request.structuredOutputMode)).toEqual([
+        "tool",
+        "auto",
+      ]);
       expect(attempts).toEqual([
         { attempt: 1, status: "failed", errorCode: "provider_unavailable" },
         { attempt: 2, status: "accepted", errorCode: null },
@@ -3760,14 +3766,20 @@ describe("Campaign Play player-action turn runtime", () => {
 
   it("stops after one automatic provider-unavailable narration recovery", async () => {
     const fixtureNarrator = playerNarratorFixture();
+    const requests: Parameters<typeof fixtureNarrator.narrate>[0][] = [];
     const narrator: TestNarrator = {
       compile: fixtureNarrator.compile,
-      narrate: vi.fn(async () => {
+      narrate: vi.fn(async (request) => {
+        requests.push(request);
         throw new CampaignPlayNarratorError("transport_interrupted", null);
       }),
     };
     const result = await runPendingNarrationThroughApplication(narrator);
     expect(narrator.narrate).toHaveBeenCalledTimes(2);
+    expect(requests.map((request) => request.structuredOutputMode)).toEqual([
+      "tool",
+      "auto",
+    ]);
     expect(result.handle.sqlite.prepare(`SELECT attempt, status, error_code AS errorCode
       FROM campaign_play_narration_attempts WHERE campaign_id = ? ORDER BY attempt`).all(
         CAMPAIGN_ID,
