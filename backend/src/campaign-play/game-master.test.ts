@@ -773,6 +773,9 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("Do not invent a quest");
     expect(String(options.prompt)).toContain("an actor must not deny, misattribute, or forget an action");
     expect(String(options.prompt)).toContain(
+      "Never copy a summary from that actor's ACTOR_CONTINUITY.recentOwnActions",
+    );
+    expect(String(options.prompt)).toContain(
       'ACTOR_CONTINUITY=[{"actorHandle":"guard","recentOwnActions":[{"summary":"Oren Tide inspected the passage latch before the traveler arrived.","observableTrace":"Fresh oil marks the passage latch."}]}]',
     );
     expect(String(options.prompt)).toContain("ACTOR_DIRECTIVES is protected roleplay authority");
@@ -899,6 +902,28 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("Do not include planning or reasoning, and do not repeat supporting facts");
     expect(String(options.prompt)).not.toContain("actor-player");
     expect(String(options.prompt)).not.toContain("actor-guard");
+  });
+
+  it("rejects a verbatim repeat of the performing actor's recent dialogue", () => {
+    const requestFrame = frame();
+    const repeatedSummary = requestFrame.actorContinuity[0]!.recentOwnActions[0]!.summary;
+    expect(() => createCampaignPlayGameMaster().compile(
+      requestFrame,
+      ruling(),
+      resolution,
+      null,
+      {
+        ...proposal,
+        effects: [{ ...proposal.effects[0], summary: repeatedSummary }],
+      },
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+    expect(createCampaignPlayGameMaster().compile(
+      requestFrame,
+      ruling(),
+      resolution,
+      null,
+      proposal,
+    ).batch.commands).toHaveLength(2);
   });
 
   it("constrains every generated handle field to admitted frame bindings", async () => {

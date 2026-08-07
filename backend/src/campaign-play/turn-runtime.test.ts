@@ -2678,7 +2678,7 @@ describe("Campaign Play player-action turn runtime", () => {
       handle,
       time,
       judgeFixture("deterministic"),
-      gameMasterFixture(),
+      gameMasterFixture(1, true),
       { narrator },
     );
     const request = admissionRequest(state, "real-one-action-playtest");
@@ -4009,7 +4009,7 @@ describe("Campaign Play player-action turn runtime", () => {
       handle,
       time,
       judgeFixture("deterministic"),
-      gameMasterFixture(),
+      gameMasterFixture(1, true),
       { narrator },
     );
     const first = runtime.admitAction({

@@ -1291,6 +1291,22 @@ function compile(
   const parsed = campaignPlayGameMasterProposalSchema.safeParse(rawProposal);
   if (!parsed.success) throw new CampaignPlayGameMasterError("model_contract_failed", null, null, { cause: parsed.error });
   const proposal = parsed.data;
+  const repeatedActorDialogue = proposal.effects.some((effect) => {
+    if (
+      effect.kind !== "record_world_event"
+      || (effect.eventClass !== "dialogue" && effect.eventClass !== "interaction")
+      || effect.performingActorHandle === null
+      || effect.performingActorHandle === NEW_SUPPORT_ACTOR_HANDLE
+    ) {
+      return false;
+    }
+    return frame.actorContinuity
+      .find((context) => context.actorHandle === effect.performingActorHandle)
+      ?.recentOwnActions.some((action) => action.summary === effect.summary) ?? false;
+  });
+  if (repeatedActorDialogue) {
+    throw new CampaignPlayGameMasterError("model_contract_failed", null);
+  }
   const targetedNonplayerActorHandles = ruling.normalizedIntent.targets.flatMap((target) => {
     if (target.kind !== "actor") return [];
     const reference = map.get(target.handle);
@@ -1724,6 +1740,7 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     "For observation and discovery effects, report concrete sensory properties and only cautious conclusions that those properties support. Keep conclusions within comparisons an ordinary observer can make from supplied facts: wear or corrosion may suggest age, but cannot establish an absolute chronology, provenance, or comparison with every structure without supplied expertise and reference evidence. Preserve unknown authorship, motive, provenance, prior contents, and hidden causes. A clean, empty, missing, or disturbed surface establishes only its current observable state; it does not prove that something existed, was found, removed, stolen, concealed, or carried away. Unknowns are constraints, not a checklist for the public summary: lead with concrete sensory evidence, express at most one useful uncertainty, and do not enumerate every interpretation the evidence fails to prove. Do not expose protected truth by guessing the most convenient explanation or echo Judge diagnostic language into the scene.",
     "When the resolved action reveals, records, communicates, or verifies concrete information whose value was previously unspecified—such as a name, marking, code, number, date, quantity, direction, or instruction—materialize each usable player-visible value in the committed summary. Never say that a value was read, written down, repeated, counted, or confirmed while omitting the value itself. If the current action relies on earlier concrete values present in SOURCE_MOMENT or VISIBLE_FACTS, preserve and repeat them exactly. Do not substitute opaque handles or internal IDs for in-world values.",
     "ACTOR_CONTINUITY is protected causal truth about visible actors' own completed actions and outranks conflicting earlier dialogue in VISIBLE_FACTS. Maintain identity and causality: an actor must not deny, misattribute, or forget an action listed under its handle. Reconcile a prior denial instead of repeating it. Use this truth only when the exact PLAYER_INTENT and RULING make it relevant; do not volunteer unrelated protected history. An absent action means unknown, not that the actor did nothing.",
+    "A dialogue or interaction must answer the exact current PLAYER_INTENT. Never copy a summary from that actor's ACTOR_CONTINUITY.recentOwnActions. If the actor must restate an earlier point, give a concise paraphrase that adds the current question-specific detail.",
     "ACTOR_DIRECTIVES is protected roleplay authority for each agent actor targeted by PLAYER_INTENT. Use the person's profile, present conditions, active goals, and relations to choose what they actually say or do. These directives establish characterization and decision pressure, not player knowledge or permission to disclose protected facts. Never quote a hidden goal or motive merely because it appears there.",
     "For an attempt with nonplayer actor targets, their response is part of the outcome. Use ACTOR_DIRECTIVES and a dialogue or interaction effect before any actorless physical result. A successful roll resolves the player's effort; it does not create permission or cooperation.",
     "REQUIRED_ACTOR_RESPONSES is the complete code-owned list for this proposal. For every listed handle, include one dialogue or interaction record_world_event with that exact performingActorHandle before the first actorless discovery or scene event. An empty list requires none. Omitting, delaying, or replacing a required response with actorless prose invalidates the whole proposal.",
