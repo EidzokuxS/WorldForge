@@ -2415,9 +2415,13 @@ describe("Campaign Play player-action turn runtime", () => {
     const time = fixedClock(2_650);
     const judge = judgeFixture("deterministic");
     const acceptedGameMaster = gameMasterFixture();
+    const bypassGameMasterModel = { specificationVersion: "v3" } as unknown as LanguageModel;
+    const reasoningGameMasterModel = { specificationVersion: "v3" } as unknown as LanguageModel;
+    const observedGameMasterModels: LanguageModel[] = [];
     let interrupted = false;
     const gameMaster = {
       plan: vi.fn(async (...args: Parameters<typeof acceptedGameMaster.plan>) => {
+        observedGameMasterModels.push(args[0].model);
         if (!interrupted) {
           interrupted = true;
           throw new CampaignPlayGameMasterError("stage_timeout", {
@@ -2428,7 +2432,23 @@ describe("Campaign Play player-action turn runtime", () => {
         return acceptedGameMaster.plan(...args);
       }),
     };
-    const runtime = turnRuntime(handle, time, judge, gameMaster);
+    const runtime = turnRuntime(handle, time, judge, gameMaster, {
+      gameMasterModel: {
+        languageModel: bypassGameMasterModel,
+        reasoningModel: reasoningGameMasterModel,
+        requested: {
+          providerId: "test",
+          model: "test-game-master",
+          strategy: "strict_object",
+          pricing: TEST_MODEL_PRICING,
+        },
+        temperature: 0.2,
+        maximumInputTokens: 1_000,
+        maximumOutputTokens: 1_000,
+        maximumTotalTokens: 2_000,
+        maximumCostMicros: 10_000,
+      },
+    });
     const admission = runtime.admitAction({
       request: admissionRequest(state, "interrupted-game-master"),
       submittedAt: 2_650,
@@ -2461,6 +2481,7 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "primary_settled" });
     expect(judge.judge).toHaveBeenCalledTimes(1);
     expect(gameMaster.plan).toHaveBeenCalledTimes(2);
+    expect(observedGameMasterModels).toEqual([bypassGameMasterModel, reasoningGameMasterModel]);
     expect(countForTurn(handle, "campaign_play_commands", admission.turnId)).toBe(2);
   });
 

@@ -413,6 +413,15 @@ describe("CampaignPlayApplication", () => {
       attempt: 1,
       wasResume: false,
       alreadyAttempted: false,
+    })).toBe(true);
+    expect(campaignPlayMayAutomaticallyResumeExternalStage({
+      turnKind: "player_action",
+      interruptedStage: "judged",
+      routeKind: "certified_contact",
+      errorCode: "model_contract_invalid",
+      attempt: 1,
+      wasResume: false,
+      alreadyAttempted: false,
     })).toBe(false);
   });
 
@@ -552,6 +561,16 @@ describe("CampaignPlayApplication", () => {
           model: "generator-model",
         },
         { role: "generator", reasoningMode: "bypass" },
+      ],
+      [
+        {
+          id: "provider-test",
+          name: "Provider Test",
+          baseUrl: "http://localhost:1234",
+          apiKey: "",
+          model: "generator-model",
+        },
+        { role: "generator" },
       ],
       [
         {

@@ -2842,7 +2842,9 @@ export function createCampaignPlayTurnRuntime(
                 ruling: judgeArtifactValue.ruling,
                 resolution: judgeArtifactValue.resolution,
                 uncertaintyAuthority: judgeArtifactValue.uncertaintyAuthority,
-                model: input.gameMasterModel.languageModel,
+                model: context.attempt > 1 && input.gameMasterModel.reasoningModel !== undefined
+                  ? input.gameMasterModel.reasoningModel
+                  : input.gameMasterModel.languageModel,
                 temperature: input.gameMasterModel.temperature,
                 budget: modelBudget(input.gameMasterModel),
                 signal: context.signal,

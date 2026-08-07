@@ -133,8 +133,8 @@ export function campaignPlayMayAutomaticallyResumeExternalStage(input: {
   if (input.turnKind !== "player_action") return false;
   if (input.errorCode === "stage_timeout") return true;
   return input.errorCode === "model_contract_invalid"
-    && input.interruptedStage === "admitted"
-    && input.routeKind === "full_authority";
+    && input.routeKind === "full_authority"
+    && (input.interruptedStage === "admitted" || input.interruptedStage === "judged");
 }
 
 interface CampaignPlayRuntimeFactory {
@@ -569,11 +569,14 @@ export function createCampaignPlayApplication(
         ),
         reasoningModel: dependencies.createModel(judge.provider, { role: "judge" }),
       },
-      gameMasterModel: stageModel(
-        generator,
-        gameMasterRequested,
-        dependencies.createModel(generator.provider, { role: "generator", reasoningMode: "bypass" }),
-      ),
+      gameMasterModel: {
+        ...stageModel(
+          generator,
+          gameMasterRequested,
+          dependencies.createModel(generator.provider, { role: "generator", reasoningMode: "bypass" }),
+        ),
+        reasoningModel: dependencies.createModel(generator.provider, { role: "generator" }),
+      },
       certifiedGameMasterModel: stageModel(
         generator,
         gameMasterRequested,
