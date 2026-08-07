@@ -3648,7 +3648,7 @@ export function createCampaignPlayTurnRuntime(
       turnId,
       claimedToken,
       recoveryFeedback,
-      structuredOutputMode = "tool",
+      structuredOutputMode = "auto",
     ) {
       const token = claimedToken ?? claimNarration(turnId);
       return token

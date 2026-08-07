@@ -3024,6 +3024,10 @@ describe("Campaign Play player-action turn runtime", () => {
         packetJson: string;
       };
     expect(narrator.narrate).toHaveBeenCalledTimes(2);
+    expect(requests.map((request) => request.structuredOutputMode)).toEqual([
+      "auto",
+      "tool",
+    ]);
     expect(attempts).toHaveLength(2);
     expect(attempts.map((attempt) => attempt.attempt)).toEqual([1, 2]);
     expect(new Set(attempts.map((attempt) => attempt.attemptId)).size).toBe(2);
@@ -3192,6 +3196,7 @@ describe("Campaign Play player-action turn runtime", () => {
             ? null
             : "the immediate situation",
         }));
+        const usesToolMode = (options.tools?.length ?? 0) > 0;
         if (generatedCalls === 1) {
           if (failure === "provider") throw new Error("transport interrupted");
           const proposal = {
@@ -3207,13 +3212,18 @@ describe("Campaign Play player-action turn runtime", () => {
             actionSelections,
           };
           return {
-            content: [{
-              type: "tool-call",
-              toolCallId: "structured-output-1",
-              toolName: "structured_output",
-              input: JSON.stringify(proposal),
-            }],
-            finishReason: { unified: "tool-calls", raw: undefined },
+            content: usesToolMode
+              ? [{
+                  type: "tool-call",
+                  toolCallId: "structured-output-1",
+                  toolName: "structured_output",
+                  input: JSON.stringify(proposal),
+                }]
+              : [{ type: "text", text: JSON.stringify(proposal) }],
+            finishReason: {
+              unified: usesToolMode ? "tool-calls" : "stop",
+              raw: undefined,
+            },
             response: { modelId: "test-narrator" },
             usage: {
               inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
@@ -3248,7 +3258,7 @@ describe("Campaign Play player-action turn runtime", () => {
               actionSelections,
             };
         return {
-          content: failure === "provider"
+          content: failure === "provider" || !usesToolMode
             ? [{ type: "text", text: JSON.stringify(proposal) }]
             : [{
                 type: "tool-call",
@@ -3257,7 +3267,7 @@ describe("Campaign Play player-action turn runtime", () => {
                 input: JSON.stringify(proposal),
               }],
           finishReason: {
-            unified: failure === "provider" ? "stop" : "tool-calls",
+            unified: failure === "provider" || !usesToolMode ? "stop" : "tool-calls",
             raw: undefined,
           },
           response: { modelId: "test-narrator" },
@@ -3425,7 +3435,7 @@ describe("Campaign Play player-action turn runtime", () => {
       undefined,
     ]);
     expect(requests.map((request) => request.structuredOutputMode)).toEqual([
-      "tool",
+      "auto",
       "tool",
     ]);
     expect(attempts).toHaveLength(2);
@@ -3696,6 +3706,9 @@ describe("Campaign Play player-action turn runtime", () => {
         currentAttempt: number;
       };
     expect(narrator.narrate).toHaveBeenCalledTimes(1);
+    expect(narrator.narrate.mock.calls[0]?.[0]).toMatchObject({
+      structuredOutputMode: "auto",
+    });
     expect(operation).toEqual({ status: "complete", currentAttempt: 1 });
     expect(result.handle.sqlite.prepare(`SELECT COUNT(*) AS count
       FROM campaign_play_narration_attempts WHERE campaign_id = ?`).get(CAMPAIGN_ID))
@@ -3752,7 +3765,7 @@ describe("Campaign Play player-action turn runtime", () => {
 
       expect(narrator.narrate).toHaveBeenCalledTimes(2);
       expect(requests.map((request) => request.structuredOutputMode)).toEqual([
-        "tool",
+        "auto",
         "auto",
       ]);
       expect(attempts).toEqual([
@@ -3791,7 +3804,7 @@ describe("Campaign Play player-action turn runtime", () => {
     const result = await runPendingNarrationThroughApplication(narrator);
     expect(narrator.narrate).toHaveBeenCalledTimes(2);
     expect(requests.map((request) => request.structuredOutputMode)).toEqual([
-      "tool",
+      "auto",
       "auto",
     ]);
     expect(result.handle.sqlite.prepare(`SELECT attempt, status, error_code AS errorCode
