@@ -1471,6 +1471,8 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Second person identifies only the player");
     expect(prompt).toContain("Never merge the player with a named or unnamed actor");
     expect(prompt).toContain("is not approaching or watching \"you\" without that identity evidence");
+    expect(prompt).toContain("Before finalizing each beat, check every visible actor name or unique name fragment in its text");
+    expect(prompt).toContain("Remove any unmatched actor reference");
     expect(prompt).toContain("If removing a beat loses no supported information, omit it");
     expect(prompt).toContain("Never add a moment beat to repeat sourceMoment");
     expect(prompt).toContain("Each actionSelection contains exactly intentIndex and detail");
