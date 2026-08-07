@@ -776,11 +776,14 @@ export function createCampaignPlayApplication(
       // Safe compiler coordinates let the existing bypass Narrator correct the
       // rejected arrangement directly. Without them, retain the broader
       // default-reasoning recovery introduced for opaque semantic failures.
-      // Transport recovery keeps the original runtime and model configuration.
+      // A tool-transport rejection has no compiler coordinates. Its native JSON
+      // recovery therefore uses the same default-reasoning path as an opaque
+      // semantic failure, while retaining the frozen provider and model.
       let recoveryRuntime = runtime;
       if (
-        failedOperation.errorCode === "narration_invalid" &&
-        operation.recoveryFeedback === undefined
+        failedOperation.errorCode === "provider_unavailable" ||
+        (failedOperation.errorCode === "narration_invalid" &&
+          operation.recoveryFeedback === undefined)
       ) {
         const originalCreateModel = dependencies.createModel;
         let recoveryStorytellerModelCreated = false;

@@ -3091,15 +3091,23 @@ describe("Campaign Play player-action turn runtime", () => {
   it.each([
     {
       label: "keeps bypass when safe compiler feedback identifies the failed checks",
+      failure: "semantic_safe" as const,
       safeCompilerFeedback: true,
       expectedRecoveryOptions: { role: "storyteller", reasoningMode: "bypass" },
     },
     {
       label: "uses default reasoning when the semantic failure has no safe feedback",
+      failure: "semantic_opaque" as const,
       safeCompilerFeedback: false,
       expectedRecoveryOptions: { role: "storyteller" },
     },
-  ])("$label", async ({ safeCompilerFeedback, expectedRecoveryOptions }) => {
+    {
+      label: "uses default reasoning with native JSON after tool transport rejection",
+      failure: "provider" as const,
+      safeCompilerFeedback: false,
+      expectedRecoveryOptions: { role: "storyteller" },
+    },
+  ])("$label", async ({ failure, safeCompilerFeedback, expectedRecoveryOptions }) => {
     const prepared = await createCompletedPlayerActionForApplication();
     closeTracked(prepared.handle);
 
@@ -3185,6 +3193,7 @@ describe("Campaign Play player-action turn runtime", () => {
             : "the immediate situation",
         }));
         if (generatedCalls === 1) {
+          if (failure === "provider") throw new Error("transport interrupted");
           const proposal = {
             beats: [{
               purpose: "consequence",
@@ -3239,13 +3248,18 @@ describe("Campaign Play player-action turn runtime", () => {
               actionSelections,
             };
         return {
-          content: [{
-            type: "tool-call",
-            toolCallId: `structured-output-${generatedCalls}`,
-            toolName: "structured_output",
-            input: JSON.stringify(proposal),
-          }],
-          finishReason: { unified: "tool-calls", raw: undefined },
+          content: failure === "provider"
+            ? [{ type: "text", text: JSON.stringify(proposal) }]
+            : [{
+                type: "tool-call",
+                toolCallId: `structured-output-${generatedCalls}`,
+                toolName: "structured_output",
+                input: JSON.stringify(proposal),
+              }],
+          finishReason: {
+            unified: failure === "provider" ? "stop" : "tool-calls",
+            raw: undefined,
+          },
           response: { modelId: "test-narrator" },
           usage: {
             inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
@@ -3291,7 +3305,7 @@ describe("Campaign Play player-action turn runtime", () => {
         model: "test-narrator",
         options: { role: "storyteller", reasoningMode: "bypass" },
       },
-      ...(safeCompilerFeedback ? [] : [{
+      ...(failure === "semantic_safe" ? [] : [{
         providerId: provider.id,
         model: "test-narrator",
         options: expectedRecoveryOptions,
@@ -3342,7 +3356,7 @@ describe("Campaign Play player-action turn runtime", () => {
         turnId: prepared.turnId,
         attempt: 1,
         status: "failed",
-        errorCode: "narration_invalid",
+        errorCode: failure === "provider" ? "provider_unavailable" : "narration_invalid",
       }),
       expect.objectContaining({
         operationId: prepared.pending.operationId,
