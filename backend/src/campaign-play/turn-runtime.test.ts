@@ -2460,10 +2460,12 @@ describe("Campaign Play player-action turn runtime", () => {
     const bypassGameMasterModel = { specificationVersion: "v3" } as unknown as LanguageModel;
     const reasoningGameMasterModel = { specificationVersion: "v3" } as unknown as LanguageModel;
     const observedGameMasterModels: LanguageModel[] = [];
+    const observedGameMasterModes: Array<"auto" | "tool" | undefined> = [];
     let interrupted = false;
     const gameMaster = {
       plan: vi.fn(async (...args: Parameters<typeof acceptedGameMaster.plan>) => {
         observedGameMasterModels.push(args[0].model);
+        observedGameMasterModes.push(args[0].structuredOutputMode);
         if (!interrupted) {
           interrupted = true;
           throw new CampaignPlayGameMasterError("stage_timeout", {
@@ -2524,6 +2526,7 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(judge.judge).toHaveBeenCalledTimes(1);
     expect(gameMaster.plan).toHaveBeenCalledTimes(2);
     expect(observedGameMasterModels).toEqual([bypassGameMasterModel, bypassGameMasterModel]);
+    expect(observedGameMasterModes).toEqual(["auto", "tool"]);
     expect(countForTurn(handle, "campaign_play_commands", admission.turnId)).toBe(2);
   });
 

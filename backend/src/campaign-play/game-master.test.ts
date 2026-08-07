@@ -704,11 +704,11 @@ describe("Campaign Play Game Master", () => {
     expect(generateObject).toHaveBeenCalledTimes(2);
     const options = generateObject.mock.calls[0]![0];
     expect(options).toMatchObject({ strictSchema: true, allowRepair: false, allowTextFallback: false,
-      retries: 1, abortSignal: workerController.signal });
+      retries: 1, abortSignal: workerController.signal, mode: "auto" });
     expect("timeout" in options).toBe(false);
     const reviewOptions = generateObject.mock.calls[1]![0];
     expect(reviewOptions).toMatchObject({ strictSchema: true, allowRepair: false,
-      allowTextFallback: false, retries: 1, abortSignal: workerController.signal });
+      allowTextFallback: false, retries: 1, abortSignal: workerController.signal, mode: "auto" });
     expect("timeout" in reviewOptions).toBe(false);
     expect(String(reviewOptions.prompt)).toContain("A record_world_event is presentation evidence, never mechanical authority");
     expect(String(reviewOptions.prompt)).toContain("unless typedResourceEffects contains the matching possession effect");
@@ -902,6 +902,30 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("Do not include planning or reasoning, and do not repeat supporting facts");
     expect(String(options.prompt)).not.toContain("actor-player");
     expect(String(options.prompt)).not.toContain("actor-guard");
+  });
+
+  it("uses the requested strict tool mode for the proposal and authority review", async () => {
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: proposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: { verdict: "accepted", reason: "The dialogue changes no mechanical resource state." },
+        trace: trace(),
+      });
+    const gameMaster = createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    await gameMaster.plan({
+      frame: frame(),
+      ruling: ruling(),
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      structuredOutputMode: "tool",
+    });
+    expect(generateObject).toHaveBeenCalledTimes(2);
+    expect(generateObject.mock.calls.map(([options]) => options.mode)).toEqual(["tool", "tool"]);
   });
 
   it("rejects a verbatim repeat of the performing actor's recent dialogue", () => {

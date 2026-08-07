@@ -2377,6 +2377,23 @@ export function createCampaignPlayTurnRuntime(
       : model.languageModel;
   };
 
+  const structuredOutputModeForExternalAttempt = (
+    turnId: string,
+    kind: "judge" | "game_master",
+    attempt: number,
+  ): "auto" | "tool" => {
+    if (attempt <= 1) return "auto";
+    const previous = input.handle.sqlite.prepare(`SELECT error_code AS errorCode
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = ? AND attempt = ?`).get(
+        input.handle.campaignId,
+        turnId,
+        kind,
+        attempt - 1,
+      ) as { errorCode: string | null } | undefined;
+    return previous?.errorCode === "model_contract_invalid" ? "auto" : "tool";
+  };
+
   const releaseActorBoundary = (
     token: CampaignPlayWorkerLeaseToken,
     jobId: string,
@@ -2658,6 +2675,11 @@ export function createCampaignPlayTurnRuntime(
                     context.attempt,
                     certifiedGameMasterModel,
                   ),
+                  structuredOutputMode: structuredOutputModeForExternalAttempt(
+                    context.turn.turnId,
+                    "game_master",
+                    context.attempt,
+                  ),
                   temperature: certifiedGameMasterModel.temperature,
                   budget: modelBudget(certifiedGameMasterModel),
                   signal: context.signal,
@@ -2875,6 +2897,11 @@ export function createCampaignPlayTurnRuntime(
                   "game_master",
                   context.attempt,
                   input.gameMasterModel,
+                ),
+                structuredOutputMode: structuredOutputModeForExternalAttempt(
+                  context.turn.turnId,
+                  "game_master",
+                  context.attempt,
                 ),
                 temperature: input.gameMasterModel.temperature,
                 budget: modelBudget(input.gameMasterModel),

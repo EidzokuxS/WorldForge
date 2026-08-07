@@ -319,6 +319,7 @@ export interface CampaignPlayGameMasterRequest {
   model: LanguageModel;
   temperature: number;
   budget: CampaignPlayModelBudget;
+  structuredOutputMode?: "auto" | "tool";
   signal?: AbortSignal;
 }
 
@@ -1877,7 +1878,7 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
           temperature: request.temperature,
           maxOutputTokens: request.budget.maximumOutputTokens,
           abortSignal: request.signal,
-          mode: "auto",
+          mode: request.structuredOutputMode ?? "auto",
           strictSchema: true,
           allowRepair: false,
           allowTextFallback: false,
@@ -1931,7 +1932,7 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
             temperature: 0,
             maxOutputTokens: request.budget.maximumOutputTokens,
             abortSignal: request.signal,
-            mode: "auto",
+            mode: request.structuredOutputMode ?? "auto",
             strictSchema: true,
             allowRepair: false,
             allowTextFallback: false,
