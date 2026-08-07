@@ -3026,7 +3026,7 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(narrator.narrate).toHaveBeenCalledTimes(2);
     expect(requests.map((request) => request.structuredOutputMode)).toEqual([
       "auto",
-      "tool",
+      "auto",
     ]);
     expect(attempts).toHaveLength(2);
     expect(attempts.map((attempt) => attempt.attempt)).toEqual([1, 2]);
@@ -3152,6 +3152,7 @@ describe("Campaign Play player-action turn runtime", () => {
     };
 
     let generatedCalls = 0;
+    const observedStructuredOutputModes: Array<"auto" | "tool"> = [];
     const model = new MockLanguageModelV3({
       provider: provider.id,
       modelId: "test-narrator",
@@ -3197,6 +3198,7 @@ describe("Campaign Play player-action turn runtime", () => {
             : "the immediate situation",
         }));
         const usesToolMode = (options.tools?.length ?? 0) > 0;
+        observedStructuredOutputModes.push(usesToolMode ? "tool" : "auto");
         if (generatedCalls === 1) {
           if (failure === "provider") throw new Error("transport interrupted");
           const proposal = {
@@ -3322,6 +3324,7 @@ describe("Campaign Play player-action turn runtime", () => {
       }]),
     ]);
     expect(generatedCalls).toBe(2);
+    expect(observedStructuredOutputModes).toEqual(["auto", "auto"]);
     const handle = track(openCampaignPlayDatabase(CAMPAIGN_ID));
     const operation = handle.sqlite.prepare(`SELECT operation_id AS operationId,
         result_id AS resultId, turn_id AS turnId, narration_id AS narrationId,
@@ -3436,7 +3439,7 @@ describe("Campaign Play player-action turn runtime", () => {
     ]);
     expect(requests.map((request) => request.structuredOutputMode)).toEqual([
       "auto",
-      "tool",
+      "auto",
     ]);
     expect(attempts).toHaveLength(2);
     expect(new Set(attempts.map((attempt) => attempt.attemptId)).size).toBe(2);
