@@ -2357,6 +2357,26 @@ export function createCampaignPlayTurnRuntime(
           turnId,
         ) as { count: number }).count;
 
+  const modelForExternalAttempt = (
+    turnId: string,
+    kind: "judge" | "game_master",
+    attempt: number,
+    model: CampaignPlayTurnRuntimeStageModel,
+  ): LanguageModel => {
+    if (attempt <= 1 || model.reasoningModel === undefined) return model.languageModel;
+    const previous = input.handle.sqlite.prepare(`SELECT error_code AS errorCode
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = ? AND attempt = ?`).get(
+        input.handle.campaignId,
+        turnId,
+        kind,
+        attempt - 1,
+      ) as { errorCode: string | null } | undefined;
+    return previous?.errorCode === "model_contract_invalid"
+      ? model.reasoningModel
+      : model.languageModel;
+  };
+
   const releaseActorBoundary = (
     token: CampaignPlayWorkerLeaseToken,
     jobId: string,
@@ -2632,9 +2652,12 @@ export function createCampaignPlayTurnRuntime(
                   ruling: certificate.ruling,
                   resolution: certificate.resolution,
                   uncertaintyAuthority: null,
-                  model: context.attempt > 1 && certifiedGameMasterModel.reasoningModel
-                    ? certifiedGameMasterModel.reasoningModel
-                    : certifiedGameMasterModel.languageModel,
+                  model: modelForExternalAttempt(
+                    context.turn.turnId,
+                    "game_master",
+                    context.attempt,
+                    certifiedGameMasterModel,
+                  ),
                   temperature: certifiedGameMasterModel.temperature,
                   budget: modelBudget(certifiedGameMasterModel),
                   signal: context.signal,
@@ -2749,9 +2772,12 @@ export function createCampaignPlayTurnRuntime(
                     ? { kind: frozenChoice.kind, targets: frozenChoice.targets }
                     : null,
                 },
-                model: context.attempt > 1 && input.judgeModel.reasoningModel !== undefined
-                  ? input.judgeModel.reasoningModel
-                  : input.judgeModel.languageModel,
+                model: modelForExternalAttempt(
+                  context.turn.turnId,
+                  "judge",
+                  context.attempt,
+                  input.judgeModel,
+                ),
                 temperature: input.judgeModel.temperature,
                 budget: modelBudget(input.judgeModel),
                 signal: context.signal,
@@ -2844,9 +2870,12 @@ export function createCampaignPlayTurnRuntime(
                 ruling: judgeArtifactValue.ruling,
                 resolution: judgeArtifactValue.resolution,
                 uncertaintyAuthority: judgeArtifactValue.uncertaintyAuthority,
-                model: context.attempt > 1 && input.gameMasterModel.reasoningModel !== undefined
-                  ? input.gameMasterModel.reasoningModel
-                  : input.gameMasterModel.languageModel,
+                model: modelForExternalAttempt(
+                  context.turn.turnId,
+                  "game_master",
+                  context.attempt,
+                  input.gameMasterModel,
+                ),
                 temperature: input.gameMasterModel.temperature,
                 budget: modelBudget(input.gameMasterModel),
                 signal: context.signal,

@@ -1376,7 +1376,7 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "planned", workerEpoch: 2 });
     expect(judge.judge).toHaveBeenCalledTimes(0);
     expect(gameMaster.plan).toHaveBeenCalledTimes(2);
-    expect(observedModels).toEqual([bypassModel, reasoningModel]);
+    expect(observedModels).toEqual([bypassModel, bypassModel]);
     await advanceUntilStage(runtime, time, admission.turnId, "completed");
     expect(countForTurn(handle, "campaign_play_turn_results", admission.turnId)).toBe(1);
     expect(countForTurn(handle, "campaign_play_receipts", admission.turnId)).toBeGreaterThan(0);
@@ -1501,22 +1501,42 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(waitDelays).toContain(45_000);
   });
 
-  it("resumes a certified contact under a fresh epoch without Judge or duplicate settlement", async () => {
+  it("uses default reasoning for a certified semantic recovery without Judge or duplicate settlement", async () => {
     const { handle, state } = await createReadyCampaignWithOpening(10_000, {
       contactDetail: "ask about the immediate situation",
     });
     const time = fixedClock(1_947);
     const judge = judgeFixture("deterministic");
     const successful = gameMasterFixture();
+    const bypassModel = {} as LanguageModel;
+    const reasoningModel = {} as LanguageModel;
+    const observedModels: LanguageModel[] = [];
     let calls = 0;
     const gameMaster = {
       plan: vi.fn(async (request: Parameters<typeof successful.plan>[0]) => {
+        observedModels.push(request.model);
         calls += 1;
-        if (calls === 1) throw new CampaignPlayGameMasterError("stage_timeout", null);
+        if (calls === 1) throw new CampaignPlayGameMasterError("model_contract_failed", null);
         return successful.plan(request);
       }),
     };
-    const runtime = turnRuntime(handle, time, judge, gameMaster);
+    const runtime = turnRuntime(handle, time, judge, gameMaster, {
+      certifiedGameMasterModel: {
+        languageModel: bypassModel,
+        reasoningModel,
+        requested: {
+          providerId: "test",
+          model: "test-certified-game-master",
+          strategy: "strict_object",
+          pricing: TEST_MODEL_PRICING,
+        },
+        temperature: 0.2,
+        maximumInputTokens: 1_000,
+        maximumOutputTokens: 1_000,
+        maximumTotalTokens: 2_000,
+        maximumCostMicros: 10_000,
+      },
+    });
     const contact = renderedContactSuggestion(handle);
     const admission = runtime.admitAction({
       request: {
@@ -1544,6 +1564,7 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "planned", workerEpoch: 2 });
     expect(judge.judge).toHaveBeenCalledTimes(0);
     expect(gameMaster.plan).toHaveBeenCalledTimes(2);
+    expect(observedModels).toEqual([bypassModel, reasoningModel]);
     await advanceUntilStage(runtime, time, admission.turnId, "completed");
     expect(countForTurn(handle, "campaign_play_turn_results", admission.turnId)).toBe(1);
   });
@@ -2426,7 +2447,7 @@ describe("Campaign Play player-action turn runtime", () => {
     await runtime.runNextStage(admission.turnId);
     expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "primary_settled" });
     expect(judge.judge).toHaveBeenCalledTimes(2);
-    expect(observedJudgeModels).toEqual([bypassJudgeModel, reasoningJudgeModel]);
+    expect(observedJudgeModels).toEqual([bypassJudgeModel, bypassJudgeModel]);
     expect(gameMaster.plan).toHaveBeenCalledTimes(1);
     expect(countForTurn(handle, "campaign_play_commands", admission.turnId)).toBe(2);
   });
@@ -2502,7 +2523,7 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "primary_settled" });
     expect(judge.judge).toHaveBeenCalledTimes(1);
     expect(gameMaster.plan).toHaveBeenCalledTimes(2);
-    expect(observedGameMasterModels).toEqual([bypassGameMasterModel, reasoningGameMasterModel]);
+    expect(observedGameMasterModels).toEqual([bypassGameMasterModel, bypassGameMasterModel]);
     expect(countForTurn(handle, "campaign_play_commands", admission.turnId)).toBe(2);
   });
 
