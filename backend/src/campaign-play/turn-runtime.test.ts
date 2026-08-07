@@ -3185,23 +3185,26 @@ describe("Campaign Play player-action turn runtime", () => {
             : "the immediate situation",
         }));
         if (generatedCalls === 1) {
+          const proposal = {
+            beats: [{
+              purpose: "consequence",
+              observationIndexes: safeCompilerFeedback
+                ? []
+                : packet.newObservations.map((_observation, index) => index),
+              text: safeCompilerFeedback
+                ? `You see the first accepted result at ${packet.currentLocation.name}.`
+                : packet.currentLocation.handle,
+            }],
+            actionSelections,
+          };
           return {
             content: [{
-              type: "text",
-              text: JSON.stringify({
-                beats: [{
-                  purpose: "consequence",
-                  observationIndexes: safeCompilerFeedback
-                    ? []
-                    : packet.newObservations.map((_observation, index) => index),
-                  text: safeCompilerFeedback
-                    ? `You see the first accepted result at ${packet.currentLocation.name}.`
-                    : packet.currentLocation.handle,
-                }],
-                actionSelections,
-              }),
+              type: "tool-call",
+              toolCallId: "structured-output-1",
+              toolName: "structured_output",
+              input: JSON.stringify(proposal),
             }],
-            finishReason: { unified: "stop", raw: undefined },
+            finishReason: { unified: "tool-calls", raw: undefined },
             response: { modelId: "test-narrator" },
             usage: {
               inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
@@ -3236,8 +3239,13 @@ describe("Campaign Play player-action turn runtime", () => {
               actionSelections,
             };
         return {
-          content: [{ type: "text", text: JSON.stringify(proposal) }],
-          finishReason: { unified: "stop", raw: undefined },
+          content: [{
+            type: "tool-call",
+            toolCallId: `structured-output-${generatedCalls}`,
+            toolName: "structured_output",
+            input: JSON.stringify(proposal),
+          }],
+          finishReason: { unified: "tool-calls", raw: undefined },
           response: { modelId: "test-narrator" },
           usage: {
             inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
@@ -3684,9 +3692,103 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(playerActionMechanicsSnapshot(result.handle, result.turnId)).toEqual(result.mechanics);
   });
 
+  it.each([
+    ["transport error", () => new Error("transport interrupted")],
+    ["provider error", () => new CampaignPlayNarratorError("transport_interrupted", null)],
+  ] as const)(
+    "automatically retries one %s narration failure without replaying mechanics",
+    async (_label, createError) => {
+      const successful = playerNarratorFixture();
+      let calls = 0;
+      const narrator: TestNarrator = {
+        compile: successful.compile,
+        narrate: vi.fn(async (request) => {
+          calls += 1;
+          if (calls === 1) throw createError();
+          return successful.narrate(request);
+        }),
+      };
+      const result = await runPendingNarrationThroughApplication(narrator);
+      const operation = result.handle.sqlite.prepare(`SELECT operation_id AS operationId,
+          result_id AS resultId, narration_id AS narrationId, packet_hash AS packetHash,
+          receipt_ids_json AS receiptIdsJson, status, current_attempt AS currentAttempt,
+          error_code AS errorCode, automatic_deadline_at AS automaticDeadlineAt,
+          active_deadline_at AS activeDeadlineAt
+        FROM campaign_play_narration_operations
+        WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, result.turnId) as {
+          operationId: string;
+          resultId: string;
+          narrationId: string;
+          packetHash: string;
+          receiptIdsJson: string;
+          status: string;
+          currentAttempt: number;
+          errorCode: string | null;
+          automaticDeadlineAt: number;
+          activeDeadlineAt: number;
+        };
+      const attempts = result.handle.sqlite.prepare(`SELECT attempt, status,
+          error_code AS errorCode FROM campaign_play_narration_attempts
+        WHERE campaign_id = ? AND operation_id = ? ORDER BY attempt`).all(
+          CAMPAIGN_ID,
+          operation.operationId,
+        );
+
+      expect(narrator.narrate).toHaveBeenCalledTimes(2);
+      expect(attempts).toEqual([
+        { attempt: 1, status: "failed", errorCode: "provider_unavailable" },
+        { attempt: 2, status: "accepted", errorCode: null },
+      ]);
+      expect(operation).toMatchObject({
+        resultId: result.pending.resultId,
+        narrationId: result.pending.narrationId,
+        packetHash: result.pending.packetHash,
+        status: "complete",
+        currentAttempt: 2,
+        errorCode: null,
+      });
+      expect(operation.activeDeadlineAt).toBe(operation.automaticDeadlineAt);
+      expect(JSON.parse(operation.receiptIdsJson)).toEqual(result.pending.receiptIds);
+      expect(result.handle.sqlite.prepare(`SELECT COUNT(*) AS count
+        FROM campaign_play_proper_scenes WHERE campaign_id = ? AND operation_id = ?`).get(
+          CAMPAIGN_ID,
+          operation.operationId,
+        )).toEqual({ count: 1 });
+      expect(playerActionMechanicsSnapshot(result.handle, result.turnId)).toEqual(result.mechanics);
+    },
+  );
+
+  it("stops after one automatic provider-unavailable narration recovery", async () => {
+    const fixtureNarrator = playerNarratorFixture();
+    const narrator: TestNarrator = {
+      compile: fixtureNarrator.compile,
+      narrate: vi.fn(async () => {
+        throw new CampaignPlayNarratorError("transport_interrupted", null);
+      }),
+    };
+    const result = await runPendingNarrationThroughApplication(narrator);
+    expect(narrator.narrate).toHaveBeenCalledTimes(2);
+    expect(result.handle.sqlite.prepare(`SELECT attempt, status, error_code AS errorCode
+      FROM campaign_play_narration_attempts WHERE campaign_id = ? ORDER BY attempt`).all(
+        CAMPAIGN_ID,
+      )).toEqual([
+        { attempt: 1, status: "failed", errorCode: "provider_unavailable" },
+        { attempt: 2, status: "failed", errorCode: "provider_unavailable" },
+      ]);
+    expect(result.handle.sqlite.prepare(`SELECT status, current_attempt AS currentAttempt,
+        error_code AS errorCode FROM campaign_play_narration_operations
+      WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, result.turnId)).toEqual({
+        status: "failed",
+        currentAttempt: 2,
+        errorCode: "provider_unavailable",
+      });
+    expect(result.handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_proper_scenes WHERE campaign_id = ?`).get(CAMPAIGN_ID))
+      .toEqual({ count: 0 });
+    expect(playerActionMechanicsSnapshot(result.handle, result.turnId)).toEqual(result.mechanics);
+  });
+
   const nonRetryableNarrationFailures = [
-    { label: "transport", expectedErrorCode: "provider_unavailable", createError: () => new Error("transport interrupted") },
-    { label: "provider", expectedErrorCode: "provider_unavailable", createError: () => new CampaignPlayNarratorError("transport_interrupted", null) },
     { label: "timeout", expectedErrorCode: "stage_timeout", createError: () => new CampaignPlayNarratorError("stage_timeout", null) },
     { label: "budget", expectedErrorCode: "stage_budget_exceeded", createError: () => new CampaignPlayNarratorError("stage_budget_exceeded", null) },
   ] as const;

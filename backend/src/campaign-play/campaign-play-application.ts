@@ -770,13 +770,18 @@ export function createCampaignPlayApplication(
       if (
         failedOperation?.status !== "failed" || failedOperation.currentAttempt !== 1 ||
         failedOperation.currentAttemptId !== operation.attemptId ||
-        failedOperation.errorCode !== "narration_invalid"
+        (failedOperation.errorCode !== "narration_invalid" &&
+          failedOperation.errorCode !== "provider_unavailable")
       ) return;
       // Safe compiler coordinates let the existing bypass Narrator correct the
       // rejected arrangement directly. Without them, retain the broader
-      // default-reasoning recovery introduced for opaque narration failures.
+      // default-reasoning recovery introduced for opaque semantic failures.
+      // Transport recovery keeps the original runtime and model configuration.
       let recoveryRuntime = runtime;
-      if (operation.recoveryFeedback === undefined) {
+      if (
+        failedOperation.errorCode === "narration_invalid" &&
+        operation.recoveryFeedback === undefined
+      ) {
         const originalCreateModel = dependencies.createModel;
         let recoveryStorytellerModelCreated = false;
         dependencies.createModel = ((provider, options = {}) => {
