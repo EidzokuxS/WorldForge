@@ -7,6 +7,9 @@ const mockCreateOpenAI = vi.fn(() => ({ chat: mockOpenAIChatFn }));
 
 const mockAnthropicModelFn = vi.fn();
 const mockCreateAnthropic = vi.fn(() => mockAnthropicModelFn);
+const { mockDiagnosticEvent } = vi.hoisted(() => ({
+  mockDiagnosticEvent: vi.fn(),
+}));
 
 vi.mock("@ai-sdk/openai", () => ({
   createOpenAI: mockCreateOpenAI,
@@ -30,6 +33,12 @@ const mockWrapLanguageModel = vi.fn(({ model, middleware }) => ({
 vi.mock("ai", () => ({
   defaultSettingsMiddleware: mockDefaultSettingsMiddleware,
   wrapLanguageModel: mockWrapLanguageModel,
+}));
+
+vi.mock("../../lib/logger.js", () => ({
+  createLogger: vi.fn(() => ({
+    event: mockDiagnosticEvent,
+  })),
 }));
 
 // Import after mocks are set up
@@ -396,6 +405,124 @@ describe("createModel", () => {
 
     const sentBody = JSON.parse(String(capturedBody));
     expect(sentBody.thinking).toEqual({ type: "disabled" });
+    expect(mockDiagnosticEvent).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it("emits one bounded diagnostic for a structured non-success response and preserves the response", async () => {
+    const fakeModel = { modelId: "glm-5.1" };
+    mockOpenAIChatFn.mockReturnValue(fakeModel);
+    const responseBody = JSON.stringify({
+      error: {
+        code: "invalid_parameter",
+        param: "tools[0].function.parameters",
+        message: "Invalid API parameter, please check the documentation.",
+        secret: "do-not-log",
+      },
+      prompt: "private player prose",
+    });
+    const response = new Response(responseBody, {
+      status: 400,
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "x-request-id": "req_123",
+      },
+    });
+    const downstreamFetch = vi.fn(async () => response);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(downstreamFetch);
+
+    const createOptions = (createModel({
+      id: "glm",
+      name: "ZAI",
+      baseUrl: "https://api.z.ai/api/paas/v4",
+      apiKey: "secret-api-key",
+      model: "GLM-5.1",
+    }, { role: "storyteller", familyHint: "glm" }) as unknown as { baseModel: unknown });
+    expect(createOptions.baseModel).toBe(fakeModel);
+    const fetch = (mockCreateOpenAI.mock.calls.at(-1) as unknown[] | undefined)?.[0] as {
+      fetch?: typeof globalThis.fetch;
+    };
+
+    const returned = await fetch.fetch!(
+      "https://api.z.ai/api/paas/v4/chat/completions?api_key=secret",
+      {
+        method: "POST",
+        headers: { authorization: "Bearer secret" },
+        body: JSON.stringify({
+          model: "glm-5.1",
+          messages: [{ role: "user", content: "private player prose" }],
+          tools: [{
+            type: "function",
+            function: {
+              name: "private_tool",
+              strict: true,
+              parameters: { type: "object", properties: { secret: { type: "string" } } },
+            },
+          }],
+          tool_choice: { type: "function", function: { name: "private_tool" } },
+        }),
+      },
+    );
+
+    expect(returned).toBe(response);
+    await expect(returned.text()).resolves.toBe(responseBody);
+    expect(mockDiagnosticEvent).toHaveBeenCalledTimes(1);
+    const [eventName, payload] = mockDiagnosticEvent.mock.calls[0] as [string, unknown];
+    expect(eventName).toBe("ai.zai_fetch.failure");
+    expect(payload).toMatchObject({
+      request: {
+        method: "POST",
+        endpointClass: "chat_completions",
+        selectedMode: "tool",
+      },
+      response: {
+        status: 400,
+        contentType: "application/json; charset=utf-8",
+        requestId: "req_123",
+        providerErrorCode: "invalid_parameter",
+        providerErrorParameter: "tools[0].function.parameters",
+        providerErrorMessage: "Invalid API parameter, please check the documentation.",
+      },
+    });
+    expect(JSON.stringify(payload)).not.toContain("secret");
+    expect(JSON.stringify(payload)).not.toContain("private player prose");
+    fetchSpy.mockRestore();
+  });
+
+  it("emits one bounded diagnostic and rethrows the original fetch error unchanged", async () => {
+    const fakeModel = { modelId: "glm-5.1" };
+    mockOpenAIChatFn.mockReturnValue(fakeModel);
+    const thrown = new Error("provider secret and player prose");
+    const downstreamFetch = vi.fn(async () => {
+      throw thrown;
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(downstreamFetch);
+
+    createModel({
+      id: "glm",
+      name: "ZAI",
+      baseUrl: "https://api.z.ai/api/paas/v4",
+      apiKey: "secret-api-key",
+      model: "GLM-5.1",
+    }, { role: "storyteller", familyHint: "glm" });
+    const fetch = (mockCreateOpenAI.mock.calls.at(-1) as unknown[] | undefined)?.[0] as {
+      fetch?: typeof globalThis.fetch;
+    };
+
+    await expect(
+      fetch.fetch!("https://api.z.ai/api/paas/v4/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({ model: "glm-5.1", messages: [] }),
+      }),
+    ).rejects.toBe(thrown);
+    expect(downstreamFetch).toHaveBeenCalledTimes(1);
+    expect(mockDiagnosticEvent).toHaveBeenCalledTimes(1);
+    const [eventName, payload] = mockDiagnosticEvent.mock.calls[0] as [string, unknown];
+    expect(eventName).toBe("ai.zai_fetch.failure");
+    expect(payload).toMatchObject({
+      request: { method: "POST", endpointClass: "chat_completions" },
+    });
+    expect(JSON.stringify(payload)).not.toContain("provider secret");
     fetchSpy.mockRestore();
   });
 

@@ -12,6 +12,12 @@ import {
   rememberStructuredOutputModelMetadata,
   type StructuredOutputTransport,
 } from "./structured-output-capabilities.js";
+import { createLogger } from "../lib/logger.js";
+import {
+  buildZaiFetchDiagnostic,
+  extractZaiProviderError,
+  ZAI_FETCH_DIAGNOSTIC_EVENT,
+} from "./zai-fetch-diagnostic.js";
 
 export type ProviderProtocol = "openai-compatible" | "anthropic-compatible";
 
@@ -111,10 +117,79 @@ function minimumOutputBudgetMiddleware(): LanguageModelMiddleware {
   };
 }
 
+const zaiFetchDiagnosticLog = createLogger("zai-fetch-diagnostic");
+
+function parseJsonBody(init: RequestInit | undefined): unknown {
+  if (typeof init?.body !== "string") {
+    return undefined;
+  }
+  try {
+    return JSON.parse(init.body) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+async function readZaiProviderError(response: Response): Promise<ReturnType<typeof extractZaiProviderError>> {
+  if (response.bodyUsed) {
+    return {};
+  }
+  try {
+    const text = await response.clone().text();
+    if (text.length === 0 || text.length > 16_384) {
+      return {};
+    }
+    return extractZaiProviderError(JSON.parse(text) as unknown);
+  } catch {
+    return {};
+  }
+}
+
 function createZaiThinkingDisabledFetch(
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
 ): typeof globalThis.fetch {
   return async (input, init) => {
+    const observeFetch = async (
+      requestInput: Parameters<typeof fetchImpl>[0],
+      requestInit: Parameters<typeof fetchImpl>[1],
+      requestBody: unknown,
+    ): Promise<Response> => {
+      try {
+        const response = await fetchImpl(requestInput, requestInit);
+        if (!response.ok) {
+          const providerError = await readZaiProviderError(response);
+          zaiFetchDiagnosticLog.event(
+            ZAI_FETCH_DIAGNOSTIC_EVENT,
+            buildZaiFetchDiagnostic({
+              input: requestInput,
+              init: requestInit,
+              body: requestBody,
+              response: {
+                status: response.status,
+                contentType: response.headers.get("content-type") ?? undefined,
+                requestId:
+                  response.headers.get("x-request-id") ??
+                  response.headers.get("request-id") ??
+                  undefined,
+                providerError,
+              },
+            }),
+          );
+        }
+        return response;
+      } catch (error) {
+        zaiFetchDiagnosticLog.event(
+          ZAI_FETCH_DIAGNOSTIC_EVENT,
+          buildZaiFetchDiagnostic({
+            input: requestInput,
+            init: requestInit,
+            body: requestBody,
+          }),
+        );
+        throw error;
+      }
+    };
+
     const url = typeof input === "string"
       ? input
       : input instanceof URL
@@ -124,24 +199,26 @@ function createZaiThinkingDisabledFetch(
           : "";
 
     if (!url.includes("/chat/completions") || typeof init?.body !== "string") {
-      return fetchImpl(input, init);
+      return observeFetch(input, init, parseJsonBody(init));
     }
 
     try {
       const body = JSON.parse(init.body) as unknown;
       if (!body || typeof body !== "object" || Array.isArray(body)) {
-        return fetchImpl(input, init);
+        return observeFetch(input, init, body);
       }
 
-      return fetchImpl(input, {
+      const modifiedBody = {
+        ...body,
+        thinking: { type: "disabled" },
+      };
+      const requestInit = {
         ...init,
-        body: JSON.stringify({
-          ...body,
-          thinking: { type: "disabled" },
-        }),
-      });
+        body: JSON.stringify(modifiedBody),
+      };
+      return observeFetch(input, requestInit, modifiedBody);
     } catch {
-      return fetchImpl(input, init);
+      return observeFetch(input, init, undefined);
     }
   };
 }
