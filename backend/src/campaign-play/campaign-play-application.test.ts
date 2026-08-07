@@ -610,7 +610,7 @@ describe("CampaignPlayApplication", () => {
           apiKey: "",
           model: "generator-model",
         },
-        { role: "generator", reasoningMode: "bypass" },
+        { role: "generator" },
       ],
       [
         {
