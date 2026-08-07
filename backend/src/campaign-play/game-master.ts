@@ -1851,7 +1851,8 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
         admittedRuling.data,
       );
       const capability = resolveStructuredOutputCapability({
-        metadata: getStructuredOutputModelMetadata(request.model), requestedMode: "auto",
+        metadata: getStructuredOutputModelMetadata(request.model),
+        requestedMode: request.structuredOutputMode ?? "auto",
       });
       if (capability.primaryStrategy === "text_fallback") {
         throw new CampaignPlayGameMasterError("structured_output_unavailable", null);

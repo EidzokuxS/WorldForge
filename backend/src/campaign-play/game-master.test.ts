@@ -568,12 +568,15 @@ function model(): LanguageModel {
 function trace(
   strategy: SafeGenerateTrace["strategy"] = "native_schema",
   usage: SafeGenerateTrace["usage"] = { inputTokens: 100, outputTokens: 80, totalTokens: 180 },
+  requestedMode: SafeGenerateTrace["requestedMode"] = "auto",
 ): SafeGenerateTrace {
+  const primaryStrategy: SafeGenerateTrace["primaryStrategy"] =
+    strategy === "repair" || strategy === "full_retry" ? "native_schema" : strategy;
   return {
-    text: "private", cleanedText: "private", requestedMode: "auto", strategy,
-    primaryStrategy: "native_schema", fallbackStrategy: "text_fallback",
-    capability: { requestedMode: "auto", primaryStrategy: "native_schema", fallbackStrategy: "text_fallback",
-      actualMode: "native_schema", reason: "test", providerId: "test-provider",
+    text: "private", cleanedText: "private", requestedMode, strategy,
+    primaryStrategy, fallbackStrategy: "text_fallback",
+    capability: { requestedMode, primaryStrategy, fallbackStrategy: "text_fallback",
+      actualMode: primaryStrategy, reason: "test", providerId: "test-provider",
       providerName: "Test Provider", model: "test-model" },
     usage,
     response: { modelId: "test-model" }, finishReason: "stop",
@@ -906,10 +909,10 @@ describe("Campaign Play Game Master", () => {
 
   it("uses the requested strict tool mode for the proposal and authority review", async () => {
     const generateObject = vi.fn()
-      .mockResolvedValueOnce({ object: proposal, trace: trace() })
+      .mockResolvedValueOnce({ object: proposal, trace: trace("tool_mode", undefined, "tool") })
       .mockResolvedValueOnce({
         object: { verdict: "accepted", reason: "The dialogue changes no mechanical resource state." },
-        trace: trace(),
+        trace: trace("tool_mode", undefined, "tool"),
       });
     const gameMaster = createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
