@@ -1420,6 +1420,9 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain(
       "Never set detail to null for observe, contact, or attempt. If you cannot supply a grounded three-to-eight-word detail, do not select that intentIndex; select another supported intent instead.",
     );
+    expect(prompt).toContain(
+      'For observe, contact, and attempt, do not begin a detail with the code-owned action verbs "examine", "talk", or "try". Start the detail with the grounded object or action phrase instead.',
+    );
     expect(prompt).toContain("must authorize one concrete player action when clicked");
     expect(prompt).toContain("mutually exclusive alternatives");
     expect(prompt).toContain("must name exactly one supported alternative");
