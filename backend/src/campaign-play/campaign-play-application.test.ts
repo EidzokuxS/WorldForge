@@ -404,7 +404,7 @@ describe("CampaignPlayApplication", () => {
       attempt: 1,
       wasResume: false,
       alreadyAttempted: false,
-    })).toBe(false);
+    })).toBe(true);
     expect(campaignPlayMayAutomaticallyResumeExternalStage({
       turnKind: "player_action",
       interruptedStage: "judged",
@@ -581,6 +581,16 @@ describe("CampaignPlayApplication", () => {
           model: "generator-model",
         },
         { role: "generator", reasoningMode: "bypass" },
+      ],
+      [
+        {
+          id: "provider-test",
+          name: "Provider Test",
+          baseUrl: "http://localhost:1234",
+          apiKey: "",
+          model: "generator-model",
+        },
+        { role: "generator" },
       ],
       [
         {

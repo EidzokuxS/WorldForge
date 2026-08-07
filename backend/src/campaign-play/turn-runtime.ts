@@ -2632,7 +2632,9 @@ export function createCampaignPlayTurnRuntime(
                   ruling: certificate.ruling,
                   resolution: certificate.resolution,
                   uncertaintyAuthority: null,
-                  model: certifiedGameMasterModel.languageModel,
+                  model: context.attempt > 1 && certifiedGameMasterModel.reasoningModel
+                    ? certifiedGameMasterModel.reasoningModel
+                    : certifiedGameMasterModel.languageModel,
                   temperature: certifiedGameMasterModel.temperature,
                   budget: modelBudget(certifiedGameMasterModel),
                   signal: context.signal,

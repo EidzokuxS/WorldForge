@@ -1321,15 +1321,35 @@ describe("Campaign Play player-action turn runtime", () => {
     const time = fixedClock(1_940);
     const judge = judgeFixture("deterministic");
     const successful = gameMasterFixture();
+    const bypassModel = {} as LanguageModel;
+    const reasoningModel = {} as LanguageModel;
+    const observedModels: LanguageModel[] = [];
     let calls = 0;
     const gameMaster = {
       plan: vi.fn(async (request: Parameters<typeof successful.plan>[0]) => {
+        observedModels.push(request.model);
         calls += 1;
         if (calls === 1) throw new CampaignPlayGameMasterError("stage_timeout", null);
         return successful.plan(request);
       }),
     };
-    const runtime = turnRuntime(handle, time, judge, gameMaster);
+    const runtime = turnRuntime(handle, time, judge, gameMaster, {
+      certifiedGameMasterModel: {
+        languageModel: bypassModel,
+        reasoningModel,
+        requested: {
+          providerId: "test",
+          model: "test-certified-game-master",
+          strategy: "strict_object",
+          pricing: TEST_MODEL_PRICING,
+        },
+        temperature: 0.2,
+        maximumInputTokens: 1_000,
+        maximumOutputTokens: 1_000,
+        maximumTotalTokens: 2_000,
+        maximumCostMicros: 10_000,
+      },
+    });
     const wait = renderedWaitSuggestion(handle);
     const admission = runtime.admitAction({
       request: {
@@ -1356,6 +1376,7 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "planned", workerEpoch: 2 });
     expect(judge.judge).toHaveBeenCalledTimes(0);
     expect(gameMaster.plan).toHaveBeenCalledTimes(2);
+    expect(observedModels).toEqual([bypassModel, reasoningModel]);
     await advanceUntilStage(runtime, time, admission.turnId, "completed");
     expect(countForTurn(handle, "campaign_play_turn_results", admission.turnId)).toBe(1);
     expect(countForTurn(handle, "campaign_play_receipts", admission.turnId)).toBeGreaterThan(0);
