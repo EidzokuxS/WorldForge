@@ -77,3 +77,78 @@ will record exact cleanup and note-only commit checks.
 Natural occurrence of repeated-dialogue recovery in r123 is not guaranteed. If it
 does not occur, live affected-recovery evidence remains unavailable; focused tests
 are the direct branch proof. No provider cause is inferred from prior frozen lanes.
+
+## Fresh r123 evidence
+
+The implementation commit was `434e56c88eac2208dd41f4834b797d913cfa6a66`, with
+local `feat/revamp` equal to `origin/feat/revamp` before the lane. The lane was
+materialized once as
+`pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r123` for campaign
+`6b85a49e-fef5-4359-95e2-051383f6fb66`. The materialization record proves the
+template `lowwater-ledger-pristine-93a09e46-20260719`, state SHA-256
+`6cb291d11ce6578e3395a10d2c5d590070e3ccdd8b2b67451410869ce97897d2`, and
+config SHA-256
+`d8362b1af976c00cb8f14c564c8196a2d1ab137743ff368ea83d762a4ad2e065`. The
+canonical Brina card SHA-256 was
+`4b48de7a32df6a6be5a91ab12f09bb87926b40d5940348c7581e298eaa12b60a`.
+
+Rendered setup used one import, one save, one lower-wards / Local / Already here
+/ Looking for work configuration, and one Begin. The opening reached the active
+surface. Actions 1 through 15 each produced one proper scene and one unique
+turn/choice binding. Checkpoint 10 recorded 10 completed and 10 bound actions,
+worldVersion 21, runtimeRevision 203, and unique turn and choice counts of 10.
+Actions 1, 6, 9, and 11 settled through the existing bounded Narrator recovery
+and still produced one settlement; other completed actions used one Narrator
+attempt.
+
+The first genuine defect was action 16, choice
+`choice_6f4026aafb07ca2ba29b99d6`, turn
+`turn-player-action:b02c0f0ac736ac4bc88522f035edb9b9af46a175`. Its certified
+Game Master attempt 1 persisted `model_contract_invalid` for the configured
+`zai-coding-plan` / `glm-5-turbo` route after 6,089 ms. The automatic attempt 2
+then persisted `stage_timeout` after 45,148 ms with the same requested provider
+and model but no actual model or strategy, and the turn became `interrupted` at
+the admitted stage. There was no Judge stage, Actor job, receipt, result,
+Narrator operation, proper scene, binding, attempt 3, mechanics replay, or late
+write. Final read-only counts were 16 player turns, 15 unique completed/bound
+actions, 47 receipts, 16 results, 16 Narrator rows, 15 operations, 19 Narrator
+attempts, and 11 Actor jobs; SQLite `integrity_check` was `ok` and
+`foreign_key_check` was empty. The lane therefore stopped before action 17; no
+20/30/40/50/60 checkpoints or same-page reload were authorized.
+
+The frozen lane does not persist the in-memory safe Game Master recovery payload
+or the selected model object. The retained stage rows prove the requested model
+for attempt 2, but because the request timed out before a candidate they do not
+prove whether the safe repeated-dialogue feedback branch was present or whether
+the implementation selected `languageModel` versus `reasoningModel` in the live
+request. No causal claim is made from the live lane; the focused tests remain the
+direct proof of that branch. The bounded timeout is nevertheless a genuine
+product/runtime terminal boundary under the endurance contract.
+
+Generated evidence is preserved under
+`output/playtests/campaign-play/pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r123.session`
+and
+`output/playtests/campaign-world-runs/pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r123`.
+The session records the setup, action evidence, checkpoint, terminal authority,
+read-only database summary, ownership registry, and cleanup verification. The
+AGENTS.md and CLAUDE.md hashes captured before cleanup were
+`0d75edc72cc195e385ed5b9c98c616e82fdb3c13e210d0feb94333e19a76d541` and
+`c6874175503f6890af8ca2db34eff5630b8a513ede95cea3f76c43435925fca6`.
+
+Cleanup closed the page, stopped roots 76616 (backend), 44656 (frontend), and
+69604 (browser) plus descendants 16924, 30740, 39580, 50324, 51248, 55916,
+57804, 65824, 74724, and 76316, removed the validated task-owned browser
+profile, and independently verified all recorded PIDs absent, ports 4090/4091/4092
+unbound, CDP unavailable, the page closed, and the profile absent. No generated
+lane evidence was staged.
+
+## Acceptance handoff
+
+The bounded source change and static contracts are complete and pushed. The
+positive rendered portion proves canonical setup, opening, 15 one-to-one
+settlements, native JSON Narrator operation, and checkpoint progression. The
+directly affected safe-recovery model-selection proof is automated but not live
+because r123 ended at a Game Master timeout before a retained candidate. The
+terminal and no-duplicate/persistence fences are evidenced by action 16's
+authoritative rows and clean SQLite checks. The 60-action and same-page reload
+criteria remain unfulfilled because the lane froze at the first genuine defect.
