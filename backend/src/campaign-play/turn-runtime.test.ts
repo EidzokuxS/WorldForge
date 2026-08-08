@@ -3079,10 +3079,26 @@ describe("Campaign Play player-action turn runtime", () => {
     const successful = playerNarratorFixture();
     const recoveryFeedback = {
       diagnostic: "narrator_packet_validation_mismatch" as const,
-      failedChecks: [
-        { check: "covered_observation_count" as const, actual: 1, expected: 2 },
-        { check: "missing_expected_observation_indexes" as const, indexes: [1] },
-      ],
+      failedChecks: [{
+        check: "visible_actor_observation_mismatch" as const,
+        beatIndex: 0,
+        fieldPath: "beats[0].text",
+        observationIndexes: [0],
+        matchedActor: {
+          canonicalId: "actor_vedris_kast",
+          canonicalName: "Vedris Kast",
+          matchedAlias: "Vedris",
+        },
+        allowedActors: [{
+          canonicalId: "actor_dren_vask",
+          canonicalName: "Dren Vask",
+        }],
+        sourceObservationPerformers: [{
+          observationIndex: 0,
+          canonicalId: "actor_dren_vask",
+          canonicalName: "Dren Vask",
+        }],
+      }],
     };
     let calls = 0;
     const requests: Parameters<typeof successful.narrate>[0][] = [];

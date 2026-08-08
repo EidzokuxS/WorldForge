@@ -892,7 +892,7 @@ describe("Campaign Play narrator", () => {
         {
           purpose: "consequence",
           observationIndexes: [0],
-          text: "Dren Vask says, \"Ask Vedris if you need more.\" secret-split-beat",
+          text: "Dren Vask says, \"Ask Vedris if you need more.\" secret-split-beat sentinel-secret",
         },
         {
           purpose: "moment",
@@ -904,14 +904,37 @@ describe("Campaign Play narrator", () => {
     narratorWarn.mockClear();
 
     expect(() => createCampaignPlayNarrator().compile({
-      narrationId: "narration-r45-shaped-split-reference",
-      packet,
-      proposal,
-      createdAt: 1_000,
-    })).toThrowError(expect.objectContaining({
-      code: "narration_invalid",
-      modelEvidence: null,
-    }));
+       narrationId: "narration-r45-shaped-split-reference",
+       packet,
+       proposal,
+       createdAt: 1_000,
+     })).toThrowError(expect.objectContaining({
+       code: "narration_invalid",
+       modelEvidence: null,
+       recoveryFeedback: {
+         diagnostic: "narrator_packet_validation_mismatch",
+         failedChecks: [{
+           check: "visible_actor_observation_mismatch",
+           beatIndex: 0,
+           fieldPath: "beats[0].text",
+           observationIndexes: [0],
+           matchedActor: {
+             canonicalId: "actor_vedris_kast",
+             canonicalName: "Vedris Kast",
+             matchedAlias: "Vedris",
+           },
+           allowedActors: [{
+             canonicalId: "actor_dren_vask",
+             canonicalName: "Dren Vask",
+           }],
+           sourceObservationPerformers: [{
+             observationIndex: 0,
+             canonicalId: "actor_dren_vask",
+             canonicalName: "Dren Vask",
+           }],
+         }],
+       },
+     }));
     expect(narratorWarn).toHaveBeenCalledOnce();
     expect(narratorWarn).toHaveBeenCalledWith(
       "narrator_visible_actor_observation_mismatch",
@@ -940,6 +963,7 @@ describe("Campaign Play narrator", () => {
     expect(recorded).not.toContain("secret-split-beat");
     expect(recorded).not.toContain(packet.newObservations[0]!.text);
     expect(recorded).not.toContain("proposal");
+    expect(recorded).not.toContain("sentinel-secret");
   });
 
   it("accepts a combined observation reference without actor diagnostics", () => {
@@ -975,7 +999,7 @@ describe("Campaign Play narrator", () => {
           {
             purpose: "consequence",
             observationIndexes: [0],
-            text: "Mara claims the remaining jars. secret-false-attribution-beat",
+            text: "Mara claims the remaining jars. secret-false-attribution-beat sentinel-secret",
           },
           {
             purpose: "moment",
@@ -988,6 +1012,29 @@ describe("Campaign Play narrator", () => {
     })).toThrowError(expect.objectContaining({
       code: "narration_invalid",
       modelEvidence: null,
+      recoveryFeedback: {
+        diagnostic: "narrator_packet_validation_mismatch",
+        failedChecks: [{
+          check: "visible_actor_observation_mismatch",
+          beatIndex: 0,
+          fieldPath: "beats[0].text",
+          observationIndexes: [0],
+          matchedActor: {
+            canonicalId: "actor_public_keeper",
+            canonicalName: "Mara Venn",
+            matchedAlias: "Mara",
+          },
+          allowedActors: [{
+            canonicalId: "actor_dren_vask",
+            canonicalName: "Dren Vask",
+          }],
+          sourceObservationPerformers: [{
+            observationIndex: 0,
+            canonicalId: "actor_dren_vask",
+            canonicalName: "Dren Vask",
+          }],
+        }],
+      },
     }));
     expect(narratorWarn).toHaveBeenCalledOnce();
     expect(narratorWarn).toHaveBeenCalledWith(
@@ -1017,6 +1064,7 @@ describe("Campaign Play narrator", () => {
     expect(recorded).not.toContain("secret-false-attribution-beat");
     expect(recorded).not.toContain(packet.newObservations[0]!.text);
     expect(recorded).not.toContain("proposal");
+    expect(recorded).not.toContain("sentinel-secret");
   });
 
   it("requires typed observation attribution before naming a visible actor", () => {
@@ -1592,6 +1640,64 @@ ${canonicalizeCampaignPlayProjection(recoveryFeedback)}
 END_RECOVERY_DIAGNOSTIC`);
     expect(recoveryPrompt).not.toContain("rejected prose");
     expect(recoveryPrompt).not.toContain("provider response");
+  });
+
+  it("forwards only safe visible-actor mismatch coordinates in narrator recovery", async () => {
+    const generateObject = vi.fn(async (
+      _options: Parameters<typeof safeGenerateObject>[0],
+    ) => ({
+      object: proposalFixture(),
+      trace: trace(),
+    }));
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    const request = {
+      narrationId: "narration-visible-actor-recovery-prompt",
+      packetBytes: canonicalizeCampaignPlayProjection(packetFixture()),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+    };
+    await narrator.narrate(request);
+    const basePrompt = String(generateObject.mock.calls[0]![0].prompt);
+    const recoveryFeedback = {
+      diagnostic: "narrator_packet_validation_mismatch" as const,
+      failedChecks: [{
+        check: "visible_actor_observation_mismatch" as const,
+        beatIndex: 0,
+        fieldPath: "beats[0].text",
+        observationIndexes: [0],
+        matchedActor: {
+          canonicalId: "actor_vedris_kast",
+          canonicalName: "Vedris Kast",
+          matchedAlias: "Vedris",
+        },
+        allowedActors: [{
+          canonicalId: "actor_dren_vask",
+          canonicalName: "Dren Vask",
+        }],
+        sourceObservationPerformers: [{
+          observationIndex: 0,
+          canonicalId: "actor_dren_vask",
+          canonicalName: "Dren Vask",
+        }],
+      }],
+    };
+    await narrator.narrate({ ...request, recoveryFeedback });
+    const recoveryPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    expect(recoveryPrompt).toBe(`${basePrompt}
+
+NARRATOR_RECOVERY
+The prior proposal failed the safe checks below. Regenerate a fresh proposal from NARRATOR_PACKET. Correct every listed check. Do not reuse the rejected observation-index or action-selection arrangement. Every schema, grounding, identity, visibility, and action rule above remains unchanged.
+RECOVERY_DIAGNOSTIC
+${canonicalizeCampaignPlayProjection(recoveryFeedback)}
+END_RECOVERY_DIAGNOSTIC`);
+    expect(recoveryPrompt).toContain('"check":"visible_actor_observation_mismatch"');
+    expect(recoveryPrompt).not.toContain("sentinel-secret");
+    expect(recoveryPrompt).not.toContain("provider response");
+    expect(recoveryPrompt).not.toContain("Dren Vask says");
   });
 
   it("bounds an opening model proposal to the two beats its scene contract can use", async () => {

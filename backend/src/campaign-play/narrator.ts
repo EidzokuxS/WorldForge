@@ -172,6 +172,26 @@ export type CampaignPlayNarratorPacketValidationFailure =
         intentIndex: number;
         intentKind: "observe" | "contact" | "attempt";
         repeatedVerb: "examine" | "talk" | "try";
+      }>
+    }
+  | {
+      check: "visible_actor_observation_mismatch";
+      beatIndex: number;
+      fieldPath: string;
+      observationIndexes: number[];
+      matchedActor: {
+        canonicalId: string;
+        canonicalName: string;
+        matchedAlias: string;
+      };
+      allowedActors: Array<{
+        canonicalId: string;
+        canonicalName: string;
+      }>;
+      sourceObservationPerformers: Array<{
+        observationIndex: number;
+        canonicalId: string | null;
+        canonicalName: string | null;
       }>;
     };
 
@@ -737,20 +757,31 @@ function assertProposalForPacket(
       .find(({ actor, matchedAlias }) =>
         matchedAlias !== null && !attributedActorNames.has(actor.name));
     if (mismatch) {
-      log.warn("narrator_visible_actor_observation_mismatch", {
-        diagnostic: "narrator_visible_actor_observation_mismatch",
+      const mismatchCoordinates = {
         beatIndex,
         fieldPath: `beats[${beatIndex}].text`,
         observationIndexes: [...beat.observationIndexes],
         matchedActor: {
           canonicalId: mismatch.actor.handle,
           canonicalName: mismatch.actor.name,
-          matchedAlias: mismatch.matchedAlias,
+          matchedAlias: mismatch.matchedAlias!,
         },
         allowedActors: [...allowedActors.values()],
         sourceObservationPerformers,
+      };
+      log.warn("narrator_visible_actor_observation_mismatch", {
+        diagnostic: "narrator_visible_actor_observation_mismatch",
+        ...mismatchCoordinates,
       });
-      throw new CampaignPlayNarratorError("narration_invalid", null);
+      throw new CampaignPlayNarratorError("narration_invalid", null, {
+        recoveryFeedback: {
+          diagnostic: "narrator_packet_validation_mismatch",
+          failedChecks: [{
+            check: "visible_actor_observation_mismatch",
+            ...mismatchCoordinates,
+          }],
+        },
+      });
     }
   }
   const forbidden = [
