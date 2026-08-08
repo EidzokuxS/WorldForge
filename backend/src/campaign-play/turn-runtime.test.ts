@@ -1722,6 +1722,7 @@ describe("Campaign Play player-action turn runtime", () => {
     });
     await advanceUntilStage(secondRuntime, time, admission.turnId, "completed");
     expect(observedRequests).toHaveLength(2);
+    expect(observedRequests.map((request) => request.model)).toEqual([bypassModel, bypassModel]);
     expect(observedRequests[1]!.recoveryFeedback).toEqual(recoveredFeedback);
     expect(observedRequests[1]!.frame.sourceMoment).toBe(firstRequest.frame.sourceMoment);
     expect(observedRequests[1]!.ruling).toEqual(firstRequest.ruling);
@@ -2804,11 +2805,15 @@ describe("Campaign Play player-action turn runtime", () => {
     const time = fixedClock(2_655);
     const judge = judgeFixture("deterministic");
     const acceptedGameMaster = gameMasterFixture();
+    const bypassGameMasterModel = {} as LanguageModel;
+    const reasoningGameMasterModel = {} as LanguageModel;
+    const observedModels: LanguageModel[] = [];
     const observedRequests: Array<Parameters<typeof acceptedGameMaster.plan>[0]> = [];
     let calls = 0;
     const gameMaster = {
       plan: vi.fn(async (request: Parameters<typeof acceptedGameMaster.plan>[0]) => {
         observedRequests.push(request);
+        observedModels.push(request.model);
         calls += 1;
         if (calls === 1) throw repeatedDialogueErrorForRequest(request);
         return acceptedGameMaster.plan(request);
@@ -2816,6 +2821,21 @@ describe("Campaign Play player-action turn runtime", () => {
     };
     let recoveredFeedback: CampaignPlayGameMasterRecoveryFeedback | undefined;
     const firstRuntime = turnRuntime(handle, time, judge, gameMaster, {
+      gameMasterModel: {
+        languageModel: bypassGameMasterModel,
+        reasoningModel: reasoningGameMasterModel,
+        requested: {
+          providerId: "test",
+          model: "test-game-master",
+          strategy: "strict_object",
+          pricing: TEST_MODEL_PRICING,
+        },
+        temperature: 0.2,
+        maximumInputTokens: 1_000,
+        maximumOutputTokens: 1_000,
+        maximumTotalTokens: 2_000,
+        maximumCostMicros: 10_000,
+      },
       onGameMasterRecoveryFeedback: (feedback) => { recoveredFeedback = feedback; },
     });
     const admission = firstRuntime.admitAction({
@@ -2848,6 +2868,21 @@ describe("Campaign Play player-action turn runtime", () => {
     const firstRequest = observedRequests[0]!;
     expect(firstRequest.recoveryFeedback).toBeUndefined();
     const secondRuntime = turnRuntime(handle, time, judge, gameMaster, {
+      gameMasterModel: {
+        languageModel: bypassGameMasterModel,
+        reasoningModel: reasoningGameMasterModel,
+        requested: {
+          providerId: "test",
+          model: "test-game-master",
+          strategy: "strict_object",
+          pricing: TEST_MODEL_PRICING,
+        },
+        temperature: 0.2,
+        maximumInputTokens: 1_000,
+        maximumOutputTokens: 1_000,
+        maximumTotalTokens: 2_000,
+        maximumCostMicros: 10_000,
+      },
       gameMasterRecoveryFeedback: recoveredFeedback,
     });
     time.advance();
@@ -2860,6 +2895,7 @@ describe("Campaign Play player-action turn runtime", () => {
     await secondRuntime.runNextStage(admission.turnId);
     expect(secondRuntime.loadTurn(admission.turnId)).toMatchObject({ stage: "primary_settled" });
     expect(observedRequests).toHaveLength(2);
+    expect(observedModels).toEqual([bypassGameMasterModel, bypassGameMasterModel]);
     expect(observedRequests[1]!.recoveryFeedback).toEqual(recoveredFeedback);
     expect(observedRequests[1]!.frame.sourceMoment).toBe(firstRequest.frame.sourceMoment);
     expect(observedRequests[1]!.ruling).toEqual(firstRequest.ruling);

@@ -2386,6 +2386,16 @@ export function createCampaignPlayTurnRuntime(
       : model.languageModel;
   };
 
+  const modelForGameMasterAttempt = (
+    turnId: string,
+    attempt: number,
+    model: CampaignPlayTurnRuntimeStageModel,
+    recoveryFeedback: CampaignPlayGameMasterRecoveryFeedback | undefined,
+  ): LanguageModel => {
+    if (attempt === 2 && recoveryFeedback !== undefined) return model.languageModel;
+    return modelForExternalAttempt(turnId, "game_master", attempt, model);
+  };
+
   const structuredOutputModeForExternalAttempt = (
     turnId: string,
     kind: "judge" | "game_master",
@@ -2681,11 +2691,11 @@ export function createCampaignPlayTurnRuntime(
                   ruling: certificate.ruling,
                   resolution: certificate.resolution,
                   uncertaintyAuthority: null,
-                  model: modelForExternalAttempt(
+                  model: modelForGameMasterAttempt(
                     context.turn.turnId,
-                    "game_master",
                     context.attempt,
                     certifiedGameMasterModel,
+                    input.gameMasterRecoveryFeedback,
                   ),
                   structuredOutputMode: structuredOutputModeForExternalAttempt(
                     context.turn.turnId,
@@ -2925,11 +2935,11 @@ export function createCampaignPlayTurnRuntime(
                 ruling: judgeArtifactValue.ruling,
                 resolution: judgeArtifactValue.resolution,
                 uncertaintyAuthority: judgeArtifactValue.uncertaintyAuthority,
-                model: modelForExternalAttempt(
+                model: modelForGameMasterAttempt(
                   context.turn.turnId,
-                  "game_master",
                   context.attempt,
                   input.gameMasterModel,
+                  input.gameMasterRecoveryFeedback,
                 ),
                 structuredOutputMode: structuredOutputModeForExternalAttempt(
                   context.turn.turnId,
