@@ -129,3 +129,95 @@ first setup-stage timeout boundary, SQLite integrity/FK evidence, and exact
 cleanup. The positive scene/binding, natural actor-mismatch recovery,
 checkpoint, 60/60, and same-page reload criteria are omitted because the
 first genuine defect occurred before Save/Begin.
+
+## r118 transient-setup falsification and journey boundary
+
+The accepted Task 168 source at entry was `66421e4c77f204c79fc6c21ac87c0d618beb9857`
+on `feat/revamp`, equal to `origin/feat/revamp`. The pre-existing unstaged
+`AGENTS.md` and `CLAUDE.md` changes were preserved byte-for-byte. Frozen r117
+was not resumed, retried, or mutated.
+
+The fresh run was
+`pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r118` for campaign
+`6b85a49e-fef5-4359-95e2-051383f6fb66`. It materialized once from
+`lowwater-ledger-pristine-93a09e46-20260719` with template state SHA-256
+`6cb291d11ce6578e3395a10d2c5d590070e3ccdd8b2b67451410869ce97897d2`, config
+SHA-256 `d8362b1af976c00cb8f14c564c8196a2d1ab137743ff368ea83d762a4ad2e065`,
+and canonical Brina card SHA-256
+`4b48de7a32df6a6be5a91ab12f09bb87926b40d5940348c7581e298eaa12b60a`.
+The materialized config retained the expected hash; the materialized state
+ended at `fe8cbf28251398d440e7bb25dc906cf38d3cc8e3bfcdbcded0fe75ef20153aa9`
+after the recorded play mutations. The r117 setup-ingestion timeout did not
+recur: Import card was clicked once, the file was selected once, and the
+draft rendered with Brina Hael. Continue/Save/Begin were each clicked once;
+Save and opening POST each completed successfully. The canonical setup was
+lower-wards / Local / Already here / Looking for work, and the opening reached
+a proper scene before action 1. No second import or replacement setup action
+was issued.
+
+The task-owned runtime used API/UI/CDP ports `4050/4051/4052` and roots
+backend PID `55868`, frontend PID `31332`, and browser PID `72928` (with the
+recorded descendants in `ownership-registry.json`). Actions 1 through 10
+each completed with one unique durable binding and one proper scene; Narrator
+attempt 2 occurred naturally on actions 1 and 8 and settled those same
+operations. The Task 168 visible-actor mismatch did not occur naturally, so
+no recovery-coordinate or `NARRATOR_RECOVERY` live claim is made.
+
+Action 11 was the first genuine product/model boundary and no later player
+action was submitted. Its authoritative turn was
+`turn-player-action:5a7a102c64a2944e5c908a5c518fff8889c2c598`, ending
+`interrupted` with `error_code=stage_timeout` and worker epoch 2. Game Master
+attempt 1 ended `model_contract_invalid` after a stopped response; its
+automatic attempt 2 ended `stage_timeout` after the shared deadline. No
+Narrator operation or attempt, proper scene, receipt, actor job, or action-11
+binding was created. The rejected Game Master contract coordinate and provider
+response body were not retained, so their cause remains unknown. This is a
+new frozen boundary, not evidence to alter provider/model/settings or to
+repair the product in this lane.
+
+The terminal read-only reconciliation at
+`output/playtests/campaign-play/pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r118.session/probes/r118-terminal-reconciled.json`
+and `r118-terminal.json` records 11 player turns, 10 completed bindings,
+10 proper scenes, 10 Narrator operations, 12 Narrator attempts, one
+checkpoint (10), one character, and 37 commands. SQLite `integrity_check`
+was `ok` and `foreign_key_check` was empty. The reconciled rendered Play
+surface had body SHA-256
+`0b8aebc74a23e05f6a23950d36b006711c8d82b1d7538c084df06fda25adb943` and
+9 buttons. Backend logs preserve the Game Master contract-invalid then
+stage-timeout sequence without raw provider bytes.
+
+Cleanup evidence in the run session (`ownership-registry.json`,
+`cleanup-stop.json`, `cleanup-profile.json`, and `cleanup-verified.json`)
+shows the task-owned page closed, profile removed, all recorded roots and
+descendants absent, and ports `4050`, `4051`, and `4052` listener-free. The
+template/config/card and protected instruction-file hashes were rechecked;
+the expected template/config/card hashes and original AGENTS/CLAUDE hashes
+remain intact.
+
+### r118 acceptance mapping
+
+- Setup ingestion: positive; the r117 timeout hypothesis was falsified for one
+  fresh lane, with the exact one-import/save/begin and hash evidence above.
+- Normal Campaign Play journey: positive through action 10, including two
+  naturally settled Narrator attempt-2 recoveries and 10 unique proper-scene
+  bindings.
+- Task 168 actor-mismatch recovery: not exercised naturally; no synthetic
+  provider/model failure was introduced.
+- No duplicate mechanics and persistence: positive for the first 10 settled
+  actions and the action-11 terminal state; counts and SQLite checks are in
+  the reconciliation probe.
+- Timeout/late-write fencing: action 11 remained one interrupted Game Master
+  turn with no Narrator operation or late binding; no retry or replacement
+  action was attempted.
+- Checkpoints: checkpoint 10 recorded; later checkpoints were not reached.
+- 60/60 and same-page reload: omitted because action 11 froze at the first
+  genuine defect; no reload was performed.
+- Cleanup: all task-owned runtime, page, profile, roots, descendants, and
+  listeners were independently verified absent.
+
+The r118 evidence is rendered/runtime/SQLite evidence only; no Task 168
+product source or test file changed. Material unknowns are the rejected Game
+Master contract coordinate and any provider response body for action 11, plus
+the unexercised actor-mismatch recovery branch. A new fresh lane or a focused
+Main decision is required before continuing the endurance objective; r118
+itself remains immutable.
