@@ -20,6 +20,7 @@ import { openCampaignPlayDatabase, type CampaignPlayDatabaseHandle } from "./cam
 import {
   CAMPAIGN_PLAY_MINIMUM_OUTPUT_TOKENS,
   CampaignPlayApplicationError,
+  campaignPlayGameMasterOperationDeadlineMs,
   campaignPlayMayAutomaticallyResumeExternalStage,
   campaignPlayMaximumOutputTokens,
   createCampaignPlayApplication,
@@ -673,6 +674,12 @@ describe("CampaignPlayApplication", () => {
   it("gives every Campaign Play model at least a 32k output window", () => {
     expect(campaignPlayMaximumOutputTokens(512)).toBe(CAMPAIGN_PLAY_MINIMUM_OUTPUT_TOKENS);
     expect(campaignPlayMaximumOutputTokens(65_536)).toBe(65_536);
+  });
+
+  it("keeps the Game Master deadline ordinary unless safe recovery feedback is present", () => {
+    expect(campaignPlayGameMasterOperationDeadlineMs()).toBe(45_000);
+    expect(campaignPlayGameMasterOperationDeadlineMs(undefined)).toBe(45_000);
+    expect(campaignPlayGameMasterOperationDeadlineMs(GAME_MASTER_RECOVERY_FEEDBACK)).toBe(90_000);
   });
 
   it("freezes exact known role pricing into Campaign Play model authority", () => {
