@@ -23,7 +23,6 @@ import type {
 } from "./campaign-play-turn-repository.js";
 
 export const CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS = 90_000;
-export const CAMPAIGN_PLAY_SUBMISSION_NARRATION_WINDOW_MS = 115_000;
 export const CAMPAIGN_PLAY_MANUAL_NARRATION_WINDOW_MS = 90_000;
 
 export type CampaignPlayNarrationRecoveryKind = "automatic" | "manual";
@@ -277,10 +276,7 @@ export function createCampaignPlayNarrationOperationRepository(
         "Campaign Play visible result lacks its immutable narration packet.",
       );
     }
-    const automaticDeadlineAt = Math.min(
-      completedAt + CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS,
-      turn.submittedAt + CAMPAIGN_PLAY_SUBMISSION_NARRATION_WINDOW_MS,
-    );
+    const automaticDeadlineAt = completedAt + CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS;
     if (!Number.isSafeInteger(automaticDeadlineAt) || automaticDeadlineAt < completedAt) {
       throw new CampaignPlayNarrationOperationError(
         "operation_fence_lost",

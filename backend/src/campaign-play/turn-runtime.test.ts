@@ -68,7 +68,10 @@ import {
   hashCampaignPlayProjection,
 } from "./campaign-play-projection.js";
 import { createCampaignPlayReadModel } from "./campaign-play-read-model.js";
-import { createCampaignPlayNarrationOperationRepository } from "./narration-operation-repository.js";
+import {
+  CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS,
+  createCampaignPlayNarrationOperationRepository,
+} from "./narration-operation-repository.js";
 import {
   CampaignPlayApplicationError,
   createCampaignPlayApplication,
@@ -897,6 +900,7 @@ function playerActionMechanicsSnapshot(handle: CampaignPlayDatabaseHandle, turnI
 
 async function createCompletedPlayerActionForApplication(
   time = fixedClock(7_500),
+  submittedAt = time.clock.now(),
 ) {
   const fixture = await createReadyCampaignWithOpening();
   const mechanicsRuntime = turnRuntime(
@@ -908,7 +912,7 @@ async function createCompletedPlayerActionForApplication(
   );
   const admission = mechanicsRuntime.admitAction({
     request: admissionRequest(fixture.state, "application-driver-action"),
-    submittedAt: time.clock.now(),
+    submittedAt,
   });
   await advanceUntilStage(mechanicsRuntime, time, admission.turnId, "completed");
   const pending = createCampaignPlayReadModel(fixture.handle).loadState().narrationOperation;
@@ -3640,8 +3644,8 @@ describe("Campaign Play player-action turn runtime", () => {
   });
 
   it("enforces one persisted automatic deadline when a late provider ignores abort", async () => {
-    const time = deadlineClock(7_500);
-    const prepared = await createCompletedPlayerActionForApplication(time);
+    const time = deadlineClock(100_000);
+    const prepared = await createCompletedPlayerActionForApplication(time, 1);
     const successful = playerNarratorFixture();
     let calls = 0;
     let releaseLate: (() => Promise<void>) | null = null;
@@ -3684,7 +3688,15 @@ describe("Campaign Play player-action turn runtime", () => {
       CAMPAIGN_ID,
       prepared.turnId,
     ) as { automaticDeadlineAt: number; activeDeadlineAt: number };
-    expect(persistedDeadline.automaticDeadlineAt).toBe(97_590);
+    const completedAt = (prepared.handle.sqlite.prepare(`SELECT completed_at AS completedAt
+      FROM campaign_play_turns WHERE campaign_id = ? AND id = ?`).get(
+      CAMPAIGN_ID,
+      prepared.turnId,
+    ) as { completedAt: number }).completedAt;
+    expect(completedAt).toBeGreaterThan(25_000);
+    expect(persistedDeadline.automaticDeadlineAt).toBe(
+      completedAt + CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS,
+    );
     expect(persistedDeadline.activeDeadlineAt).toBe(persistedDeadline.automaticDeadlineAt);
     const inFlight = runtime.runNarration(prepared.turnId, secondToken);
     expect(narrator.narrate).toHaveBeenCalledTimes(2);
