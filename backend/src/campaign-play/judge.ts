@@ -341,53 +341,77 @@ function judgeProposalSchemaForFrame(
       .max(CAMPAIGN_PLAY_LIMITS.citedFacts),
     visibleActorReactions,
   });
-  if (input?.source !== "suggested" || !input.frozenChoice) return frameSchema;
-
-  const allowedSuggestedTargets = [
-    ...input.frozenChoice.targets,
-    ...frame.visibleFacts
-      .filter((fact) => fact.kind === "actor" && fact.handle !== frame.playerActorHandle)
-      .map((fact) => ({ handle: fact.handle, kind: "actor" as const })),
-  ].filter((target, index, targets) => targets.findIndex((candidate) =>
-    candidate.handle === target.handle && candidate.kind === target.kind) === index);
-  const allowedSuggestedTargetSchemas = allowedSuggestedTargets.map((target) =>
-    campaignPlayVisibleTargetSchema.extend({
-      handle: z.literal(target.handle),
-      kind: z.literal(target.kind),
-    }));
-  const suggestedTargetsSchema = allowedSuggestedTargetSchemas.length === 0
-    ? z.array(campaignPlayVisibleTargetSchema).length(0)
-    : z.array(allowedSuggestedTargetSchemas.length === 1
-      ? allowedSuggestedTargetSchemas[0]!
-      : z.union(allowedSuggestedTargetSchemas as [
-        (typeof allowedSuggestedTargetSchemas)[number],
-        (typeof allowedSuggestedTargetSchemas)[number],
-        ...(typeof allowedSuggestedTargetSchemas)[number][],
-      ]))
-      .min(input.frozenChoice.targets.length)
-      .max(Math.min(CAMPAIGN_PLAY_LIMITS.targets, allowedSuggestedTargets.length));
-  const frozenRouteHandles = input.frozenChoice.targets
-    .filter((target) => target.kind === "route")
-    .map((target) => target.handle);
-  const frozenRouteHandle = (input.frozenChoice.kind === "move"
-      || input.frozenChoice.kind === "attempt")
-    && frozenRouteHandles.length === 1
-    ? frozenRouteHandles[0]!
-    : null;
-  return frameSchema.extend({
-    kind: z.literal(input.frozenChoice.kind),
-    targets: suggestedTargetsSchema,
-    movementRouteHandle: frozenRouteHandle === null
-      ? z.null()
-      : z.literal(frozenRouteHandle),
-    ...(input.frozenChoice.kind === "wait" ? {
+  const generationFrameSchema = (() => {
+    if (input?.source === "suggested" && input.frozenChoice) {
+      const allowedSuggestedTargets = [
+        ...input.frozenChoice.targets,
+        ...frame.visibleFacts
+          .filter((fact) => fact.kind === "actor" && fact.handle !== frame.playerActorHandle)
+          .map((fact) => ({ handle: fact.handle, kind: "actor" as const })),
+      ].filter((target, index, targets) => targets.findIndex((candidate) =>
+        candidate.handle === target.handle && candidate.kind === target.kind) === index);
+      const allowedSuggestedTargetSchemas = allowedSuggestedTargets.map((target) =>
+        campaignPlayVisibleTargetSchema.extend({
+          handle: z.literal(target.handle),
+          kind: z.literal(target.kind),
+        }));
+      const suggestedTargetsSchema = allowedSuggestedTargetSchemas.length === 0
+        ? z.array(campaignPlayVisibleTargetSchema).length(0)
+        : z.array(allowedSuggestedTargetSchemas.length === 1
+          ? allowedSuggestedTargetSchemas[0]!
+          : z.union(allowedSuggestedTargetSchemas as [
+            (typeof allowedSuggestedTargetSchemas)[number],
+            (typeof allowedSuggestedTargetSchemas)[number],
+            ...(typeof allowedSuggestedTargetSchemas)[number][],
+          ]))
+          .min(input.frozenChoice.targets.length)
+          .max(Math.min(CAMPAIGN_PLAY_LIMITS.targets, allowedSuggestedTargets.length));
+      const frozenRouteHandles = input.frozenChoice.targets
+        .filter((target) => target.kind === "route")
+        .map((target) => target.handle);
+      const frozenRouteHandle = (input.frozenChoice.kind === "move"
+          || input.frozenChoice.kind === "attempt")
+        && frozenRouteHandles.length === 1
+        ? frozenRouteHandles[0]!
+        : null;
+      return frameSchema.extend({
+        kind: z.literal(input.frozenChoice.kind),
+        targets: suggestedTargetsSchema,
+        movementRouteHandle: frozenRouteHandle === null
+          ? z.null()
+          : z.literal(frozenRouteHandle),
+        ...(input.frozenChoice.kind === "wait" ? {
+          disposition: z.literal("deterministic"),
+          elapsedBounds: z.object({
+            minimumMinutes: z.literal(CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES),
+            maximumMinutes: z.literal(CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES),
+          }).strict(),
+        } : {}),
+      });
+    }
+    return frameSchema;
+  })();
+  const branches = [
+    generationFrameSchema.extend({
       disposition: z.literal("deterministic"),
-      elapsedBounds: z.object({
-        minimumMinutes: z.literal(CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES),
-        maximumMinutes: z.literal(CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES),
-      }).strict(),
-    } : {}),
-  });
+      clarificationQuestion: z.null(),
+    }),
+    generationFrameSchema.extend({
+      disposition: z.literal("uncertain"),
+      clarificationQuestion: z.null(),
+    }),
+    generationFrameSchema.extend({
+      disposition: z.literal("impossible"),
+      clarificationQuestion: z.null(),
+    }),
+    generationFrameSchema.extend({
+      disposition: z.literal("clarification_required"),
+      clarificationQuestion: line(CAMPAIGN_PLAY_LIMITS.shortText),
+    }),
+  ] as const;
+  return input?.source === "suggested" && input.frozenChoice?.kind === "wait"
+    ? z.discriminatedUnion("disposition", [branches[0]!])
+    : z.discriminatedUnion("disposition", branches);
 }
 
 export interface CampaignPlayJudgeFrame extends z.infer<typeof campaignPlayJudgeFrameSchema> {}

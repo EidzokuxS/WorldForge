@@ -451,6 +451,70 @@ describe("Campaign Play Judge", () => {
     })).success).toBe(false);
   });
 
+  it("enforces the disposition clarification-question relation in generation only", async () => {
+    const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
+      object: proposal(),
+      trace: trace(),
+    }));
+    const judge = createCampaignPlayJudge({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    await judge.judge({
+      frame: frame(),
+      input: { originalText: "I ask.", source: "freeform", choiceHandle: null },
+      model: model(),
+      temperature: 0.2,
+      budget,
+    });
+
+    const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    const validVariants = [
+      proposal({ disposition: "deterministic", clarificationQuestion: null }),
+      proposal({ disposition: "uncertain", clarificationQuestion: null }),
+      proposal({ disposition: "impossible", clarificationQuestion: null }),
+      proposal({ disposition: "clarification_required", clarificationQuestion: "Which gate do you mean?" }),
+    ];
+    for (const value of validVariants) {
+      expect(options.schema.safeParse(value).success).toBe(true);
+    }
+    expect(options.schema.safeParse(proposal({
+      disposition: "deterministic",
+      clarificationQuestion: "Which gate do you mean?",
+    })).success).toBe(false);
+    expect(options.schema.safeParse(proposal({
+      disposition: "clarification_required",
+      clarificationQuestion: null,
+    })).success).toBe(false);
+    expect(options.schema.safeParse(proposal({
+      disposition: "clarification_required",
+      clarificationQuestion: "",
+    })).success).toBe(false);
+    const { clarificationQuestion: _omitted, ...omittedQuestion } = proposal({
+      disposition: "clarification_required",
+    });
+    expect(options.schema.safeParse(omittedQuestion).success).toBe(false);
+
+    const schema = z.toJSONSchema(options.schema) as {
+      oneOf?: Array<{ properties?: Record<string, unknown> }>;
+    };
+    expect(schema.oneOf).toHaveLength(4);
+    expect(schema.oneOf?.map((branch) => branch.properties?.disposition)).toEqual([
+      { type: "string", const: "deterministic" },
+      { type: "string", const: "uncertain" },
+      { type: "string", const: "impossible" },
+      { type: "string", const: "clarification_required" },
+    ]);
+    expect(schema.oneOf?.slice(0, 3).map((branch) => branch.properties?.clarificationQuestion)).toEqual([
+      { type: "null" },
+      { type: "null" },
+      { type: "null" },
+    ]);
+    expect(schema.oneOf?.[3]?.properties?.clarificationQuestion).toMatchObject({
+      type: "string",
+      minLength: 1,
+    });
+  });
+
   it("accepts a strict tool-mode ruling against the requested capability", async () => {
     const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
       object: proposal(),
@@ -946,9 +1010,10 @@ describe("Campaign Play Judge", () => {
     });
     expect(result.ruling.normalizedIntent.targets).toEqual(validProposal.targets);
     const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
-    expect(z.toJSONSchema((options.schema as unknown as {
-      shape: { targets: z.ZodType };
-    }).shape.targets)).toMatchObject({
+    const schema = z.toJSONSchema(options.schema) as unknown as {
+      oneOf: Array<{ properties: { targets: unknown } }>;
+    };
+    expect(schema.oneOf[0]!.properties.targets).toMatchObject({
       type: "array",
       minItems: 1,
       maxItems: 2,
@@ -1061,10 +1126,10 @@ describe("Campaign Play Judge", () => {
     });
 
     const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
-    const targetsSchema = (options.schema as unknown as {
-      shape: { targets: z.ZodType };
-    }).shape.targets;
-    const targetsJsonSchema = z.toJSONSchema(targetsSchema);
+    const schema = z.toJSONSchema(options.schema) as unknown as {
+      oneOf: Array<{ properties: { targets: Record<string, unknown> } }>;
+    };
+    const targetsJsonSchema = schema.oneOf[0]!.properties.targets;
     expect(targetsJsonSchema).toMatchObject({
       type: "array",
       minItems: 1,
