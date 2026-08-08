@@ -45,6 +45,7 @@ import {
   CampaignPlayJudgeError,
   createCampaignPlayJudge,
   type CampaignPlayModelEvidence,
+  type CampaignPlayJudgeRecoveryFeedback,
 } from "./judge.js";
 import { CampaignPlayGameMasterError, createCampaignPlayGameMaster } from "./game-master.js";
 import {
@@ -558,8 +559,13 @@ async function createReadyCampaignWithOpening(
 
 type Disposition = "deterministic" | "uncertain" | "impossible" | "clarification_required";
 
-function judgeFixture(disposition: Disposition, compoundDestinationName: string | null = null) {
+function judgeFixture(
+  disposition: Disposition,
+  compoundDestinationName: string | null = null,
+  failFirstFinalValidation = false,
+) {
   const compiler = createCampaignPlayJudge();
+  let calls = 0;
   let selectedChoice: {
     kind: "observe" | "move" | "contact" | "wait" | "attempt";
     targets: Array<{ handle: string; kind: "actor" | "location" | "route" | "pressure" | "possession" }>;
@@ -569,6 +575,7 @@ function judgeFixture(disposition: Disposition, compoundDestinationName: string 
       selectedChoice = binding;
     },
     judge: vi.fn(async (request: Parameters<ReturnType<typeof createCampaignPlayJudge>["judge"]>[0]) => {
+      calls += 1;
       const choice = request.input.choiceHandle === null
         ? null
         : request.frame.visibleFacts.find((fact) => fact.handle === request.input.choiceHandle);
@@ -619,7 +626,9 @@ function judgeFixture(disposition: Disposition, compoundDestinationName: string 
         possessionEffectAuthority: { kind: "none" },
         requiredObligationEffect: { kind: "none" },
         disposition,
-        citedVisibleFactHandles: [request.frame.locationHandle],
+        citedVisibleFactHandles: failFirstFinalValidation && calls === 1
+          ? [request.frame.locationHandle, request.frame.locationHandle]
+          : [request.frame.locationHandle],
         resultBounds: noEffect
           ? { minimum: "no_effect", maximum: "no_effect" }
           : disposition === "uncertain"
@@ -2453,6 +2462,110 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(observedJudgeModes).toEqual(["auto", "tool"]);
     expect(gameMaster.plan).toHaveBeenCalledTimes(1);
     expect(countForTurn(handle, "campaign_play_commands", admission.turnId)).toBe(2);
+  });
+
+  it("does not pass recovery feedback into the initial Judge attempt", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening();
+    const time = fixedClock(2_625);
+    const judge = judgeFixture("deterministic");
+    const runtime = turnRuntime(handle, time, judge, gameMasterFixture(), {
+      judgeRecoveryFeedback: {
+        issues: [{
+          issueIndex: 0,
+          code: "custom",
+          path: ["resultBounds", "minimum"],
+          message: "Actionable judgments require a mechanical result range.",
+        }],
+      },
+    });
+    const admission = runtime.admitAction({
+      request: admissionRequest(state, "judge-recovery-feedback"),
+      submittedAt: 2_625,
+    });
+    time.advance();
+    const result = await runtime.runNextStage(admission.turnId);
+
+    expect(result.turn).toMatchObject({
+      turnId: admission.turnId,
+      stage: "judged",
+    });
+    expect(judge.judge).toHaveBeenCalledOnce();
+    expect(judge.judge.mock.calls[0]![0]).toMatchObject({
+      frame: expect.objectContaining({
+        campaignId: CAMPAIGN_ID,
+        turnId: admission.turnId,
+      }),
+      attempt: 1,
+    });
+    expect(judge.judge.mock.calls[0]![0]).not.toHaveProperty("recoveryFeedback");
+  });
+
+  it("recovers one final-validation Judge rejection into one settlement without replay", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening();
+    const time = fixedClock(2_635);
+    const judge = judgeFixture("deterministic", null, true);
+    let recoveredFeedback: CampaignPlayJudgeRecoveryFeedback | undefined;
+    const firstRuntime = turnRuntime(handle, time, judge, gameMasterFixture(), {
+      onJudgeRecoveryFeedback: (feedback) => { recoveredFeedback = feedback; },
+    });
+    const admission = firstRuntime.admitAction({
+      request: admissionRequest(state, "judge-dependent-field-recovery"),
+      submittedAt: 2_635,
+    });
+    time.advance();
+    const first = await firstRuntime.runNextStage(admission.turnId);
+    expect(first.turn).toMatchObject({
+      turnId: admission.turnId,
+      stage: "interrupted",
+      interruptedStage: "admitted",
+      errorCode: "model_contract_invalid",
+      resumeEligible: true,
+    });
+    expect(recoveredFeedback).toEqual({
+      issues: [{
+        issueIndex: 0,
+        code: "custom",
+        path: ["citedVisibleFactHandles"],
+        message: "Cited visible fact handles must be unique.",
+      }],
+    });
+    const interrupted = firstRuntime.loadTurn(admission.turnId)!;
+    expect(playerActionMechanicsSnapshot(handle, admission.turnId)).toMatchObject({
+      commands: 0,
+      receipts: 0,
+      turnResults: 0,
+    });
+    if (recoveredFeedback === undefined) throw new Error("Expected safe Judge recovery feedback.");
+
+    const secondRuntime = turnRuntime(handle, time, judge, gameMasterFixture(), {
+      judgeRecoveryFeedback: recoveredFeedback,
+    });
+    time.advance();
+    await secondRuntime.resumeInterruptedStage({
+      turnId: admission.turnId,
+      interruptedStage: "admitted",
+      observedEpoch: interrupted.workerEpoch,
+    });
+    time.advance();
+    await secondRuntime.runNextStage(admission.turnId);
+    time.advance();
+    await secondRuntime.runNextStage(admission.turnId);
+
+    expect(secondRuntime.loadTurn(admission.turnId)).toMatchObject({ stage: "primary_settled" });
+    expect(judge.judge).toHaveBeenCalledTimes(2);
+    expect(judge.judge.mock.calls.map((call) => call[0]!.attempt)).toEqual([1, 2]);
+    expect(judge.judge.mock.calls[1]![0]).toMatchObject({
+      frame: expect.objectContaining({ campaignId: CAMPAIGN_ID, turnId: admission.turnId }),
+      recoveryFeedback: recoveredFeedback,
+    });
+    expect(playerActionMechanicsSnapshot(handle, admission.turnId)).toMatchObject({
+      commands: 2,
+      receipts: 2,
+      turnResults: 0,
+    });
+    expect(handle.sqlite.prepare(`SELECT count(*) AS value FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'judge'`)
+      .get(CAMPAIGN_ID, admission.turnId)).toEqual({ value: 2 });
   });
 
   it("persists a Game Master timeout and resumes the same accepted Judge ledger", async () => {

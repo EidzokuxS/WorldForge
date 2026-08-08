@@ -57,12 +57,14 @@ import {
   campaignPlayJudgeFrameSchema,
   campaignPlayJudgeVisibleFactSchema,
   createCampaignPlayJudge,
+  getCampaignPlayJudgeRecoveryFeedback,
   resolveCampaignPlayUncertainty,
   validateCampaignPlayUncertaintyResolution,
   type CampaignPlayJudgeFrame,
   type CampaignPlayJudgeInput,
   type CampaignPlayModelBudget,
   type CampaignPlayModelEvidence,
+  type CampaignPlayJudgeRecoveryFeedback,
 } from "./judge.js";
 import {
   CampaignPlayGameMasterError,
@@ -370,6 +372,8 @@ export interface CreateCampaignPlayTurnRuntimeInput {
   visibility?: CampaignPlayVisibilityService;
   injectRulebookFault?: (point: CampaignPlayRulebookFaultPoint) => void;
   injectNarratorFault?: (point: "after_provider_return" | "during_terminal_commit") => void;
+  judgeRecoveryFeedback?: CampaignPlayJudgeRecoveryFeedback;
+  onJudgeRecoveryFeedback?: (feedback: CampaignPlayJudgeRecoveryFeedback) => void;
 }
 
 export interface AdmitCampaignPlayPlayerActionInput {
@@ -2814,6 +2818,9 @@ export function createCampaignPlayTurnRuntime(
                 attempt: context.attempt,
                 workerEpoch: context.token.epoch,
                 signal: context.signal,
+                ...(input.judgeRecoveryFeedback === undefined || context.attempt !== 2
+                  ? {}
+                  : { recoveryFeedback: input.judgeRecoveryFeedback }),
               });
               const artifact = judgeArtifact({
                 admission,
@@ -2860,6 +2867,10 @@ export function createCampaignPlayTurnRuntime(
                   cause,
                   now() - startedAt,
                 );
+              }
+              const recoveryFeedback = getCampaignPlayJudgeRecoveryFeedback(cause);
+              if (recoveryFeedback !== undefined) {
+                input.onJudgeRecoveryFeedback?.(recoveryFeedback);
               }
               log.warn("Judge stage failed before artifact acceptance.", {
                 code: cause instanceof CampaignPlayJudgeError ? cause.code : null,

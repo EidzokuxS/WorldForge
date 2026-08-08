@@ -13,6 +13,7 @@ import {
 } from "../lib/logger-test-utils.js";
 import {
   createCampaignPlayJudge,
+  getCampaignPlayJudgeRecoveryFeedback,
   resolveCampaignPlayUncertainty,
   type CampaignPlayJudgeFrame,
   type CampaignPlayModelBudget,
@@ -699,9 +700,14 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain('uncertainty must be exactly {"kind":"none"}');
     expect(sentPrompt).toContain("resultBounds must not contain no_effect");
     expect(sentPrompt).toContain(
-      "resultBounds.minimum and resultBounds.maximum must be different result tiers",
+      "Deterministic judgments require resultBounds.minimum and resultBounds.maximum to be the same non-no_effect result tier.",
     );
-    expect(sentPrompt).toContain("clarificationQuestion must be non-null only");
+    expect(sentPrompt).toContain(
+      "Uncertain judgments require different non-no_effect minimum and maximum tiers.",
+    );
+    expect(sentPrompt).toContain(
+      "clarificationQuestion must be a non-empty question only when disposition is clarification_required; otherwise it must be null.",
+    );
     expect(sentPrompt).toContain("modifier range must contain zero");
     expect(sentPrompt).toContain("uncertainty.kind must be check");
     expect(sentPrompt).toContain("Every one of those four values must be an unquoted JSON integer");
@@ -802,9 +808,8 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("Spell citedVisibleFactHandles and visibleActorReactions exactly");
     expect(sentPrompt).toContain("never use citedVisibleFacts");
     expect(sentPrompt).toContain(
-      "resultBounds.minimum and resultBounds.maximum must be the same literal result tier",
+      "Deterministic judgments require resultBounds.minimum and resultBounds.maximum to be the same non-no_effect result tier.",
     );
-    expect(sentPrompt).toContain("Never return a range for deterministic");
     expect(sentPrompt).toContain(JSON.stringify(injection));
     expect(sentPrompt).not.toContain("campaign-one");
     expect(sentPrompt).not.toContain("turn-one");
@@ -1352,7 +1357,10 @@ describe("Campaign Play Judge", () => {
   );
 
   it("fails a stage whose token or cost evidence exceeds its admitted budget", async () => {
-    const generateObject = vi.fn(async () => ({ object: proposal(), trace: trace() }));
+    const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
+      object: proposal(),
+      trace: trace(),
+    }));
     const judge = createCampaignPlayJudge({ generateObject: generateObject as unknown as typeof safeGenerateObject });
     await expect(judge.judge({
       frame: frame(),
@@ -1387,6 +1395,181 @@ describe("Campaign Play Judge", () => {
       await flushJudgeLogs();
       expect(contractDiagnostics(capture)).toEqual([]);
     });
+  });
+
+  it("carries only safe final-validation issues into one recovery prompt", async () => {
+    const unsafe = "player-prose-secret-123";
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: finalInvalidProposal(), trace: trace() })
+      .mockResolvedValueOnce({ object: proposal(), trace: trace() });
+    const judge = createCampaignPlayJudge({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    let firstError: unknown;
+    try {
+      await judge.judge({
+        frame: frame(),
+        input: { originalText: unsafe, source: "freeform", choiceHandle: null },
+        model: model(), temperature: 0.2, budget,
+        attempt: 1,
+        workerEpoch: 4,
+      });
+    } catch (error) {
+      firstError = error;
+    }
+    expect(firstError).toMatchObject({ code: "model_contract_failed" });
+    const feedback = getCampaignPlayJudgeRecoveryFeedback(firstError);
+    expect(feedback).toEqual({
+      issues: [
+        {
+          issueIndex: 0,
+          code: "custom",
+          path: ["citedVisibleFactHandles"],
+          message: "Cited visible fact handles must be unique.",
+        },
+        {
+          issueIndex: 1,
+          code: "custom",
+          path: ["possessionEffectAuthority", "minimumResult"],
+          message: "Required possession effect must be reachable inside the result bounds.",
+        },
+      ],
+    });
+    if (feedback === undefined) throw new Error("Expected safe Judge recovery feedback.");
+
+    await judge.judge({
+      frame: frame(),
+      input: { originalText: unsafe, source: "freeform", choiceHandle: null },
+      model: model(), temperature: 0.2, budget,
+      attempt: 2,
+      workerEpoch: 5,
+      recoveryFeedback: feedback,
+    });
+
+    const firstPrompt = String((generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0]).prompt);
+    const secondPrompt = String((generateObject.mock.calls[1]![0] as Parameters<typeof safeGenerateObject>[0]).prompt);
+    const recoverySection = secondPrompt.slice(secondPrompt.indexOf("RECOVERY_FINAL_VALIDATION_ISSUES"));
+    expect(firstPrompt).not.toContain("RECOVERY_FINAL_VALIDATION_ISSUES");
+    expect(secondPrompt).toContain(`RECOVERY_FINAL_VALIDATION_ISSUES=${JSON.stringify(feedback.issues)}`);
+    expect(secondPrompt).toContain("RECOVERY_FINAL_VALIDATION_INSTRUCTION=Produce a fresh ruling");
+    expect(recoverySection).not.toContain(unsafe);
+    expect(recoverySection).not.toContain("actor-guard");
+    expect(generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    [
+      "resultBounds",
+      proposal({ resultBounds: { minimum: "no_effect", maximum: "no_effect" } }),
+      {
+        issueIndex: 0,
+        code: "custom",
+        path: ["resultBounds"],
+        message: "Actionable judgments require a mechanical result range.",
+      },
+    ],
+    [
+      "clarificationQuestion",
+      proposal({ clarificationQuestion: "Which gate do you mean?" }),
+      {
+        issueIndex: 0,
+        code: "custom",
+        path: ["clarificationQuestion"],
+        message: "Clarification question must match the judgment disposition.",
+      },
+    ],
+  ] as const)("carries one safe %s rejection into attempt 2", async (_field, invalidProposal, expectedIssue) => {
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: invalidProposal, trace: trace() })
+      .mockResolvedValueOnce({ object: proposal(), trace: trace() });
+    const judge = createCampaignPlayJudge({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    let firstError: unknown;
+    try {
+      await judge.judge({
+        frame: frame(),
+        input: { originalText: "I ask.", source: "freeform", choiceHandle: null },
+        model: model(), temperature: 0.2, budget,
+        attempt: 1,
+        workerEpoch: 13,
+      });
+    } catch (cause) {
+      firstError = cause;
+    }
+    const feedback = getCampaignPlayJudgeRecoveryFeedback(firstError);
+    expect(feedback).toEqual({ issues: [expectedIssue] });
+    if (feedback === undefined) throw new Error("Expected safe Judge recovery feedback.");
+    await judge.judge({
+      frame: frame(),
+      input: { originalText: "I ask.", source: "freeform", choiceHandle: null },
+      model: model(), temperature: 0.2, budget,
+      attempt: 2,
+      workerEpoch: 14,
+      recoveryFeedback: feedback,
+    });
+    const prompt = String((generateObject.mock.calls[1]![0] as Parameters<typeof safeGenerateObject>[0]).prompt);
+    expect(prompt).toContain(`RECOVERY_FINAL_VALIDATION_ISSUES=${JSON.stringify(feedback.issues)}`);
+    expect(generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not carry recovery feedback from a transport failure", async () => {
+    const generateObject = vi.fn(async () => { throw new Error("connection reset"); });
+    const judge = createCampaignPlayJudge({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    let error: unknown;
+    try {
+      await judge.judge({
+        frame: frame(),
+        input: { originalText: "I ask.", source: "freeform", choiceHandle: null },
+        model: model(), temperature: 0.2, budget,
+        attempt: 1,
+        workerEpoch: 6,
+      });
+    } catch (cause) {
+      error = cause;
+    }
+    expect(error).toMatchObject({ code: "transport_interrupted" });
+    expect(getCampaignPlayJudgeRecoveryFeedback(error)).toBeUndefined();
+  });
+
+  it("ignores recovery feedback outside the automatic second attempt", async () => {
+    const feedback = {
+      issues: [{
+        issueIndex: 0,
+        code: "custom",
+        path: ["resultBounds", "minimum"],
+        message: "Actionable judgments require a mechanical result range.",
+      }],
+    } as const;
+    const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
+      object: proposal(),
+      trace: trace(),
+    }));
+    const judge = createCampaignPlayJudge({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    await judge.judge({
+      frame: frame(),
+      input: { originalText: "I ask.", source: "freeform", choiceHandle: null },
+      model: model(), temperature: 0.2, budget,
+      attempt: 1,
+      workerEpoch: 8,
+      recoveryFeedback: feedback,
+    });
+    await judge.judge({
+      frame: frame(),
+      input: { originalText: "I ask.", source: "freeform", choiceHandle: null },
+      model: model(), temperature: 0.2, budget,
+      attempt: 3,
+      workerEpoch: 9,
+      recoveryFeedback: feedback,
+    });
+    const prompts = generateObject.mock.calls.map((call) =>
+      String((call[0] as Parameters<typeof safeGenerateObject>[0]).prompt));
+    expect(prompts).toHaveLength(2);
+    expect(prompts.every((value) => !value.includes("RECOVERY_FINAL_VALIDATION_ISSUES"))).toBe(true);
   });
 
   it("emits one safe, ordered diagnostic for a final ruling contract failure", async () => {

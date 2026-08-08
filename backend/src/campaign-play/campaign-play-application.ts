@@ -87,6 +87,7 @@ import {
   createCampaignPlayReadModel,
   type CampaignPlayReadModel,
 } from "./campaign-play-read-model.js";
+import type { CampaignPlayJudgeRecoveryFeedback } from "./judge.js";
 
 const LEASE_DURATION_MS = 150_000;
 const HEARTBEAT_INTERVAL_MS = 10_000;
@@ -148,6 +149,8 @@ interface CampaignPlayRuntimeFactory {
   createTurn(
     handle: CampaignPlayDatabaseHandle,
     selection?: CampaignPlayTurnModelSelection,
+    judgeRecoveryFeedback?: CampaignPlayJudgeRecoveryFeedback,
+    onJudgeRecoveryFeedback?: (feedback: CampaignPlayJudgeRecoveryFeedback) => void,
   ): CampaignPlayTurnRuntime;
 }
 
@@ -506,6 +509,8 @@ export function createCampaignPlayApplication(
   const createDefaultTurnRuntime = (
     handle: CampaignPlayDatabaseHandle,
     selection?: CampaignPlayTurnModelSelection,
+    judgeRecoveryFeedback?: CampaignPlayJudgeRecoveryFeedback,
+    onJudgeRecoveryFeedback?: (feedback: CampaignPlayJudgeRecoveryFeedback) => void,
   ): CampaignPlayTurnRuntime => {
     const settings = dependencies.loadSettings();
     const state = createCampaignPlayStateRepository(handle).loadState();
@@ -601,6 +606,8 @@ export function createCampaignPlayApplication(
         narratorRequested,
         dependencies.createModel(storyteller.provider, { role: "storyteller", reasoningMode: "bypass" }),
       ),
+      judgeRecoveryFeedback,
+      onJudgeRecoveryFeedback,
     });
   };
 
@@ -639,9 +646,16 @@ export function createCampaignPlayApplication(
   const runtimeForTurn = (
     handle: CampaignPlayDatabaseHandle,
     turn: LoadedCampaignPlayTurn,
+    judgeRecoveryFeedback?: CampaignPlayJudgeRecoveryFeedback,
+    onJudgeRecoveryFeedback?: (feedback: CampaignPlayJudgeRecoveryFeedback) => void,
   ): CampaignPlayOpeningRuntime | CampaignPlayTurnRuntime => turn.turnKind === "opening"
     ? runtimeFactory.createOpening(handle, turn.modelSelection)
-    : runtimeFactory.createTurn(handle, turn.modelSelection);
+    : runtimeFactory.createTurn(
+        handle,
+        turn.modelSelection,
+        judgeRecoveryFeedback,
+        onJudgeRecoveryFeedback,
+      );
 
   const replayAdmission = (
     handle: CampaignPlayDatabaseHandle,
@@ -680,6 +694,7 @@ export function createCampaignPlayApplication(
     resume: { interruptedStage: LoadedCampaignPlayTurn["interruptedStage"]; observedEpoch: number } | null,
   ): Promise<void> => {
     let pendingResume = resume;
+    let pendingJudgeRecoveryFeedback: CampaignPlayJudgeRecoveryFeedback | undefined;
     let automaticResumeAttempted = false;
     while (true) {
       const handle = dependencies.openDatabase(campaignId);
@@ -688,7 +703,13 @@ export function createCampaignPlayApplication(
         const before = repository.loadTurn(turnId);
         if (!before || before.stage === "completed" || before.stage === "failed") return;
         if (before.stage === "interrupted" && pendingResume === null) return;
-        const runtime = runtimeForTurn(handle, before);
+        let recoveredJudgeFeedback: CampaignPlayJudgeRecoveryFeedback | undefined;
+        const runtime = runtimeForTurn(
+          handle,
+          before,
+          pendingJudgeRecoveryFeedback,
+          (feedback) => { recoveredJudgeFeedback = feedback; },
+        );
         const wasResume = pendingResume !== null;
         const result = pendingResume
           ? await runtime.resumeInterruptedStage({
@@ -698,6 +719,8 @@ export function createCampaignPlayApplication(
             })
           : await runtime.runNextStage(turnId);
         pendingResume = null;
+        const nextJudgeRecoveryFeedback = recoveredJudgeFeedback;
+        pendingJudgeRecoveryFeedback = undefined;
         if (result.recovery.kind === "explicit_resume_required" &&
           campaignPlayMayAutomaticallyResumeExternalStage({
             turnKind: before.turnKind,
@@ -715,6 +738,7 @@ export function createCampaignPlayApplication(
             interruptedStage: result.recovery.interruptedStage,
             observedEpoch: result.recovery.workerEpoch,
           };
+          pendingJudgeRecoveryFeedback = nextJudgeRecoveryFeedback;
           continue;
         }
         if (result.recovery.kind === "completed" && result.turn.turnKind === "player_action") {
