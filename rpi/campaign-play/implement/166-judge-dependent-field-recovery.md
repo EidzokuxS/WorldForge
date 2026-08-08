@@ -73,17 +73,66 @@ create feedback.
 
 ## Rendered lane
 
-Fresh lane evidence will be appended after commit and push as
-`pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r115`. The lane must use the
-canonical low-water template/card setup, one rendered choice and authoritative
-readback per action, and stop at the first genuine defect. No frozen lane is
-resumed or mutated.
+Fresh run `pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r115` used commit
+`2c915c97dc5872eeb1b4cb4ff70ebfac3bee250c`, campaign
+`6b85a49e-fef5-4359-95e2-051383f6fb66`, the exact
+`lowwater-ledger-pristine-93a09e46-20260719` template, and the canonical Brina
+card (`4b48de7a32df6a6be5a91ab12f09bb87926b40d5940348c7581e298eaa12b60a`).
+Materialized state/config hashes were
+`6cb291d11ce6578e3395a10d2c5d590070e3ccdd8b2b67451410869ce97897d2` and
+`d8362b1af976c00cb8f14c564c8196a2d1ab137743ff368ea83d762a4ad2e065`.
+The rendered setup imported once and saved once (the setup helper listened for
+POST while the product uses PUT, so it exited after observing the real save;
+SQLite confirms one character row and one `character_created` event), then
+selected lower-wards / Local / Already here / Looking for work and clicked
+Begin once. Opening reached `ready` with a proper scene.
+
+The first journey helper stopped before action 3 on a stale-choice locator
+race; it submitted no action. A task-owned continuation added bounded choice
+polling and ran one rendered choice at a time with authoritative readback.
+Actions 1-11 each returned an enabled control, one unique turn/choice binding,
+and one proper scene. The action-10 checkpoint had 10 completed/10 bound,
+worldVersion 22, runtimeRevision 216, and 10 unique turn and choice handles.
+Action 8 naturally exercised the existing Narrator recovery: attempt 1 was
+`narration_invalid`, attempt 2 was `auto`/`native_json`, and exactly one proper
+scene and binding settled. Offline parsing of the retained backend log shows
+the normal initial player-action Narrator requests as `requestedMode=auto`,
+`actualMode=native_json`, with bypass reasoning. No Judge final-validation
+rejection occurred naturally (`judge.contract_rejected` count 0); focused
+automated recovery tests are the branch proof.
+
+The first genuine product defect was action 12, turn
+`turn-player-action:6a2158a8ca9e7d4a8e21833e01c25517ac7333ef`, operation
+`narration-operation:b881e32fe1492c82c442c9c3bfdd29f60d5b9786`, and attempt
+`narration-attempt:7ed5ac5665efd6c27ddace0599fadd9a0736dd51`. Judge, Game
+Master, and Actor recovery stages settled mechanics and three receipts, but
+the final Narrator native_json request aborted at the existing absolute
+deadline (`stage_timeout`, 38,234 ms), leaving no proper scene and no
+Narrator attempt 2. The lane stopped immediately at 12 completed actions and
+11 bound proper scenes; no later click, retry, Resume, replay, or reload was
+performed. Final SQLite counts were 12 player turns, 12 unique turn IDs, 29
+commands, 29 receipts, 12 narration operations, 13 narration attempts, and
+11 proper scenes; `integrity_check` was `ok` and `foreign_key_check` was empty.
+No late write or duplicate binding was observed.
 
 ## Acceptance handoff
 
-Entry state is a fresh canonical Brina Campaign Play lane after this exact
-repair commit. Positive proof must map to: clarified Judge prompt; one safe
-attempt-1 final-validation issue set; attempt-2 same-turn identity and original
-deadline; one settlement with no mechanics replay; no attempt 3 or late write;
-then proper scene, enabled controls, durable binding, and same-page reload with
-clean SQLite integrity and foreign keys if 60 actions are reached.
+Entry state: fresh canonical Brina lane after the Task 166 code commit, exact
+setup admission, and one Begin. Criterion mapping:
+
+- the three dependent-field rules and safe ordered recovery section are proven
+  by the 44/44 Judge suite and focused runtime recovery test;
+- initial player Narrator mode is proven in the retained r115 log as
+  `auto -> native_json` with bypass reasoning, and actions 1-11 rendered
+  proper scenes with enabled controls and unique bindings;
+- the existing Narrator invalid-result recovery is positive at action 8
+  (`narration_invalid` attempt 1 -> `auto/native_json` attempt 2, one scene,
+  one binding); no natural Judge recovery was manufactured;
+- action-12 mechanics/receipt settlement and the failed Narrator operation
+  retain one turn identity, no duplicate mechanics, no attempt 3, and no late
+  write, while correctly exposing the missing proper scene as the lane stop;
+- reload and 60/60 acceptance are not claimed because the endurance contract
+  requires stopping at that first genuine provider/transport deadline defect.
+
+All task-owned r115 roots, descendants, helpers, ports 4020/4021/4022, and the
+browser profile were stopped or closed and independently verified absent.
