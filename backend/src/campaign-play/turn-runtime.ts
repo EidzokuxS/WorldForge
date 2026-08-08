@@ -69,7 +69,9 @@ import {
 import {
   CampaignPlayGameMasterError,
   createCampaignPlayGameMaster,
+  getCampaignPlayGameMasterRecoveryFeedback,
   type CampaignPlayGameMasterFrame,
+  type CampaignPlayGameMasterRecoveryFeedback,
 } from "./game-master.js";
 import { loadCampaignPlayActorContinuity } from "./actor-continuity.js";
 import {
@@ -374,6 +376,8 @@ export interface CreateCampaignPlayTurnRuntimeInput {
   injectNarratorFault?: (point: "after_provider_return" | "during_terminal_commit") => void;
   judgeRecoveryFeedback?: CampaignPlayJudgeRecoveryFeedback;
   onJudgeRecoveryFeedback?: (feedback: CampaignPlayJudgeRecoveryFeedback) => void;
+  gameMasterRecoveryFeedback?: CampaignPlayGameMasterRecoveryFeedback;
+  onGameMasterRecoveryFeedback?: (feedback: CampaignPlayGameMasterRecoveryFeedback) => void;
 }
 
 export interface AdmitCampaignPlayPlayerActionInput {
@@ -2691,6 +2695,9 @@ export function createCampaignPlayTurnRuntime(
                   temperature: certifiedGameMasterModel.temperature,
                   budget: modelBudget(certifiedGameMasterModel),
                   signal: context.signal,
+                  ...(input.gameMasterRecoveryFeedback === undefined || context.attempt !== 2
+                    ? {}
+                    : { recoveryFeedback: input.gameMasterRecoveryFeedback }),
                 });
                 const artifact = campaignPlayGameMasterArtifactSchema.parse({
                   ...(admission.executionRoute.kind === "certified_move"
@@ -2861,6 +2868,10 @@ export function createCampaignPlayTurnRuntime(
               };
             } catch (cause) {
               if (cause instanceof CampaignPlayExternalStageInterruption) throw cause;
+              const gameMasterRecoveryFeedback = getCampaignPlayGameMasterRecoveryFeedback(cause);
+              if (gameMasterRecoveryFeedback !== undefined) {
+                input.onGameMasterRecoveryFeedback?.(gameMasterRecoveryFeedback);
+              }
               if (routeKind !== "full_authority") {
                 throw gameMasterInterruption(
                   input.gameMasterModel.requested,
@@ -2928,6 +2939,9 @@ export function createCampaignPlayTurnRuntime(
                 temperature: input.gameMasterModel.temperature,
                 budget: modelBudget(input.gameMasterModel),
                 signal: context.signal,
+                ...(input.gameMasterRecoveryFeedback === undefined || context.attempt !== 2
+                  ? {}
+                  : { recoveryFeedback: input.gameMasterRecoveryFeedback }),
               });
               const artifact = campaignPlayGameMasterArtifactSchema.parse({
                 judgeArtifactHash: storedJudge.artifactHash,
@@ -2978,6 +2992,10 @@ export function createCampaignPlayTurnRuntime(
               };
             } catch (cause) {
               if (cause instanceof CampaignPlayExternalStageInterruption) throw cause;
+              const gameMasterRecoveryFeedback = getCampaignPlayGameMasterRecoveryFeedback(cause);
+              if (gameMasterRecoveryFeedback !== undefined) {
+                input.onGameMasterRecoveryFeedback?.(gameMasterRecoveryFeedback);
+              }
               throw gameMasterInterruption(
                 input.gameMasterModel.requested,
                 cause,

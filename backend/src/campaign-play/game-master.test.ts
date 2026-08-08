@@ -9,6 +9,8 @@ import { safeGenerateObject, type SafeGenerateTrace } from "../ai/generate-objec
 import {
   campaignPlayGameMasterProposalSchema,
   createCampaignPlayGameMaster,
+  CampaignPlayGameMasterError,
+  getCampaignPlayGameMasterRecoveryFeedback,
   type CampaignPlayGameMasterFrame,
 } from "./game-master.js";
 import type { CampaignPlayJudgeRuling, CampaignPlayUncertaintyResolution } from "./contracts.js";
@@ -553,6 +555,136 @@ describe("Campaign Play Game Master obligations", () => {
         affectedHandles: ["you", "guard", "guard-receivable"],
       }],
     }).success).toBe(false);
+  });
+});
+
+describe("Campaign Play Game Master repeated-dialogue recovery", () => {
+  const repeatedSummary = frame().actorContinuity[0]!.recentOwnActions[0]!.summary;
+  const recoveryFeedback = {
+    diagnostic: "game_master_semantic_validation_mismatch" as const,
+    failedChecks: [{
+      check: "repeated_actor_dialogue" as const,
+      effectIndex: 0,
+      fieldPath: "effects[0].summary",
+      performingActorHandle: "guard",
+      recentOwnActionIndex: 0,
+    }],
+  };
+
+  it("rejects repeated actor dialogue with stable ordered safe coordinates", () => {
+    const repeatedProposal = {
+      ...proposal,
+      effects: [
+        { ...proposal.effects[0], summary: repeatedSummary },
+        { ...proposal.effects[0], eventClass: "interaction" as const, summary: repeatedSummary },
+      ],
+    };
+    let thrown: unknown;
+    try {
+      createCampaignPlayGameMaster().compile(
+        frame(),
+        ruling(),
+        resolution,
+        null,
+        repeatedProposal,
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(CampaignPlayGameMasterError);
+    expect(thrown).toMatchObject({ code: "model_contract_failed" });
+    const feedback = getCampaignPlayGameMasterRecoveryFeedback(thrown);
+    expect(feedback).toEqual({
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [
+        {
+          check: "repeated_actor_dialogue",
+          effectIndex: 0,
+          fieldPath: "effects[0].summary",
+          performingActorHandle: "guard",
+          recentOwnActionIndex: 0,
+        },
+        {
+          check: "repeated_actor_dialogue",
+          effectIndex: 1,
+          fieldPath: "effects[1].summary",
+          performingActorHandle: "guard",
+          recentOwnActionIndex: 0,
+        },
+      ],
+    });
+    expect(JSON.stringify(feedback)).not.toContain(repeatedSummary);
+    expect(JSON.stringify(feedback)).not.toContain("SENTINEL_RAW_PROPOSAL");
+  });
+
+  it("preserves safe feedback when semantic failure is wrapped with model evidence", async () => {
+    const repeatedProposal = {
+      ...proposal,
+      effects: [{ ...proposal.effects[0], summary: repeatedSummary }],
+    };
+    const generateObject = vi.fn().mockResolvedValue({ object: repeatedProposal, trace: trace() });
+    let thrown: unknown;
+    try {
+      await createCampaignPlayGameMaster({
+        generateObject: generateObject as unknown as typeof safeGenerateObject,
+      }).plan({
+        frame: frame(),
+        ruling: ruling(),
+        resolution,
+        uncertaintyAuthority: null,
+        model: model(),
+        temperature: 0.2,
+        budget,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({
+      code: "model_contract_failed",
+      modelEvidence: expect.objectContaining({ errorCode: "model_contract_failed" }),
+    });
+    expect(getCampaignPlayGameMasterRecoveryFeedback(thrown)).toEqual(recoveryFeedback);
+    expect(generateObject).toHaveBeenCalledOnce();
+  });
+
+  it("adds the exact recovery block only when safe feedback is supplied", async () => {
+    const acceptedReview = {
+      object: { verdict: "accepted", reason: "The dialogue remains within supplied authority." },
+      trace: trace(),
+    };
+    const normalGenerate = vi.fn()
+      .mockResolvedValueOnce({ object: proposal, trace: trace() })
+      .mockResolvedValueOnce(acceptedReview);
+    await createCampaignPlayGameMaster({
+      generateObject: normalGenerate as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget,
+    });
+    const normalPrompt = String(normalGenerate.mock.calls[0]![0].prompt);
+    expect(normalPrompt).not.toContain("GAME_MASTER_RECOVERY");
+
+    const recoveryGenerate = vi.fn()
+      .mockResolvedValueOnce({ object: proposal, trace: trace() })
+      .mockResolvedValueOnce(acceptedReview);
+    await createCampaignPlayGameMaster({
+      generateObject: recoveryGenerate as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget,
+      recoveryFeedback,
+    });
+    const recoveryPrompt = String(recoveryGenerate.mock.calls[0]![0].prompt);
+    const recoveryBlock = recoveryPrompt.slice(recoveryPrompt.indexOf("GAME_MASTER_RECOVERY"));
+    expect(recoveryBlock).toBe([
+      "GAME_MASTER_RECOVERY",
+      "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. All schema, authority, continuity, and Rulebook rules above still apply.",
+      "RECOVERY_DIAGNOSTIC",
+      JSON.stringify(recoveryFeedback),
+      "END_RECOVERY_DIAGNOSTIC",
+    ].join("\n"));
+    expect(recoveryBlock).not.toContain(repeatedSummary);
+    expect(recoveryBlock).not.toContain("SENTINEL_RAW_PROPOSAL");
   });
 });
 

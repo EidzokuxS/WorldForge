@@ -88,6 +88,7 @@ import {
   type CampaignPlayReadModel,
 } from "./campaign-play-read-model.js";
 import type { CampaignPlayJudgeRecoveryFeedback } from "./judge.js";
+import type { CampaignPlayGameMasterRecoveryFeedback } from "./game-master.js";
 
 const LEASE_DURATION_MS = 150_000;
 const HEARTBEAT_INTERVAL_MS = 10_000;
@@ -151,6 +152,8 @@ interface CampaignPlayRuntimeFactory {
     selection?: CampaignPlayTurnModelSelection,
     judgeRecoveryFeedback?: CampaignPlayJudgeRecoveryFeedback,
     onJudgeRecoveryFeedback?: (feedback: CampaignPlayJudgeRecoveryFeedback) => void,
+    gameMasterRecoveryFeedback?: CampaignPlayGameMasterRecoveryFeedback,
+    onGameMasterRecoveryFeedback?: (feedback: CampaignPlayGameMasterRecoveryFeedback) => void,
   ): CampaignPlayTurnRuntime;
 }
 
@@ -511,6 +514,8 @@ export function createCampaignPlayApplication(
     selection?: CampaignPlayTurnModelSelection,
     judgeRecoveryFeedback?: CampaignPlayJudgeRecoveryFeedback,
     onJudgeRecoveryFeedback?: (feedback: CampaignPlayJudgeRecoveryFeedback) => void,
+    gameMasterRecoveryFeedback?: CampaignPlayGameMasterRecoveryFeedback,
+    onGameMasterRecoveryFeedback?: (feedback: CampaignPlayGameMasterRecoveryFeedback) => void,
   ): CampaignPlayTurnRuntime => {
     const settings = dependencies.loadSettings();
     const state = createCampaignPlayStateRepository(handle).loadState();
@@ -608,6 +613,8 @@ export function createCampaignPlayApplication(
       ),
       judgeRecoveryFeedback,
       onJudgeRecoveryFeedback,
+      gameMasterRecoveryFeedback,
+      onGameMasterRecoveryFeedback,
     });
   };
 
@@ -648,6 +655,8 @@ export function createCampaignPlayApplication(
     turn: LoadedCampaignPlayTurn,
     judgeRecoveryFeedback?: CampaignPlayJudgeRecoveryFeedback,
     onJudgeRecoveryFeedback?: (feedback: CampaignPlayJudgeRecoveryFeedback) => void,
+    gameMasterRecoveryFeedback?: CampaignPlayGameMasterRecoveryFeedback,
+    onGameMasterRecoveryFeedback?: (feedback: CampaignPlayGameMasterRecoveryFeedback) => void,
   ): CampaignPlayOpeningRuntime | CampaignPlayTurnRuntime => turn.turnKind === "opening"
     ? runtimeFactory.createOpening(handle, turn.modelSelection)
     : runtimeFactory.createTurn(
@@ -655,6 +664,8 @@ export function createCampaignPlayApplication(
         turn.modelSelection,
         judgeRecoveryFeedback,
         onJudgeRecoveryFeedback,
+        gameMasterRecoveryFeedback,
+        onGameMasterRecoveryFeedback,
       );
 
   const replayAdmission = (
@@ -695,6 +706,7 @@ export function createCampaignPlayApplication(
   ): Promise<void> => {
     let pendingResume = resume;
     let pendingJudgeRecoveryFeedback: CampaignPlayJudgeRecoveryFeedback | undefined;
+    let pendingGameMasterRecoveryFeedback: CampaignPlayGameMasterRecoveryFeedback | undefined;
     let automaticResumeAttempted = false;
     while (true) {
       const handle = dependencies.openDatabase(campaignId);
@@ -704,11 +716,14 @@ export function createCampaignPlayApplication(
         if (!before || before.stage === "completed" || before.stage === "failed") return;
         if (before.stage === "interrupted" && pendingResume === null) return;
         let recoveredJudgeFeedback: CampaignPlayJudgeRecoveryFeedback | undefined;
+        let recoveredGameMasterFeedback: CampaignPlayGameMasterRecoveryFeedback | undefined;
         const runtime = runtimeForTurn(
           handle,
           before,
           pendingJudgeRecoveryFeedback,
           (feedback) => { recoveredJudgeFeedback = feedback; },
+          pendingGameMasterRecoveryFeedback,
+          (feedback) => { recoveredGameMasterFeedback = feedback; },
         );
         const wasResume = pendingResume !== null;
         const result = pendingResume
@@ -720,7 +735,9 @@ export function createCampaignPlayApplication(
           : await runtime.runNextStage(turnId);
         pendingResume = null;
         const nextJudgeRecoveryFeedback = recoveredJudgeFeedback;
+        const nextGameMasterRecoveryFeedback = recoveredGameMasterFeedback;
         pendingJudgeRecoveryFeedback = undefined;
+        pendingGameMasterRecoveryFeedback = undefined;
         if (result.recovery.kind === "explicit_resume_required" &&
           campaignPlayMayAutomaticallyResumeExternalStage({
             turnKind: before.turnKind,
@@ -739,6 +756,7 @@ export function createCampaignPlayApplication(
             observedEpoch: result.recovery.workerEpoch,
           };
           pendingJudgeRecoveryFeedback = nextJudgeRecoveryFeedback;
+          pendingGameMasterRecoveryFeedback = nextGameMasterRecoveryFeedback;
           continue;
         }
         if (result.recovery.kind === "completed" && result.turn.turnKind === "player_action") {

@@ -30,6 +30,9 @@ import {
   type CampaignPlayExternalInterruptionEvidence,
   type CampaignPlayTurnModelSelection,
 } from "./campaign-play-turn-repository.js";
+import { createCampaignPlayStateRepository } from "./campaign-play-state-repository.js";
+import type { CampaignPlayGameMasterRecoveryFeedback } from "./game-master.js";
+import type { CampaignPlayTurnRuntime } from "./turn-runtime.js";
 import type { CampaignPlayOpeningRuntime } from "./opening-runtime.js";
 
 const CAMPAIGN_ID = "99999999-9999-4999-8999-999999999999";
@@ -49,6 +52,46 @@ const SELECTION: CampaignPlayTurnModelSelection = {
     strategy: "strict_object",
     pricing: PRICING,
   },
+};
+
+const PLAYER_SELECTION: CampaignPlayTurnModelSelection = {
+  turnKind: "player_action",
+  routeKind: "full_authority",
+  judge: {
+    providerId: "provider-frozen",
+    model: "judge-frozen",
+    strategy: "strict_object",
+    pricing: PRICING,
+  },
+  gameMaster: {
+    providerId: "provider-frozen",
+    model: "game-master-frozen",
+    strategy: "strict_object",
+    pricing: PRICING,
+  },
+  actorReplanner: {
+    providerId: "provider-frozen",
+    model: "actor-frozen",
+    strategy: "strict_object",
+    pricing: PRICING,
+  },
+  narrator: {
+    providerId: "provider-frozen",
+    model: "narrator-frozen",
+    strategy: "strict_object",
+    pricing: PRICING,
+  },
+};
+
+const GAME_MASTER_RECOVERY_FEEDBACK: CampaignPlayGameMasterRecoveryFeedback = {
+  diagnostic: "game_master_semantic_validation_mismatch",
+  failedChecks: [{
+    check: "repeated_actor_dialogue",
+    effectIndex: 0,
+    fieldPath: "effects[0].summary",
+    performingActorHandle: "actor:performer",
+    recentOwnActionIndex: 0,
+  }],
 };
 
 let root = "";
@@ -342,6 +385,208 @@ function fakeOpeningRuntime(
       return snapshot(input.turnId, resumedAt + 2);
     },
     loadTurn: (turnId) => repository.loadTurn(turnId),
+  };
+}
+
+function markPlayerPhaseReady(): void {
+  const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
+  try {
+    const stateRepository = createCampaignPlayStateRepository(handle);
+    const before = stateRepository.loadState();
+    if (!before) throw new Error("Campaign Play state must exist before the ready fixture.");
+    const packet = {
+      acceptedWorldVersion: before.authority.acceptedWorldVersion,
+      worldVersion: before.authority.worldVersion + 1,
+      runtimeRevision: before.authority.runtimeRevision + 1,
+      campaignId: CAMPAIGN_ID,
+      turnId: "turn:opening-fixture",
+      turnKind: "opening" as const,
+      openingContext: {
+        role: "A repairer waiting for passage",
+        arrivalMode: "On the last permitted ferry",
+        immediateSituation: "The harbor gates close as an impossible bell pattern crosses the water.",
+      },
+      actionContext: null,
+      playerHistory: [],
+      sourceMoment: null,
+      currentLocation: {
+        handle: "location_harbor",
+        name: "Harbor",
+        description: "Rain crosses the lantern light.",
+      },
+      visibleActors: [],
+      visibleRoutes: [],
+      visiblePressures: [],
+      possessions: [],
+      obligations: [],
+      newObservations: [],
+      consequences: [],
+      continuity: [],
+      elapsedMinutes: 0,
+      availableIntents: [],
+    };
+    const packetHash = "a".repeat(64);
+    stateRepository.commitMechanicalAndRuntime({
+      worldVersionAdvance: 1,
+      event: {
+        eventId: "player-ready-boundary",
+        turnId: null,
+        kind: "character_created",
+        workerEpoch: null,
+        protectedPayloadHash: "b".repeat(64),
+        createdAt: 2_000,
+      },
+      mutate({ sqlite, campaignId }) {
+        sqlite.prepare(`INSERT INTO campaign_play_turns (
+          id, campaign_id, turn_kind, supersedes_turn_id, input_json, input_hash,
+          idempotency_key, expected_world_version, expected_runtime_revision,
+          base_world_version, final_world_version, stage, frame_hash,
+          next_event_sequence, worker_epoch, model_selection_json,
+          public_packet_hash, mutation_audit_json, submitted_at, updated_at, completed_at
+        ) VALUES (?, ?, 'opening', NULL, '{}', ?, ?, ?, ?, ?, ?, 'completed', ?, 1, 0, ?, ?, '{}', ?, ?, ?)`)
+          .run(
+            packet.turnId,
+            campaignId,
+            "d".repeat(64),
+            "opening-fixture",
+            before.authority.worldVersion,
+            before.authority.runtimeRevision,
+            before.authority.worldVersion,
+            before.authority.worldVersion + 1,
+            "c".repeat(64),
+            JSON.stringify(SELECTION),
+            packetHash,
+            1_500,
+            2_000,
+            2_000,
+          );
+        sqlite.prepare(`INSERT INTO campaign_play_narrations (
+          narration_id, campaign_id, turn_id, status, packet_hash, packet_json,
+          beats_json, display_text, suggested_actions_json, effects_json,
+          created_at, completed_at
+        ) VALUES (?, ?, ?, 'complete', ?, ?, ?, ?, '[]', '[]', ?, ?)`)
+          .run(
+            "narration:opening-fixture",
+            campaignId,
+            packet.turnId,
+            packetHash,
+            JSON.stringify(packet),
+            JSON.stringify([{ beatId: "beat-opening", text: "Rain gathers on the quiet road." }]),
+            "The harbor waits beneath the impossible bell.",
+            2_000,
+            2_000,
+          );
+        sqlite.prepare(`UPDATE campaign_play_states
+          SET setup_phase = 'ready', world_time_minutes = 0, opened_at = ?, updated_at = ?
+          WHERE campaign_id = ?`).run(2_000, 2_000, campaignId);
+      },
+    });
+  } finally {
+    handle.close();
+  }
+}
+
+function fakePlayerRuntime(
+  handle: CampaignPlayDatabaseHandle,
+  options: {
+    gameMasterRecoveryFeedback?: CampaignPlayGameMasterRecoveryFeedback;
+    onGameMasterRecoveryFeedback?: (feedback: CampaignPlayGameMasterRecoveryFeedback) => void;
+    onRun?: (turnId: string) => void;
+    onResume?: (input: {
+      turnId: string;
+      gameMasterRecoveryFeedback?: CampaignPlayGameMasterRecoveryFeedback;
+    }) => void;
+  },
+): CampaignPlayTurnRuntime {
+  const repository = createCampaignPlayTurnRepository(handle);
+  const snapshot = (turnId: string, observedAt: number) => ({
+    turn: repository.loadTurn(turnId)!,
+    recovery: repository.loadRecoveryState(turnId, observedAt),
+    telemetry: null,
+  });
+  return {
+    admitAction({ request, submittedAt }) {
+      const turnId = `turn:${request.idempotencyKey}`;
+      return repository.admitTurn({
+        turnId,
+        supersedesTurnId: null,
+        mutationId: `admit:${request.idempotencyKey}`,
+        submittedAt,
+        document: { turnKind: "player_action", request, frame: {} },
+        modelSelection: PLAYER_SELECTION,
+      });
+    },
+    async runNextStage(turnId) {
+      options.onRun?.(turnId);
+      const turn = repository.loadTurn(turnId)!;
+      if (turn.stage !== "admitted" || turn.workerLeaseOwner !== null) {
+        return snapshot(turnId, turn.updatedAt);
+      }
+      const claimedAt = turn.updatedAt + 1;
+      const token = repository.claimStage({
+        turnId,
+        expectedStage: "admitted",
+        observedEpoch: turn.workerEpoch,
+        owner: "application-gm-recovery",
+        claimedAt,
+        leaseExpiresAt: claimedAt + 1_000,
+        mutationId: `claim:${turn.workerEpoch + 1}`,
+      });
+      options.onGameMasterRecoveryFeedback?.(GAME_MASTER_RECOVERY_FEEDBACK);
+      repository.interruptExternal({
+        token,
+        evidence: {
+          actualProviderId: "provider-frozen",
+          actualModel: "game-master-frozen",
+          actualStrategy: "strict_object",
+          inputTokens: 3,
+          outputTokens: 0,
+          durationMs: 2,
+          finishReason: "invalid_output",
+          schemaOutcome: "invalid",
+          errorCode: "model_contract_invalid",
+        },
+        interruptedAt: claimedAt + 2,
+        mutationId: `interrupt:${token.epoch}`,
+      });
+      return snapshot(turnId, claimedAt + 2);
+    },
+    async recoverActiveTurn() {
+      const turn = repository.loadActiveTurn();
+      return turn ? snapshot(turn.turnId, turn.updatedAt) : null;
+    },
+    async resumeInterruptedStage(input) {
+      options.onResume?.({
+        turnId: input.turnId,
+        gameMasterRecoveryFeedback: options.gameMasterRecoveryFeedback,
+      });
+      const turn = repository.loadTurn(input.turnId)!;
+      const resumedAt = turn.updatedAt + 1;
+      const token = repository.resumeExternal({
+        turnId: input.turnId,
+        interruptedStage: input.interruptedStage,
+        observedEpoch: input.observedEpoch,
+        owner: "application-gm-recovery-resume",
+        resumedAt,
+        leaseExpiresAt: resumedAt + 1_000,
+        mutationId: `resume:${input.observedEpoch + 1}`,
+      });
+      const resumed = repository.loadTurn(input.turnId)!;
+      return {
+        turn: resumed,
+        recovery: {
+          kind: "external_ready" as const,
+          turnId: input.turnId,
+          stage: "admitted" as const,
+          workerEpoch: token.epoch,
+        },
+        telemetry: null,
+      };
+    },
+    runNarration: async () => null,
+    prepareNarrationRecovery: () => { throw new Error("Narration is outside this application fixture."); },
+    loadTurn: (turnId) => repository.loadTurn(turnId),
+    loadTelemetry: (turnId) => repository.loadTurnTelemetry(turnId),
   };
 }
 
@@ -725,6 +970,74 @@ describe("CampaignPlayApplication", () => {
       )).toEqual({ count: 0 });
       expect(handle.sqlite.prepare("PRAGMA integrity_check").get()).toEqual({ integrity_check: "ok" });
       expect(handle.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    } finally {
+      handle.close();
+    }
+  });
+
+  it("carries Game Master recovery feedback through one automatic player-action resume and clears it", async () => {
+    createAcceptedCampaign();
+    const resumeFeedback: Array<CampaignPlayGameMasterRecoveryFeedback | undefined> = [];
+    const createTurn = vi.fn((
+      handle: CampaignPlayDatabaseHandle,
+      _selection?: CampaignPlayTurnModelSelection,
+      _judgeRecoveryFeedback?: unknown,
+      _onJudgeRecoveryFeedback?: unknown,
+      gameMasterRecoveryFeedback?: CampaignPlayGameMasterRecoveryFeedback,
+      onGameMasterRecoveryFeedback?: (feedback: CampaignPlayGameMasterRecoveryFeedback) => void,
+    ) => fakePlayerRuntime(handle, {
+      gameMasterRecoveryFeedback,
+      onGameMasterRecoveryFeedback,
+      onResume: (input) => resumeFeedback.push(input.gameMasterRecoveryFeedback),
+    }));
+    const application = createCampaignPlayApplication({
+      now: () => 1_300,
+      runtimeFactory: {
+        createOpening: (handle) => fakeOpeningRuntime(handle, { runNextStage: vi.fn() }),
+        createTurn,
+      },
+    });
+    application.loadState(CAMPAIGN_ID);
+    bootstrapPlayer(application);
+    markPlayerPhaseReady();
+    const state = application.loadState(CAMPAIGN_ID);
+    const admission = application.admitTurn(CAMPAIGN_ID, {
+      source: "freeform",
+      idempotencyKey: "player-gm-recovery-feedback",
+      text: "Ask about the current signal.",
+      expectedWorldVersion: state.worldVersion,
+      expectedRuntimeRevision: state.runtimeRevision,
+    });
+    await application.waitForIdle(CAMPAIGN_ID);
+
+    const playerTurnCalls = createTurn.mock.calls.filter((call) => call[1]?.turnKind === "player_action");
+    expect(playerTurnCalls.map((call) => call[4])).toEqual([
+      undefined,
+      GAME_MASTER_RECOVERY_FEEDBACK,
+      undefined,
+    ]);
+    expect(resumeFeedback).toEqual([GAME_MASTER_RECOVERY_FEEDBACK]);
+
+    const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
+    try {
+      const repository = createCampaignPlayTurnRepository(handle);
+      expect(repository.loadTurn(admission.turnId)).toMatchObject({
+        turnId: admission.turnId,
+        stage: "admitted",
+        workerEpoch: 2,
+        workerLeaseOwner: "application-gm-recovery-resume",
+      });
+      expect(handle.sqlite.prepare(`SELECT attempt, status, error_code AS errorCode
+        FROM campaign_play_model_stages WHERE turn_id = ? ORDER BY attempt`).all(
+        admission.turnId,
+      )).toEqual([
+        { attempt: 1, status: "interrupted", errorCode: "model_contract_invalid" },
+        { attempt: 2, status: "started", errorCode: null },
+      ]);
+      expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+        FROM campaign_play_turn_results WHERE campaign_id = ? AND turn_id = ?`).get(
+        CAMPAIGN_ID, admission.turnId,
+      )).toEqual({ count: 0 });
     } finally {
       handle.close();
     }

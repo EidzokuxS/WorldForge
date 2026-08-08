@@ -47,7 +47,11 @@ import {
   type CampaignPlayModelEvidence,
   type CampaignPlayJudgeRecoveryFeedback,
 } from "./judge.js";
-import { CampaignPlayGameMasterError, createCampaignPlayGameMaster } from "./game-master.js";
+import {
+  CampaignPlayGameMasterError,
+  createCampaignPlayGameMaster,
+  type CampaignPlayGameMasterRecoveryFeedback,
+} from "./game-master.js";
 import {
   createCampaignPlayTurnRuntime,
   loadCampaignPlayPlayerActionAdmissionFrame,
@@ -708,6 +712,44 @@ function gameMasterFixture(
       };
     }),
   };
+}
+
+function repeatedDialogueErrorForRequest(
+  request: Parameters<ReturnType<typeof createCampaignPlayGameMaster>["plan"]>[0],
+): CampaignPlayGameMasterError {
+  const continuity = request.frame.actorContinuity.find((entry) =>
+    entry.recentOwnActions.length > 0);
+  if (!continuity) throw new Error("Recovery fixture requires actor continuity.");
+  const playerHandle = request.frame.handleBindings.find((binding) =>
+    binding.reference.kind === "actor" && binding.reference.id === PLAYER_ID)?.handle;
+  const locationHandle = request.frame.visibleFacts.find((fact) => fact.kind === "location")?.handle;
+  if (!playerHandle || !locationHandle) {
+    throw new Error("Recovery fixture requires player and location handles.");
+  }
+  const recentSummary = continuity.recentOwnActions[0]!.summary;
+  try {
+    createCampaignPlayGameMaster().compile(
+      request.frame,
+      request.ruling,
+      request.resolution,
+      request.uncertaintyAuthority,
+      {
+        elapsedMinutes: request.ruling.elapsedBounds.minimumMinutes,
+        effects: [{
+          kind: "record_world_event",
+          eventClass: "dialogue",
+          performingActorHandle: continuity.actorHandle,
+          routeAccessClaims: [],
+          summary: recentSummary,
+          affectedHandles: [playerHandle, locationHandle],
+        }],
+      },
+    );
+  } catch (error) {
+    if (error instanceof CampaignPlayGameMasterError) return error;
+    throw error;
+  }
+  throw new Error("Recovery fixture did not reject the repeated dialogue.");
 }
 
 function ambientContactJudgeFixture() {
@@ -1580,6 +1622,113 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(observedModels).toEqual([bypassModel, reasoningModel]);
     await advanceUntilStage(runtime, time, admission.turnId, "completed");
     expect(countForTurn(handle, "campaign_play_turn_results", admission.turnId)).toBe(1);
+  });
+
+  it("forwards safe Game Master recovery feedback on a certified route once", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening(10_000, {
+      contactDetail: "ask about the immediate situation",
+    });
+    const time = fixedClock(1_947_5);
+    const judge = judgeFixture("deterministic");
+    const acceptedGameMaster = gameMasterFixture();
+    const bypassModel = {} as LanguageModel;
+    const reasoningModel = {} as LanguageModel;
+    const observedRequests: Array<Parameters<typeof acceptedGameMaster.plan>[0]> = [];
+    let calls = 0;
+    const gameMaster = {
+      plan: vi.fn(async (request: Parameters<typeof acceptedGameMaster.plan>[0]) => {
+        observedRequests.push(request);
+        calls += 1;
+        if (calls === 1) throw repeatedDialogueErrorForRequest(request);
+        return acceptedGameMaster.plan(request);
+      }),
+    };
+    let recoveredFeedback: CampaignPlayGameMasterRecoveryFeedback | undefined;
+    const firstRuntime = turnRuntime(handle, time, judge, gameMaster, {
+      certifiedGameMasterModel: {
+        languageModel: bypassModel,
+        reasoningModel,
+        requested: {
+          providerId: "test",
+          model: "test-certified-game-master",
+          strategy: "strict_object",
+          pricing: TEST_MODEL_PRICING,
+        },
+        temperature: 0.2,
+        maximumInputTokens: 1_000,
+        maximumOutputTokens: 1_000,
+        maximumTotalTokens: 2_000,
+        maximumCostMicros: 10_000,
+      },
+      onGameMasterRecoveryFeedback: (feedback) => { recoveredFeedback = feedback; },
+    });
+    const contact = renderedContactSuggestion(handle);
+    const admission = firstRuntime.admitAction({
+      request: {
+        idempotencyKey: "certified-contact-dialogue-recovery",
+        expectedWorldVersion: state.authority.worldVersion,
+        expectedRuntimeRevision: state.authority.runtimeRevision,
+        source: "suggested",
+        choiceHandle: contact.choiceHandle,
+      },
+      submittedAt: time.clock.now(),
+    });
+    time.advance();
+    await firstRuntime.runNextStage(admission.turnId);
+    const interrupted = firstRuntime.loadTurn(admission.turnId)!;
+    expect(interrupted).toMatchObject({
+      stage: "interrupted",
+      interruptedStage: "admitted",
+      errorCode: "model_contract_invalid",
+      resumeEligible: true,
+    });
+    expect(judge.judge).toHaveBeenCalledTimes(0);
+    expect(recoveredFeedback).toEqual({
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [{
+        check: "repeated_actor_dialogue",
+        effectIndex: 0,
+        fieldPath: "effects[0].summary",
+        performingActorHandle: expect.any(String),
+        recentOwnActionIndex: 0,
+      }],
+    });
+    if (recoveredFeedback === undefined) throw new Error("Expected safe Game Master recovery feedback.");
+    const firstRequest = observedRequests[0]!;
+    expect(firstRequest.recoveryFeedback).toBeUndefined();
+    const secondRuntime = turnRuntime(handle, time, judge, gameMaster, {
+      certifiedGameMasterModel: {
+        languageModel: bypassModel,
+        reasoningModel,
+        requested: {
+          providerId: "test",
+          model: "test-certified-game-master",
+          strategy: "strict_object",
+          pricing: TEST_MODEL_PRICING,
+        },
+        temperature: 0.2,
+        maximumInputTokens: 1_000,
+        maximumOutputTokens: 1_000,
+        maximumTotalTokens: 2_000,
+        maximumCostMicros: 10_000,
+      },
+      gameMasterRecoveryFeedback: recoveredFeedback,
+    });
+    time.advance();
+    await secondRuntime.resumeInterruptedStage({
+      turnId: admission.turnId,
+      interruptedStage: "admitted",
+      observedEpoch: interrupted.workerEpoch,
+    });
+    await advanceUntilStage(secondRuntime, time, admission.turnId, "completed");
+    expect(observedRequests).toHaveLength(2);
+    expect(observedRequests[1]!.recoveryFeedback).toEqual(recoveredFeedback);
+    expect(observedRequests[1]!.frame.sourceMoment).toBe(firstRequest.frame.sourceMoment);
+    expect(observedRequests[1]!.ruling).toEqual(firstRequest.ruling);
+    expect(observedRequests[1]!.resolution).toEqual(firstRequest.resolution);
+    expect(judge.judge).toHaveBeenCalledTimes(0);
+    expect(countForTurn(handle, "campaign_play_turn_results", admission.turnId)).toBe(1);
+    expect(countForTurn(handle, "campaign_play_receipts", admission.turnId)).toBeGreaterThan(0);
   });
 
   it("keeps a nonmatching rendered contact detail on full authority", async () => {
@@ -2648,6 +2797,81 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(observedGameMasterModels).toEqual([bypassGameMasterModel, bypassGameMasterModel]);
     expect(observedGameMasterModes).toEqual(["auto", "tool"]);
     expect(countForTurn(handle, "campaign_play_commands", admission.turnId)).toBe(2);
+  });
+
+  it("forwards Game Master recovery feedback at the judged boundary without replaying Judge", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening();
+    const time = fixedClock(2_655);
+    const judge = judgeFixture("deterministic");
+    const acceptedGameMaster = gameMasterFixture();
+    const observedRequests: Array<Parameters<typeof acceptedGameMaster.plan>[0]> = [];
+    let calls = 0;
+    const gameMaster = {
+      plan: vi.fn(async (request: Parameters<typeof acceptedGameMaster.plan>[0]) => {
+        observedRequests.push(request);
+        calls += 1;
+        if (calls === 1) throw repeatedDialogueErrorForRequest(request);
+        return acceptedGameMaster.plan(request);
+      }),
+    };
+    let recoveredFeedback: CampaignPlayGameMasterRecoveryFeedback | undefined;
+    const firstRuntime = turnRuntime(handle, time, judge, gameMaster, {
+      onGameMasterRecoveryFeedback: (feedback) => { recoveredFeedback = feedback; },
+    });
+    const admission = firstRuntime.admitAction({
+      request: admissionRequest(state, "full-authority-game-master-dialogue-recovery"),
+      submittedAt: time.clock.now(),
+    });
+    time.advance();
+    await firstRuntime.runNextStage(admission.turnId);
+    expect(judge.judge).toHaveBeenCalledTimes(1);
+    time.advance();
+    const first = await firstRuntime.runNextStage(admission.turnId);
+    expect(first.turn).toMatchObject({
+      stage: "interrupted",
+      interruptedStage: "judged",
+      errorCode: "model_contract_invalid",
+      resumeEligible: true,
+    });
+    expect(recoveredFeedback).toEqual({
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [{
+        check: "repeated_actor_dialogue",
+        effectIndex: 0,
+        fieldPath: "effects[0].summary",
+        performingActorHandle: expect.any(String),
+        recentOwnActionIndex: 0,
+      }],
+    });
+    if (recoveredFeedback === undefined) throw new Error("Expected safe Game Master recovery feedback.");
+    const interrupted = firstRuntime.loadTurn(admission.turnId)!;
+    const firstRequest = observedRequests[0]!;
+    expect(firstRequest.recoveryFeedback).toBeUndefined();
+    const secondRuntime = turnRuntime(handle, time, judge, gameMaster, {
+      gameMasterRecoveryFeedback: recoveredFeedback,
+    });
+    time.advance();
+    await secondRuntime.resumeInterruptedStage({
+      turnId: admission.turnId,
+      interruptedStage: "judged",
+      observedEpoch: interrupted.workerEpoch,
+    });
+    time.advance();
+    await secondRuntime.runNextStage(admission.turnId);
+    expect(secondRuntime.loadTurn(admission.turnId)).toMatchObject({ stage: "primary_settled" });
+    expect(observedRequests).toHaveLength(2);
+    expect(observedRequests[1]!.recoveryFeedback).toEqual(recoveredFeedback);
+    expect(observedRequests[1]!.frame.sourceMoment).toBe(firstRequest.frame.sourceMoment);
+    expect(observedRequests[1]!.ruling).toEqual(firstRequest.ruling);
+    expect(observedRequests[1]!.resolution).toEqual(firstRequest.resolution);
+    expect(judge.judge).toHaveBeenCalledTimes(1);
+    expect(handle.sqlite.prepare(`SELECT count(*) AS value FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'game_master'`).get(
+        CAMPAIGN_ID,
+        admission.turnId,
+      )).toEqual({ value: 2 });
+    expect(countForTurn(handle, "campaign_play_commands", admission.turnId)).toBe(2);
+    expect(countForTurn(handle, "campaign_play_receipts", admission.turnId)).toBe(2);
   });
 
   it("rolls back the entire primary Rulebook batch when settlement faults between commands", async () => {
