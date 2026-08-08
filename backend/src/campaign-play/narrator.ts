@@ -343,6 +343,159 @@ function requiredReplyIntentIndex(packet: CampaignPlayNarratorPacket): number | 
   return null;
 }
 
+interface TextOccurrence {
+  start: number;
+  end: number;
+}
+
+interface ObservationActorNameFrameEntry {
+  observationIndex: number;
+  permittedActorNames: string[];
+  quotedReferenceActorNames: string[];
+  forbiddenActorNames: string[];
+}
+
+type CampaignPlayVisibleActor = CampaignPlayNarratorPacket["visibleActors"][number];
+
+function actorNameAliases(actorName: string): string[] {
+  return [actorName, actorName.split(/\s+/u)[0] ?? actorName]
+    .filter((alias) => alias.length >= 3);
+}
+
+function escapedAlias(alias: string): string {
+  return alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function aliasOccurrences(textValue: string, alias: string): TextOccurrence[] {
+  const occurrences: TextOccurrence[] = [];
+  const matcher = new RegExp(
+    `(?<![\\p{L}\\p{N}])${escapedAlias(alias)}(?![\\p{L}\\p{N}])`,
+    "giu",
+  );
+  let match: RegExpExecArray | null;
+  while ((match = matcher.exec(textValue)) !== null) {
+    occurrences.push({
+      start: match.index,
+      end: match.index + match[0].length,
+    });
+    if (match[0].length === 0) matcher.lastIndex += 1;
+  }
+  return occurrences;
+}
+
+function balancedDoubleQuoteSpans(textValue: string): TextOccurrence[] {
+  const spans: TextOccurrence[] = [];
+  let straightStart: number | null = null;
+  let curlyStart: number | null = null;
+  for (let index = 0; index < textValue.length; index += 1) {
+    const character = textValue[index];
+    if (character === '"') {
+      if (straightStart === null) straightStart = index + 1;
+      else {
+        spans.push({ start: straightStart, end: index });
+        straightStart = null;
+      }
+    } else if (character === "“") {
+      if (curlyStart === null) curlyStart = index + 1;
+    } else if (character === "”" && curlyStart !== null) {
+      spans.push({ start: curlyStart, end: index });
+      curlyStart = null;
+    }
+  }
+  return spans;
+}
+
+function occurrenceInsideDoubleQuoteSpan(
+  occurrence: TextOccurrence,
+  spans: TextOccurrence[],
+): boolean {
+  return spans.some((span) => occurrence.start >= span.start && occurrence.end <= span.end);
+}
+
+interface ActorNameMatcher {
+  aliasesForActor: (actor: CampaignPlayVisibleActor) => string[];
+  matchedAlias: (textValue: string, actorName: string) => string | null;
+  occurrencesForActor: (textValue: string, actor: CampaignPlayVisibleActor) => TextOccurrence[];
+}
+
+function createActorNameMatcher(packet: CampaignPlayNarratorPacket): ActorNameMatcher {
+  const aliasOwners = new Map<string, Set<string>>();
+  packet.visibleActors.forEach((actor) => {
+    actorNameAliases(actor.name).forEach((alias) => {
+      const normalizedAlias = alias.toLocaleLowerCase("en-US");
+      const owners = aliasOwners.get(normalizedAlias) ?? new Set<string>();
+      owners.add(actor.name);
+      aliasOwners.set(normalizedAlias, owners);
+    });
+  });
+  const visiblePlaceNames = [
+    packet.currentLocation.name,
+    ...packet.visibleRoutes.map((route) => route.destinationName),
+  ];
+  const isUsableAlias = (alias: string): boolean => {
+    const normalizedAlias = alias.toLocaleLowerCase("en-US");
+    if (aliasOwners.get(normalizedAlias)?.size !== 1) return false;
+    return !visiblePlaceNames.some((placeName) => aliasOccurrences(placeName, alias).length > 0);
+  };
+  const aliasesForActor = (actor: CampaignPlayVisibleActor): string[] =>
+    actorNameAliases(actor.name).filter(isUsableAlias);
+  const occurrencesForActor = (
+    textValue: string,
+    actor: CampaignPlayVisibleActor,
+  ): TextOccurrence[] => aliasesForActor(actor)
+    .flatMap((alias) => aliasOccurrences(textValue, alias));
+  return {
+    aliasesForActor,
+    matchedAlias: (textValue, actorName) => {
+      const actor = packet.visibleActors.find((candidate) => candidate.name === actorName);
+      if (actor === undefined) return null;
+      return aliasesForActor(actor)
+        .find((alias) => aliasOccurrences(textValue, alias).length > 0) ?? null;
+    },
+    occurrencesForActor,
+  };
+}
+
+function buildObservationActorNameFrame(
+  packet: CampaignPlayNarratorPacket,
+  matcher = createActorNameMatcher(packet),
+): ObservationActorNameFrameEntry[] {
+  const observationSubjects = new Map(
+    (packet.observationSubjects ?? []).map((binding) => [binding.observationHandle, binding.actors]),
+  );
+  return packet.newObservations.map((observation, observationIndex) => {
+    const permittedNames = new Set<string>();
+    const performingActorName = observation.consequence?.performingActorName;
+    if (performingActorName !== null && performingActorName !== undefined) {
+      permittedNames.add(performingActorName);
+    }
+    observationSubjects.get(observation.observationHandle)?.forEach((actor) => {
+      permittedNames.add(actor.name);
+    });
+    const permittedActorNames = packet.visibleActors
+      .filter((actor) => permittedNames.has(actor.name))
+      .map((actor) => actor.name);
+    const quotedReferenceActorNames = packet.visibleActors
+      .filter((actor) => {
+        if (permittedNames.has(actor.name)) return false;
+        const occurrences = matcher.occurrencesForActor(observation.text, actor);
+        if (occurrences.length === 0) return false;
+        const spans = balancedDoubleQuoteSpans(observation.text);
+        return occurrences.every((occurrence) => occurrenceInsideDoubleQuoteSpan(occurrence, spans));
+      })
+      .map((actor) => actor.name);
+    return {
+      observationIndex,
+      permittedActorNames,
+      quotedReferenceActorNames,
+      forbiddenActorNames: packet.visibleActors
+        .filter((actor) => !permittedActorNames.includes(actor.name)
+          && !quotedReferenceActorNames.includes(actor.name))
+        .map((actor) => actor.name),
+    };
+  });
+}
+
 function narratorProposalSchemaForPacket(packet: CampaignPlayNarratorPacket) {
   const expectedActionCount = Math.min(
     CAMPAIGN_PLAY_LIMITS.suggestedActions,
@@ -388,28 +541,7 @@ function buildPrompt(
   recoveryFeedback?: CampaignPlayNarratorRecoveryFeedback,
 ): string {
   const requiredIntentIndex = requiredReplyIntentIndex(packet);
-  const observationSubjects = new Map(
-    (packet.observationSubjects ?? []).map((binding) => [binding.observationHandle, binding.actors]),
-  );
-  const observationActorNameFrame = packet.newObservations.map((observation, observationIndex) => {
-    const permittedNames = new Set<string>();
-    const performingActorName = observation.consequence?.performingActorName;
-    if (performingActorName !== null && performingActorName !== undefined) {
-      permittedNames.add(performingActorName);
-    }
-    observationSubjects.get(observation.observationHandle)?.forEach((actor) => {
-      permittedNames.add(actor.name);
-    });
-    return {
-      observationIndex,
-      permittedActorNames: packet.visibleActors
-        .filter((actor) => permittedNames.has(actor.name))
-        .map((actor) => actor.name),
-      forbiddenActorNames: packet.visibleActors
-        .filter((actor) => !permittedNames.has(actor.name))
-        .map((actor) => actor.name),
-    };
-  });
+  const observationActorNameFrame = buildObservationActorNameFrame(packet);
   const semanticPacketBytes = canonicalizeCampaignPlayProjection({
     ...packet,
     visibleActors: packet.visibleActors.map((actor) => ({
@@ -450,11 +582,13 @@ newObservations contains accepted consequences visible to the player in chronolo
 
 When a newObservation has a non-null consequence.performingActorName, the beat carrying that observationIndex must name that actor and show the actor's visible part in the change. Do not reduce an actor-attributed observation to agentless aftermath. Because REQUIRED_REPLY_INTENT_INDEX may bind a reply to that actor, the prose must make that reply legible before the choices appear.
 
-observationSubjects, when present, is code-owned identity binding for the non-performing visible actors affected by each current observation. OBSERVATION_ACTOR_NAME_FRAME turns the performer and subject bindings into literal permitted and forbidden visible-actor names for every observation index. Match observationSubjects by observationHandle. If an observation names a performing actor and binds exactly one other actor, an unnamed person, silhouette, hooded figure, traveler, witness, or other human target in that observation is the bound actor, never the player. Preserve the bound name or a clearly separate third-person reference. Do not replace a bound actor with "you", even when sourceMoment previously confused their identity or the player stands nearby.
+observationSubjects, when present, is code-owned identity binding for the non-performing visible actors affected by each current observation. OBSERVATION_ACTOR_NAME_FRAME turns the performer and subject bindings into literal visible-actor names for every observation index. Match observationSubjects by observationHandle. If an observation names a performing actor and binds exactly one other actor, an unnamed person, silhouette, hooded figure, traveler, witness, or other human target in that observation is the bound actor, never the player. Preserve the bound name or a clearly separate third-person reference. Do not replace a bound actor with "you", even when sourceMoment previously confused their identity or the player stands nearby.
 
-For each beat, union permittedActorNames from every frame entry named by its observationIndexes. Do not write any other visible actor's canonical name or a unique part of that name in the beat. This remains true when actionContext, sourceMoment, or the observation text repeats a forbidden name. Describe the accepted result without that name. Actorless sounds, traces, silhouettes, and motion remain unattributed. The same rule applies to weather and other scene changes, even when earlier context makes a visible actor seem like the likely source. Resemblance is not identity.
+OBSERVATION_ACTOR_NAME_FRAME separates visible actor names for each observation index into permittedActorNames, quotedReferenceActorNames, and forbiddenActorNames. permittedActorNames are the performer and bound subjects. quotedReferenceActorNames are visible actors named only inside accepted straight or curly double-quoted dialogue; they are referents, not participants.
 
-Before finalizing each beat, check every visible actor name or unique name fragment in its text against the union permittedActorNames for that beat's observationIndexes. Remove any unmatched actor reference, even when that actor appears in sourceMoment, visibleActors, or prior prose. If the actor matters but is not permitted by those observations, put the orientation in a separate beat with observationIndexes: [].
+For each beat, union each name list from every frame entry named by its observationIndexes. A permittedActorName may be described acting in the beat. A quotedReferenceActorName may appear only inside straight or curly double-quoted dialogue that preserves a permitted speaker's accepted reference. It does not authorize a new claim about that actor, and the beat must not describe that actor speaking, moving, arriving, watching, or otherwise acting. Do not write a forbiddenActorName or a unique part of it anywhere in the beat. Actorless sounds, traces, silhouettes, and motion remain unattributed. The same rule applies to weather and other scene changes, even when earlier context makes a visible actor seem like the likely source. Resemblance is not identity.
+
+Before finalizing each beat, check every visible actor name or unique name fragment. Outside double-quoted dialogue, every name must belong to permittedActorNames. Inside double-quoted dialogue, every other visible actor name must belong to quotedReferenceActorNames. Remove any unmatched actor reference. If the actor matters but is not permitted by those observations, put the orientation in a separate beat with observationIndexes: [].
 
 An actor may still be present in visibleActors without being bound to a current observation. Put any orientation mention of that actor in a separate beat with observationIndexes: []. On a movement turn, assign the travel observation to its consequence beat, then orient the player to unbound people at the destination in a separate empty-index beat. Do not attach an unbound actor name to the travel observation.
 
@@ -495,7 +629,7 @@ Keep distant events, hidden actors, private goals, protected state, Judge reason
 
 NARRATOR_RECOVERY
 The prior proposal failed the safe checks below. Regenerate a fresh proposal from NARRATOR_PACKET. Correct every listed check. Do not reuse the rejected observation-index or action-selection arrangement. Every schema, grounding, identity, visibility, and action rule above remains unchanged.
-If a failed check requires changing observation coverage or observationIndexes, recompute permittedActorNames for every beat from OBSERVATION_ACTOR_NAME_FRAME using its final observationIndexes. Then rewrite each beat so its text contains no forbidden visible actor name or unique name fragment.
+If a failed check requires changing observation coverage or observationIndexes, recompute permittedActorNames, quotedReferenceActorNames, and forbiddenActorNames for every beat from OBSERVATION_ACTOR_NAME_FRAME using its final observationIndexes. Then rewrite each beat so every actor name follows the rules above.
 RECOVERY_DIAGNOSTIC
 ${canonicalizeCampaignPlayProjection(recoveryFeedback)}
 END_RECOVERY_DIAGNOSTIC`}`;
@@ -681,39 +815,23 @@ function assertProposalForPacket(
   const subjectBindings = new Map(
     (packet.observationSubjects ?? []).map((binding) => [binding.observationHandle, binding.actors]),
   );
-  const aliasOwners = new Map<string, Set<string>>();
-  packet.visibleActors.forEach((actor) => {
-    [actor.name, actor.name.split(/\s+/u)[0] ?? actor.name]
-      .filter((alias) => alias.length >= 3)
-      .forEach((alias) => {
-        const normalizedAlias = alias.toLocaleLowerCase("en-US");
-        const owners = aliasOwners.get(normalizedAlias) ?? new Set<string>();
-        owners.add(actor.name);
-        aliasOwners.set(normalizedAlias, owners);
-      });
-  });
-  const visiblePlaceNames = [
-    packet.currentLocation.name,
-    ...packet.visibleRoutes.map((route) => route.destinationName),
-  ];
-  const containsAlias = (text: string, alias: string): boolean => {
-    const escapedAlias = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return new RegExp(
-      `(?<![\\p{L}\\p{N}])${escapedAlias}(?![\\p{L}\\p{N}])`,
-      "iu",
-    ).test(text);
-  };
-  const matchedActorAlias = (beatText: string, actorName: string): string | null =>
-    [actorName, actorName.split(/\s+/u)[0] ?? actorName]
-      .filter((alias) => alias.length >= 3)
-      .find((alias) => {
-        const normalizedAlias = alias.toLocaleLowerCase("en-US");
-        if (aliasOwners.get(normalizedAlias)?.size !== 1) return false;
-        if (visiblePlaceNames.some((placeName) => containsAlias(placeName, alias))) return false;
-        return containsAlias(beatText, alias);
-      }) ?? null;
+  const actorNameMatcher = createActorNameMatcher(packet);
+  const observationActorNameFrame = buildObservationActorNameFrame(packet, actorNameMatcher);
   for (const [beatIndex, beat] of proposal.beats.entries()) {
     if (beat.observationIndexes.length === 0) continue;
+    const frameEntries = beat.observationIndexes
+      .map((observationIndex) => observationActorNameFrame[observationIndex])
+      .filter((entry): entry is ObservationActorNameFrameEntry => entry !== undefined);
+    const permittedActorNames = new Set(
+      frameEntries.flatMap((entry) => entry.permittedActorNames),
+    );
+    const quotedReferenceActorNames = new Set(
+      frameEntries.flatMap((entry) => entry.quotedReferenceActorNames),
+    );
+    const forbiddenActorNames = new Set(
+      frameEntries.flatMap((entry) => entry.forbiddenActorNames),
+    );
+    const beatQuoteSpans = balancedDoubleQuoteSpans(beat.text);
     const attributedActorNames = new Set<string>();
     const allowedActors = new Map<string, {
       canonicalId: string;
@@ -753,10 +871,19 @@ function assertProposalForPacket(
     const mismatch = packet.visibleActors
       .map((actor) => ({
         actor,
-        matchedAlias: matchedActorAlias(beat.text, actor.name),
+        matchedAlias: actorNameMatcher.matchedAlias(beat.text, actor.name),
       }))
-      .find(({ actor, matchedAlias }) =>
-        matchedAlias !== null && !attributedActorNames.has(actor.name));
+      .find(({ actor, matchedAlias }) => {
+        if (matchedAlias === null) return false;
+        if (permittedActorNames.has(actor.name) || attributedActorNames.has(actor.name)) return false;
+        if (quotedReferenceActorNames.has(actor.name)) {
+          const occurrences = actorNameMatcher.occurrencesForActor(beat.text, actor);
+          return occurrences.length === 0
+            || !occurrences.every((occurrence) =>
+              occurrenceInsideDoubleQuoteSpan(occurrence, beatQuoteSpans));
+        }
+        return forbiddenActorNames.has(actor.name) || !quotedReferenceActorNames.has(actor.name);
+      });
     if (mismatch) {
       const mismatchCoordinates = {
         beatIndex,

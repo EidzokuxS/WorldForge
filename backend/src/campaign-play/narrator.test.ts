@@ -186,6 +186,15 @@ function r45ActorAttributionPacket(): CampaignPlayNarratorPacket {
   };
 }
 
+function r45SingleObservationPacket(): CampaignPlayNarratorPacket {
+  const packet = r45ActorAttributionPacket();
+  return {
+    ...packet,
+    newObservations: packet.newObservations.slice(0, 1),
+    consequences: packet.consequences.slice(0, 1),
+  };
+}
+
 const budget = {
   maximumInputTokens: 1_000,
   maximumOutputTokens: 2_048,
@@ -884,7 +893,7 @@ describe("Campaign Play narrator", () => {
     })).not.toThrow();
   });
 
-  it("records stable coordinates for an r45-shaped split visible-actor reference", () => {
+  it("accepts a quoted reference from the performing actor without participant diagnostics", () => {
     const packet = r45ActorAttributionPacket();
     const proposal: CampaignPlayNarratorProposal = {
       actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
@@ -904,66 +913,181 @@ describe("Campaign Play narrator", () => {
     narratorWarn.mockClear();
 
     expect(() => createCampaignPlayNarrator().compile({
-       narrationId: "narration-r45-shaped-split-reference",
-       packet,
-       proposal,
-       createdAt: 1_000,
-     })).toThrowError(expect.objectContaining({
-       code: "narration_invalid",
-       modelEvidence: null,
-       recoveryFeedback: {
-         diagnostic: "narrator_packet_validation_mismatch",
-         failedChecks: [{
-           check: "visible_actor_observation_mismatch",
-           beatIndex: 0,
-           fieldPath: "beats[0].text",
-           observationIndexes: [0],
-           matchedActor: {
-             canonicalId: "actor_vedris_kast",
-             canonicalName: "Vedris Kast",
-             matchedAlias: "Vedris",
-           },
-           allowedActors: [{
-             canonicalId: "actor_dren_vask",
-             canonicalName: "Dren Vask",
-           }],
-           sourceObservationPerformers: [{
-             observationIndex: 0,
-             canonicalId: "actor_dren_vask",
-             canonicalName: "Dren Vask",
-           }],
-         }],
-       },
-     }));
-    expect(narratorWarn).toHaveBeenCalledOnce();
-    expect(narratorWarn).toHaveBeenCalledWith(
-      "narrator_visible_actor_observation_mismatch",
-      {
-        diagnostic: "narrator_visible_actor_observation_mismatch",
-        beatIndex: 0,
-        fieldPath: "beats[0].text",
-        observationIndexes: [0],
-        matchedActor: {
-          canonicalId: "actor_vedris_kast",
-          canonicalName: "Vedris Kast",
-          matchedAlias: "Vedris",
-        },
-        allowedActors: [{
-          canonicalId: "actor_dren_vask",
-          canonicalName: "Dren Vask",
-        }],
-        sourceObservationPerformers: [{
-          observationIndex: 0,
-          canonicalId: "actor_dren_vask",
-          canonicalName: "Dren Vask",
+      narrationId: "narration-r45-shaped-split-reference",
+      packet,
+      proposal,
+      createdAt: 1_000,
+    })).not.toThrow();
+    expect(narratorWarn).not.toHaveBeenCalled();
+  });
+
+  it("rejects a quoted actor reference when the accepted observation does not authorize it", () => {
+    const packet = r45SingleObservationPacket();
+    packet.newObservations = packet.newObservations.map((observation, index) => index === 0
+      ? {
+          ...observation,
+          text: "Dren Vask says, \"Ask the clerk if you need more.\"",
+          consequence: observation.consequence === null ? null : {
+            ...observation.consequence,
+            whatChanged: "Dren Vask says, \"Ask the clerk if you need more.\"",
+          },
+        }
+      : observation);
+    packet.consequences = packet.consequences.map((consequence, index) => index === 0
+      ? { ...consequence, whatChanged: "Dren Vask says, \"Ask the clerk if you need more.\"" }
+      : consequence);
+    expect(() => createCampaignPlayNarrator().compile({
+      narrationId: "narration-unacknowledged-quoted-reference",
+      packet,
+      proposal: {
+        actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+        beats: [{
+          purpose: "consequence",
+          observationIndexes: [0],
+          text: "Dren Vask says, \"Ask Vedris if you need more.\"",
         }],
       },
-    );
-    const recorded = JSON.stringify(narratorWarn.mock.calls);
-    expect(recorded).not.toContain("secret-split-beat");
-    expect(recorded).not.toContain(packet.newObservations[0]!.text);
-    expect(recorded).not.toContain("proposal");
-    expect(recorded).not.toContain("sentinel-secret");
+      createdAt: 1_000,
+    })).toThrowError(expect.objectContaining({
+      code: "narration_invalid",
+      recoveryFeedback: expect.objectContaining({
+        failedChecks: [expect.objectContaining({
+          check: "visible_actor_observation_mismatch",
+          matchedActor: expect.objectContaining({ canonicalName: "Vedris Kast" }),
+        })],
+      }),
+    }));
+  });
+
+  it("keeps quoted references confined to balanced double-quoted dialogue", () => {
+    const sourcePacket = r45SingleObservationPacket();
+    const compile = (packet: CampaignPlayNarratorPacket, text: string, narrationId: string) =>
+      createCampaignPlayNarrator().compile({
+        narrationId,
+        packet,
+        proposal: {
+          actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+          beats: [{ purpose: "consequence", observationIndexes: [0], text }],
+        },
+        createdAt: 1_000,
+      });
+    expect(() => compile(
+      sourcePacket,
+      "Dren Vask says, \"Ask Vedris if you need more.\"",
+      "narration-straight-quoted-reference",
+    )).not.toThrow();
+
+    const curlyPacket: CampaignPlayNarratorPacket = {
+      ...sourcePacket,
+      newObservations: sourcePacket.newObservations.map((observation, index) => index === 0
+        ? {
+            ...observation,
+            text: "Dren Vask says, “Ask Vedris if you need more.”",
+            consequence: observation.consequence === null ? null : {
+              ...observation.consequence,
+              whatChanged: "Dren Vask says, “Ask Vedris if you need more.”",
+            },
+          }
+        : observation),
+      consequences: sourcePacket.consequences.map((consequence, index) => index === 0
+        ? { ...consequence, whatChanged: "Dren Vask says, “Ask Vedris if you need more.”" }
+        : consequence),
+    };
+    expect(() => compile(
+      curlyPacket,
+      "Dren Vask says, “Ask Vedris if you need more.”",
+      "narration-curly-quoted-reference",
+    )).not.toThrow();
+
+    const unbalancedPacket: CampaignPlayNarratorPacket = {
+      ...curlyPacket,
+      newObservations: curlyPacket.newObservations.map((observation, index) => index === 0
+        ? {
+            ...observation,
+            text: 'Dren Vask says, “Ask Vedris if you need more.,',
+            consequence: observation.consequence === null ? null : {
+              ...observation.consequence,
+              whatChanged: 'Dren Vask says, “Ask Vedris if you need more.,',
+            },
+          }
+        : observation),
+      consequences: curlyPacket.consequences.map((consequence, index) => index === 0
+        ? { ...consequence, whatChanged: 'Dren Vask says, “Ask Vedris if you need more.,' }
+        : consequence),
+    };
+    expect(() => compile(
+      unbalancedPacket,
+      'Dren Vask says, “Ask Vedris if you need more.,',
+      "narration-unbalanced-quoted-reference",
+    )).toThrowError(CampaignPlayNarratorError);
+
+    const apostrophePacket: CampaignPlayNarratorPacket = {
+      ...sourcePacket,
+      newObservations: sourcePacket.newObservations.map((observation, index) => index === 0
+        ? {
+            ...observation,
+            text: "Dren Vask says, 'Ask Vedris if you need more.'",
+            consequence: observation.consequence === null ? null : {
+              ...observation.consequence,
+              whatChanged: "Dren Vask says, 'Ask Vedris if you need more.'",
+            },
+          }
+        : observation),
+      consequences: sourcePacket.consequences.map((consequence, index) => index === 0
+        ? { ...consequence, whatChanged: "Dren Vask says, 'Ask Vedris if you need more.'" }
+        : consequence),
+    };
+    expect(() => compile(
+      apostrophePacket,
+      "Dren Vask says, 'Ask Vedris if you need more.'",
+      "narration-single-quoted-reference",
+    )).toThrowError(CampaignPlayNarratorError);
+  });
+
+  it("rejects a quoted reference that also depicts the actor outside dialogue", () => {
+    const packet = r45SingleObservationPacket();
+    expect(() => createCampaignPlayNarrator().compile({
+      narrationId: "narration-quoted-reference-outside-dialogue",
+      packet,
+      proposal: {
+        actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+        beats: [{
+          purpose: "consequence",
+          observationIndexes: [0],
+          text: "Dren Vask tells you to ask Vedris.",
+        }],
+      },
+      createdAt: 1_000,
+    })).toThrowError(expect.objectContaining({
+      code: "narration_invalid",
+      recoveryFeedback: expect.objectContaining({
+        failedChecks: [expect.objectContaining({
+          check: "visible_actor_observation_mismatch",
+          matchedActor: expect.objectContaining({ canonicalName: "Vedris Kast" }),
+        })],
+      }),
+    }));
+    expect(() => createCampaignPlayNarrator().compile({
+      narrationId: "narration-quoted-reference-actor-action",
+      packet,
+      proposal: {
+        actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+        beats: [{
+          purpose: "consequence",
+          observationIndexes: [0],
+          text: "Dren Vask says, \"Ask Vedris if you need more.\" Vedris walks toward the jars.",
+        }],
+      },
+      createdAt: 1_000,
+    })).toThrowError(expect.objectContaining({
+      code: "narration_invalid",
+      recoveryFeedback: expect.objectContaining({
+        failedChecks: [expect.objectContaining({
+          check: "visible_actor_observation_mismatch",
+          matchedActor: expect.objectContaining({ canonicalName: "Vedris Kast" }),
+        })],
+      }),
+    }));
   });
 
   it("accepts a combined observation reference without actor diagnostics", () => {
@@ -1253,9 +1377,44 @@ describe("Campaign Play narrator", () => {
     const prompt = String(generateObject.mock.calls[0]![0].prompt);
     expect(prompt).toContain("OBSERVATION_ACTOR_NAME_FRAME");
     expect(prompt).toContain(
-      '[{"forbiddenActorNames":["Mara Venn"],"observationIndex":0,"permittedActorNames":[]}]',
+      '[{"forbiddenActorNames":["Mara Venn"],"observationIndex":0,"permittedActorNames":[],"quotedReferenceActorNames":[]}]',
     );
-    expect(prompt).toContain("the observation text repeats a forbidden name");
+    expect(prompt).toContain("quotedReferenceActorNames");
+  });
+
+  it("exposes performer, quoted-reference, and forbidden actor frame entries", async () => {
+    const packet = r45SingleObservationPacket();
+    const generateObject = vi.fn(async (
+      _options: Parameters<typeof safeGenerateObject>[0],
+    ) => ({
+      object: {
+        actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+        beats: [{
+          purpose: "consequence" as const,
+          observationIndexes: [0],
+          text: "Dren Vask says, \"Ask Vedris if you need more.\"",
+        }],
+      },
+      trace: trace(),
+    }));
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    await narrator.narrate({
+      narrationId: "narration-three-way-actor-frame",
+      packetBytes: canonicalizeCampaignPlayProjection(packet),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+      signal: new AbortController().signal,
+    });
+
+    const prompt = String(generateObject.mock.calls[0]![0].prompt);
+    expect(prompt).toContain(
+      '[{"forbiddenActorNames":["Mara Venn"],"observationIndex":0,"permittedActorNames":["Dren Vask"],"quotedReferenceActorNames":["Vedris Kast"]}]',
+    );
   });
 
   it("allows opening pressure to remain part of orientation without a consequence beat", () => {
@@ -1509,6 +1668,12 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("later current-turn observation attributes visible action to an actor");
     expect(prompt).toContain("do not retain the stale absence claim");
     expect(prompt).toContain("observationSubjects, when present, is code-owned identity binding");
+    expect(prompt).toContain(
+      "OBSERVATION_ACTOR_NAME_FRAME separates visible actor names for each observation index into permittedActorNames, quotedReferenceActorNames, and forbiddenActorNames. permittedActorNames are the performer and bound subjects. quotedReferenceActorNames are visible actors named only inside accepted straight or curly double-quoted dialogue; they are referents, not participants.",
+    );
+    expect(prompt).toContain(
+      "For each beat, union each name list from every frame entry named by its observationIndexes. A permittedActorName may be described acting in the beat. A quotedReferenceActorName may appear only inside straight or curly double-quoted dialogue that preserves a permitted speaker's accepted reference. It does not authorize a new claim about that actor, and the beat must not describe that actor speaking, moving, arriving, watching, or otherwise acting. Do not write a forbiddenActorName or a unique part of it anywhere in the beat.",
+    );
     expect(prompt).toContain("Actorless sounds, traces, silhouettes, and motion remain unattributed");
     expect(prompt).toContain("Resemblance is not identity");
     expect(prompt).toContain("Put any orientation mention of that actor in a separate beat with observationIndexes: []");
@@ -1519,7 +1684,9 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Second person identifies only the player");
     expect(prompt).toContain("Never merge the player with a named or unnamed actor");
     expect(prompt).toContain("is not approaching or watching \"you\" without that identity evidence");
-    expect(prompt).toContain("Before finalizing each beat, check every visible actor name or unique name fragment in its text");
+    expect(prompt).toContain(
+      "Before finalizing each beat, check every visible actor name or unique name fragment. Outside double-quoted dialogue, every name must belong to permittedActorNames. Inside double-quoted dialogue, every other visible actor name must belong to quotedReferenceActorNames. Remove any unmatched actor reference.",
+    );
     expect(prompt).toContain("Remove any unmatched actor reference");
     expect(prompt).toContain("If removing a beat loses no supported information, omit it");
     expect(prompt).toContain("Never add a moment beat to repeat sourceMoment");
@@ -1635,7 +1802,7 @@ describe("Campaign Play narrator", () => {
 
 NARRATOR_RECOVERY
 The prior proposal failed the safe checks below. Regenerate a fresh proposal from NARRATOR_PACKET. Correct every listed check. Do not reuse the rejected observation-index or action-selection arrangement. Every schema, grounding, identity, visibility, and action rule above remains unchanged.
-If a failed check requires changing observation coverage or observationIndexes, recompute permittedActorNames for every beat from OBSERVATION_ACTOR_NAME_FRAME using its final observationIndexes. Then rewrite each beat so its text contains no forbidden visible actor name or unique name fragment.
+If a failed check requires changing observation coverage or observationIndexes, recompute permittedActorNames, quotedReferenceActorNames, and forbiddenActorNames for every beat from OBSERVATION_ACTOR_NAME_FRAME using its final observationIndexes. Then rewrite each beat so every actor name follows the rules above.
 RECOVERY_DIAGNOSTIC
 ${canonicalizeCampaignPlayProjection(recoveryFeedback)}
 END_RECOVERY_DIAGNOSTIC`);
@@ -1696,7 +1863,7 @@ END_RECOVERY_DIAGNOSTIC`);
 
 NARRATOR_RECOVERY
 The prior proposal failed the safe checks below. Regenerate a fresh proposal from NARRATOR_PACKET. Correct every listed check. Do not reuse the rejected observation-index or action-selection arrangement. Every schema, grounding, identity, visibility, and action rule above remains unchanged.
-If a failed check requires changing observation coverage or observationIndexes, recompute permittedActorNames for every beat from OBSERVATION_ACTOR_NAME_FRAME using its final observationIndexes. Then rewrite each beat so its text contains no forbidden visible actor name or unique name fragment.
+If a failed check requires changing observation coverage or observationIndexes, recompute permittedActorNames, quotedReferenceActorNames, and forbiddenActorNames for every beat from OBSERVATION_ACTOR_NAME_FRAME using its final observationIndexes. Then rewrite each beat so every actor name follows the rules above.
 RECOVERY_DIAGNOSTIC
 ${canonicalizeCampaignPlayProjection(recoveryFeedback)}
 END_RECOVERY_DIAGNOSTIC`);
