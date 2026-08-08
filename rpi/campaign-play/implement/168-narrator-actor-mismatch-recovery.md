@@ -76,19 +76,56 @@ same identities, one mechanics settlement, one proper scene, and no attempt 3.
 
 ## Rendered lane
 
-To be appended after the fresh r117 lane. This section will record the exact
-template/config/card hashes, setup/admission counts, per-action authoritative
-turn/model/operation/attempt/scene/binding evidence, checkpoints, integrity and
-foreign-key checks, any natural actor-mismatch recovery, same-page reload, and
-task-owned runtime cleanup. A genuine product defect freezes the lane at its
-first boundary without a replacement action.
+The bounded code commit was `a45499a1daa67ff22a31a2786f6beaddec0071a4`
+(`fix(campaign-play): forward actor mismatch recovery`), pushed to
+`origin/feat/revamp` before the lane. The fresh lane was
+`pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r117` for campaign
+`6b85a49e-fef5-4359-95e2-051383f6fb66`. It materialized the exact
+`lowwater-ledger-pristine-93a09e46-20260719` template with state SHA-256
+`6cb291d11ce6578e3395a10d2c5d590070e3ccdd8b2b67451410869ce97897d2`, config
+SHA-256 `d8362b1af976c00cb8f14c564c8196a2d1ab137743ff368ea83d762a4ad2e065`,
+and canonical Brina card SHA-256
+`4b48de7a32df6a6be5a91ab12f09bb87926b40d5940348c7581e298eaa12b60a`.
+
+The task-owned runtime used API/UI/CDP ports `4040/4041/4042`, roots
+`21408/65228/66744` (backend/frontend/browser), one page at the canonical
+Character URL, and one task-owned browser profile. The marker preflight was a
+harness-only repair after the copied setup helper detected its unset page
+marker; it performed no product action. The actual setup then clicked Import
+card once and set the canonical card file once. It did not reach Save or
+Begin. The rendered card parse ended with the visible
+`Campaign Play request failed with service_unavailable.` alert after the
+ingestion provider call locally aborted at its 90,023 ms timeout. Backend logs
+recorded only the bounded `ai.zai_fetch.failure` request metadata (no provider
+response bytes or coordinate) and the truthful `llm.attempt` timeout; no raw
+card/prose/provider body was retained.
+
+Read-only reconciliation in `probes/setup-failure-reconciled.json` proves the
+first genuine lane boundary: `setup_phase=character_required`, zero player
+characters, zero commands, zero turns, and only the initial
+`play_state_created` runtime event. SQLite `PRAGMA integrity_check` was `ok`
+and `PRAGMA foreign_key_check` was `[]`. No player action, Narrator operation,
+attempt, scene, binding, checkpoint, actor-mismatch recovery, or reload was
+admitted; the lane froze without a replacement import or later action.
+
+Cleanup is recorded in `ownership-registry.json`, `cleanup-stop.json`,
+`cleanup-profile.json`, and `cleanup-verified.json`: all listed roots and
+descendants were stopped, the task-owned page was closed, the task-owned
+profile was removed, and ports `4040`, `4041`, and `4042` had no listeners.
+No 60/60 or reload claim is made. The setup provider timeout coordinate is a
+material unknown because the retained safe diagnostic intentionally omits raw
+provider response content.
 
 ## Acceptance handoff
 
-Entry state is the current Task 167 source at
+Entry state was the current Task 167 source at
 `3eac444a655bd0685eaf790e065554b522463f69`, with frozen r116 preserved and
 only the pre-existing AGENTS.md/CLAUDE.md worktree edits unstaged. The source
 and focused tests positively map the mismatch rejection, safe feedback,
 prompt forwarding, identity/deadline reuse, single settlement, no mechanics
-replay, no attempt 3, and privacy criteria. Rendered r117, its first genuine
-boundary (or 60/60), reload, and cleanup remain pending at note creation.
+replay, no attempt 3, and privacy criteria. The r117 rendered handoff maps
+the fresh-template/card/setup contract, the exact one-import admission, the
+first setup-stage timeout boundary, SQLite integrity/FK evidence, and exact
+cleanup. The positive scene/binding, natural actor-mismatch recovery,
+checkpoint, 60/60, and same-page reload criteria are omitted because the
+first genuine defect occurred before Save/Begin.
