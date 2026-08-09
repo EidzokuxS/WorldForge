@@ -34,13 +34,23 @@ Main's semantic verdict: the prompt literals align the instruction with quote fo
 - Campaign Play turn-runtime suite: 72/72 passed.
 - Campaign Play application suite: 15/15 passed.
 - Backend typecheck: passed.
+- Backend build: passed.
 - `git diff --check`: passed.
-- Backend build, staged detect_changes, implementation commit/push, and the fresh r129 product lane remain pending at this initial note.
+- Staged GitNexus detect_changes reported only the Narrator flow (`narrate`) in `PrefersJsonObjectMode` and `CanonicalJson` with medium overall change risk.
+- Implementation commit `cf3bd78625d1282710baa329c15c9f16940962a0` was pushed with local and `origin/feat/revamp` equal before r129.
 
 ## Rendered r129
 
-Pending. The fresh lane must use the canonical pristine template, config, and Brina card hashes from the task packet, one setup sequence, one rendered click per action, authoritative runtime/SQLite reconciliation, and a hard stop at the first genuine defect or 60 completed unique proper-scene bindings plus one same-page reload.
+The only fresh lane was `pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r129` for campaign `6b85a49e-fef5-4359-95e2-051383f6fb66`, using API/UI/CDP ports 4150/4151/4152 and the task-owned browser profile recorded in `runtime.json`. Materialization was once from `lowwater-ledger-pristine-93a09e46-20260719`; the source state hash was `6cb291d11ce6578e3395a10d2c5d590070e3ccdd8b2b67451410869ce97897d2`, config hash `d8362b1af976c00cb8f14c564c8196a2d1ab137743ff368ea83d762a4ad2e065`, and canonical Brina card hash `4b48de7a32df6a6be5a91ab12f09bb87926b40d5940348c7581e298eaa12b60a`.
 
-## Unknowns
+Setup was performed exactly once: one rendered Import card click and one file-selection dispatch. The parse request began at `2026-08-09T02:16:53.564Z` and ended at `2026-08-09T02:18:23.622Z` with HTTP 503, approximately 90,058 ms elapsed. The rendered page stayed on Character and showed `Campaign Play request failed with service_unavailable.`; Save/Continue and Begin were not clicked. Backend evidence at `backend.stdout.log:2-24,25-38,39-60` records ingestion classification, the Z.AI post-SDK failure diagnostic with `thinkingType=disabled`, `maxOutputTokens=32768`, `temperature=0.7`, and request-body shape hash `1a2a34e8afc38a83dc8ca70870724596bf2059a24374e2a354ffae484df934a`, followed by one `glm-5-turbo` attempt aborted locally after 90,017 ms with no response model, usage, finish reason, or retained provider coordinates. The provider status/body/cause remain unknown.
 
-The retained r128 evidence contains no rejected Narrator proposal bytes, so its exact candidate quote placement is unknown. Live r129 coverage of the single-quoted observation class remains unknown until the canonical journey runs.
+Read-only SQLite evidence in `probes/sqlite-boundary.json` shows setup phase `character_required`, zero characters, commands, turns, results, receipts, proper scenes, narration operations, narration attempts, and model stages, one runtime event, `integrity_check=ok`, and an empty `foreign_key_check`. The materialized state hash was the required source hash before runtime; after the single setup event the materialized state hash was `9d33937ea5dc2af52bc1bbbb79e4b0c7cb40b7b6d88ec6f5364bd719e9da0dbe`; config remained the required hash. Evidence hashes are setup-boundary `07e939726748f6b8124812c043790a5409db79f81e6267ac70652d2e531c8cc4`, SQLite-boundary `d40bca1ea52b458d282c7b22736cb1c04c96a1f84ec1de38870e170289b67810`, screenshot `aa4c1fd1f0ad084135cb58aacfa1b938015fddf0652fc2b8ecbe112c3bf38779`, and cleanup `65a1c875da4c63bfdc6802917171bd5ed9fa2ea400a1bf808d6ab243be457d1b`.
+
+This is the first genuine setup/model transport boundary for this lane, so r129 hard-stopped before Opening, player action 1, the single-quote observation class, action checkpoints, recovery, 60-action endurance, and same-page reload. Those criteria are omitted rather than inferred. Cleanup closed the page and stopped backend PID 36556, frontend PID 48584, browser PID 9884, descendants 69976/55036/33108/66400/75704/31708/70800/70188/66932; ports 4150/4151/4152, CDP `http://127.0.0.1:4152`, the browser profile, and the task-owned shadow index were independently absent. Cleanup details are in `probes/cleanup.json`.
+
+The setup service-unavailable boundary falsifies neither the single-quote semantics nor their focused test evidence; it prevents live coverage only. No source, runtime, provider, model, prompt, persistence, mechanics, UI, or recovery change was selected after the freeze.
+
+## Unknowns and omitted criteria
+
+The retained r128 evidence contains no rejected Narrator proposal bytes, so its exact candidate quote placement is unknown. Live r129 coverage of the single-quoted observation class, player actions, natural recovery, checkpoints, 60 bindings, and same-page reload is unavailable because the canonical card import froze at setup. The provider response status/body and upstream cause are unknown; the retained evidence proves only the local timeout and the rendered 503 boundary.
