@@ -28,7 +28,7 @@ The bounded focused suites passed: `npm --prefix backend test -- --run src/campa
 
 ## Rendered r128 evidence
 
-To be appended after exactly one fresh `pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r128` lane from the canonical lowwater-ledger template and Brina card. Generated session/run evidence remains uncommitted. The lane will stop at its first genuine setup, model, semantic, runtime, persistence, mechanics, binding, or reload defect; otherwise it must reach 60 unique bindings and one same-page reload.
+The completed lane evidence and hard-stop boundary are recorded in the appended `r128 rendered evidence and terminal boundary` section below. Generated session/run evidence remains uncommitted.
 
 ## Unknowns and acceptance handoff
 
