@@ -1393,6 +1393,148 @@ describe("Campaign Play actor replanner", () => {
     ]);
   });
 
+  it("uses the locality schema for target-outside compilation recovery", async () => {
+    const { handle, token, jobId } = createReplanFixture();
+    const bypassModel = {} as LanguageModel;
+    const recoveryModel = {} as LanguageModel;
+    let callNumber = 0;
+    const generateObject = vi.fn(async (request: {
+      prompt: string;
+      model: LanguageModel;
+      mode: "auto" | "tool";
+      schema: unknown;
+    }) => {
+      callNumber += 1;
+      if (request.prompt.includes("ACTOR_PLAN_REVIEW\n")) {
+        return { object: { verdict: "accepted", violations: [] }, trace: acceptedTrace() };
+      }
+      return {
+        object: callNumber === 1
+          ? remoteNonMoveProposalFromPrompt(request.prompt)
+          : singleStepProposalFromPrompt(request.prompt),
+        trace: acceptedTrace(),
+      };
+    });
+    const replanner = createCampaignPlayActorReplanner(handle, {
+      now: () => 1_600,
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const outcome = await replanner.replan({
+      jobId,
+      token,
+      model: bypassModel,
+      recoveryModel,
+      temperature: 0.2,
+      maxOutputTokens: 100,
+      maximumInputTokens: 1_000,
+      maximumOutputTokens: 100,
+      maximumTotalTokens: 2_000,
+      maximumCostMicros: 10_000,
+      externalOperationDeadlineMs: 90_000,
+      signal: new AbortController().signal,
+      createdAt: 1_590,
+    });
+
+    expect(outcome).toMatchObject({ kind: "replanned", jobId, workerEpoch: 1 });
+    expect(generateObject).toHaveBeenCalledTimes(3);
+    expect(generateObject.mock.calls.map((call) => call[0]!.model)).toEqual([
+      bypassModel,
+      recoveryModel,
+      bypassModel,
+    ]);
+    expect(generateObject.mock.calls.map((call) => call[0]!.mode)).toEqual([
+      "auto",
+      "tool",
+      "tool",
+    ]);
+
+    const firstPrompt = generateObject.mock.calls[0]![0].prompt;
+    const recoveryPrompt = generateObject.mock.calls[1]![0].prompt;
+    const firstSchema = generateObject.mock.calls[0]![0].schema as z.ZodType;
+    const recoverySchema = generateObject.mock.calls[1]![0].schema as z.ZodType;
+    const firstProposal = remoteNonMoveProposalFromPrompt(firstPrompt);
+    expect(firstSchema.safeParse(firstProposal).success).toBe(true);
+    expect(recoverySchema).not.toBe(firstSchema);
+
+    const remoteOneStep = { ...firstProposal, steps: [firstProposal.steps[0]!] };
+    const currentLocationProposal = singleStepProposalFromPrompt(recoveryPrompt);
+    expect(recoverySchema.safeParse(remoteOneStep).success).toBe(false);
+    expect(recoverySchema.safeParse(currentLocationProposal).success).toBe(true);
+
+    type JsonSchemaBranch = {
+      properties?: {
+        kind?: { const?: string };
+        targetHandles?: { items?: { enum?: string[] } };
+      };
+    };
+    type JsonSchemaNode = {
+      properties?: {
+        steps?: {
+          items?: {
+            properties?: {
+              intent?: { oneOf?: JsonSchemaBranch[] };
+            };
+          };
+        };
+      };
+    };
+    const recoverySchemaJson = z.toJSONSchema(recoverySchema) as JsonSchemaNode;
+    const start = firstPrompt.indexOf("ACTOR_FRAME\n") + "ACTOR_FRAME\n".length;
+    const end = firstPrompt.indexOf("\nEND_ACTOR_FRAME", start);
+    const frame = JSON.parse(firstPrompt.slice(start, end)) as {
+      entities: Array<{ handle: string; kind: string; state: string | null }>;
+    };
+    const remoteLocation = frame.entities.find((entity) =>
+      entity.kind === "location" && entity.state !== "occupied");
+    expect(remoteLocation).toBeDefined();
+    const nonMoveBranches = recoverySchemaJson.properties?.steps?.items?.properties?.intent?.oneOf
+      ?.filter((branch) => branch.properties?.kind?.const !== "move") ?? [];
+    expect(nonMoveBranches.length).toBeGreaterThan(0);
+    for (const branch of nonMoveBranches) {
+      expect(branch.properties?.targetHandles?.items?.enum).not.toContain(remoteLocation!.handle);
+    }
+
+    expect(recoveryPrompt.startsWith(`${firstPrompt}\n\nACTOR_REPLAN_RECOVERY\n`)).toBe(true);
+    expect(recoveryPrompt).toContain("When reason is target_outside_step_location, regenerate with exactly one grounded step. For a non-move step, every location target must be the actor's current occupied location; never target another location. For a move step, target exactly one directly reachable destination location and no route handle.");
+    expect(recoveryFeedbackFromPrompt(recoveryPrompt)).toMatchObject({
+      phase: "compilation",
+      reason: "target_outside_step_location",
+      stepCount: 3,
+      moveTargets: "",
+      reviewViolations: "",
+    });
+    expect(recoveryPrompt).not.toContain("REJECTED_PROPOSAL_SENTINEL");
+    expect(recoveryPrompt).not.toContain("provider response");
+
+    const modelStages = handle.sqlite.prepare(`SELECT attempt, status,
+        schema_outcome AS schemaOutcome, error_code AS errorCode
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = 'turn-player' AND kind = 'actor_replanner'
+      ORDER BY attempt`).all(CAMPAIGN_ID);
+    expect(modelStages).toEqual([
+      { attempt: 1, status: "interrupted", schemaOutcome: "invalid", errorCode: "model_contract_invalid" },
+      { attempt: 2, status: "accepted", schemaOutcome: "valid", errorCode: null },
+    ]);
+    const attempts = handle.sqlite.prepare(`SELECT attempt_number AS attemptNumber,
+        frame_hash AS frameHash, frozen_base_world_version AS frozenBaseWorldVersion,
+        deadline_at AS deadlineAt
+      FROM campaign_play_actor_replan_attempts
+      WHERE campaign_id = ? AND job_id = ? ORDER BY attempt_number`).all(CAMPAIGN_ID, jobId) as Array<Record<string, unknown>>;
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]).toMatchObject({
+      attemptNumber: 2,
+      frameHash: attempts[0]!.frameHash,
+      frozenBaseWorldVersion: attempts[0]!.frozenBaseWorldVersion,
+      deadlineAt: attempts[0]!.deadlineAt,
+    });
+    expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_plans
+      WHERE campaign_id = ? AND actor_id = 'actor-b' AND status = 'active'`).get(CAMPAIGN_ID))
+      .toEqual({ count: 1 });
+    expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_replan_attempts
+      WHERE campaign_id = ? AND job_id = ?`).get(CAMPAIGN_ID, jobId)).toEqual({ count: 2 });
+  });
+
   it("keeps move and review rejection coordinates opaque and index-stable", async () => {
     const { handle, token, jobId } = createReplanFixture();
     const logCapture = captureActorReplanLogs();

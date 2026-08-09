@@ -1802,6 +1802,11 @@ export function createCampaignPlayActorReplanner(
             contractInvalid: false,
           });
         }
+        const useGenerationRecoverySchema = firstResult.rejectionArtifact === undefined
+          || (
+            firstResult.rejectionArtifact.phase === "compilation"
+            && firstResult.rejectionArtifact.reason === "target_outside_step_location"
+          );
         const secondResult = await runAttempt(
           recoveryModel,
           request.model,
@@ -1809,7 +1814,7 @@ export function createCampaignPlayActorReplanner(
           secondAttemptNumber,
           secondModelStageRowId,
           secondAttemptId,
-          firstResult.rejectionArtifact === undefined
+          useGenerationRecoverySchema
             ? generationRecoveryProposalSchema
             : proposalSchema,
           "tool",

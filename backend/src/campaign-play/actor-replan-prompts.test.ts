@@ -142,6 +142,35 @@ describe("campaign play actor replan prompt", () => {
     expect(prompt).not.toContain("NoObjectGeneratedError");
   });
 
+  it("gives target-outside compilation failures the exact locality recovery rule", () => {
+    const basePrompt = buildCampaignPlayActorReplanPrompt(frame);
+    const prompt = buildCampaignPlayActorReplanRecoveryPrompt(basePrompt, {
+      phase: "compilation",
+      reason: "target_outside_step_location",
+      goalHandle: "goal:keep-gate-open",
+      stepCount: 1,
+      moveTargets: "",
+      reviewViolations: "",
+    });
+    const rule = "When reason is target_outside_step_location, regenerate with exactly one grounded step. For a non-move step, every location target must be the actor's current occupied location; never target another location. For a move step, target exactly one directly reachable destination location and no route handle.";
+
+    expect(prompt).toContain(rule);
+    expect(prompt.indexOf(rule)).toBeLessThan(prompt.indexOf("When reviewViolations lists other_actor_action_not_established"));
+    expect(prompt).toContain("SAFE_REJECTION_FEEDBACK");
+    const start = prompt.indexOf("SAFE_REJECTION_FEEDBACK\n") + "SAFE_REJECTION_FEEDBACK\n".length;
+    const end = prompt.indexOf("\nEND_SAFE_REJECTION_FEEDBACK", start);
+    expect(JSON.parse(prompt.slice(start, end))).toEqual({
+      phase: "compilation",
+      reason: "target_outside_step_location",
+      goalHandle: "goal:keep-gate-open",
+      stepCount: 1,
+      moveTargets: "",
+      reviewViolations: "",
+    });
+    expect(prompt).not.toContain("REJECTED_PROPOSAL_SENTINEL");
+    expect(prompt).not.toContain("provider response");
+  });
+
   it("gives other-actor grounding failures one safe actor-owned recovery rule", () => {
     const basePrompt = buildCampaignPlayActorReplanPrompt(frame);
     const prompt = buildCampaignPlayActorReplanRecoveryPrompt(basePrompt, {
