@@ -92,6 +92,7 @@ describe("campaign play actor replan prompt", () => {
       stepCount: 3,
       moveTargets: "0:location:gate|2:location:river",
       reviewViolations: "1:outcome_not_established|2:contradicts_accepted_frame",
+      reviewViolationFields: "1:observableTrace|2:intent.method",
     });
 
     expect(prompt.startsWith(`${basePrompt}\n\nACTOR_REPLAN_RECOVERY\n`)).toBe(true);
@@ -115,6 +116,7 @@ describe("campaign play actor replan prompt", () => {
       "moveTargets",
       "phase",
       "reason",
+      "reviewViolationFields",
       "reviewViolations",
       "stepCount",
     ]);
@@ -125,6 +127,7 @@ describe("campaign play actor replan prompt", () => {
       stepCount: 3,
       moveTargets: "0:location:gate|2:location:river",
       reviewViolations: "1:outcome_not_established|2:contradicts_accepted_frame",
+      reviewViolationFields: "1:observableTrace|2:intent.method",
     });
   });
 
@@ -151,6 +154,7 @@ describe("campaign play actor replan prompt", () => {
       stepCount: 1,
       moveTargets: "",
       reviewViolations: "",
+      reviewViolationFields: "",
     });
     const rule = "When reason is target_outside_step_location, regenerate with exactly one grounded step. For a non-move step, every location target must be the actor's current occupied location; never target another location. For a move step, target exactly one directly reachable destination location and no route handle.";
 
@@ -166,6 +170,7 @@ describe("campaign play actor replan prompt", () => {
       stepCount: 1,
       moveTargets: "",
       reviewViolations: "",
+      reviewViolationFields: "",
     });
     expect(prompt).not.toContain("REJECTED_PROPOSAL_SENTINEL");
     expect(prompt).not.toContain("provider response");
@@ -180,6 +185,7 @@ describe("campaign play actor replan prompt", () => {
       stepCount: 1,
       moveTargets: "",
       reviewViolations: "0:other_actor_action_not_established",
+      reviewViolationFields: "0:observableTrace",
     });
     const rule = "When reviewViolations lists other_actor_action_not_established, rebuild each flagged step around one action performed only by the actor identified by ACTOR_FRAME.actorHandle. Another actor may remain only as the target of contact or observation. Remove any method, stakes, or observableTrace that states or requires that other actor to respond, consent, assist, work, move, accept, pay, or complete anything. The rewritten observableTrace must show only the planning actor's own attempt or a physical trace directly caused by that method; do not replace the removed participation with another unestablished outcome. Prefer one grounded step.";
 
@@ -197,6 +203,7 @@ describe("campaign play actor replan prompt", () => {
       stepCount: 1,
       moveTargets: "",
       reviewViolations: "0:other_actor_action_not_established",
+      reviewViolationFields: "0:observableTrace",
     });
   });
 
@@ -254,17 +261,52 @@ describe("campaign play actor replan prompt", () => {
     expect(prompt).toContain("does not establish that work started or finished");
     expect(prompt).toContain("It does not prove participation or agreement");
     expect(prompt).toContain("Watch the visitor reseat the gate lantern wick");
+    expect(prompt).toContain(
+      "Each rejected violation must include fieldPath, naming the single proposal field that most directly contains the violation: intent.kind, intent.targetHandles, intent.method, intent.stakes, observableTrace, possessionOutcome, obligationOutcome, or elapsedBounds. Do not quote or copy field contents.",
+    );
     expect(campaignPlayActorPlanGroundingReviewSchema.safeParse({
       verdict: "accepted",
       violations: [],
     }).success).toBe(true);
     expect(campaignPlayActorPlanGroundingReviewSchema.safeParse({
       verdict: "rejected",
-      violations: [{ stepIndex: 0, kind: "other_actor_action_not_established" }],
+      violations: [{
+        stepIndex: 0,
+        kind: "other_actor_action_not_established",
+        fieldPath: "observableTrace",
+      }],
     }).success).toBe(true);
+    const fieldPaths = [
+      "intent.kind",
+      "intent.targetHandles",
+      "intent.method",
+      "intent.stakes",
+      "observableTrace",
+      "possessionOutcome",
+      "obligationOutcome",
+      "elapsedBounds",
+    ] as const;
+    for (const fieldPath of fieldPaths) {
+      expect(campaignPlayActorPlanGroundingReviewSchema.safeParse({
+        verdict: "rejected",
+        violations: [{ stepIndex: 0, kind: "outcome_not_established", fieldPath }],
+      }).success).toBe(true);
+    }
+    expect(campaignPlayActorPlanGroundingReviewSchema.safeParse({
+      verdict: "rejected",
+      violations: [{ stepIndex: 0, kind: "outcome_not_established" }],
+    }).success).toBe(false);
+    expect(campaignPlayActorPlanGroundingReviewSchema.safeParse({
+      verdict: "rejected",
+      violations: [{ stepIndex: 0, kind: "outcome_not_established", fieldPath: "proposal.raw" }],
+    }).success).toBe(false);
     expect(campaignPlayActorPlanGroundingReviewSchema.safeParse({
       verdict: "accepted",
-      violations: [{ stepIndex: 0, kind: "other_actor_action_not_established" }],
+      violations: [{
+        stepIndex: 0,
+        kind: "other_actor_action_not_established",
+        fieldPath: "observableTrace",
+      }],
     }).success).toBe(false);
     expect(campaignPlayActorPlanGroundingReviewSchema.safeParse({
       verdict: "rejected",

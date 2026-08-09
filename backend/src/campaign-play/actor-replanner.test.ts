@@ -1028,6 +1028,7 @@ describe("Campaign Play actor replanner", () => {
             violations: [{
               stepIndex: 0,
               kind: "other_actor_action_not_established",
+              fieldPath: "observableTrace",
             }],
           },
           trace: acceptedTrace(),
@@ -1095,6 +1096,7 @@ describe("Campaign Play actor replanner", () => {
       "moveTargets",
       "phase",
       "reason",
+      "reviewViolationFields",
       "reviewViolations",
       "stepCount",
       "turnId",
@@ -1112,6 +1114,7 @@ describe("Campaign Play actor replanner", () => {
       stepCount: 3,
       moveTargets: "",
       reviewViolations: "0:other_actor_action_not_established",
+      reviewViolationFields: "0:observableTrace",
     });
     expect(JSON.stringify(diagnosticPayload)).not.toContain("visitor");
     expect(generateObject).toHaveBeenCalledTimes(2);
@@ -1156,7 +1159,7 @@ describe("Campaign Play actor replanner", () => {
           ? {
               object: {
                 verdict: "rejected",
-                violations: [{ stepIndex: 0, kind: "outcome_not_established" }],
+                violations: [{ stepIndex: 0, kind: "outcome_not_established", fieldPath: "observableTrace" }],
               },
               trace: acceptedTrace(),
             }
@@ -1202,6 +1205,7 @@ describe("Campaign Play actor replanner", () => {
       stepCount: 1,
       moveTargets: "",
       reviewViolations: "0:outcome_not_established",
+      reviewViolationFields: "0:observableTrace",
     });
     expect(generateObject).toHaveBeenCalledTimes(4);
     expect(generateObject.mock.calls.slice(0, 2).map((call) => call[0]!.model)).toEqual([
@@ -1222,6 +1226,7 @@ describe("Campaign Play actor replanner", () => {
       stepCount: 1,
       moveTargets: "",
       reviewViolations: "0:outcome_not_established",
+      reviewViolationFields: "0:observableTrace",
     });
     expect(handle.sqlite.prepare(`SELECT attempt, status, schema_outcome AS schemaOutcome,
         error_code AS errorCode FROM campaign_play_model_stages
@@ -1249,7 +1254,7 @@ describe("Campaign Play actor replanner", () => {
           ? {
               object: {
                 verdict: "rejected",
-                violations: [{ stepIndex: 0, kind: "other_actor_action_not_established" }],
+                violations: [{ stepIndex: 0, kind: "other_actor_action_not_established", fieldPath: "observableTrace" }],
               },
               trace: acceptedTrace(),
             }
@@ -1381,6 +1386,7 @@ describe("Campaign Play actor replanner", () => {
       goalHandle: expect.stringMatching(/^goal:/),
       stepCount: 3,
       reviewViolations: "",
+      reviewViolationFields: "",
     });
     expect(feedback.moveTargets).toMatch(/^0:route:[^|]+\|1:route:[^|]+\|2:route:[^|]+$/);
     expect(recoveryPrompt).not.toContain("Follow the supplied route away from the current scene");
@@ -1503,6 +1509,7 @@ describe("Campaign Play actor replanner", () => {
       stepCount: 3,
       moveTargets: "",
       reviewViolations: "",
+      reviewViolationFields: "",
     });
     expect(recoveryPrompt).not.toContain("REJECTED_PROPOSAL_SENTINEL");
     expect(recoveryPrompt).not.toContain("provider response");
@@ -1543,7 +1550,7 @@ describe("Campaign Play actor replanner", () => {
         return {
           object: {
             verdict: "rejected",
-            violations: [{ stepIndex: 2, kind: "contradicts_accepted_frame" }],
+            violations: [{ stepIndex: 2, kind: "contradicts_accepted_frame", fieldPath: "observableTrace" }],
           },
           trace: acceptedTrace(),
         };
@@ -1606,6 +1613,7 @@ describe("Campaign Play actor replanner", () => {
               kind: callNumber === 2
                 ? "outcome_not_established"
                 : "contradicts_accepted_frame",
+              fieldPath: "observableTrace",
             }],
           },
           trace: acceptedTrace(),
@@ -1661,6 +1669,7 @@ describe("Campaign Play actor replanner", () => {
       stepCount: 1,
       moveTargets: "",
       reviewViolations: "0:outcome_not_established",
+      reviewViolationFields: "0:observableTrace",
     });
     expect(generateObject).toHaveBeenCalledTimes(4);
     expect(generateObject.mock.calls.map((call) => call[0]!.model)).toEqual([
@@ -1905,7 +1914,7 @@ describe("Campaign Play actor replanner", () => {
         return Promise.resolve({
           object: {
             verdict: "rejected",
-            violations: [{ stepIndex: 0, kind: "outcome_not_established" }],
+            violations: [{ stepIndex: 0, kind: "outcome_not_established", fieldPath: "observableTrace" }],
           },
           trace: acceptedTrace(),
         });
@@ -1969,6 +1978,7 @@ describe("Campaign Play actor replanner", () => {
       phase: "grounding_review",
       reason: "grounding_review_rejected",
       reviewViolations: "0:outcome_not_established",
+      reviewViolationFields: "0:observableTrace",
     });
     expect(generateObject).toHaveBeenCalledTimes(3);
     expect(generateObject.mock.calls[2]![0].abortSignal?.aborted).toBe(true);

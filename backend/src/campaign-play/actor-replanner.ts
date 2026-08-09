@@ -162,6 +162,15 @@ interface CampaignPlayActorPlanRejectionArtifact {
         | "other_actor_action_not_established"
         | "outcome_not_established"
         | "contradicts_accepted_frame";
+      fieldPath:
+        | "intent.kind"
+        | "intent.targetHandles"
+        | "intent.method"
+        | "intent.stakes"
+        | "observableTrace"
+        | "possessionOutcome"
+        | "obligationOutcome"
+        | "elapsedBounds";
     }>;
   };
 }
@@ -1029,6 +1038,9 @@ export function createCampaignPlayActorReplanner(
         reviewViolations: artifact.review?.violations
           .map((violation) => `${violation.stepIndex}:${violation.kind}`)
           .join("|") ?? "",
+        reviewViolationFields: artifact.review?.violations
+          .map((violation) => `${violation.stepIndex}:${violation.fieldPath}`)
+          .join("|") ?? "",
       });
       const emitRejectionDiagnostic = (failure: AttemptFailure): void => {
         const artifact = failure.rejectionArtifact;
@@ -1141,6 +1153,15 @@ export function createCampaignPlayActorReplanner(
             violations: Array<{
               stepIndex: number;
               kind: "other_actor_action_not_established" | "outcome_not_established" | "contradicts_accepted_frame";
+              fieldPath:
+                | "intent.kind"
+                | "intent.targetHandles"
+                | "intent.method"
+                | "intent.stakes"
+                | "observableTrace"
+                | "possessionOutcome"
+                | "obligationOutcome"
+                | "elapsedBounds";
             }>;
           };
           let reviewed: { object: GroundingReview; trace: SafeGenerateTrace };

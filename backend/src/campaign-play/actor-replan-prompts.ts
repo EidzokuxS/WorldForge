@@ -87,6 +87,16 @@ const actorPlanGroundingViolationSchema = z.object({
     "outcome_not_established",
     "contradicts_accepted_frame",
   ]),
+  fieldPath: z.enum([
+    "intent.kind",
+    "intent.targetHandles",
+    "intent.method",
+    "intent.stakes",
+    "observableTrace",
+    "possessionOutcome",
+    "obligationOutcome",
+    "elapsedBounds",
+  ]),
 }).strict();
 
 export const campaignPlayActorPlanGroundingReviewSchema = z.object({
@@ -147,6 +157,7 @@ export type CampaignPlayActorReplanRecoveryFeedback = {
   stepCount?: number;
   moveTargets: string;
   reviewViolations: string;
+  reviewViolationFields: string;
 };
 
 function frameHandleSchema(handles: readonly string[]) {
@@ -293,6 +304,7 @@ export function buildCampaignPlayActorReplanRecoveryPrompt(
     ...(feedback.stepCount === undefined ? {} : { stepCount: feedback.stepCount }),
     moveTargets: feedback.moveTargets,
     reviewViolations: feedback.reviewViolations,
+    reviewViolationFields: feedback.reviewViolationFields,
   };
   return `${basePrompt}
 
@@ -306,6 +318,8 @@ When reason is target_outside_step_location, regenerate with exactly one grounde
 When reviewViolations lists other_actor_action_not_established, rebuild each flagged step around one action performed only by the actor identified by ACTOR_FRAME.actorHandle. Another actor may remain only as the target of contact or observation. Remove any method, stakes, or observableTrace that states or requires that other actor to respond, consent, assist, work, move, accept, pay, or complete anything. The rewritten observableTrace must show only the planning actor's own attempt or a physical trace directly caused by that method; do not replace the removed participation with another unestablished outcome. Prefer one grounded step.
 
 When reviewViolations lists outcome_not_established, rebuild each flagged step so its method and observableTrace describe only this actor's own attempt or a physical trace directly caused by that method and established by ACTOR_FRAME or an earlier accepted step. Remove claims that another actor responded, consented, worked, moved, paid, or that a requested, visible, or possible result already occurred; do not replace the claim with another unestablished outcome. Prefer one grounded step.
+
+reviewViolationFields pairs each flagged step index with the single proposal field reported by the Reviewer. Rewrite that field, plus only the directly dependent fields needed to keep the step internally consistent; do not copy rejected prose.
 
 SAFE_REJECTION_FEEDBACK
 ${JSON.stringify(safeFeedback)}
@@ -343,6 +357,8 @@ Accept only when every step stays within these rules:
 - A target handle proves only that the entity can be targeted. It does not prove participation or agreement.
 - Every non-move target must be present at the actor's established step location. A move may target only its one grounded route destination.
 - A debt or payment claim requires the matching obligationOutcome. incur makes only frame.actorHandle the debtor. pay uses only a supplied obligation owed by frame.actorHandle and a supplied copper possession owned by that actor. Prose, method, stakes, or observableTrace cannot create or settle debt by themselves.
+
+Each rejected violation must include fieldPath, naming the single proposal field that most directly contains the violation: intent.kind, intent.targetHandles, intent.method, intent.stakes, observableTrace, possessionOutcome, obligationOutcome, or elapsedBounds. Do not quote or copy field contents.
 
 Reject the plan when any step violates a rule. Report each affected step once with the closest violation kind. An accepted verdict has no violations; a rejected verdict has at least one.`;
 }
