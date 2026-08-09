@@ -568,7 +568,11 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
       fieldPath: "effects[0].summary",
       performingActorHandle: "guard",
       recentOwnActionIndex: 0,
-    }],
+      }],
+  };
+  const mechanicalRecoveryFeedback = {
+    diagnostic: "game_master_semantic_validation_mismatch" as const,
+    failedChecks: [{ check: "mechanical_authority_rejected" as const }],
   };
 
   it("rejects repeated actor dialogue with stable ordered safe coordinates", () => {
@@ -678,13 +682,80 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
     const recoveryBlock = recoveryPrompt.slice(recoveryPrompt.indexOf("GAME_MASTER_RECOVERY"));
     expect(recoveryBlock).toBe([
       "GAME_MASTER_RECOVERY",
-      "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. All schema, authority, continuity, and Rulebook rules above still apply.",
+      "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. For mechanical_authority_rejected, make every mechanically durable claim in each event summary agree with the typed resource effects and route access claims. If no typed authority changes a possession, obligation, or route, keep the event summary non-mechanical. All schema, authority, continuity, and Rulebook rules above still apply.",
       "RECOVERY_DIAGNOSTIC",
       JSON.stringify(recoveryFeedback),
       "END_RECOVERY_DIAGNOSTIC",
     ].join("\n"));
     expect(recoveryBlock).not.toContain(repeatedSummary);
     expect(recoveryBlock).not.toContain("SENTINEL_RAW_PROPOSAL");
+  });
+
+  it("forwards only the safe mechanical-authority check after reviewer rejection", async () => {
+    const rejectedProposal = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        summary: "SENTINEL_RAW_PROPOSAL Dren Vask says the route is paid.",
+      }],
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: rejectedProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "rejected",
+          reason: "SENTINEL_REVIEW_REASON Dren Vask and private reviewer prose.",
+        },
+        trace: trace(),
+      });
+    let thrown: unknown;
+    try {
+      await createCampaignPlayGameMaster({
+        generateObject: generateObject as unknown as typeof safeGenerateObject,
+      }).plan({
+        frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+        model: model(), temperature: 0.2, budget,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({
+      code: "model_contract_failed",
+      modelEvidence: expect.objectContaining({ errorCode: "mechanical_authority_rejected" }),
+    });
+    expect(getCampaignPlayGameMasterRecoveryFeedback(thrown)).toEqual(mechanicalRecoveryFeedback);
+    const feedbackText = JSON.stringify(getCampaignPlayGameMasterRecoveryFeedback(thrown));
+    expect(feedbackText).not.toContain("SENTINEL_REVIEW_REASON");
+    expect(feedbackText).not.toContain("SENTINEL_RAW_PROPOSAL");
+    expect(feedbackText).not.toContain("Dren Vask");
+    expect(feedbackText).not.toContain(rejectedProposal.effects[0]!.summary);
+    expect(generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it("renders the mechanical-authority recovery instruction without rejected content", async () => {
+    const acceptedReview = {
+      object: { verdict: "accepted", reason: "The corrected proposal remains within typed authority." },
+      trace: trace(),
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: proposal, trace: trace() })
+      .mockResolvedValueOnce(acceptedReview);
+    await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget,
+      recoveryFeedback: mechanicalRecoveryFeedback,
+    });
+    const promptText = String(generateObject.mock.calls[0]![0].prompt);
+    expect(promptText).not.toContain("SENTINEL_RAW_PROPOSAL");
+    expect(promptText).toContain([
+      "GAME_MASTER_RECOVERY",
+      "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. For mechanical_authority_rejected, make every mechanically durable claim in each event summary agree with the typed resource effects and route access claims. If no typed authority changes a possession, obligation, or route, keep the event summary non-mechanical. All schema, authority, continuity, and Rulebook rules above still apply.",
+      "RECOVERY_DIAGNOSTIC",
+      JSON.stringify(mechanicalRecoveryFeedback),
+      "END_RECOVERY_DIAGNOSTIC",
+    ].join("\n"));
   });
 });
 

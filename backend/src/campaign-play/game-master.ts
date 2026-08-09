@@ -357,13 +357,17 @@ export class CampaignPlayGameMasterError extends Error {
   }
 }
 
-export interface CampaignPlayGameMasterRecoveryCheck {
-  readonly check: "repeated_actor_dialogue";
-  readonly effectIndex: number;
-  readonly fieldPath: string;
-  readonly performingActorHandle: string;
-  readonly recentOwnActionIndex: number;
-}
+export type CampaignPlayGameMasterRecoveryCheck =
+  | {
+      readonly check: "repeated_actor_dialogue";
+      readonly effectIndex: number;
+      readonly fieldPath: string;
+      readonly performingActorHandle: string;
+      readonly recentOwnActionIndex: number;
+    }
+  | {
+      readonly check: "mechanical_authority_rejected";
+    };
 
 export interface CampaignPlayGameMasterRecoveryFeedback {
   readonly diagnostic: "game_master_semantic_validation_mismatch";
@@ -1873,7 +1877,7 @@ function prompt(
   if (recoveryFeedback !== undefined) {
     instructions.push([
       "GAME_MASTER_RECOVERY",
-      "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. All schema, authority, continuity, and Rulebook rules above still apply.",
+      "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. For mechanical_authority_rejected, make every mechanically durable claim in each event summary agree with the typed resource effects and route access claims. If no typed authority changes a possession, obligation, or route, keep the event summary non-mechanical. All schema, authority, continuity, and Rulebook rules above still apply.",
       "RECOVERY_DIAGNOSTIC",
       JSON.stringify(recoveryFeedback),
       "END_RECOVERY_DIAGNOSTIC",
@@ -2058,10 +2062,15 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
           );
         }
         if (reviewed.object.verdict !== "accepted") {
-          throw new CampaignPlayGameMasterError(
+          const error = new CampaignPlayGameMasterError(
             "model_contract_failed",
             { ...combined, errorCode: "mechanical_authority_rejected" },
           );
+          rememberCampaignPlayGameMasterRecoveryFeedback(error, {
+            diagnostic: "game_master_semantic_validation_mismatch",
+            failedChecks: [{ check: "mechanical_authority_rejected" }],
+          });
+          throw error;
         }
         return freeze({
           ...compiled,
