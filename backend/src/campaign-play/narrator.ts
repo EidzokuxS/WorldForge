@@ -496,6 +496,23 @@ function buildObservationActorNameFrame(
   });
 }
 
+function trailingIntentIndexSchema(
+  requiredIntentIndex: number,
+  availableIntentCount: number,
+) {
+  const allowedIntentIndexes = Array.from(
+    { length: availableIntentCount },
+    (_value, intentIndex) => intentIndex,
+  ).filter((intentIndex) => intentIndex !== requiredIntentIndex);
+  const literalSchemas = allowedIntentIndexes.map((intentIndex) => z.literal(intentIndex));
+  if (literalSchemas.length === 1) return literalSchemas[0]!;
+  return z.union(literalSchemas as [
+    typeof literalSchemas[number],
+    typeof literalSchemas[number],
+    ...typeof literalSchemas,
+  ]);
+}
+
 function narratorProposalSchemaForPacket(packet: CampaignPlayNarratorPacket) {
   const expectedActionCount = Math.min(
     CAMPAIGN_PLAY_LIMITS.suggestedActions,
@@ -523,13 +540,22 @@ function narratorProposalSchemaForPacket(packet: CampaignPlayNarratorPacket) {
   const requiredSelection = campaignPlayNarratorActionSelectionSchema.extend({
     intentIndex: z.literal(requiredIntentIndex),
   });
+  if (expectedActionCount === 1) {
+    return campaignPlayNarratorProposalSchema.extend({
+      beats,
+      actionSelections: z.tuple([requiredSelection]),
+    });
+  }
+  const trailingSelection = campaignPlayNarratorActionSelectionSchema.extend({
+    intentIndex: trailingIntentIndexSchema(requiredIntentIndex, packet.availableIntents.length),
+  });
   const tupleItems = [
     requiredSelection,
     ...Array.from(
       { length: expectedActionCount - 1 },
-      () => campaignPlayNarratorActionSelectionSchema,
+      () => trailingSelection,
     ),
-  ] as [typeof requiredSelection, ...typeof campaignPlayNarratorActionSelectionSchema[]];
+  ] as [typeof requiredSelection, ...typeof trailingSelection[]];
   return campaignPlayNarratorProposalSchema.extend({
     beats,
     actionSelections: z.tuple(tupleItems),

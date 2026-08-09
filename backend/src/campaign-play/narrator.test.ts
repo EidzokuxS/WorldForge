@@ -1,6 +1,10 @@
 import type { LanguageModel } from "ai";
 import { describe, expect, it, vi } from "vitest";
-import type { CampaignPlayNarratorPacket } from "@worldforge/shared";
+import { z } from "zod";
+import {
+  CAMPAIGN_PLAY_LIMITS,
+  type CampaignPlayNarratorPacket,
+} from "@worldforge/shared";
 import {
   buildStructuredOutputModelMetadata,
   rememberStructuredOutputModelMetadata,
@@ -750,6 +754,27 @@ describe("Campaign Play narrator", () => {
         ...replyProposal.actionSelections.slice(2),
       ],
     }).success).toBe(false);
+    const schema = z.toJSONSchema(options.schema) as unknown as {
+      properties: {
+        actionSelections: {
+          prefixItems: Array<{
+            properties: {
+              intentIndex: {
+                const?: number;
+                anyOf?: Array<{ const?: number }>;
+              };
+            };
+          }>;
+        };
+      };
+    };
+    expect(schema.properties.actionSelections.prefixItems).toHaveLength(4);
+    expect(schema.properties.actionSelections.prefixItems[0]?.properties.intentIndex)
+      .toEqual({ type: "number", const: 1 });
+    for (const item of schema.properties.actionSelections.prefixItems.slice(1)) {
+      expect(item.properties.intentIndex.anyOf?.map((entry) => entry.const))
+        .toEqual([0, 2, 3]);
+    }
     expect(String(options.prompt)).toContain("REQUIRED_REPLY_INTENT_INDEX=1");
     expect(String(options.prompt)).toContain(
       "Put that exact index only in actionSelections[0] so the player can answer, accept, refuse, or continue the exchange.",
@@ -769,6 +794,207 @@ describe("Campaign Play narrator", () => {
     expect(String(options.prompt)).toContain("Set detail to null for move and wait");
     expect(String(options.prompt)).toContain("Move and wait always set detail to null");
     expect(String(options.prompt)).not.toContain("wait uses a base-form verb phrase");
+  });
+
+  it("excludes the required reply index from every r125-shaped trailing selection", async () => {
+    const basePacket = packetFixture();
+    const consequence = {
+      observationHandle: "observation_offer",
+      performingActorHandle: "actor_public_keeper",
+      performingActorName: "Mara Venn",
+      whatChanged: "Mara offers an uncertain share.",
+      whereOrRoute: "Salt Harbor",
+      worldTimeLabel: "Day 1, 00:10",
+      causalCue: "direct_perception" as const,
+    };
+    const packet: CampaignPlayNarratorPacket = {
+      ...basePacket,
+      turnKind: "player_action",
+      openingContext: null,
+      sourceMoment: "Mara studies the divided catch while you wait for an answer.",
+      actionContext: {
+        submittedText: "Ask Mara for a share.",
+        intentKind: "contact",
+        disposition: "deterministic",
+        result: "success",
+        clarificationQuestion: null,
+      },
+      newObservations: [{
+        observationHandle: "observation_offer",
+        title: "Mara's offer",
+        text: "Mara offers an uncertain share.",
+        whereOrRoute: "Salt Harbor",
+        worldTimeLabel: "Day 1, 00:10",
+        consequence,
+      }],
+      consequences: [consequence],
+      availableIntents: Array.from({ length: 7 }, (_value, intentIndex) => ({
+        ...basePacket.availableIntents[0]!,
+        handle: `choice_public_${intentIndex}`,
+        label: intentIndex === 5 ? "Talk to Mara Venn" : `Look around ${intentIndex}`,
+        kind: intentIndex === 5 ? "contact" as const : "observe" as const,
+        targets: intentIndex === 5
+          ? [{ handle: "actor_public_keeper", kind: "actor" as const }]
+          : basePacket.availableIntents[0]!.targets,
+      })),
+    };
+    const proposal = {
+      beats: [{
+        purpose: "consequence" as const,
+        observationIndexes: [0],
+        text: "Mara offers you an uncertain share and waits for your answer.",
+      }],
+      actionSelections: [5, 6, 0, 1].map((intentIndex) => ({
+        intentIndex,
+        detail: `visible option ${intentIndex}`,
+      })),
+    };
+    const generateObject = vi.fn(async (
+      _options: Parameters<typeof safeGenerateObject>[0],
+    ) => ({ object: proposal, trace: trace() }));
+    await createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).narrate({
+      narrationId: "narration-required-index-five",
+      packetBytes: canonicalizeCampaignPlayProjection(packet),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+    });
+    const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    expect(options.schema.safeParse(proposal).success).toBe(true);
+    expect(options.schema.safeParse({
+      ...proposal,
+      actionSelections: [5, 5, 0, 1].map((intentIndex) => ({
+        intentIndex,
+        detail: `visible option ${intentIndex}`,
+      })),
+    }).success).toBe(false);
+    const schema = z.toJSONSchema(options.schema) as unknown as {
+      properties: {
+        actionSelections: {
+          prefixItems: Array<{
+            properties: {
+              intentIndex: {
+                const?: number;
+                anyOf?: Array<{ const?: number }>;
+              };
+            };
+          }>;
+        };
+      };
+    };
+    expect(schema.properties.actionSelections.prefixItems).toHaveLength(4);
+    expect(schema.properties.actionSelections.prefixItems[0]?.properties.intentIndex)
+      .toEqual({ type: "number", const: 5 });
+    for (const item of schema.properties.actionSelections.prefixItems.slice(1)) {
+      expect(item.properties.intentIndex.anyOf?.map((entry) => entry.const))
+        .toEqual([0, 1, 2, 3, 4, 6]);
+    }
+  });
+
+  it("keeps the required-reply one-intent and no-required paths representable", async () => {
+    const basePacket = packetFixture();
+    const consequence = {
+      observationHandle: "observation_offer",
+      performingActorHandle: "actor_public_keeper",
+      performingActorName: "Mara Venn",
+      whatChanged: "Mara offers an uncertain share.",
+      whereOrRoute: "Salt Harbor",
+      worldTimeLabel: "Day 1, 00:10",
+      causalCue: "direct_perception" as const,
+    };
+    const requiredPacket: CampaignPlayNarratorPacket = {
+      ...basePacket,
+      turnKind: "player_action",
+      openingContext: null,
+      sourceMoment: "Mara studies the divided catch while you wait for an answer.",
+      actionContext: {
+        submittedText: "Ask Mara for a share.",
+        intentKind: "contact",
+        disposition: "deterministic",
+        result: "success",
+        clarificationQuestion: null,
+      },
+      newObservations: [{
+        observationHandle: "observation_offer",
+        title: "Mara's offer",
+        text: "Mara offers an uncertain share.",
+        whereOrRoute: "Salt Harbor",
+        worldTimeLabel: "Day 1, 00:10",
+        consequence,
+      }],
+      consequences: [consequence],
+      availableIntents: [{
+        ...basePacket.availableIntents[0]!,
+        handle: "choice_public_contact",
+        label: "Talk to Mara Venn",
+        kind: "contact",
+        targets: [{ handle: "actor_public_keeper", kind: "actor" }],
+      }],
+    };
+    const requiredProposal = {
+      beats: [{
+        purpose: "consequence" as const,
+        observationIndexes: [0],
+        text: "Mara offers you an uncertain share and waits for your answer.",
+      }],
+      actionSelections: [{ intentIndex: 0, detail: "accept the uncertain share" }],
+    };
+    const generateObject = vi.fn(async (
+      _options: Parameters<typeof safeGenerateObject>[0],
+    ) => ({ object: requiredProposal, trace: trace() }));
+    await createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).narrate({
+      narrationId: "narration-required-one-intent",
+      packetBytes: canonicalizeCampaignPlayProjection(requiredPacket),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+    });
+    const requiredOptions = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    expect(requiredOptions.schema.safeParse(requiredProposal).success).toBe(true);
+    const requiredSchema = z.toJSONSchema(requiredOptions.schema) as unknown as {
+      properties: { actionSelections: { prefixItems: unknown[]; items?: unknown } };
+    };
+    expect(requiredSchema.properties.actionSelections.prefixItems).toHaveLength(1);
+    expect(requiredSchema.properties.actionSelections).not.toHaveProperty("items");
+
+    const noReplyPacket: CampaignPlayNarratorPacket = {
+      ...basePacket,
+    };
+    const noReplyProposal = {
+      ...proposalFixture(),
+      beats: proposalFixture().beats.slice(0, 2),
+      actionSelections: [{ intentIndex: 0, detail: "look around" }],
+    };
+    const noReplyGenerateObject = vi.fn(async (
+      _options: Parameters<typeof safeGenerateObject>[0],
+    ) => ({ object: noReplyProposal, trace: trace() }));
+    await createCampaignPlayNarrator({
+      generateObject: noReplyGenerateObject as unknown as typeof safeGenerateObject,
+    }).narrate({
+      narrationId: "narration-no-required-reply",
+      packetBytes: canonicalizeCampaignPlayProjection(noReplyPacket),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+    });
+    const noReplyOptions = noReplyGenerateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    expect(noReplyOptions.schema.safeParse(noReplyProposal).success).toBe(true);
+    expect(noReplyOptions.schema.safeParse({
+      ...noReplyProposal,
+      actionSelections: [{ intentIndex: 1, detail: "look around" }],
+    }).success).toBe(true);
+    const noReplySchema = z.toJSONSchema(noReplyOptions.schema) as unknown as {
+      properties: { actionSelections: { items: { properties: { intentIndex: { minimum: number; maximum: number } } } } };
+    };
+    expect(noReplySchema.properties.actionSelections.items.properties.intentIndex)
+      .toMatchObject({ minimum: 0, maximum: CAMPAIGN_PLAY_LIMITS.availableIntents - 1 });
   });
 
   it("publishes ordinary moves as exact code-owned destinations", () => {
