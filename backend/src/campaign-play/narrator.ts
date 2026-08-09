@@ -543,6 +543,58 @@ function buildObservationActorNameFrame(
   });
 }
 
+type ActorScopeRepairScope = "permitted" | "quoted_reference" | "forbidden";
+
+interface ActorScopeRepairFrameEntry {
+  beatIndex: number;
+  fieldPath: string;
+  observationIndexes: number[];
+  matchedActor: {
+    canonicalName: string;
+    matchedAlias: string;
+  };
+  matchedActorScopeByObservation: Array<{
+    observationIndex: number;
+    scope: ActorScopeRepairScope;
+  }>;
+  allowedActorNames: string[];
+}
+
+function buildActorScopeRepairFrame(
+  observationActorNameFrame: ObservationActorNameFrameEntry[],
+  recoveryFeedback?: CampaignPlayNarratorRecoveryFeedback,
+): ActorScopeRepairFrameEntry[] | null {
+  const mismatchChecks = recoveryFeedback?.failedChecks.filter(
+    (check): check is Extract<
+      CampaignPlayNarratorPacketValidationFailure,
+      { check: "visible_actor_observation_mismatch" }
+    > => check.check === "visible_actor_observation_mismatch",
+  ) ?? [];
+  if (mismatchChecks.length === 0) return null;
+  return mismatchChecks.map((check) => ({
+    beatIndex: check.beatIndex,
+    fieldPath: check.fieldPath,
+    observationIndexes: [...check.observationIndexes],
+    matchedActor: {
+      canonicalName: check.matchedActor.canonicalName,
+      matchedAlias: check.matchedActor.matchedAlias,
+    },
+    matchedActorScopeByObservation: check.observationIndexes.map((observationIndex) => {
+      const frameEntry = observationActorNameFrame.find((entry) =>
+        entry.observationIndex === observationIndex);
+      const scope: ActorScopeRepairScope = frameEntry?.permittedActorNames.includes(
+        check.matchedActor.canonicalName,
+      )
+        ? "permitted"
+        : frameEntry?.quotedReferenceActorNames.includes(check.matchedActor.canonicalName)
+          ? "quoted_reference"
+          : "forbidden";
+      return { observationIndex, scope };
+    }),
+    allowedActorNames: check.allowedActors.map((actor) => actor.canonicalName),
+  }));
+}
+
 function trailingIntentIndexSchema(
   requiredIntentIndex: number,
   availableIntentCount: number,
@@ -615,6 +667,16 @@ function buildPrompt(
 ): string {
   const requiredIntentIndex = requiredReplyIntentIndex(packet);
   const observationActorNameFrame = buildObservationActorNameFrame(packet);
+  const actorScopeRepairFrame = buildActorScopeRepairFrame(
+    observationActorNameFrame,
+    recoveryFeedback,
+  );
+  const actorScopeRepairBlock = actorScopeRepairFrame === null ? "" : `
+ACTOR_SCOPE_REPAIR
+Each entry identifies one failed beat field. Keep its final observationIndexes grounded; do not change them merely to authorize a name. If the matched actor is forbidden for every listed observation, remove its canonical name and matched alias from that field. If the matched actor is a quoted reference for any listed observation and is never permitted, keep it only inside balanced quoted dialogue and do not depict that actor speaking, moving, arriving, watching, or otherwise acting. Rewrite the listed field, then check every actor name against OBSERVATION_ACTOR_NAME_FRAME.
+ACTOR_SCOPE_REPAIR_FRAME
+${canonicalizeCampaignPlayProjection(actorScopeRepairFrame)}
+END_ACTOR_SCOPE_REPAIR_FRAME`;
   const semanticPacketBytes = canonicalizeCampaignPlayProjection({
     ...packet,
     visibleActors: packet.visibleActors.map((actor) => ({
@@ -702,7 +764,7 @@ Keep distant events, hidden actors, private goals, protected state, Judge reason
 
 NARRATOR_RECOVERY
 The prior proposal failed the safe checks below. Regenerate a fresh proposal from NARRATOR_PACKET. Correct every listed check. Do not reuse the rejected observation-index or action-selection arrangement. Every schema, grounding, identity, visibility, and action rule above remains unchanged.
-If a failed check requires changing observation coverage or observationIndexes, recompute permittedActorNames, quotedReferenceActorNames, and forbiddenActorNames for every beat from OBSERVATION_ACTOR_NAME_FRAME using its final observationIndexes. Then rewrite each beat so every actor name follows the rules above.
+If a failed check requires changing observation coverage or observationIndexes, recompute permittedActorNames, quotedReferenceActorNames, and forbiddenActorNames for every beat from OBSERVATION_ACTOR_NAME_FRAME using its final observationIndexes. Then rewrite each beat so every actor name follows the rules above.${actorScopeRepairBlock}
 RECOVERY_DIAGNOSTIC
 ${canonicalizeCampaignPlayProjection(recoveryFeedback)}
 END_RECOVERY_DIAGNOSTIC`}`;

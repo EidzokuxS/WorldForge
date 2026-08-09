@@ -2178,6 +2178,11 @@ END_RECOVERY_DIAGNOSTIC`);
 NARRATOR_RECOVERY
 The prior proposal failed the safe checks below. Regenerate a fresh proposal from NARRATOR_PACKET. Correct every listed check. Do not reuse the rejected observation-index or action-selection arrangement. Every schema, grounding, identity, visibility, and action rule above remains unchanged.
 If a failed check requires changing observation coverage or observationIndexes, recompute permittedActorNames, quotedReferenceActorNames, and forbiddenActorNames for every beat from OBSERVATION_ACTOR_NAME_FRAME using its final observationIndexes. Then rewrite each beat so every actor name follows the rules above.
+ACTOR_SCOPE_REPAIR
+Each entry identifies one failed beat field. Keep its final observationIndexes grounded; do not change them merely to authorize a name. If the matched actor is forbidden for every listed observation, remove its canonical name and matched alias from that field. If the matched actor is a quoted reference for any listed observation and is never permitted, keep it only inside balanced quoted dialogue and do not depict that actor speaking, moving, arriving, watching, or otherwise acting. Rewrite the listed field, then check every actor name against OBSERVATION_ACTOR_NAME_FRAME.
+ACTOR_SCOPE_REPAIR_FRAME
+[{"allowedActorNames":["Dren Vask"],"beatIndex":0,"fieldPath":"beats[0].text","matchedActor":{"canonicalName":"Vedris Kast","matchedAlias":"Vedris"},"matchedActorScopeByObservation":[{"observationIndex":0,"scope":"forbidden"}],"observationIndexes":[0]}]
+END_ACTOR_SCOPE_REPAIR_FRAME
 RECOVERY_DIAGNOSTIC
 ${canonicalizeCampaignPlayProjection(recoveryFeedback)}
 END_RECOVERY_DIAGNOSTIC`);
@@ -2189,6 +2194,145 @@ END_RECOVERY_DIAGNOSTIC`);
     expect(recoveryPrompt).not.toContain("sentinel-secret");
     expect(recoveryPrompt).not.toContain("provider response");
     expect(recoveryPrompt).not.toContain("Dren Vask says");
+  });
+
+  it("localizes actor scope for each visible-actor mismatch in recovery", async () => {
+    const generateObject = vi.fn(async (
+      _options: Parameters<typeof safeGenerateObject>[0],
+    ) => ({
+      object: {
+        actionSelections: [{ intentIndex: 0, detail: "Ask about supplies" }],
+        beats: [{
+          purpose: "consequence",
+          observationIndexes: [0],
+          text: 'Dren Vask says, "Ask Vedris if you need more."',
+        }],
+      },
+      trace: trace(),
+    }));
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    const request = {
+      narrationId: "narration-actor-scope-frame",
+      packetBytes: canonicalizeCampaignPlayProjection(r45SingleObservationPacket()),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+    };
+    await narrator.narrate(request);
+    const basePrompt = String(generateObject.mock.calls[0]![0].prompt);
+    expect(basePrompt).not.toContain("ACTOR_SCOPE_REPAIR");
+
+    const recoveryFeedback = {
+      diagnostic: "narrator_packet_validation_mismatch" as const,
+      failedChecks: [
+        {
+          check: "visible_actor_observation_mismatch" as const,
+          beatIndex: 0,
+          fieldPath: "beats[0].text",
+          observationIndexes: [0],
+          matchedActor: {
+            canonicalId: "actor_dren_vask",
+            canonicalName: "Dren Vask",
+            matchedAlias: "Dren",
+          },
+          allowedActors: [{
+            canonicalId: "actor_dren_vask",
+            canonicalName: "Dren Vask",
+          }],
+          sourceObservationPerformers: [{
+            observationIndex: 0,
+            canonicalId: "actor_dren_vask",
+            canonicalName: "Dren Vask",
+          }],
+        },
+        {
+          check: "visible_actor_observation_mismatch" as const,
+          beatIndex: 0,
+          fieldPath: "beats[0].text",
+          observationIndexes: [0],
+          matchedActor: {
+            canonicalId: "actor_vedris_kast",
+            canonicalName: "Vedris Kast",
+            matchedAlias: "Vedris",
+          },
+          allowedActors: [{
+            canonicalId: "actor_dren_vask",
+            canonicalName: "Dren Vask",
+          }],
+          sourceObservationPerformers: [{
+            observationIndex: 0,
+            canonicalId: "actor_dren_vask",
+            canonicalName: "Dren Vask",
+          }],
+        },
+        {
+          check: "visible_actor_observation_mismatch" as const,
+          beatIndex: 0,
+          fieldPath: "beats[0].text",
+          observationIndexes: [0],
+          matchedActor: {
+            canonicalId: "actor_public_keeper",
+            canonicalName: "Mara Venn",
+            matchedAlias: "Mara",
+          },
+          allowedActors: [{
+            canonicalId: "actor_dren_vask",
+            canonicalName: "Dren Vask",
+          }],
+          sourceObservationPerformers: [{
+            observationIndex: 0,
+            canonicalId: "actor_dren_vask",
+            canonicalName: "Dren Vask",
+          }],
+        },
+      ],
+    };
+    await narrator.narrate({ ...request, recoveryFeedback });
+    const recoveryPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    const frame = canonicalizeCampaignPlayProjection([
+      {
+        beatIndex: 0,
+        fieldPath: "beats[0].text",
+        observationIndexes: [0],
+        matchedActor: { canonicalName: "Dren Vask", matchedAlias: "Dren" },
+        matchedActorScopeByObservation: [{ observationIndex: 0, scope: "permitted" }],
+        allowedActorNames: ["Dren Vask"],
+      },
+      {
+        beatIndex: 0,
+        fieldPath: "beats[0].text",
+        observationIndexes: [0],
+        matchedActor: { canonicalName: "Vedris Kast", matchedAlias: "Vedris" },
+        matchedActorScopeByObservation: [{ observationIndex: 0, scope: "quoted_reference" }],
+        allowedActorNames: ["Dren Vask"],
+      },
+      {
+        beatIndex: 0,
+        fieldPath: "beats[0].text",
+        observationIndexes: [0],
+        matchedActor: { canonicalName: "Mara Venn", matchedAlias: "Mara" },
+        matchedActorScopeByObservation: [{ observationIndex: 0, scope: "forbidden" }],
+        allowedActorNames: ["Dren Vask"],
+      },
+    ]);
+    expect(recoveryPrompt).toContain("ACTOR_SCOPE_REPAIR\n");
+    expect(recoveryPrompt).toContain(
+      "Each entry identifies one failed beat field. Keep its final observationIndexes grounded; do not change them merely to authorize a name.",
+    );
+    expect(recoveryPrompt).toContain(`ACTOR_SCOPE_REPAIR_FRAME\n${frame}\nEND_ACTOR_SCOPE_REPAIR_FRAME`);
+    expect(recoveryPrompt.indexOf("ACTOR_SCOPE_REPAIR_FRAME")).toBeLessThan(
+      recoveryPrompt.indexOf("RECOVERY_DIAGNOSTIC"),
+    );
+    expect(recoveryPrompt.match(/(?:^|\n)ACTOR_SCOPE_REPAIR_FRAME\n/g)).toHaveLength(1);
+    expect(recoveryPrompt).toContain('"scope":"quoted_reference"');
+    expect(recoveryPrompt).toContain('"scope":"forbidden"');
+    expect(recoveryPrompt).not.toContain("source observation prose");
+    expect(recoveryPrompt).not.toContain("provider response");
+    expect(recoveryPrompt).not.toContain("sentinel-secret");
+    expect(frame).not.toContain("Ask Vedris if you need more");
   });
 
   it("bounds an opening model proposal to the two beats its scene contract can use", async () => {
