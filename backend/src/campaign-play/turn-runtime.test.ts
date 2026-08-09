@@ -5531,7 +5531,7 @@ describe("Campaign Play player-action turn runtime", () => {
       const runtime = turnRuntime(
         handle,
         time,
-        judgeFixture("deterministic"),
+        ambientContactJudgeFixture(),
         gameMasterFixture(1, false, true),
         { actorProposalService },
       );
@@ -5614,7 +5614,7 @@ describe("Campaign Play player-action turn runtime", () => {
     const runtime = turnRuntime(
       handle,
       time,
-      judgeFixture("deterministic"),
+      ambientContactJudgeFixture(),
       gameMasterFixture(1, false, true),
       { actorProposalService, owner: "actor-receipt-worker" },
     );

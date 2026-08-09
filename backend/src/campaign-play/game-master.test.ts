@@ -177,6 +177,15 @@ const proposal = {
   }],
 };
 
+const guardResponseEffect = {
+  kind: "record_world_event" as const,
+  eventClass: "dialogue" as const,
+  performingActorHandle: "guard",
+  routeAccessClaims: [],
+  summary: "The guard answers the player's question.",
+  affectedHandles: ["you", "guard"],
+};
+
 function receivableCollectionFrame(): CampaignPlayGameMasterFrame {
   const value = frame();
   const obligationId = deriveCampaignPlayObligationId(
@@ -255,7 +264,7 @@ describe("Campaign Play Game Master obligations", () => {
           amount: 8,
           summary: "You now owe Oren Tide eight copper for the broken glass.",
           affectedHandles: [],
-        }],
+        }, guardResponseEffect],
       },
     );
     const obligationId = deriveCampaignPlayObligationId(
@@ -314,7 +323,7 @@ describe("Campaign Play Game Master obligations", () => {
           amount: 8,
           summary: "Oren Tide owes the player eight copper for the completed repair.",
           affectedHandles: ["guard", "you"],
-        }],
+        }, guardResponseEffect],
       },
     );
     const obligationId = deriveCampaignPlayObligationId(
@@ -400,7 +409,7 @@ describe("Campaign Play Game Master obligations", () => {
           amount: 2,
           summary: "You place two copper coins in Oren Tide's hand; five copper remains owed.",
           affectedHandles: ["you", "guard", "coins", "guard-debt"],
-        }],
+        }, guardResponseEffect],
       },
     );
     expect(candidate.batch.commands[1]).toMatchObject({
@@ -573,6 +582,15 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
   const mechanicalRecoveryFeedback = {
     diagnostic: "game_master_semantic_validation_mismatch" as const,
     failedChecks: [{ check: "mechanical_authority_rejected" as const }],
+  };
+  const targetedActorRecoveryFeedback = {
+    diagnostic: "game_master_semantic_validation_mismatch" as const,
+    failedChecks: [{
+      check: "targeted_actor_response_missing" as const,
+      intentKind: "contact" as const,
+      requiredActorHandles: ["guard"],
+      firstActorlessEffectIndex: 0,
+    }],
   };
 
   it("rejects repeated actor dialogue with stable ordered safe coordinates", () => {
@@ -756,6 +774,34 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
       JSON.stringify(mechanicalRecoveryFeedback),
       "END_RECOVERY_DIAGNOSTIC",
     ].join("\n"));
+  });
+
+  it("renders the targeted-contact recovery instruction with only safe coordinates", async () => {
+    const acceptedReview = {
+      object: { verdict: "accepted", reason: "The corrected reply precedes the actorless result." },
+      trace: trace(),
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: proposal, trace: trace() })
+      .mockResolvedValueOnce(acceptedReview);
+    await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget,
+      recoveryFeedback: targetedActorRecoveryFeedback,
+    });
+    const promptText = String(generateObject.mock.calls[0]![0].prompt);
+    expect(promptText).toContain("GAME_MASTER_RECOVERY");
+    expect(promptText).toContain(
+      "For targeted_actor_response_missing, include one dialogue or interaction record_world_event for every handle in requiredActorHandles, copy that same handle into performingActorHandle, and put all required responses before the first actorless discovery or scene event.",
+    );
+    expect(promptText).toContain("RECOVERY_DIAGNOSTIC");
+    expect(promptText).toContain(JSON.stringify(targetedActorRecoveryFeedback));
+    expect(promptText).toContain("END_RECOVERY_DIAGNOSTIC");
+    expect(promptText).not.toContain("SENTINEL_RAW_PROPOSAL");
+    expect(promptText).not.toContain("SENTINEL_REVIEW_REASON");
+    expect(promptText).not.toContain("Oren Tide's private response");
   });
 });
 
@@ -989,6 +1035,7 @@ describe("Campaign Play Game Master", () => {
       "For an attempt with nonplayer actor targets, their response is part of the outcome",
     );
     expect(String(options.prompt)).toContain("REQUIRED_ACTOR_RESPONSES is the complete code-owned list");
+    expect(String(options.prompt)).toContain('REQUIRED_ACTOR_RESPONSES=["guard"]');
     expect(String(options.prompt)).toContain("Omitting, delaying, or replacing a required response with actorless prose invalidates the whole proposal");
     expect(String(options.prompt)).toContain(
       "A successful roll resolves the player's effort; it does not create permission or cooperation",
@@ -1319,6 +1366,69 @@ describe("Campaign Play Game Master", () => {
     )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
   });
 
+  it("requires a targeted contact actor to respond before an actorless result", () => {
+    const actorlessResult = {
+      kind: "record_world_event" as const,
+      eventClass: "discovery" as const,
+      performingActorHandle: null,
+      summary: "A posted notice catches the player's eye.",
+      affectedHandles: ["here"],
+    };
+    let thrown: unknown;
+    try {
+      createCampaignPlayGameMaster().compile(
+        frame(),
+        ruling(),
+        resolution,
+        null,
+        { elapsedMinutes: 1, effects: [actorlessResult] },
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({ code: "model_contract_failed" });
+    expect(getCampaignPlayGameMasterRecoveryFeedback(thrown)).toEqual({
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [{
+        check: "targeted_actor_response_missing",
+        intentKind: "contact",
+        requiredActorHandles: ["guard"],
+        firstActorlessEffectIndex: 0,
+      }],
+    });
+    const feedbackText = JSON.stringify(getCampaignPlayGameMasterRecoveryFeedback(thrown));
+    expect(feedbackText).not.toContain(actorlessResult.summary);
+    expect(feedbackText).not.toContain("SENTINEL_RAW_PROPOSAL");
+
+    const delayedResponse = [actorlessResult, guardResponseEffect];
+    let delayedThrown: unknown;
+    try {
+      createCampaignPlayGameMaster().compile(
+        frame(), ruling(), resolution, null,
+        { elapsedMinutes: 1, effects: delayedResponse },
+      );
+    } catch (error) {
+      delayedThrown = error;
+    }
+    expect(delayedThrown).toMatchObject({ code: "model_contract_failed" });
+    expect(getCampaignPlayGameMasterRecoveryFeedback(delayedThrown)).toEqual(
+      getCampaignPlayGameMasterRecoveryFeedback(thrown),
+    );
+
+    const accepted = createCampaignPlayGameMaster().compile(
+      frame(), ruling(), resolution, null,
+      { elapsedMinutes: 1, effects: [guardResponseEffect, actorlessResult] },
+    );
+    expect(accepted.preflight.accepted).toBe(true);
+    expect(accepted.batch.commands).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "record_world_event",
+        affectedRefs: expect.arrayContaining([{ kind: "actor", id: "actor-guard" }]),
+        readScope: expect.arrayContaining([{ kind: "actor", id: "actor-guard" }]),
+      }),
+    ]));
+  });
+
   it("binds route-targeted dialogue to the code-owned direct access state", () => {
     const routeRuling = ruling({
       normalizedIntent: {
@@ -1584,9 +1694,17 @@ describe("Campaign Play Game Master", () => {
         quantity: 2,
         summary: "Oren hands over two copper chits for the copied manifests.",
         affectedHandles: ["you", "guard"],
-      }],
+      }, guardResponseEffect],
     };
-    const generateObject = vi.fn().mockResolvedValueOnce({ object: acquisitionProposal, trace: trace() });
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: acquisitionProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The typed acquisition is the only durable possession change and the guard answered.",
+        },
+        trace: trace(),
+      });
     await createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).plan({
@@ -1730,7 +1848,7 @@ describe("Campaign Play Game Master", () => {
           quantity: 2,
           summary: "The clerk pays you two copper chits for the copied manifests.",
           affectedHandles: ["guard"],
-        }],
+        }, guardResponseEffect],
       },
     );
     const possessionKey = deriveCampaignPlayPossessionKey("Copper chit");
@@ -1790,7 +1908,7 @@ describe("Campaign Play Game Master", () => {
           quantity: 2,
           summary: "The clerk pays you two copper chits for the copied manifests.",
           affectedHandles: ["guard"],
-        }],
+        }, guardResponseEffect],
       },
     );
     expect(grantedAcquisition.preflight.accepted).toBe(true);
@@ -1841,7 +1959,7 @@ describe("Campaign Play Game Master", () => {
           quantity: 1,
           summary: "You pay one copper chit for a cot until afternoon.",
           affectedHandles: [],
-        }],
+        }, guardResponseEffect],
       },
     );
     expect(spending.batch.commands[1]).toMatchObject({
@@ -1897,12 +2015,12 @@ describe("Campaign Play Game Master", () => {
           quantity: 1,
           summary: "You stamp one copper chit as paid lodging credit.",
           affectedHandles: [],
-        }],
+        }, guardResponseEffect],
       },
     );
     const resultKey = deriveCampaignPlayPossessionKey("Copper chit stamped for lodging");
     const resultId = deriveCampaignPlayPossessionId(CAMPAIGN_ID, PLAYER_ID, resultKey);
-    expect(transformation.batch.commands.slice(1)).toMatchObject([{
+    expect(transformation.batch.commands.filter((command) => command.kind === "adjust_actor_possession")).toMatchObject([{
       kind: "adjust_actor_possession",
       possessionId,
       quantityDelta: -1,
@@ -2020,7 +2138,12 @@ describe("Campaign Play Game Master", () => {
         kind: "move", targets: [{ handle: "passage", kind: "route" }],
         method: "Cross the open passage", stakes: "Reach South Harbor",
       },
-    }) : ruling();
+    }) : ruling({
+      normalizedIntent: {
+        ...ruling().normalizedIntent,
+        targets: [],
+      },
+    });
     const result = createCampaignPlayGameMaster().compile(frame(), effectRuling, resolution, null, {
       elapsedMinutes: effect.kind === "move_actor" ? 5 : 1, effects: [effect],
     });

@@ -367,6 +367,12 @@ export type CampaignPlayGameMasterRecoveryCheck =
     }
   | {
       readonly check: "mechanical_authority_rejected";
+    }
+  | {
+      readonly check: "targeted_actor_response_missing";
+      readonly intentKind: "contact";
+      readonly requiredActorHandles: readonly string[];
+      readonly firstActorlessEffectIndex: number | null;
     };
 
 export interface CampaignPlayGameMasterRecoveryFeedback {
@@ -1369,7 +1375,9 @@ function compile(
       ? [target.handle]
       : [];
   });
-  if (ruling.normalizedIntent.kind === "attempt" && targetedNonplayerActorHandles.length > 0) {
+  const requiresTargetedResponse = ruling.normalizedIntent.kind === "contact"
+    || ruling.normalizedIntent.kind === "attempt";
+  if (requiresTargetedResponse && targetedNonplayerActorHandles.length > 0) {
     const firstActorlessResultIndex = proposal.effects.findIndex((effect) =>
       effect.kind === "record_world_event"
       && (effect.eventClass === "discovery" || effect.eventClass === "scene")
@@ -1383,6 +1391,21 @@ function compile(
         && (firstActorlessResultIndex < 0 || responseIndex < firstActorlessResultIndex);
     });
     if (!everyTargetRespondsFirst) {
+      if (ruling.normalizedIntent.kind === "contact") {
+        const error = new CampaignPlayGameMasterError("model_contract_failed", null);
+        rememberCampaignPlayGameMasterRecoveryFeedback(error, {
+          diagnostic: "game_master_semantic_validation_mismatch",
+          failedChecks: [{
+            check: "targeted_actor_response_missing",
+            intentKind: "contact",
+            requiredActorHandles: targetedNonplayerActorHandles,
+            firstActorlessEffectIndex: firstActorlessResultIndex < 0
+              ? null
+              : firstActorlessResultIndex,
+          }],
+        });
+        throw error;
+      }
       throw new CampaignPlayGameMasterError("model_contract_failed", null);
     }
   }
@@ -1730,7 +1753,8 @@ function prompt(
   const movement = canonicalMovement(frame, ruling, resolution, map);
   const arrivalScene = destinationScene(frame, movement);
   const directives = actorDirectives(frame, ruling, map);
-  const requiredActorResponseHandles = effectiveRuling.normalizedIntent.kind === "attempt"
+  const requiredActorResponseHandles = (effectiveRuling.normalizedIntent.kind === "attempt"
+    || effectiveRuling.normalizedIntent.kind === "contact")
     ? effectiveRuling.normalizedIntent.targets.flatMap((target) => {
         if (target.kind !== "actor") return [];
         const reference = map.get(target.handle);
@@ -1875,9 +1899,19 @@ function prompt(
     `PERMITTED_RESOURCE_EFFECT_KINDS=${JSON.stringify([...resourceEffectKinds])}`,
   ];
   if (recoveryFeedback !== undefined) {
+    const hasTargetedActorResponseMissing = recoveryFeedback.failedChecks.some(
+      (check) => check.check === "targeted_actor_response_missing",
+    );
+    const recoveryInstruction = [
+      "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. For mechanical_authority_rejected, make every mechanically durable claim in each event summary agree with the typed resource effects and route access claims. If no typed authority changes a possession, obligation, or route, keep the event summary non-mechanical.",
+      ...(hasTargetedActorResponseMissing
+        ? ["For targeted_actor_response_missing, include one dialogue or interaction record_world_event for every handle in requiredActorHandles, copy that same handle into performingActorHandle, and put all required responses before the first actorless discovery or scene event."]
+        : []),
+      "All schema, authority, continuity, and Rulebook rules above still apply.",
+    ].join(" ");
     instructions.push([
       "GAME_MASTER_RECOVERY",
-      "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. For mechanical_authority_rejected, make every mechanically durable claim in each event summary agree with the typed resource effects and route access claims. If no typed authority changes a possession, obligation, or route, keep the event summary non-mechanical. All schema, authority, continuity, and Rulebook rules above still apply.",
+      recoveryInstruction,
       "RECOVERY_DIAGNOSTIC",
       JSON.stringify(recoveryFeedback),
       "END_RECOVERY_DIAGNOSTIC",
