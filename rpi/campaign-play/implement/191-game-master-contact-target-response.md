@@ -82,10 +82,77 @@ canonical materialization. Required hashes are state
 `d8362b1af976c00cb8f14c564c8196a2d1ab137743ff368ea83d762a4ad2e065`, and
 Brina card `4b48de7a32df6a6be5a91ab12f09bb87926b40d5940348c7581e298eaa12b60a`.
 
-Rendered outcome, authoritative stage/operation/receipt/binding evidence,
-checkpoint counts, SQLite integrity/FK, natural contact recovery coverage,
-cleanup, and the final hard-stop or 60-action/reload boundary are appended
-after the lane. Generated session/run evidence remains uncommitted.
+Setup completed through the rendered Character page with exactly one canonical
+card import/file assignment and one successful parse response (HTTP 200), one
+Continue/save, the exact `lower-wards` / `Local` / `Already here` /
+`Looking for work` selections, and one Begin. The setup probe retained card
+SHA-256 `4b48de7a32df6a6be5a91ab12f09bb87926b40d5940348c7581e298eaa12b60a`,
+state SHA-256 `6cb291d11ce6578e3395a10d2c5d590070e3ccdd8b2b67451410869ce97897d2`,
+and config SHA-256
+`d8362b1af976c00cb8f14c564c8196a2d1ab137743ff368ea83d762a4ad2e065`.
+Opening reached a ready proper scene. Actions 1 through 15 each settled one
+completed turn with one unique proper-scene binding and enabled controls. The
+only retained checkpoint, action 10, recorded completed/bound `10/10`,
+`worldVersion=22`, `runtimeRevision=193`, `currentLocation=alderman-hallway`,
+`attemptCount=2`, `operationCount=1`, `integrity_check=ok`, and an empty
+`foreign_key_check`.
+
+Action 16 selected the rendered `Go to Dim Ward Market` choice once. Its
+authoritative turn was
+`turn-player-action:ac5cf9fb71b3704d5998ea054db88f3cd53981de`, and the Game
+Master stage was
+`e302da83b6bb2b735fa0848e6cd9ae556a517482f467c6b733bc1d4f41e1cc3f` with one
+attempt. The turn became `interrupted` at `admitted` with
+`errorCode=rulebook_denied`, `resumeEligible=1`, expected/base
+`worldVersion=27`, expected/base `runtimeRevision=280`, and no final world
+version. The retained model-stage row reports provider/model
+`zai-coding-plan` / `glm-5-turbo`, strategy `strict_object`, input/output
+tokens `10323/533`, duration `9928ms`, finish reason `stop`,
+`schemaOutcome=invalid`, and no artifact JSON. No Judge/Actor/Narrator
+settlement, receipt, proper scene, or binding exists for action 16; no later
+player action was submitted. The rendered page exposed the existing terminal
+message `The turn stopped before it finished.` with Resume, which was not
+pressed. This is the first genuine product/model-stage boundary for r139;
+the retained evidence does not include the provider response, candidate,
+reviewer reason, or other raw failure prose, so their cause remains unknown.
+
+r139 did not naturally exercise actor-targeted contact or the new
+`targeted_actor_response_missing` recovery. The lane therefore provides no
+live acceptance claim for that path. It also did not reach the 60-action
+checkpoint series or same-page reload because the hard-stop boundary was
+action 16. The generated session/run evidence remains uncommitted. Primary
+evidence hashes after cleanup are:
+
+- `r139-terminal.json`: SHA-256
+  `861c56807066e082d98abd7a664a2859a0dbdb7054acfbebd302367cea0ee788`
+- `actions/action-016-evidence.json`: SHA-256
+  `8454a2225b02525ac10f8e865ff61376a97d3a920994b17f9f54afb543fa722b`
+- `probes/setup-summary.json`: SHA-256
+  `4c2803f5bcc2a0bc907ff99d3ec35e2e13ce9dd1ff592ce4d1aa22f329bf833b`
+- `backend.stdout.log`: SHA-256
+  `23a613bea2c9d435a9bb032abfa583c5c2e89e8ce9546671ac0dd67c849b0011`
+- r139 `state.db`: SHA-256
+  `c3ff3c944bc724ac75eb731512c48cc67d22020b5ab8b9629c469909305d46b6`
+
+The final read-only SQLite check returned `integrity_check=ok` and an empty
+`foreign_key_check`; authoritative counts were 17 turns, 48 commands, 48
+receipts, 15 proper scenes, 31 model stages, 15 Narrator operations, 18
+Narrator attempts, 9 actor jobs, 8 Actor Replanner attempts, and 16 turn
+results. These counts include the frozen interrupted action and show no late
+settlement for it.
+
+## Cleanup
+
+Owned roots were backend PID `70968`, frontend root PID `56540` with Next child
+`7372` and conhost `25348`, and browser root PID `71564` with Chrome
+descendants `45996`, `60128`, `67036`, `70264`, `76964`, `77192`; backend
+helpers were conhost `76040` and esbuild `77328`. The task-owned CDP page
+`E165BF60F01610FF7D853F036774BC1F` was closed before process shutdown. Every
+recorded PID was independently absent afterward; listeners on 4250/4251/4252
+were absent; the CDP endpoint and page were absent. Only the validated r139
+browser profile under the r139 session root and the task-owned GitNexus shadow
+`C:\Users\robra\AppData\Local\Temp\wf-task191-shadow-20260809-1933` were
+removed. The r139 session/run evidence and protected files were preserved.
 
 ## Acceptance handoff
 
@@ -98,14 +165,17 @@ after the lane. Generated session/run evidence remains uncommitted.
 - Existing behavior: attempt invariant, targetless contact, introduced support,
   unrelated mechanics, one automatic recovery, identity, fencing, and no
   duplicate settlement remain covered by the affected suites.
-- Built product: pending r139 evidence will distinguish a settled contact
-  recovery from the first genuine defect; static evidence is not a substitute.
-- Persistence/reload: pending r139; require read-only integrity/FK and no
-  duplicate writes, and require same-page reload only after 60/60.
+- Built product: r139 setup and Opening passed, and actions 1-15 each have one
+  unique binding. Action 16 is the first genuine `rulebook_denied` boundary,
+  with no later action, no duplicate settlement, and no live contact-recovery
+  evidence. The exact retained stage/turn evidence is above.
+- Persistence/reload: checkpoint 10 and the final read-only SQLite checks are
+  clean with `integrity_check=ok` and empty foreign keys; the 60/60 boundary
+  and same-page reload were not reached because of the action-16 hard stop.
 
 ## Unknowns
 
-The natural r139 provider path, contact recovery occurrence, endurance count,
-and reload result are unknown until the one authorized lane runs. The provider
-cause of any future failure remains unknown unless retained coordinates prove
-otherwise.
+The provider response/candidate and Reviewer reason behind action-16
+`rulebook_denied` are not retained, so their cause is unknown. The natural
+`targeted_actor_response_missing` contact recovery remains unobserved, as do
+the 60-action and reload criteria; no causal claim is made from their absence.
