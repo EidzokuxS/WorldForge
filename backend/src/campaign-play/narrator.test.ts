@@ -1185,7 +1185,7 @@ describe("Campaign Play narrator", () => {
     }));
   });
 
-  it("keeps quoted references confined to balanced double-quoted dialogue", () => {
+  it("keeps quoted references confined to balanced dialogue", () => {
     const sourcePacket = r45SingleObservationPacket();
     const compile = (packet: CampaignPlayNarratorPacket, text: string, narrationId: string) =>
       createCampaignPlayNarrator().compile({
@@ -1252,21 +1252,64 @@ describe("Campaign Play narrator", () => {
       newObservations: sourcePacket.newObservations.map((observation, index) => index === 0
         ? {
             ...observation,
-            text: "Dren Vask says, 'Ask Vedris if you need more.'",
+            text: "Dren Vask says, 'Ask Vedris if I'm busy.'",
             consequence: observation.consequence === null ? null : {
               ...observation.consequence,
-              whatChanged: "Dren Vask says, 'Ask Vedris if you need more.'",
+              whatChanged: "Dren Vask says, 'Ask Vedris if I'm busy.'",
             },
           }
         : observation),
       consequences: sourcePacket.consequences.map((consequence, index) => index === 0
-        ? { ...consequence, whatChanged: "Dren Vask says, 'Ask Vedris if you need more.'" }
+        ? { ...consequence, whatChanged: "Dren Vask says, 'Ask Vedris if I'm busy.'" }
         : consequence),
     };
     expect(() => compile(
       apostrophePacket,
-      "Dren Vask says, 'Ask Vedris if you need more.'",
+      "Dren Vask says, 'Ask Vedris if I'm busy.'",
       "narration-single-quoted-reference",
+    )).not.toThrow();
+
+    const curlySinglePacket: CampaignPlayNarratorPacket = {
+      ...sourcePacket,
+      newObservations: sourcePacket.newObservations.map((observation, index) => index === 0
+        ? {
+            ...observation,
+            text: "Dren Vask says, ‘Ask Vedris if I’m busy.’",
+            consequence: observation.consequence === null ? null : {
+              ...observation.consequence,
+              whatChanged: "Dren Vask says, ‘Ask Vedris if I’m busy.’",
+            },
+          }
+        : observation),
+      consequences: sourcePacket.consequences.map((consequence, index) => index === 0
+        ? { ...consequence, whatChanged: "Dren Vask says, ‘Ask Vedris if I’m busy.’" }
+        : consequence),
+    };
+    expect(() => compile(
+      curlySinglePacket,
+      "Dren Vask says, ‘Ask Vedris if I’m busy.’",
+      "narration-curly-single-quoted-reference",
+    )).not.toThrow();
+
+    expect(() => compile(
+      apostrophePacket,
+      "Dren Vask says, 'Ask Vedris if I'm busy.",
+      "narration-unbalanced-single-quoted-reference",
+    )).toThrowError(CampaignPlayNarratorError);
+    expect(() => compile(
+      apostrophePacket,
+      "Dren Vask says, ‘Ask Vedris if I’m busy.'",
+      "narration-mismatched-single-quoted-reference",
+    )).toThrowError(CampaignPlayNarratorError);
+    expect(() => compile(
+      apostrophePacket,
+      "Dren Vask says, Ask Vedris if I'm busy.",
+      "narration-bare-apostrophe-reference",
+    )).toThrowError(CampaignPlayNarratorError);
+    expect(() => compile(
+      apostrophePacket,
+      "Dren Vask says, 'Ask Vedris if I'm busy.' Vedris's badge glints.",
+      "narration-single-reference-outside-dialogue",
     )).toThrowError(CampaignPlayNarratorError);
   });
 
@@ -1311,6 +1354,51 @@ describe("Campaign Play narrator", () => {
         failedChecks: [expect.objectContaining({
           check: "visible_actor_observation_mismatch",
           matchedActor: expect.objectContaining({ canonicalName: "Vedris Kast" }),
+        })],
+      }),
+    }));
+
+    const vedrisPacket: CampaignPlayNarratorPacket = {
+      ...packet,
+      newObservations: packet.newObservations.map((observation, index) => index === 0
+        ? {
+            ...observation,
+            text: "Vedris Kast checks the remaining jars.",
+            consequence: observation.consequence === null ? null : {
+              ...observation.consequence,
+              performingActorHandle: "actor_vedris_kast",
+              performingActorName: "Vedris Kast",
+              whatChanged: "Vedris Kast checks the remaining jars.",
+            },
+          }
+        : observation),
+      consequences: packet.consequences.map((consequence, index) => index === 0
+        ? {
+            ...consequence,
+            performingActorHandle: "actor_vedris_kast",
+            performingActorName: "Vedris Kast",
+            whatChanged: "Vedris Kast checks the remaining jars.",
+          }
+        : consequence),
+    };
+    expect(() => createCampaignPlayNarrator().compile({
+      narrationId: "narration-possessive-actor-outside-dialogue",
+      packet: vedrisPacket,
+      proposal: {
+        actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+        beats: [{
+          purpose: "consequence",
+          observationIndexes: [0],
+          text: "Vedris Kast checks the remaining jars. Dren's ledger rests nearby.",
+        }],
+      },
+      createdAt: 1_000,
+    })).toThrowError(expect.objectContaining({
+      code: "narration_invalid",
+      recoveryFeedback: expect.objectContaining({
+        failedChecks: [expect.objectContaining({
+          check: "visible_actor_observation_mismatch",
+          matchedActor: expect.objectContaining({ canonicalName: "Dren Vask" }),
         })],
       }),
     }));
@@ -1895,10 +1983,10 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("do not retain the stale absence claim");
     expect(prompt).toContain("observationSubjects, when present, is code-owned identity binding");
     expect(prompt).toContain(
-      "OBSERVATION_ACTOR_NAME_FRAME separates visible actor names for each observation index into permittedActorNames, quotedReferenceActorNames, and forbiddenActorNames. permittedActorNames are the performer and bound subjects. quotedReferenceActorNames are visible actors named only inside accepted straight or curly double-quoted dialogue; they are referents, not participants.",
+      "OBSERVATION_ACTOR_NAME_FRAME separates visible actor names for each observation index into permittedActorNames, quotedReferenceActorNames, and forbiddenActorNames. permittedActorNames are the performer and bound subjects. quotedReferenceActorNames are visible actors named only inside accepted dialogue enclosed by balanced straight or curly single or double quotes; they are referents, not participants. Apostrophes inside words are not quote boundaries.",
     );
     expect(prompt).toContain(
-      "For each beat, union each name list from every frame entry named by its observationIndexes. A permittedActorName may be described acting in the beat. A quotedReferenceActorName may appear only inside straight or curly double-quoted dialogue that preserves a permitted speaker's accepted reference. It does not authorize a new claim about that actor, and the beat must not describe that actor speaking, moving, arriving, watching, or otherwise acting. Do not write a forbiddenActorName or a unique part of it anywhere in the beat.",
+      "For each beat, union each name list from every frame entry named by its observationIndexes. A permittedActorName may be described acting in the beat. A quotedReferenceActorName may appear only inside dialogue enclosed by balanced straight or curly single or double quotes that preserves a permitted speaker's accepted reference. It does not authorize a new claim about that actor, and the beat must not describe that actor speaking, moving, arriving, watching, or otherwise acting. Do not write a forbiddenActorName or a unique part of it anywhere in the beat.",
     );
     expect(prompt).toContain("Actorless sounds, traces, silhouettes, and motion remain unattributed");
     expect(prompt).toContain("Resemblance is not identity");
@@ -1911,7 +1999,7 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Never merge the player with a named or unnamed actor");
     expect(prompt).toContain("is not approaching or watching \"you\" without that identity evidence");
     expect(prompt).toContain(
-      "Before finalizing each beat, check every visible actor name or unique name fragment. Outside double-quoted dialogue, every name must belong to permittedActorNames. Inside double-quoted dialogue, every other visible actor name must belong to quotedReferenceActorNames. Remove any unmatched actor reference.",
+      "Before finalizing each beat, check every visible actor name or unique name fragment. Outside balanced quoted dialogue, every name must belong to permittedActorNames. Inside balanced quoted dialogue, every other visible actor name must belong to quotedReferenceActorNames. Remove any unmatched actor reference.",
     );
     expect(prompt).toContain("Remove any unmatched actor reference");
     expect(prompt).toContain("If removing a beat loses no supported information, omit it");

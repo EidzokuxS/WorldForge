@@ -383,29 +383,76 @@ function aliasOccurrences(textValue: string, alias: string): TextOccurrence[] {
   return occurrences;
 }
 
-function balancedDoubleQuoteSpans(textValue: string): TextOccurrence[] {
+function codePointAt(textValue: string, index: number): string | undefined {
+  if (index < 0 || index >= textValue.length) return undefined;
+  const value = textValue.codePointAt(index);
+  return value === undefined ? undefined : String.fromCodePoint(value);
+}
+
+function codePointBefore(textValue: string, index: number): string | undefined {
+  if (index <= 0) return undefined;
+  const previousIndex = index - 1;
+  const previousCodeUnit = textValue.charCodeAt(previousIndex);
+  const codePointIndex = previousCodeUnit >= 0xdc00 && previousCodeUnit <= 0xdfff
+    ? previousIndex - 1
+    : previousIndex;
+  return codePointAt(textValue, codePointIndex);
+}
+
+function isUnicodeWordCharacter(character: string | undefined): boolean {
+  return character !== undefined && /^[\p{L}\p{N}]$/u.test(character);
+}
+
+function isApostropheBetweenWordCharacters(
+  textValue: string,
+  index: number,
+  nextIndex: number,
+): boolean {
+  return isUnicodeWordCharacter(codePointBefore(textValue, index)) &&
+    isUnicodeWordCharacter(codePointAt(textValue, nextIndex));
+}
+
+function balancedDialogueQuoteSpans(textValue: string): TextOccurrence[] {
   const spans: TextOccurrence[] = [];
-  let straightStart: number | null = null;
-  let curlyStart: number | null = null;
+  let straightDoubleStart: number | null = null;
+  let curlyDoubleStart: number | null = null;
+  let straightSingleStart: number | null = null;
+  let curlySingleStart: number | null = null;
   for (let index = 0; index < textValue.length; index += 1) {
     const character = textValue[index];
     if (character === '"') {
-      if (straightStart === null) straightStart = index + 1;
+      if (straightDoubleStart === null) straightDoubleStart = index + 1;
       else {
-        spans.push({ start: straightStart, end: index });
-        straightStart = null;
+        spans.push({ start: straightDoubleStart, end: index });
+        straightDoubleStart = null;
       }
     } else if (character === "“") {
-      if (curlyStart === null) curlyStart = index + 1;
-    } else if (character === "”" && curlyStart !== null) {
-      spans.push({ start: curlyStart, end: index });
-      curlyStart = null;
+      if (curlyDoubleStart === null) curlyDoubleStart = index + 1;
+    } else if (character === "”" && curlyDoubleStart !== null) {
+      spans.push({ start: curlyDoubleStart, end: index });
+      curlyDoubleStart = null;
+    } else if (character === "'") {
+      if (isApostropheBetweenWordCharacters(textValue, index, index + 1)) continue;
+      if (straightSingleStart === null) straightSingleStart = index + 1;
+      else {
+        spans.push({ start: straightSingleStart, end: index });
+        straightSingleStart = null;
+      }
+    } else if (character === "‘") {
+      if (isApostropheBetweenWordCharacters(textValue, index, index + 1)) continue;
+      if (curlySingleStart === null) curlySingleStart = index + 1;
+    } else if (character === "’") {
+      if (isApostropheBetweenWordCharacters(textValue, index, index + 1)) continue;
+      if (curlySingleStart !== null) {
+        spans.push({ start: curlySingleStart, end: index });
+        curlySingleStart = null;
+      }
     }
   }
   return spans;
 }
 
-function occurrenceInsideDoubleQuoteSpan(
+function occurrenceInsideDialogueQuoteSpan(
   occurrence: TextOccurrence,
   spans: TextOccurrence[],
 ): boolean {
@@ -480,8 +527,8 @@ function buildObservationActorNameFrame(
         if (permittedNames.has(actor.name)) return false;
         const occurrences = matcher.occurrencesForActor(observation.text, actor);
         if (occurrences.length === 0) return false;
-        const spans = balancedDoubleQuoteSpans(observation.text);
-        return occurrences.every((occurrence) => occurrenceInsideDoubleQuoteSpan(occurrence, spans));
+        const spans = balancedDialogueQuoteSpans(observation.text);
+        return occurrences.every((occurrence) => occurrenceInsideDialogueQuoteSpan(occurrence, spans));
       })
       .map((actor) => actor.name);
     return {
@@ -610,11 +657,11 @@ When a newObservation has a non-null consequence.performingActorName, the beat c
 
 observationSubjects, when present, is code-owned identity binding for the non-performing visible actors affected by each current observation. OBSERVATION_ACTOR_NAME_FRAME turns the performer and subject bindings into literal visible-actor names for every observation index. Match observationSubjects by observationHandle. If an observation names a performing actor and binds exactly one other actor, an unnamed person, silhouette, hooded figure, traveler, witness, or other human target in that observation is the bound actor, never the player. Preserve the bound name or a clearly separate third-person reference. Do not replace a bound actor with "you", even when sourceMoment previously confused their identity or the player stands nearby.
 
-OBSERVATION_ACTOR_NAME_FRAME separates visible actor names for each observation index into permittedActorNames, quotedReferenceActorNames, and forbiddenActorNames. permittedActorNames are the performer and bound subjects. quotedReferenceActorNames are visible actors named only inside accepted straight or curly double-quoted dialogue; they are referents, not participants.
+OBSERVATION_ACTOR_NAME_FRAME separates visible actor names for each observation index into permittedActorNames, quotedReferenceActorNames, and forbiddenActorNames. permittedActorNames are the performer and bound subjects. quotedReferenceActorNames are visible actors named only inside accepted dialogue enclosed by balanced straight or curly single or double quotes; they are referents, not participants. Apostrophes inside words are not quote boundaries.
 
-For each beat, union each name list from every frame entry named by its observationIndexes. A permittedActorName may be described acting in the beat. A quotedReferenceActorName may appear only inside straight or curly double-quoted dialogue that preserves a permitted speaker's accepted reference. It does not authorize a new claim about that actor, and the beat must not describe that actor speaking, moving, arriving, watching, or otherwise acting. Do not write a forbiddenActorName or a unique part of it anywhere in the beat. Actorless sounds, traces, silhouettes, and motion remain unattributed. The same rule applies to weather and other scene changes, even when earlier context makes a visible actor seem like the likely source. Resemblance is not identity.
+For each beat, union each name list from every frame entry named by its observationIndexes. A permittedActorName may be described acting in the beat. A quotedReferenceActorName may appear only inside dialogue enclosed by balanced straight or curly single or double quotes that preserves a permitted speaker's accepted reference. It does not authorize a new claim about that actor, and the beat must not describe that actor speaking, moving, arriving, watching, or otherwise acting. Do not write a forbiddenActorName or a unique part of it anywhere in the beat. Actorless sounds, traces, silhouettes, and motion remain unattributed. The same rule applies to weather and other scene changes, even when earlier context makes a visible actor seem like the likely source. Resemblance is not identity.
 
-Before finalizing each beat, check every visible actor name or unique name fragment. Outside double-quoted dialogue, every name must belong to permittedActorNames. Inside double-quoted dialogue, every other visible actor name must belong to quotedReferenceActorNames. Remove any unmatched actor reference. If the actor matters but is not permitted by those observations, put the orientation in a separate beat with observationIndexes: [].
+Before finalizing each beat, check every visible actor name or unique name fragment. Outside balanced quoted dialogue, every name must belong to permittedActorNames. Inside balanced quoted dialogue, every other visible actor name must belong to quotedReferenceActorNames. Remove any unmatched actor reference. If the actor matters but is not permitted by those observations, put the orientation in a separate beat with observationIndexes: [].
 
 An actor may still be present in visibleActors without being bound to a current observation. Put any orientation mention of that actor in a separate beat with observationIndexes: []. On a movement turn, assign the travel observation to its consequence beat, then orient the player to unbound people at the destination in a separate empty-index beat. Do not attach an unbound actor name to the travel observation.
 
@@ -857,7 +904,7 @@ function assertProposalForPacket(
     const forbiddenActorNames = new Set(
       frameEntries.flatMap((entry) => entry.forbiddenActorNames),
     );
-    const beatQuoteSpans = balancedDoubleQuoteSpans(beat.text);
+    const beatQuoteSpans = balancedDialogueQuoteSpans(beat.text);
     const attributedActorNames = new Set<string>();
     const allowedActors = new Map<string, {
       canonicalId: string;
@@ -906,7 +953,7 @@ function assertProposalForPacket(
           const occurrences = actorNameMatcher.occurrencesForActor(beat.text, actor);
           return occurrences.length === 0
             || !occurrences.every((occurrence) =>
-              occurrenceInsideDoubleQuoteSpan(occurrence, beatQuoteSpans));
+              occurrenceInsideDialogueQuoteSpan(occurrence, beatQuoteSpans));
         }
         return forbiddenActorNames.has(actor.name) || !quotedReferenceActorNames.has(actor.name);
       });
