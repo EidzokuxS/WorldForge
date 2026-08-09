@@ -39,18 +39,24 @@ Focused tests cover all enum values, missing/unknown field rejection, accepted/r
 
 ## Implementation and rendered evidence
 
-Implementation commit: to be recorded after the bounded source/test/note commit.
+Implementation commit: `a57e9079cb0b47e21b192eac78fb7f7ed831a2fd`, pushed to `origin/feat/revamp`; local HEAD equals origin. The staged detect-changes review reported 5 files, 17 symbols, one affected Campaign Play flow, and medium aggregate risk. The authorized HIGH schema/replanner transitive impact remained confined to the Actor Replanner/Grounding Reviewer path; no CRITICAL edited target, exported factory signature, route, turn-runtime, persistence, or non-Campaign-Play owner was changed.
 
-Fresh lane: `pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r136`, campaign `6b85a49e-fef5-4359-95e2-051383f6fb66`, ports 4220/4221/4222. Canonical hashes: template state `6cb291d11ce6578e3395a10d2c5d590070e3ccdd8b2b67451410869ce97897d2`, config `d8362b1af976c00cb8f14c564c8196a2d1ab137743ff368ea83d762a4ad2e065`, Brina card `4b48de7a32df6a6be5a91ab12f09bb87926b40d5940348c7581e298eaa12b60a`.
+Fresh lane: `pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r136`, campaign `6b85a49e-fef5-4359-95e2-051383f6fb66`, ports 4220/4221/4222. The materialized template state, config, and canonical card were verified against state `6cb291d11ce6578e3395a10d2c5d590070e3ccdd8b2b67451410869ce97897d2`, config `d8362b1af976c00cb8f14c564c8196a2d1ab137743ff368ea83d762a4ad2e065`, and card `4b48de7a32df6a6be5a91ab12f09bb87926b40d5940348c7581e298eaa12b60a`. The card file readback hash was `4B48DE7A32DF6A6BE5A91AB12F09BB87926B40D5940348C7581E298EAA12B60A`.
 
-Rendered and authoritative SQLite/log evidence, checkpoint counts, any natural Grounding Reviewer recovery, terminal boundary (or 60/60 plus reload), and independently verified cleanup are to be appended after the one fresh lane. Generated session/run evidence remains uncommitted.
+The rendered Character page reached the canonical import surface. Import was activated once and the canonical card was assigned once through the file chooser. Backend ingestion completed successfully for Brina Hael: the bounded log records `ingestCharacterDraft: starting` at `14:17:01.071`, two successful `llm.attempt` events (native_json; latencies 14,575 ms and 2,834 ms), and `ingestCharacterDraft: complete` at `14:17:18.486`. No Save, Begin, Opening, or player action occurred.
+
+After ingestion the browser remained busy without rendering the draft. A read-only reconciliation reload was performed; this reset the frontend's in-memory draft state because the Character page's `handleCard` stores the draft locally and `handleSave` consumes it for the save request. Repeating import or synthesizing a draft would violate the one-import/no-mutation lane contract, so r136 was frozen at setup as an environment/UI-state blocker, not classified as a product semantic defect. The authoritative API state remained `phase=character_required`, `character=null`, `activeTurn=null`, and empty opening options.
+
+The read-only SQLite snapshot at `...r136...\state.db` had `integrity_check=ok`, an empty `foreign_key_check`, one campaign state row, and zero campaign-play character, command, model-stage, actor-job, replan-attempt, turn, result, receipt, narration, operation, attempt, proper-scene, or binding rows. The backend log hash after capture was `3EDAE28CEE21BB22206205D493D0094EE2ABA4CB272CCD336A8600A21FFB42C2`; the database hash was `9D33937EA5DC2AF52BC1BBBB79E4B0C7CB40B7B6D88EC6F5364BD719E9DA0DBE`. No action checkpoints, natural field-coordinate recovery, or 60-action/reload evidence exist because setup did not reach Save.
+
+Cleanup completed after evidence capture: the task-owned browser tab was closed; backend/frontend task-owned process trees were stopped; ports 4220, 4221, and 4222 had no listeners; recorded task-owned PIDs were absent; the task browser profile, launch helpers, and exact-entry GitNexus shadow were removed. Session/run evidence remains under the r136 roots. AGENTS.md and CLAUDE.md remain untouched and unstaged.
 
 ## Acceptance handoff
 
 - Source: the Reviewer schema, prompt sentence, in-memory artifact, and recovery/diagnostic coordinate mapping above.
 - Static: prompt/replanner 32/32, turn-runtime 72/72, application 15/15, route integration 1/1, typecheck/build/diff-check; detect-changes result and commit to be appended.
-- Built product: r136 must either reach 60 unique proper-scene bindings plus one same-page reload or freeze at its first genuine defect. A natural `fieldPath` recovery is live evidence only if it occurs; otherwise focused tests are the available recovery proof.
-- Persistence: read-only `integrity_check=ok`, empty `foreign_key_check`, and no duplicate settlement are required at the lane boundary.
-- Cleanup: task-owned processes, listeners, page/profile, helpers, and GitNexus shadow must be independently absent; exact evidence is appended after the lane.
+- Built product: r136 froze before Save/Begin at the setup blocker above, so no player-action or natural `fieldPath` recovery claim is made. The static suites remain the available recovery proof.
+- Persistence: read-only `integrity_check=ok`, empty `foreign_key_check`, and zero player-action settlement rows were observed at the boundary; no duplicate settlement was possible.
+- Cleanup: task-owned processes, listeners, page/profile, helpers, and GitNexus shadow were independently verified absent as recorded above.
 
-Unknowns before the lane: whether r136 naturally exercises a Grounding Reviewer rejection with a field coordinate, and whether the endurance journey reaches 60 actions without an unrelated first defect.
+Unknowns after the lane: provider response bodies/candidate bytes and the cause of the frontend draft-loss/busy state are not retained; no Grounding Reviewer field-coordinate request occurred, and the 60-action endurance/reload criteria remain unavailable.
