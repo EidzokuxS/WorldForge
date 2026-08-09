@@ -1228,6 +1228,95 @@ describe("Campaign Play actor replanner", () => {
       .toEqual({ count: 1 });
   });
 
+  it("recovers one other-actor grounding failure with the same job and deadline", async () => {
+    const { handle, token, jobId } = createReplanFixture();
+    const bypassModel = {} as LanguageModel;
+    const recoveryModel = {} as LanguageModel;
+    let callNumber = 0;
+    const generateObject = vi.fn(async (request: { prompt: string; model: LanguageModel }) => {
+      callNumber += 1;
+      if (request.prompt.includes("ACTOR_PLAN_REVIEW\n")) {
+        return callNumber === 2
+          ? {
+              object: {
+                verdict: "rejected",
+                violations: [{ stepIndex: 0, kind: "other_actor_action_not_established" }],
+              },
+              trace: acceptedTrace(),
+            }
+          : { object: { verdict: "accepted", violations: [] }, trace: acceptedTrace() };
+      }
+      return { object: singleStepProposalFromPrompt(request.prompt), trace: acceptedTrace() };
+    });
+    const replanner = createCampaignPlayActorReplanner(handle, {
+      now: () => 1_600,
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const outcome = await replanner.replan({
+      jobId,
+      token,
+      model: bypassModel,
+      recoveryModel,
+      temperature: 0.2,
+      maxOutputTokens: 100,
+      maximumInputTokens: 1_000,
+      maximumOutputTokens: 100,
+      maximumTotalTokens: 2_000,
+      maximumCostMicros: 10_000,
+      externalOperationDeadlineMs: 90_000,
+      signal: new AbortController().signal,
+      createdAt: 1_590,
+    });
+
+    expect(outcome).toMatchObject({ kind: "replanned", jobId, workerEpoch: 1 });
+    expect(generateObject).toHaveBeenCalledTimes(4);
+    expect(generateObject.mock.calls.slice(2).map((call) => call[0]!.model)).toEqual([
+      recoveryModel,
+      bypassModel,
+    ]);
+    const recoveryPrompt = generateObject.mock.calls[2]![0].prompt;
+    expect(recoveryPrompt).toContain(
+      "When reviewViolations lists other_actor_action_not_established, rebuild each flagged step around one action performed only by the actor identified by ACTOR_FRAME.actorHandle.",
+    );
+    expect(recoveryPrompt).toContain("0:other_actor_action_not_established");
+    expect(recoveryPrompt).not.toContain("REJECTED_PROPOSAL_SENTINEL");
+    expect(handle.sqlite.prepare(`SELECT attempt, status, schema_outcome AS schemaOutcome,
+        error_code AS errorCode FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = 'turn-player' AND kind = 'actor_replanner'
+      ORDER BY attempt`).all(CAMPAIGN_ID)).toEqual([
+      { attempt: 1, status: "interrupted", schemaOutcome: "invalid", errorCode: "model_contract_invalid" },
+      { attempt: 2, status: "accepted", schemaOutcome: "valid", errorCode: null },
+    ]);
+    const attempts = handle.sqlite.prepare(`SELECT attempt_number AS attemptNumber,
+        actor_job_worker_epoch AS actorJobWorkerEpoch,
+        claim_turn_worker_epoch AS claimTurnWorkerEpoch,
+        frame_hash AS frameHash,
+        frozen_base_world_version AS frozenBaseWorldVersion,
+        deadline_at AS deadlineAt,
+        retry_consumed_at AS retryConsumedAt
+      FROM campaign_play_actor_replan_attempts
+      WHERE campaign_id = ? AND job_id = ? ORDER BY attempt_number`).all(
+      CAMPAIGN_ID,
+      jobId,
+    ) as Array<Record<string, unknown>>;
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]).toMatchObject({
+      attemptNumber: 2,
+      actorJobWorkerEpoch: attempts[0]!.actorJobWorkerEpoch,
+      claimTurnWorkerEpoch: token.epoch,
+      frameHash: attempts[0]!.frameHash,
+      frozenBaseWorldVersion: attempts[0]!.frozenBaseWorldVersion,
+      deadlineAt: attempts[0]!.deadlineAt,
+      retryConsumedAt: null,
+    });
+    expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_replan_attempts
+      WHERE campaign_id = ? AND job_id = ?`).get(CAMPAIGN_ID, jobId)).toEqual({ count: 2 });
+    expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_plans
+      WHERE campaign_id = ? AND actor_id = 'actor-b' AND status = 'active'`).get(CAMPAIGN_ID))
+      .toEqual({ count: 1 });
+  });
+
   it("recovers one compilation rejection with the exact safe move coordinates", async () => {
     const { handle, token, jobId } = createReplanFixture();
     const bypassModel = {} as LanguageModel;

@@ -125,6 +125,35 @@ describe("campaign play actor replan prompt", () => {
     });
   });
 
+  it("gives other-actor grounding failures one safe actor-owned recovery rule", () => {
+    const basePrompt = buildCampaignPlayActorReplanPrompt(frame);
+    const prompt = buildCampaignPlayActorReplanRecoveryPrompt(basePrompt, {
+      phase: "grounding_review",
+      reason: "grounding_review_rejected",
+      goalHandle: "goal:keep-gate-open",
+      stepCount: 1,
+      moveTargets: "",
+      reviewViolations: "0:other_actor_action_not_established",
+    });
+    const rule = "When reviewViolations lists other_actor_action_not_established, rebuild each flagged step around one action performed only by the actor identified by ACTOR_FRAME.actorHandle. Another actor may remain only as the target of contact or observation. Remove any method, stakes, or observableTrace that states or requires that other actor to respond, consent, assist, work, move, accept, pay, or complete anything. The rewritten observableTrace must show only the planning actor's own attempt or a physical trace directly caused by that method; do not replace the removed participation with another unestablished outcome. Prefer one grounded step.";
+
+    expect(prompt.match(/other_actor_action_not_established/g)).toHaveLength(2);
+    expect(prompt).toContain(rule);
+    expect(prompt.indexOf(rule)).toBeLessThan(prompt.indexOf("When reviewViolations lists outcome_not_established"));
+    expect(prompt).not.toContain("REJECTED_PROPOSAL_SENTINEL");
+    expect(prompt).not.toContain("reviewer reason");
+    const start = prompt.indexOf("SAFE_REJECTION_FEEDBACK\n") + "SAFE_REJECTION_FEEDBACK\n".length;
+    const end = prompt.indexOf("\nEND_SAFE_REJECTION_FEEDBACK", start);
+    expect(JSON.parse(prompt.slice(start, end))).toEqual({
+      phase: "grounding_review",
+      reason: "grounding_review_rejected",
+      goalHandle: "goal:keep-gate-open",
+      stepCount: 1,
+      moveTargets: "",
+      reviewViolations: "0:other_actor_action_not_established",
+    });
+  });
+
   it("treats known recent scenes as binding continuity without forcing one outcome", () => {
     const prompt = buildCampaignPlayActorReplanPrompt({
       ...frame,
