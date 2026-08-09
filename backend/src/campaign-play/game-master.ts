@@ -373,6 +373,14 @@ export type CampaignPlayGameMasterRecoveryCheck =
       readonly intentKind: "contact";
       readonly requiredActorHandles: readonly string[];
       readonly firstActorlessEffectIndex: number | null;
+    }
+  | {
+      readonly check: "record_world_event_scope_overflow";
+      readonly effectIndex: number;
+      readonly fieldPath: string;
+      readonly proposedAffectedHandleCount: number;
+      readonly compilerOwnedAppendCount: number;
+      readonly maximumAffectedRefCount: number;
     };
 
 export interface CampaignPlayGameMasterRecoveryFeedback {
@@ -817,6 +825,8 @@ function compileEffect(
   ruling: CampaignPlayJudgeRuling,
   perceptionLocationId: string,
   localSceneElapsedMinutes: number,
+  effectIndex: number,
+  scopeOverflowChecks: CampaignPlayGameMasterRecoveryCheck[],
 ): CommandArguments | CommandArguments[] {
   switch (effect.kind) {
     case "move_actor": {
@@ -1223,13 +1233,26 @@ function compileEffect(
       if (playerActorId === null) {
         throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
       }
+      let compilerOwnedAppendCount = 0;
       if (!affectedRefs.some((reference) =>
         reference.kind === "actor" && reference.id === playerActorId)) {
         affectedRefs.push({ kind: "actor", id: playerActorId });
+        compilerOwnedAppendCount += 1;
       }
       if (performingActor && !affectedRefs.some((reference) =>
         reference.kind === "actor" && reference.id === performingActor.id)) {
         affectedRefs.push(performingActor);
+        compilerOwnedAppendCount += 1;
+      }
+      if (affectedRefs.length > CAMPAIGN_PLAY_LIMITS.affectedRefs) {
+        scopeOverflowChecks.push({
+          check: "record_world_event_scope_overflow",
+          effectIndex,
+          fieldPath: `effects[${effectIndex}].affectedHandles`,
+          proposedAffectedHandleCount: effect.affectedHandles.length,
+          compilerOwnedAppendCount,
+          maximumAffectedRefCount: CAMPAIGN_PLAY_LIMITS.affectedRefs,
+        });
       }
       return { kind: effect.kind, eventClass: effect.eventClass, summary: effect.summary,
         performingActorId: performingActor?.id ?? null,
@@ -1634,6 +1657,7 @@ function compile(
     proposal,
   }).slice(0, 32)}`;
   const argumentsList: CommandArguments[] = [];
+  const scopeOverflowChecks: CampaignPlayGameMasterRecoveryCheck[] = [];
   const initialElapsedMinutes = movement !== null && localSceneEffects.length === 1
     ? movement.travelCost
     : proposal.elapsedMinutes;
@@ -1647,7 +1671,7 @@ function compile(
     throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
   }
   let perceptionLocationId = playerPlacement.locationId;
-  for (const effect of proposal.effects) {
+  for (const [effectIndex, effect] of proposal.effects.entries()) {
     if (effect.kind === "enter_local_scene" && movement !== null) {
       argumentsList.push({
         kind: "advance_world_time",
@@ -1665,6 +1689,8 @@ function compile(
       ruling,
       perceptionLocationId,
       localSceneElapsedMinutes,
+      effectIndex,
+      scopeOverflowChecks,
     );
     argumentsList.push(...(Array.isArray(compiled) ? compiled : [compiled]));
     if (effect.kind === "materialize_support_actor") {
@@ -1686,6 +1712,14 @@ function compile(
       }
       perceptionLocationId = localMove.toLocationId;
     }
+  }
+  if (scopeOverflowChecks.length > 0) {
+    const error = new CampaignPlayGameMasterError("model_contract_failed", null);
+    rememberCampaignPlayGameMasterRecoveryFeedback(error, {
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: scopeOverflowChecks,
+    });
+    throw error;
   }
   if (argumentsList.length > CAMPAIGN_PLAY_LIMITS.commandsPerBatch) {
     throw new CampaignPlayGameMasterError("model_contract_failed", null);
@@ -1902,10 +1936,16 @@ function prompt(
     const hasTargetedActorResponseMissing = recoveryFeedback.failedChecks.some(
       (check) => check.check === "targeted_actor_response_missing",
     );
+    const hasRecordWorldEventScopeOverflow = recoveryFeedback.failedChecks.some(
+      (check) => check.check === "record_world_event_scope_overflow",
+    );
     const recoveryInstruction = [
       "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. For mechanical_authority_rejected, make every mechanically durable claim in each event summary agree with the typed resource effects and route access claims. If no typed authority changes a possession, obligation, or route, keep the event summary non-mechanical.",
       ...(hasTargetedActorResponseMissing
         ? ["For targeted_actor_response_missing, include one dialogue or interaction record_world_event for every handle in requiredActorHandles, copy that same handle into performingActorHandle, and put all required responses before the first actorless discovery or scene event."]
+        : []),
+      ...(hasRecordWorldEventScopeOverflow
+        ? ["For record_world_event_scope_overflow, reduce affectedHandles at fieldPath until proposedAffectedHandleCount plus compilerOwnedAppendCount is no greater than maximumAffectedRefCount. Keep only handles directly affected by that event, and preserve the performing actor handle when the event has one."]
         : []),
       "All schema, authority, continuity, and Rulebook rules above still apply.",
     ].join(" ");

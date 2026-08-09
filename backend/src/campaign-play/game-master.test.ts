@@ -144,6 +144,64 @@ function frame(): CampaignPlayGameMasterFrame {
   };
 }
 
+function scopeOverflowFrame(): CampaignPlayGameMasterFrame {
+  const value = frame();
+  for (let index = 0; index < 9; index += 1) {
+    const handle = `scope-location-${index}`;
+    const locationId = `scope-location-${index}`;
+    value.visibleFacts.push({
+      handle,
+      kind: "location",
+      summary: `A visible scope test location ${index}.`,
+    });
+    value.handleBindings.push({
+      handle,
+      reference: { kind: "location", id: locationId },
+    });
+    value.authority.authorizedRefs.push({ kind: "location", id: locationId });
+    value.rulebookFrame.acceptedWorld.locations.push({
+      id: locationId,
+      name: `Scope Location ${index}`,
+      description: `A scope test location ${index}.`,
+      kind: "persistent_sublocation",
+      parentLocationId: "region-a",
+      tags: ["harbor"],
+      isStarting: false,
+    });
+  }
+  return value;
+}
+
+function scopeOverflowRuling(): CampaignPlayJudgeRuling {
+  return ruling({
+    normalizedIntent: {
+      originalText: "I inspect the gate.",
+      source: "suggested",
+      choiceHandle: "observe-gate",
+      kind: "observe",
+      targets: [],
+      method: "Inspect the gate",
+      stakes: "Learn the gate's visible condition",
+    },
+    citedVisibleFactHandles: ["here"],
+    reason: "The gate is visible.",
+  });
+}
+
+function scopeDiscoveryEffect(affectedHandles: string[]) {
+  return {
+    kind: "record_world_event" as const,
+    eventClass: "discovery" as const,
+    performingActorHandle: null,
+    summary: "The gate shows visible wear.",
+    affectedHandles,
+  };
+}
+
+function scopeLocationHandles(): string[] {
+  return Array.from({ length: 9 }, (_, index) => `scope-location-${index}`);
+}
+
 function ruling(overrides: Partial<CampaignPlayJudgeRuling> = {}): CampaignPlayJudgeRuling {
   return {
     disposition: "deterministic",
@@ -3036,5 +3094,228 @@ describe("Campaign Play Game Master", () => {
       modelEvidence: { outputTokens: 32_100, errorCode: null },
       preflight: { accepted: true },
     });
+  });
+
+  it("rejects a record event whose compiler-owned player ref would exceed the affected-ref limit", () => {
+    const affectedHandles = [
+      "guard",
+      "here",
+      "south",
+      "passage",
+      "delay",
+      "trust",
+      "guard-goal",
+      ...scopeLocationHandles(),
+    ];
+    let thrown: unknown;
+    try {
+      createCampaignPlayGameMaster().compile(
+        scopeOverflowFrame(),
+        scopeOverflowRuling(),
+        resolution,
+        null,
+        { elapsedMinutes: 1, effects: [scopeDiscoveryEffect(affectedHandles)] },
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({ code: "model_contract_failed" });
+    const feedback = getCampaignPlayGameMasterRecoveryFeedback(thrown);
+    expect(feedback).toEqual({
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [{
+        check: "record_world_event_scope_overflow",
+        effectIndex: 0,
+        fieldPath: "effects[0].affectedHandles",
+        proposedAffectedHandleCount: 16,
+        compilerOwnedAppendCount: 1,
+        maximumAffectedRefCount: 16,
+      }],
+    });
+    const serialized = JSON.stringify(feedback);
+    expect(serialized).not.toContain("scope-location-0");
+    expect(serialized).not.toContain("The gate shows visible wear.");
+  });
+
+  it("accepts fifteen authored refs plus the compiler-owned player ref", () => {
+    const affectedHandles = [
+      "guard",
+      "here",
+      "south",
+      "passage",
+      "delay",
+      "trust",
+      "guard-goal",
+      ...scopeLocationHandles().slice(0, 8),
+    ];
+    const candidate = createCampaignPlayGameMaster().compile(
+      scopeOverflowFrame(),
+      scopeOverflowRuling(),
+      resolution,
+      null,
+      { elapsedMinutes: 1, effects: [scopeDiscoveryEffect(affectedHandles)] },
+    );
+    expect(candidate.preflight.accepted).toBe(true);
+    const eventCommand = candidate.batch.commands.find((command) => command.kind === "record_world_event");
+    expect(eventCommand).toMatchObject({
+      affectedRefs: expect.arrayContaining([{ kind: "actor", id: PLAYER_ID }]),
+    });
+    expect(eventCommand?.affectedRefs).toHaveLength(16);
+  });
+
+  it("accepts sixteen authored refs when the player ref is already present", () => {
+    const affectedHandles = ["you", ...[
+      "guard",
+      "here",
+      "south",
+      "passage",
+      "delay",
+      "trust",
+      "guard-goal",
+      ...scopeLocationHandles(),
+    ].slice(0, 15)];
+    const candidate = createCampaignPlayGameMaster().compile(
+      scopeOverflowFrame(),
+      scopeOverflowRuling(),
+      resolution,
+      null,
+      { elapsedMinutes: 1, effects: [scopeDiscoveryEffect(affectedHandles)] },
+    );
+    expect(candidate.preflight.accepted).toBe(true);
+    const eventCommand = candidate.batch.commands.find((command) => command.kind === "record_world_event");
+    expect(eventCommand?.affectedRefs).toHaveLength(16);
+    expect(getCampaignPlayGameMasterRecoveryFeedback(null)).toBeUndefined();
+  });
+
+  it("counts a missing performer ref alongside the player ref for performed events", () => {
+    const affectedHandles = [
+      "here",
+      "south",
+      "passage",
+      "delay",
+      "trust",
+      "guard-goal",
+      ...scopeLocationHandles().slice(0, 8),
+    ];
+    const candidate = createCampaignPlayGameMaster().compile(
+      scopeOverflowFrame(),
+      ruling(),
+      resolution,
+      null,
+      {
+        elapsedMinutes: 1,
+        effects: [{
+          kind: "record_world_event",
+          eventClass: "dialogue",
+          performingActorHandle: "guard",
+          routeAccessClaims: [],
+          summary: "The guard answers the player's question.",
+          affectedHandles,
+        }, guardResponseEffect],
+      },
+    );
+    expect(candidate.preflight.accepted).toBe(true);
+    const eventCommand = candidate.batch.commands.find((command) => command.kind === "record_world_event");
+    expect(eventCommand?.affectedRefs).toHaveLength(16);
+    expect(eventCommand?.affectedRefs).toEqual(expect.arrayContaining([
+      { kind: "actor", id: PLAYER_ID },
+      { kind: "actor", id: "actor-guard" },
+    ]));
+  });
+
+  it("reports multiple scope overflows in effect order", () => {
+    const affectedHandles = [
+      "guard",
+      "here",
+      "south",
+      "passage",
+      "delay",
+      "trust",
+      "guard-goal",
+      ...scopeLocationHandles(),
+    ];
+    let thrown: unknown;
+    try {
+      createCampaignPlayGameMaster().compile(
+        scopeOverflowFrame(),
+        scopeOverflowRuling(),
+        resolution,
+        null,
+        {
+          elapsedMinutes: 1,
+          effects: [scopeDiscoveryEffect(affectedHandles), scopeDiscoveryEffect(affectedHandles)],
+        },
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(getCampaignPlayGameMasterRecoveryFeedback(thrown)).toEqual({
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [0, 1].map((effectIndex) => ({
+        check: "record_world_event_scope_overflow",
+        effectIndex,
+        fieldPath: `effects[${effectIndex}].affectedHandles`,
+        proposedAffectedHandleCount: 16,
+        compilerOwnedAppendCount: 1,
+        maximumAffectedRefCount: 16,
+      })),
+    });
+  });
+
+  it("adds the scope overflow recovery sentence only for that safe check", async () => {
+    const sentence = "For record_world_event_scope_overflow, reduce affectedHandles at fieldPath until proposedAffectedHandleCount plus compilerOwnedAppendCount is no greater than maximumAffectedRefCount. Keep only handles directly affected by that event, and preserve the performing actor handle when the event has one.";
+    const overflowFeedback = {
+      diagnostic: "game_master_semantic_validation_mismatch" as const,
+      failedChecks: [{
+        check: "record_world_event_scope_overflow" as const,
+        effectIndex: 0,
+        fieldPath: "effects[0].affectedHandles",
+        proposedAffectedHandleCount: 16,
+        compilerOwnedAppendCount: 1,
+        maximumAffectedRefCount: 16,
+      }],
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: {
+        elapsedMinutes: 1,
+        effects: [scopeDiscoveryEffect(["here"])],
+      }, trace: trace() });
+    await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: scopeOverflowFrame(),
+      ruling: scopeOverflowRuling(),
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      recoveryFeedback: overflowFeedback,
+    });
+    const recoveryPrompt = String(generateObject.mock.calls[0]?.[0]?.prompt);
+    expect(recoveryPrompt).toContain(sentence);
+    expect(recoveryPrompt).toContain("record_world_event_scope_overflow");
+    expect(recoveryPrompt).not.toContain("REJECTED RAW PROPOSAL");
+
+    let normalPrompt = "";
+    const normalGenerate = vi.fn(async (input: { prompt?: unknown }) => {
+      normalPrompt = String(input.prompt);
+      return {
+      object: { elapsedMinutes: 1, effects: [scopeDiscoveryEffect(["here"])] },
+      trace: trace(),
+      };
+    });
+    await createCampaignPlayGameMaster({
+      generateObject: normalGenerate as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: scopeOverflowFrame(),
+      ruling: scopeOverflowRuling(),
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+    });
+    expect(normalPrompt).not.toContain(sentence);
   });
 });
