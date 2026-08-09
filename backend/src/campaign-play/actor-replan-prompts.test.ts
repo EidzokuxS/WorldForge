@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
   buildCampaignPlayActorPlanGroundingReviewPrompt,
   buildCampaignPlayActorReplanGenerationRecoveryPrompt,
   buildCampaignPlayActorReplanRecoveryPrompt,
   buildCampaignPlayActorReplanPrompt,
   campaignPlayActorPlanGroundingReviewSchema,
+  campaignPlayActorReplanGenerationRecoveryProposalSchemaForFrame,
   campaignPlayActorReplanProposalSchema,
   campaignPlayActorReplanProposalSchemaForFrame,
   type CampaignPlayActorReplanPromptFrame,
@@ -129,7 +131,7 @@ describe("campaign play actor replan prompt", () => {
   it("gives a no-artifact generation failure one coordinate-free recovery rule", () => {
     const basePrompt = buildCampaignPlayActorReplanPrompt(frame);
     const prompt = buildCampaignPlayActorReplanGenerationRecoveryPrompt(basePrompt);
-    const paragraph = "The first attempt did not produce a usable proposal, so no rejected proposal or reviewer feedback is available. Generate one fresh proposal from ACTOR_FRAME. Prefer one grounded step performed only by ACTOR_FRAME.actorHandle. Another actor may remain only as the target of contact or observation. Do not include any method, stakes, or observableTrace that states or requires another actor to respond, consent, assist, work, move, accept, pay, or complete anything. observableTrace must show only the planning actor's own attempt or a physical trace directly caused by that method; do not assert a requested, visible, or possible outcome. Satisfy every unchanged schema, compiler, and grounding-review rule.";
+    const paragraph = "The first attempt did not produce a usable proposal, so no rejected proposal or reviewer feedback is available. Generate one fresh proposal from ACTOR_FRAME with exactly one grounded step performed only by ACTOR_FRAME.actorHandle. For a non-move step, every location target must be the actor's current occupied location; never target another location. For a move step, target exactly one directly reachable destination location and no route handle. Another actor may remain only as the target of contact or observation. Do not include any method, stakes, or observableTrace that states or requires another actor to respond, consent, assist, work, move, accept, pay, or complete anything. observableTrace must show only the planning actor's own attempt or a physical trace directly caused by that method; do not assert a requested, visible, or possible outcome. Satisfy every unchanged schema, compiler, and grounding-review rule.";
 
     expect(prompt.startsWith(`${basePrompt}\n\nACTOR_REPLAN_RECOVERY\n`)).toBe(true);
     expect(prompt.match(/ACTOR_REPLAN_RECOVERY/g)).toHaveLength(1);
@@ -387,6 +389,156 @@ describe("campaign play actor replan prompt", () => {
         ? { ...entity, state: "completed" }
         : entity),
     })).toBeNull();
+  });
+
+  it("keeps the no-artifact recovery schema local to one grounded step", () => {
+    const recoveryFrame: CampaignPlayActorReplanPromptFrame = {
+      ...frame,
+      entities: [
+        ...frame.entities,
+        {
+          handle: "location:remote",
+          kind: "location",
+          name: "River landing",
+          summary: "A landing beyond the gate.",
+          state: "open",
+        },
+        {
+          handle: "route:gate-remote",
+          kind: "route",
+          name: "Gate to landing",
+          summary: "An open path to the river landing.",
+          state: "open",
+        },
+        {
+          handle: "actor:visitor",
+          kind: "actor",
+          name: "Visiting courier",
+          summary: "A courier at the gate.",
+          state: null,
+        },
+      ],
+    };
+    const schema = campaignPlayActorReplanGenerationRecoveryProposalSchemaForFrame(recoveryFrame);
+    expect(schema).not.toBeNull();
+    if (!schema) throw new Error("The recovery frame requires a generation schema.");
+    const step = (intent: Record<string, unknown>) => ({
+      intent,
+      observableTrace: "Fresh chalk marks interrupt the watch rota beside the gate.",
+      possessionOutcome: { kind: "none" },
+      obligationOutcome: { kind: "none" },
+      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 15 },
+    });
+    const proposal = (candidateStep: ReturnType<typeof step>) => ({
+      goalHandle: "goal:keep-gate-open",
+      cadenceMinutes: 20,
+      priority: 4,
+      intent: {
+        kind: "observe",
+        targetHandles: ["location:gate"],
+        method: "Read the watch rota",
+        stakes: "The safe passage may close",
+      },
+      steps: [candidateStep],
+    });
+
+    expect(schema.safeParse(proposal(step({
+      kind: "observe",
+      targetHandles: ["location:gate"],
+      method: "Read the watch rota",
+      stakes: null,
+    }))).success).toBe(true);
+    expect(schema.safeParse(proposal(step({
+      kind: "observe",
+      targetHandles: ["location:remote"],
+      method: "Read the landing",
+      stakes: null,
+    }))).success).toBe(false);
+    expect(schema.safeParse(proposal(step({
+      kind: "contact",
+      targetHandles: ["actor:visitor"],
+      method: "Question the courier",
+      stakes: null,
+    }))).success).toBe(true);
+    expect(schema.safeParse(proposal(step({
+      kind: "observe",
+      targetHandles: ["actor:foreign"],
+      method: "Question the stranger",
+      stakes: null,
+    }))).success).toBe(false);
+    expect(schema.safeParse(proposal(step({
+      kind: "move",
+      targetHandles: ["location:remote"],
+      method: "Walk to the landing",
+      stakes: null,
+    }))).success).toBe(true);
+    expect(schema.safeParse(proposal(step({
+      kind: "move",
+      targetHandles: ["location:gate"],
+      method: "Stay by the gate",
+      stakes: null,
+    }))).success).toBe(false);
+    expect(schema.safeParse(proposal(step({
+      kind: "move",
+      targetHandles: ["route:gate-remote"],
+      method: "Take the path",
+      stakes: null,
+    }))).success).toBe(false);
+    expect(schema.safeParse(proposal(step({
+      kind: "move",
+      targetHandles: [],
+      method: "Walk somewhere",
+      stakes: null,
+    }))).success).toBe(false);
+    expect(schema.safeParse(proposal(step({
+      kind: "move",
+      targetHandles: ["location:remote", "location:remote"],
+      method: "Walk twice",
+      stakes: null,
+    }))).success).toBe(false);
+
+    const noDestinationSchema = campaignPlayActorReplanGenerationRecoveryProposalSchemaForFrame(frame);
+    expect(noDestinationSchema).not.toBeNull();
+    if (!noDestinationSchema) throw new Error("The occupied-only frame requires a generation schema.");
+    expect(noDestinationSchema.safeParse(proposal(step({
+      kind: "move",
+      targetHandles: ["location:gate"],
+      method: "Stay by the gate",
+      stakes: null,
+    }))).success).toBe(false);
+
+    type JsonSchemaNode = {
+      properties?: Record<string, JsonSchemaNode>;
+      items?: JsonSchemaNode;
+      oneOf?: JsonSchemaNode[];
+      const?: string;
+      enum?: string[];
+      minItems?: number;
+      maxItems?: number;
+    };
+    const providerSchema = z.toJSONSchema(schema) as JsonSchemaNode;
+    const intentBranches = providerSchema.properties?.steps?.items?.properties?.intent?.oneOf ?? [];
+    const nonMoveBranches = intentBranches.filter((branch) => branch.properties?.kind?.const !== "move");
+    expect(nonMoveBranches).toHaveLength(4);
+    for (const branch of nonMoveBranches) {
+      expect(branch.properties?.targetHandles?.items?.enum).toContain("location:gate");
+      expect(branch.properties?.targetHandles?.items?.enum).not.toContain("location:remote");
+    }
+    const moveBranch = intentBranches.find((branch) => branch.properties?.kind?.const === "move");
+    expect(moveBranch?.properties?.targetHandles?.minItems).toBe(1);
+    expect(moveBranch?.properties?.targetHandles?.maxItems).toBe(1);
+    expect(moveBranch?.properties?.targetHandles?.items?.enum).toEqual(["location:remote"]);
+
+    const noDestinationProviderSchema = z.toJSONSchema(noDestinationSchema) as JsonSchemaNode;
+    const noDestinationKinds = noDestinationProviderSchema.properties?.steps?.items?.properties?.intent?.oneOf
+      ?.map((branch) => branch.properties?.kind?.const);
+    expect(noDestinationKinds).not.toContain("move");
+
+    const serializedSchema = JSON.stringify(providerSchema);
+    expect(serializedSchema).toContain("location:gate");
+    expect(serializedSchema).toContain("location:remote");
+    expect(serializedSchema).toContain("route:gate-remote");
+    expect(serializedSchema).not.toContain("The first attempt");
   });
 
   it.each([

@@ -1,4 +1,5 @@
 import type { LanguageModel } from "ai";
+import type { ZodType } from "zod";
 import {
   getSafeGenerateObjectErrorCode,
   getSafeGenerateObjectTrace,
@@ -35,6 +36,7 @@ import {
   buildCampaignPlayActorReplanPrompt,
   campaignPlayActorPlanGroundingReviewSchema,
   campaignPlayActorReplanProposalSchema,
+  campaignPlayActorReplanGenerationRecoveryProposalSchemaForFrame,
   campaignPlayActorReplanProposalSchemaForFrame,
   type CampaignPlayActorReplanRecoveryFeedback,
   type CampaignPlayActorReplanPromptEntity,
@@ -810,6 +812,13 @@ export function createCampaignPlayActorReplanner(
       if (!proposalSchema) {
         throw new CampaignPlayActorReplannerError("replan_state_invalid");
       }
+      const generationRecoveryProposalSchema =
+        campaignPlayActorReplanGenerationRecoveryProposalSchemaForFrame(
+          compilation.promptFrame,
+        );
+      if (!generationRecoveryProposalSchema) {
+        throw new CampaignPlayActorReplannerError("replan_state_invalid");
+      }
       const proposalPrompt = buildCampaignPlayActorReplanPrompt(compilation.promptFrame);
       const stageId = deriveCampaignPlayActorReplanStageId(request.jobId);
       const previousStageCount = (handle.sqlite.prepare(`SELECT count(*) AS count
@@ -1048,6 +1057,7 @@ export function createCampaignPlayActorReplanner(
         attemptNumber: number,
         modelStageRowId: string,
         attemptId: string | null,
+        proposalSchemaForAttempt: ZodType<CampaignPlayActorReplanProposal>,
         proposalMode: "auto" | "tool",
         prompt: string,
       ): Promise<AttemptResult> => {
@@ -1064,7 +1074,7 @@ export function createCampaignPlayActorReplanner(
           try {
             generated = await runProvider(() => dependencies.generateObject<CampaignPlayActorReplanProposal>({
               model: proposalModel,
-              schema: proposalSchema,
+              schema: proposalSchemaForAttempt,
               prompt,
               temperature: request.temperature,
               maxOutputTokens: request.maxOutputTokens,
@@ -1578,6 +1588,7 @@ export function createCampaignPlayActorReplanner(
         firstAttemptNumber,
         firstModelStageRowId,
         linkedCall ? firstAttemptId : null,
+        proposalSchema,
         "auto",
         proposalPrompt,
       );
@@ -1798,6 +1809,9 @@ export function createCampaignPlayActorReplanner(
           secondAttemptNumber,
           secondModelStageRowId,
           secondAttemptId,
+          firstResult.rejectionArtifact === undefined
+            ? generationRecoveryProposalSchema
+            : proposalSchema,
           "tool",
           firstResult.rejectionArtifact === undefined
             ? buildCampaignPlayActorReplanGenerationRecoveryPrompt(proposalPrompt)

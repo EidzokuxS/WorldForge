@@ -154,9 +154,7 @@ function frameHandleSchema(handles: readonly string[]) {
   return first === undefined ? null : z.enum([first, ...rest]);
 }
 
-export function campaignPlayActorReplanProposalSchemaForFrame(
-  frame: CampaignPlayActorReplanPromptFrame,
-) {
+function frameProposalSchemas(frame: CampaignPlayActorReplanPromptFrame) {
   const entityHandleSchema = frameHandleSchema([
     ...new Set(frame.entities.map((entity) => entity.handle)),
   ]);
@@ -172,12 +170,77 @@ export function campaignPlayActorReplanProposalSchemaForFrame(
       .max(CAMPAIGN_PLAY_LIMITS.targets)
       .refine((handles) => new Set(handles).size === handles.length),
   });
+  return { activeGoalHandleSchema, entityHandleSchema, frameIntentSchema };
+}
+
+export function campaignPlayActorReplanProposalSchemaForFrame(
+  frame: CampaignPlayActorReplanPromptFrame,
+) {
+  const schemas = frameProposalSchemas(frame);
+  if (!schemas) return null;
   return campaignPlayActorReplanProposalSchema.extend({
-    goalHandle: activeGoalHandleSchema,
-    intent: frameIntentSchema,
+    goalHandle: schemas.activeGoalHandleSchema,
+    intent: schemas.frameIntentSchema,
     steps: z.array(replanStepSchema.safeExtend({
-      intent: frameIntentSchema,
+      intent: schemas.frameIntentSchema,
     })).min(CAMPAIGN_PLAY_REPLAN_MIN_STEPS).max(CAMPAIGN_PLAY_LIMITS.planSteps),
+  });
+}
+
+export function campaignPlayActorReplanGenerationRecoveryProposalSchemaForFrame(
+  frame: CampaignPlayActorReplanPromptFrame,
+) {
+  const schemas = frameProposalSchemas(frame);
+  if (!schemas) return null;
+
+  const nonMoveTargetHandles = frameHandleSchema(frame.entities
+    .filter((entity) => entity.kind !== "location" || entity.state === "occupied")
+    .map((entity) => entity.handle)
+    .filter((handle, index, handles) => handles.indexOf(handle) === index));
+  if (!nonMoveTargetHandles) return null;
+  const nonMoveTargetHandlesSchema = z.array(nonMoveTargetHandles)
+    .max(CAMPAIGN_PLAY_LIMITS.targets)
+    .refine((handles) => new Set(handles).size === handles.length);
+  const makeIntentSchema = (
+    kind: Exclude<(typeof WORLD_INTENT_KIND_VALUES)[number], "move">,
+  ) => schemas.frameIntentSchema.extend({
+    kind: z.literal(kind),
+    targetHandles: nonMoveTargetHandlesSchema,
+  });
+  const observeIntentSchema = makeIntentSchema("observe");
+  const contactIntentSchema = makeIntentSchema("contact");
+  const waitIntentSchema = makeIntentSchema("wait");
+  const attemptIntentSchema = makeIntentSchema("attempt");
+  const destinationHandles = frameHandleSchema(frame.entities
+    .filter((entity) => entity.kind === "location" && entity.state !== "occupied")
+    .map((entity) => entity.handle)
+    .filter((handle, index, handles) => handles.indexOf(handle) === index));
+  const recoveryIntentSchema = destinationHandles
+    ? z.discriminatedUnion("kind", [
+        observeIntentSchema,
+        contactIntentSchema,
+        waitIntentSchema,
+        attemptIntentSchema,
+        schemas.frameIntentSchema.extend({
+          kind: z.literal("move"),
+          targetHandles: z.array(destinationHandles)
+            .length(1)
+            .refine((handles) => new Set(handles).size === handles.length),
+        }),
+      ])
+    : z.discriminatedUnion("kind", [
+        observeIntentSchema,
+        contactIntentSchema,
+        waitIntentSchema,
+        attemptIntentSchema,
+      ]);
+  const recoveryStepSchema = replanStepSchema.safeExtend({
+    intent: recoveryIntentSchema,
+  });
+  return campaignPlayActorReplanProposalSchema.extend({
+    goalHandle: schemas.activeGoalHandleSchema,
+    intent: schemas.frameIntentSchema,
+    steps: z.array(recoveryStepSchema).length(1),
   });
 }
 
@@ -253,7 +316,7 @@ export function buildCampaignPlayActorReplanGenerationRecoveryPrompt(
   return `${basePrompt}
 
 ACTOR_REPLAN_RECOVERY
-The first attempt did not produce a usable proposal, so no rejected proposal or reviewer feedback is available. Generate one fresh proposal from ACTOR_FRAME. Prefer one grounded step performed only by ACTOR_FRAME.actorHandle. Another actor may remain only as the target of contact or observation. Do not include any method, stakes, or observableTrace that states or requires another actor to respond, consent, assist, work, move, accept, pay, or complete anything. observableTrace must show only the planning actor's own attempt or a physical trace directly caused by that method; do not assert a requested, visible, or possible outcome. Satisfy every unchanged schema, compiler, and grounding-review rule.`;
+The first attempt did not produce a usable proposal, so no rejected proposal or reviewer feedback is available. Generate one fresh proposal from ACTOR_FRAME with exactly one grounded step performed only by ACTOR_FRAME.actorHandle. For a non-move step, every location target must be the actor's current occupied location; never target another location. For a move step, target exactly one directly reachable destination location and no route handle. Another actor may remain only as the target of contact or observation. Do not include any method, stakes, or observableTrace that states or requires another actor to respond, consent, assist, work, move, accept, pay, or complete anything. observableTrace must show only the planning actor's own attempt or a physical trace directly caused by that method; do not assert a requested, visible, or possible outcome. Satisfy every unchanged schema, compiler, and grounding-review rule.`;
 }
 
 export function buildCampaignPlayActorPlanGroundingReviewPrompt(
