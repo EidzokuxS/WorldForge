@@ -1117,62 +1117,175 @@ type StructuredOutputToolCallLike = {
   invalid?: boolean;
 };
 
-function isStructuredOutputToolCall(call: unknown): call is StructuredOutputToolCallLike {
+type StructuredOutputToolCallLocation = {
+  call: unknown;
+  source: "result" | "step";
+  stepIndex: number | null;
+  toolCallIndex: number;
+};
+
+type StructuredOutputToolCallCollection = {
+  calls: StructuredOutputToolCallLocation[];
+  directToolCallCount: number;
+  stepToolCallCount: number;
+  matchingToolCallCount: number;
+  invalidMatchingToolCallCount: number;
+};
+
+type StructuredOutputArgumentCarrier = "input" | "args" | "arguments" | "none";
+type StructuredOutputArgumentType =
+  | "missing"
+  | "null"
+  | "array"
+  | "object"
+  | "string"
+  | "number"
+  | "boolean"
+  | "bigint"
+  | "symbol"
+  | "function";
+
+type StructuredOutputInvalidToolCallDiagnostic = {
+  toolName: typeof STRUCTURED_OUTPUT_TOOL_NAME;
+  source: "result" | "step";
+  stepIndex: number | null;
+  toolCallIndex: number;
+  argumentCarrier: StructuredOutputArgumentCarrier;
+  argumentType: StructuredOutputArgumentType;
+  directToolCallCount: number;
+  stepToolCallCount: number;
+  matchingToolCallCount: number;
+  invalidMatchingToolCallCount: number;
+};
+
+function isMatchingStructuredOutputToolCall(call: unknown): call is StructuredOutputToolCallLike {
   return Boolean(
     call
     && typeof call === "object"
-    && (call as StructuredOutputToolCallLike).toolName === STRUCTURED_OUTPUT_TOOL_NAME
+    && (call as StructuredOutputToolCallLike).toolName === STRUCTURED_OUTPUT_TOOL_NAME,
+  );
+}
+
+function isStructuredOutputToolCall(call: unknown): call is StructuredOutputToolCallLike {
+  return Boolean(
+    isMatchingStructuredOutputToolCall(call)
     && (call as StructuredOutputToolCallLike).invalid !== true,
   );
 }
 
+function structuredOutputToolArgument(
+  call: StructuredOutputToolCallLike,
+): { carrier: StructuredOutputArgumentCarrier; value: unknown } {
+  if (call.input !== undefined) return { carrier: "input", value: call.input };
+  if (call.args !== undefined) return { carrier: "args", value: call.args };
+  if (call.arguments !== undefined) return { carrier: "arguments", value: call.arguments };
+  return { carrier: "none", value: undefined };
+}
+
 function structuredOutputToolInput(call: StructuredOutputToolCallLike): unknown {
-  if (call.input !== undefined) return call.input;
-  if (call.args !== undefined) return call.args;
-  return call.arguments;
+  return structuredOutputToolArgument(call).value;
+}
+
+function structuredOutputArgumentType(value: unknown): StructuredOutputArgumentType {
+  if (value === undefined) return "missing";
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+
+  const type = typeof value;
+  switch (type) {
+    case "object":
+    case "string":
+    case "number":
+    case "boolean":
+    case "bigint":
+    case "symbol":
+    case "function":
+      return type;
+    default:
+      return "missing";
+  }
 }
 
 type StructuredOutputToolInputResult =
   | { kind: "found"; input: unknown }
-  | { kind: "invalid" }
+  | { kind: "invalid"; diagnostic: StructuredOutputInvalidToolCallDiagnostic }
   | { kind: "missing" };
 
 function collectStructuredOutputToolCalls(
   result: Awaited<ReturnType<typeof generateText>>,
-): unknown[] {
+): StructuredOutputToolCallCollection {
   const directToolCalls = (result as { toolCalls?: unknown }).toolCalls;
-  const toolCalls: unknown[] = Array.isArray(directToolCalls) ? [...directToolCalls] : [];
+  const directCalls: unknown[] = Array.isArray(directToolCalls) ? directToolCalls : [];
+  const calls: StructuredOutputToolCallLocation[] = directCalls.map((call, toolCallIndex) => ({
+    call,
+    source: "result",
+    stepIndex: null,
+    toolCallIndex,
+  }));
   const steps = (result as { steps?: unknown }).steps;
+  let stepToolCallCount = 0;
   if (Array.isArray(steps)) {
-    for (const step of steps) {
+    for (const [stepIndex, step] of steps.entries()) {
       if (!step || typeof step !== "object") continue;
       const stepToolCalls = (step as { toolCalls?: unknown }).toolCalls;
       if (Array.isArray(stepToolCalls)) {
-        toolCalls.push(...stepToolCalls);
+        stepToolCallCount += stepToolCalls.length;
+        for (const [toolCallIndex, call] of stepToolCalls.entries()) {
+          calls.push({
+            call,
+            source: "step",
+            stepIndex,
+            toolCallIndex,
+          });
+        }
       }
     }
   }
-  return toolCalls;
+
+  const matchingCalls = calls.filter(({ call }) => isMatchingStructuredOutputToolCall(call));
+  return {
+    calls,
+    directToolCallCount: directCalls.length,
+    stepToolCallCount,
+    matchingToolCallCount: matchingCalls.length,
+    invalidMatchingToolCallCount: matchingCalls.filter(({ call }) =>
+      isMatchingStructuredOutputToolCall(call) && call.invalid === true,
+    ).length,
+  };
 }
 
 function extractStructuredOutputToolInput(
   result: Awaited<ReturnType<typeof generateText>>,
 ): StructuredOutputToolInputResult {
-  const toolCalls = collectStructuredOutputToolCalls(result);
-  const toolCall = toolCalls.find(isStructuredOutputToolCall);
-  if (toolCall) {
-    return { kind: "found", input: structuredOutputToolInput(toolCall) };
+  const collection = collectStructuredOutputToolCalls(result);
+  const toolCall = collection.calls.find(({ call }) => isStructuredOutputToolCall(call));
+  if (toolCall && isStructuredOutputToolCall(toolCall.call)) {
+    return { kind: "found", input: structuredOutputToolInput(toolCall.call) };
   }
 
-  const invalidToolCall = toolCalls.find((call) =>
-    Boolean(
-      call
-      && typeof call === "object"
-      && (call as StructuredOutputToolCallLike).toolName === STRUCTURED_OUTPUT_TOOL_NAME
-      && (call as StructuredOutputToolCallLike).invalid === true,
-    ),
+  const invalidToolCall = collection.calls.find(({ call }) =>
+    isMatchingStructuredOutputToolCall(call) && call.invalid === true,
   );
-  return invalidToolCall ? { kind: "invalid" } : { kind: "missing" };
+  if (!invalidToolCall || !isMatchingStructuredOutputToolCall(invalidToolCall.call)) {
+    return { kind: "missing" };
+  }
+
+  const argument = structuredOutputToolArgument(invalidToolCall.call);
+  return {
+    kind: "invalid",
+    diagnostic: {
+      toolName: STRUCTURED_OUTPUT_TOOL_NAME,
+      source: invalidToolCall.source,
+      stepIndex: invalidToolCall.stepIndex,
+      toolCallIndex: invalidToolCall.toolCallIndex,
+      argumentCarrier: argument.carrier,
+      argumentType: structuredOutputArgumentType(argument.value),
+      directToolCallCount: collection.directToolCallCount,
+      stepToolCallCount: collection.stepToolCallCount,
+      matchingToolCallCount: collection.matchingToolCallCount,
+      invalidMatchingToolCallCount: collection.invalidMatchingToolCallCount,
+    },
+  };
 }
 
 /**
@@ -1415,6 +1528,7 @@ async function attemptToolModeGenerate<T>(
     );
   }
   if (toolInputResult.kind === "invalid") {
+    log.event("llm.structured_output_invalid_tool_call", toolInputResult.diagnostic);
     throw new SafeGenerateError(
       `safeGenerateObject tool mode: ${STRUCTURED_OUTPUT_TOOL_NAME} tool call was generated with invalid arguments`,
       trace,
