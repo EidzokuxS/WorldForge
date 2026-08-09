@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCampaignPlayActorPlanGroundingReviewPrompt,
+  buildCampaignPlayActorReplanGenerationRecoveryPrompt,
   buildCampaignPlayActorReplanRecoveryPrompt,
   buildCampaignPlayActorReplanPrompt,
   campaignPlayActorPlanGroundingReviewSchema,
@@ -123,6 +124,20 @@ describe("campaign play actor replan prompt", () => {
       moveTargets: "0:location:gate|2:location:river",
       reviewViolations: "1:outcome_not_established|2:contradicts_accepted_frame",
     });
+  });
+
+  it("gives a no-artifact generation failure one coordinate-free recovery rule", () => {
+    const basePrompt = buildCampaignPlayActorReplanPrompt(frame);
+    const prompt = buildCampaignPlayActorReplanGenerationRecoveryPrompt(basePrompt);
+    const paragraph = "The first attempt did not produce a usable proposal, so no rejected proposal or reviewer feedback is available. Generate one fresh proposal from ACTOR_FRAME. Prefer one grounded step performed only by ACTOR_FRAME.actorHandle. Another actor may remain only as the target of contact or observation. Do not include any method, stakes, or observableTrace that states or requires another actor to respond, consent, assist, work, move, accept, pay, or complete anything. observableTrace must show only the planning actor's own attempt or a physical trace directly caused by that method; do not assert a requested, visible, or possible outcome. Satisfy every unchanged schema, compiler, and grounding-review rule.";
+
+    expect(prompt.startsWith(`${basePrompt}\n\nACTOR_REPLAN_RECOVERY\n`)).toBe(true);
+    expect(prompt.match(/ACTOR_REPLAN_RECOVERY/g)).toHaveLength(1);
+    expect(prompt.match(/The first attempt did not produce a usable proposal/g)).toHaveLength(1);
+    expect(prompt).toContain(paragraph);
+    expect(prompt).not.toContain("SAFE_REJECTION_FEEDBACK");
+    expect(prompt).not.toContain("REJECTED_PROPOSAL_SENTINEL");
+    expect(prompt).not.toContain("NoObjectGeneratedError");
   });
 
   it("gives other-actor grounding failures one safe actor-owned recovery rule", () => {

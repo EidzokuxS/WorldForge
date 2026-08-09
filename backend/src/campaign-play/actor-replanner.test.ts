@@ -948,8 +948,11 @@ describe("Campaign Play actor replanner", () => {
       bypassModel,
     ]);
     expect(generateObject.mock.calls[1]![0].prompt)
-      .toBe(generateObject.mock.calls[0]![0].prompt);
-    expect(generateObject.mock.calls[1]![0].prompt).not.toContain("ACTOR_REPLAN_RECOVERY");
+      .toBe(`${generateObject.mock.calls[0]![0].prompt}\n\nACTOR_REPLAN_RECOVERY\nThe first attempt did not produce a usable proposal, so no rejected proposal or reviewer feedback is available. Generate one fresh proposal from ACTOR_FRAME. Prefer one grounded step performed only by ACTOR_FRAME.actorHandle. Another actor may remain only as the target of contact or observation. Do not include any method, stakes, or observableTrace that states or requires another actor to respond, consent, assist, work, move, accept, pay, or complete anything. observableTrace must show only the planning actor's own attempt or a physical trace directly caused by that method; do not assert a requested, visible, or possible outcome. Satisfy every unchanged schema, compiler, and grounding-review rule.`);
+    expect(generateObject.mock.calls[0]![0].prompt).not.toContain("ACTOR_REPLAN_RECOVERY");
+    expect(generateObject.mock.calls[1]![0].prompt.match(/ACTOR_REPLAN_RECOVERY/g)).toHaveLength(1);
+    expect(generateObject.mock.calls[1]![0].prompt).not.toContain("SAFE_REJECTION_FEEDBACK");
+    expect(generateObject.mock.calls[1]![0].prompt).not.toContain("NoObjectGeneratedError");
     expect(handle.sqlite.prepare(`SELECT attempt, status, worker_epoch AS workerEpoch,
         schema_outcome AS schemaOutcome, error_code AS errorCode
       FROM campaign_play_model_stages

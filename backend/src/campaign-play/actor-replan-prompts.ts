@@ -247,6 +247,15 @@ ${JSON.stringify(safeFeedback)}
 END_SAFE_REJECTION_FEEDBACK`;
 }
 
+export function buildCampaignPlayActorReplanGenerationRecoveryPrompt(
+  basePrompt: string,
+): string {
+  return `${basePrompt}
+
+ACTOR_REPLAN_RECOVERY
+The first attempt did not produce a usable proposal, so no rejected proposal or reviewer feedback is available. Generate one fresh proposal from ACTOR_FRAME. Prefer one grounded step performed only by ACTOR_FRAME.actorHandle. Another actor may remain only as the target of contact or observation. Do not include any method, stakes, or observableTrace that states or requires another actor to respond, consent, assist, work, move, accept, pay, or complete anything. observableTrace must show only the planning actor's own attempt or a physical trace directly caused by that method; do not assert a requested, visible, or possible outcome. Satisfy every unchanged schema, compiler, and grounding-review rule.`;
+}
+
 export function buildCampaignPlayActorPlanGroundingReviewPrompt(
   frame: CampaignPlayActorReplanPromptFrame,
   proposal: CampaignPlayActorReplanProposal,

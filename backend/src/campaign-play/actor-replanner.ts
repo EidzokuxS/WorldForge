@@ -30,6 +30,7 @@ import {
 } from "./campaign-play-turn-repository.js";
 import {
   buildCampaignPlayActorPlanGroundingReviewPrompt,
+  buildCampaignPlayActorReplanGenerationRecoveryPrompt,
   buildCampaignPlayActorReplanRecoveryPrompt,
   buildCampaignPlayActorReplanPrompt,
   campaignPlayActorPlanGroundingReviewSchema,
@@ -1799,7 +1800,7 @@ export function createCampaignPlayActorReplanner(
           secondAttemptId,
           "tool",
           firstResult.rejectionArtifact === undefined
-            ? proposalPrompt
+            ? buildCampaignPlayActorReplanGenerationRecoveryPrompt(proposalPrompt)
             : buildCampaignPlayActorReplanRecoveryPrompt(
                 proposalPrompt,
                 recoveryFeedbackFromArtifact(firstResult.rejectionArtifact),
