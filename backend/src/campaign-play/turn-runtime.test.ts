@@ -2613,10 +2613,104 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "primary_settled" });
     expect(judge.judge).toHaveBeenCalledTimes(2);
     expect(observedJudgeModels).toEqual([bypassJudgeModel, bypassJudgeModel]);
-    expect(observedJudgeModes).toEqual(["auto", "tool"]);
+    expect(observedJudgeModes).toEqual(["auto", "auto"]);
     expect(gameMaster.plan).toHaveBeenCalledTimes(1);
     expect(countForTurn(handle, "campaign_play_commands", admission.turnId)).toBe(2);
   });
+
+  it.each([
+    {
+      label: "model contract invalid",
+      error: "model_contract_failed" as const,
+      persistedErrorCode: "model_contract_invalid" as const,
+      expectedSecondModel: "reasoning" as const,
+    },
+    {
+      label: "provider unavailable",
+      error: "transport_interrupted" as const,
+      persistedErrorCode: "provider_unavailable" as const,
+      expectedSecondModel: "language" as const,
+    },
+  ])(
+    "keeps Judge attempt 2 in tool mode after a no-feedback $label interruption",
+    async ({ error, persistedErrorCode, expectedSecondModel }) => {
+      const { handle, state } = await createReadyCampaignWithOpening();
+      const time = fixedClock(2_610);
+      const acceptedJudge = judgeFixture("deterministic");
+      const languageModel = { specificationVersion: "v3" } as unknown as LanguageModel;
+      const reasoningModel = { specificationVersion: "v3" } as unknown as LanguageModel;
+      let calls = 0;
+      const observedModels: LanguageModel[] = [];
+      const observedModes: Array<"auto" | "tool" | undefined> = [];
+      const judge = {
+        judge: vi.fn(async (...args: Parameters<typeof acceptedJudge.judge>) => {
+          calls += 1;
+          observedModels.push(args[0].model);
+          observedModes.push(args[0].structuredOutputMode);
+          if (calls === 1) {
+            throw new CampaignPlayJudgeError(error, {
+              ...acceptedEvidence("test-judge"),
+              errorCode: error === "transport_interrupted" ? null : "model_contract_invalid",
+            });
+          }
+          return acceptedJudge.judge(...args);
+        }),
+      };
+      const runtime = turnRuntime(handle, time, judge, gameMasterFixture(), {
+        judgeModel: {
+          languageModel,
+          reasoningModel,
+          requested: {
+            providerId: "test",
+            model: "test-judge",
+            strategy: "strict_object",
+            pricing: TEST_MODEL_PRICING,
+          },
+          temperature: 0.2,
+          maximumInputTokens: 1_000,
+          maximumOutputTokens: 1_000,
+          maximumTotalTokens: 2_000,
+          maximumCostMicros: 10_000,
+        },
+      });
+      const admission = runtime.admitAction({
+        request: admissionRequest(state, `interrupted-judge-${persistedErrorCode}`),
+        submittedAt: 2_610,
+      });
+      time.advance();
+      const first = await runtime.runNextStage(admission.turnId);
+      expect(first.turn).toMatchObject({
+        stage: "interrupted",
+        interruptedStage: "admitted",
+        errorCode: persistedErrorCode,
+        resumeEligible: true,
+      });
+      const interrupted = runtime.loadTurn(admission.turnId)!;
+
+      time.advance();
+      await runtime.resumeInterruptedStage({
+        turnId: admission.turnId,
+        interruptedStage: "admitted",
+        observedEpoch: interrupted.workerEpoch,
+      });
+      time.advance();
+      await runtime.runNextStage(admission.turnId);
+      time.advance();
+      await runtime.runNextStage(admission.turnId);
+
+      expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "primary_settled" });
+      expect(observedModes).toEqual(["auto", "tool"]);
+      expect(observedModels).toEqual([
+        languageModel,
+        expectedSecondModel === "reasoning" ? reasoningModel : languageModel,
+      ]);
+      expect(judge.judge).toHaveBeenCalledTimes(2);
+      expect(countForTurn(handle, "campaign_play_commands", admission.turnId)).toBe(2);
+      expect(handle.sqlite.prepare(`SELECT count(*) AS value FROM campaign_play_model_stages
+        WHERE campaign_id = ? AND turn_id = ? AND kind = 'judge'`)
+        .get(CAMPAIGN_ID, admission.turnId)).toEqual({ value: 2 });
+    },
+  );
 
   it("does not pass recovery feedback into the initial Judge attempt", async () => {
     const { handle, state } = await createReadyCampaignWithOpening();

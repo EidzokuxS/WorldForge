@@ -2403,7 +2403,16 @@ export function createCampaignPlayTurnRuntime(
   ): "auto" | "tool" => {
     if (attempt <= 1) return "auto";
     if (kind === "judge") {
-      return input.judgeRecoveryFeedback !== undefined ? "auto" : "tool";
+      if (input.judgeRecoveryFeedback !== undefined) return "auto";
+      const previous = input.handle.sqlite.prepare(`SELECT error_code AS errorCode
+        FROM campaign_play_model_stages
+        WHERE campaign_id = ? AND turn_id = ? AND kind = ? AND attempt = ?`).get(
+        input.handle.campaignId,
+        turnId,
+        kind,
+        attempt - 1,
+      ) as { errorCode: string | null } | undefined;
+      return previous?.errorCode === "stage_timeout" ? "auto" : "tool";
     }
     const previous = input.handle.sqlite.prepare(`SELECT error_code AS errorCode
       FROM campaign_play_model_stages
