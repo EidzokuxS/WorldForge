@@ -29,6 +29,7 @@ import {
   campaignPlayPlayerProfileAuthoritySchema,
   campaignPlayUncertaintyResolutionSchema,
   campaignPlayVisibleTargetSchema,
+  type CampaignPlayResultTier,
   type CampaignPlayJudgeRuling,
   type CampaignPlayUncertaintyResolution,
 } from "./contracts.js";
@@ -303,6 +304,31 @@ function visibleHandleSchema(handles: readonly string[]) {
   return z.enum([first, ...rest]);
 }
 
+function generationResultBoundsPairSchema(
+  minimum: CampaignPlayResultTier,
+  maximum: CampaignPlayResultTier,
+) {
+  return z.object({ minimum: z.literal(minimum), maximum: z.literal(maximum) }).strict();
+}
+
+const deterministicGenerationResultBoundsSchema = z.union([
+  generationResultBoundsPairSchema("setback", "setback"),
+  generationResultBoundsPairSchema("limited", "limited"),
+  generationResultBoundsPairSchema("success", "success"),
+  generationResultBoundsPairSchema("strong_success", "strong_success"),
+]);
+
+const uncertainGenerationResultBoundsSchema = z.union([
+  generationResultBoundsPairSchema("setback", "limited"),
+  generationResultBoundsPairSchema("setback", "success"),
+  generationResultBoundsPairSchema("setback", "strong_success"),
+  generationResultBoundsPairSchema("limited", "success"),
+  generationResultBoundsPairSchema("limited", "strong_success"),
+  generationResultBoundsPairSchema("success", "strong_success"),
+]);
+
+const noEffectGenerationResultBoundsSchema = generationResultBoundsPairSchema("no_effect", "no_effect");
+
 function judgeProposalSchemaForFrame(
   frame: CampaignPlayJudgeFrame,
   input?: CampaignPlayJudgeInput,
@@ -394,18 +420,22 @@ function judgeProposalSchemaForFrame(
   const branches = [
     generationFrameSchema.extend({
       disposition: z.literal("deterministic"),
+      resultBounds: deterministicGenerationResultBoundsSchema,
       clarificationQuestion: z.null(),
     }),
     generationFrameSchema.extend({
       disposition: z.literal("uncertain"),
+      resultBounds: uncertainGenerationResultBoundsSchema,
       clarificationQuestion: z.null(),
     }),
     generationFrameSchema.extend({
       disposition: z.literal("impossible"),
+      resultBounds: noEffectGenerationResultBoundsSchema,
       clarificationQuestion: z.null(),
     }),
     generationFrameSchema.extend({
       disposition: z.literal("clarification_required"),
+      resultBounds: noEffectGenerationResultBoundsSchema,
       clarificationQuestion: line(CAMPAIGN_PLAY_LIMITS.shortText),
     }),
   ] as const;

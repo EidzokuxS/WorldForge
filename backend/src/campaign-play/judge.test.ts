@@ -469,10 +469,41 @@ describe("Campaign Play Judge", () => {
 
     const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
     const validVariants = [
-      proposal({ disposition: "deterministic", clarificationQuestion: null }),
-      proposal({ disposition: "uncertain", clarificationQuestion: null }),
-      proposal({ disposition: "impossible", clarificationQuestion: null }),
-      proposal({ disposition: "clarification_required", clarificationQuestion: "Which gate do you mean?" }),
+      ...(["setback", "limited", "success", "strong_success"] as const)
+        .map((tier) => proposal({
+          disposition: "deterministic",
+          resultBounds: { minimum: tier, maximum: tier },
+          clarificationQuestion: null,
+        })),
+      ...([
+        ["setback", "limited"],
+        ["setback", "success"],
+        ["setback", "strong_success"],
+        ["limited", "success"],
+        ["limited", "strong_success"],
+        ["success", "strong_success"],
+      ] as const).map(([minimum, maximum]) => proposal({
+        disposition: "uncertain",
+        resultBounds: { minimum, maximum },
+        uncertainty: {
+          kind: "check",
+          dieSides: 20,
+          difficulty: 12,
+          modifierMinimum: -2,
+          modifierMaximum: 3,
+        },
+        clarificationQuestion: null,
+      })),
+      proposal({
+        disposition: "impossible",
+        resultBounds: { minimum: "no_effect", maximum: "no_effect" },
+        clarificationQuestion: null,
+      }),
+      proposal({
+        disposition: "clarification_required",
+        resultBounds: { minimum: "no_effect", maximum: "no_effect" },
+        clarificationQuestion: "Which gate do you mean?",
+      }),
     ];
     for (const value of validVariants) {
       expect(options.schema.safeParse(value).success).toBe(true);
@@ -493,9 +524,65 @@ describe("Campaign Play Judge", () => {
       disposition: "clarification_required",
     });
     expect(options.schema.safeParse(omittedQuestion).success).toBe(false);
+    expect(options.schema.safeParse(proposal({
+      disposition: "deterministic",
+      resultBounds: { minimum: "no_effect", maximum: "no_effect" },
+    })).success).toBe(false);
+    expect(options.schema.safeParse(proposal({
+      disposition: "deterministic",
+      resultBounds: { minimum: "limited", maximum: "success" },
+    })).success).toBe(false);
+    expect(options.schema.safeParse(proposal({
+      disposition: "uncertain",
+      resultBounds: { minimum: "limited", maximum: "limited" },
+      uncertainty: {
+        kind: "check",
+        dieSides: 20,
+        difficulty: 12,
+        modifierMinimum: -2,
+        modifierMaximum: 3,
+      },
+    })).success).toBe(false);
+    expect(options.schema.safeParse(proposal({
+      disposition: "uncertain",
+      resultBounds: { minimum: "success", maximum: "limited" },
+      uncertainty: {
+        kind: "check",
+        dieSides: 20,
+        difficulty: 12,
+        modifierMinimum: -2,
+        modifierMaximum: 3,
+      },
+    })).success).toBe(false);
+    expect(options.schema.safeParse(proposal({
+      disposition: "uncertain",
+      resultBounds: { minimum: "no_effect", maximum: "success" },
+      uncertainty: {
+        kind: "check",
+        dieSides: 20,
+        difficulty: 12,
+        modifierMinimum: -2,
+        modifierMaximum: 3,
+      },
+    })).success).toBe(false);
+    expect(options.schema.safeParse(proposal({
+      disposition: "impossible",
+      resultBounds: { minimum: "setback", maximum: "setback" },
+    })).success).toBe(false);
+    expect(options.schema.safeParse(proposal({
+      disposition: "clarification_required",
+      resultBounds: { minimum: "success", maximum: "success" },
+    })).success).toBe(false);
 
     const schema = z.toJSONSchema(options.schema) as {
       oneOf?: Array<{ properties?: Record<string, unknown> }>;
+    };
+    const unionBranches = (value: unknown): Array<{ properties?: Record<string, unknown> }> => {
+      const candidate = value as {
+        anyOf?: Array<{ properties?: Record<string, unknown> }>;
+        oneOf?: Array<{ properties?: Record<string, unknown> }>;
+      };
+      return candidate.oneOf ?? candidate.anyOf ?? [];
     };
     expect(schema.oneOf).toHaveLength(4);
     expect(schema.oneOf?.map((branch) => branch.properties?.disposition)).toEqual([
@@ -513,6 +600,35 @@ describe("Campaign Play Judge", () => {
       type: "string",
       minLength: 1,
     });
+    const bounds = schema.oneOf?.map((branch) => {
+      const resultBounds = branch.properties?.resultBounds as {
+        properties?: Record<string, unknown>;
+      } | undefined;
+      const candidates = unionBranches(resultBounds);
+      const values = candidates.length > 0 ? candidates : [resultBounds];
+      return values.map((candidate) => ({
+        minimum: ((candidate?.properties?.minimum as { const?: unknown } | undefined)?.const),
+        maximum: ((candidate?.properties?.maximum as { const?: unknown } | undefined)?.const),
+      }));
+    });
+    expect(bounds).toEqual([
+      [
+        { minimum: "setback", maximum: "setback" },
+        { minimum: "limited", maximum: "limited" },
+        { minimum: "success", maximum: "success" },
+        { minimum: "strong_success", maximum: "strong_success" },
+      ],
+      [
+        { minimum: "setback", maximum: "limited" },
+        { minimum: "setback", maximum: "success" },
+        { minimum: "setback", maximum: "strong_success" },
+        { minimum: "limited", maximum: "success" },
+        { minimum: "limited", maximum: "strong_success" },
+        { minimum: "success", maximum: "strong_success" },
+      ],
+      [{ minimum: "no_effect", maximum: "no_effect" }],
+      [{ minimum: "no_effect", maximum: "no_effect" }],
+    ]);
   });
 
   it("accepts a strict tool-mode ruling against the requested capability", async () => {
