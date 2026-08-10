@@ -1831,6 +1831,8 @@ export function createCampaignPlayActorReplanner(
               || firstResult.rejectionArtifact.reason === "route_not_traversable_from_step_location"
             )
           );
+        const useRouteRecoveryAutoMode = firstResult.rejectionArtifact?.phase === "compilation"
+          && firstResult.rejectionArtifact.reason === "route_not_traversable_from_step_location";
         const secondResult = await runAttempt(
           recoveryModel,
           request.model,
@@ -1841,7 +1843,7 @@ export function createCampaignPlayActorReplanner(
           useGenerationRecoverySchema
             ? generationRecoveryProposalSchema
             : proposalSchema,
-          "tool",
+          useRouteRecoveryAutoMode ? "auto" : "tool",
           firstResult.rejectionArtifact === undefined
             ? buildCampaignPlayActorReplanGenerationRecoveryPrompt(proposalPrompt)
             : buildCampaignPlayActorReplanRecoveryPrompt(

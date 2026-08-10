@@ -1383,7 +1383,7 @@ describe("Campaign Play actor replanner", () => {
     ]);
     expect(generateObject.mock.calls.map((call) => call[0]!.mode)).toEqual([
       "auto",
-      "tool",
+      "auto",
       "tool",
     ]);
     const firstPrompt = generateObject.mock.calls[0]![0].prompt;
