@@ -1,5 +1,5 @@
 import type { LanguageModel } from "ai";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
   CAMPAIGN_PLAY_LIMITS,
@@ -25,6 +25,7 @@ import {
 } from "./narrator.js";
 
 const narratorWarn = vi.hoisted(() => vi.fn());
+const narratorEvent = vi.hoisted(() => vi.fn());
 
 vi.mock("../lib/index.js", () => ({
   createLogger: (tag: string) => ({
@@ -32,7 +33,7 @@ vi.mock("../lib/index.js", () => ({
     warn: tag === "campaign-play-narrator" ? narratorWarn : vi.fn(),
     error: vi.fn(),
     debug: vi.fn(),
-    event: vi.fn(),
+    event: tag === "campaign-play-narrator" ? narratorEvent : vi.fn(),
   }),
 }));
 
@@ -245,6 +246,221 @@ function trace(strategy: SafeGenerateTrace["strategy"] = "native_schema"): SafeG
     finishReason: "stop",
   };
 }
+
+function contractRejectionEvents(): Array<Record<string, unknown>> {
+  return narratorEvent.mock.calls
+    .filter((call) => call[0] === "narrator.contract_rejected")
+    .map((call) => call[1] as Record<string, unknown>);
+}
+
+describe("Campaign Play narrator contract rejection diagnostics", () => {
+  beforeEach(() => {
+    narratorEvent.mockClear();
+    narratorWarn.mockClear();
+  });
+
+  it("classifies safe generation failures without changing the thrown error", async () => {
+    const generateObject = vi.fn(async (options: Parameters<typeof safeGenerateObject>[0]) =>
+      safeGenerateObject({
+        ...options,
+        model: {} as LanguageModel,
+      }));
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    let thrown: unknown;
+    try {
+      await narrator.narrate({
+        narrationId: "narration-generation-diagnostic",
+        packetBytes: canonicalizeCampaignPlayProjection(packetFixture()),
+        createdAt: 1_000,
+        model: structuredModel(),
+        temperature: 0.5,
+        budget,
+      });
+    } catch (cause) {
+      thrown = cause;
+    }
+
+    expect(thrown).toMatchObject({
+      code: "transport_interrupted",
+      modelEvidence: { errorCode: "text_fallback_disabled" },
+    });
+    expect(contractRejectionEvents()).toEqual([{
+      narrationId: "narration-generation-diagnostic",
+      campaignId: "campaign-harbor",
+      turnId: "turn-opening",
+      phase: "generation",
+      errorCode: "transport_interrupted",
+      safeGenerationCode: "text_fallback_disabled",
+      recoveryDiagnostic: null,
+      failedChecks: [],
+    }]);
+    expect(JSON.stringify(contractRejectionEvents())).not.toContain("private model output");
+  });
+
+  it("keeps packet recovery coordinates ordered beside the existing warning", async () => {
+    const base = packetFixture();
+    const packet: CampaignPlayNarratorPacket = {
+      ...base,
+      campaignId: "campaign-diagnostic-event",
+      turnId: "turn-diagnostic-event",
+      availableIntents: [
+        ...base.availableIntents,
+        {
+          handle: "choice_public_contact",
+          label: "Talk to Mara Venn",
+          kind: "contact",
+          targets: [{ handle: "actor_public_keeper", kind: "actor" }],
+        },
+      ],
+    };
+    const generateObject = vi.fn(async () => ({
+      object: proposalFixture(),
+      trace: trace(),
+    }));
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    let thrown: unknown;
+    try {
+      await narrator.narrate({
+        narrationId: "narration-packet-diagnostic",
+        packetBytes: canonicalizeCampaignPlayProjection(packet),
+        createdAt: 1_000,
+        model: structuredModel(),
+        temperature: 0.5,
+        budget,
+      });
+    } catch (cause) {
+      thrown = cause;
+    }
+
+    expect(thrown).toMatchObject({
+      code: "narration_invalid",
+      recoveryFeedback: {
+        diagnostic: "narrator_packet_validation_mismatch",
+        failedChecks: [{ check: "selected_action_count", actual: 1, expected: 2 }],
+      },
+    });
+    expect(narratorWarn).toHaveBeenCalledWith(
+      "narrator_packet_validation_mismatch",
+      expect.objectContaining({
+        diagnostic: "narrator_packet_validation_mismatch",
+        campaignId: "campaign-diagnostic-event",
+        turnId: "turn-diagnostic-event",
+        failedChecks: expect.arrayContaining([{
+          check: "selected_action_count",
+          actual: 1,
+          expected: 2,
+        }]),
+      }),
+    );
+    expect(contractRejectionEvents()).toEqual([{
+      narrationId: "narration-packet-diagnostic",
+      campaignId: "campaign-diagnostic-event",
+      turnId: "turn-diagnostic-event",
+      phase: "semantic",
+      errorCode: "narration_invalid",
+      safeGenerationCode: null,
+      recoveryDiagnostic: "narrator_packet_validation_mismatch",
+      failedChecks: [{ check: "selected_action_count", actual: 1, expected: 2 }],
+    }]);
+    expect((thrown as CampaignPlayNarratorError).recoveryFeedback?.failedChecks)
+      .toEqual(contractRejectionEvents()[0]!.failedChecks);
+    const recorded = JSON.stringify(contractRejectionEvents());
+    expect(recorded).not.toContain("Mara Venn's signal ledger");
+    expect(recorded).not.toContain("private model output");
+  });
+
+  it("classifies evidence mismatches separately from semantic rejection", async () => {
+    const generateObject = vi.fn(async () => ({
+      object: proposalFixture(),
+      trace: trace("repair"),
+    }));
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    await expect(narrator.narrate({
+      narrationId: "narration-evidence-diagnostic",
+      packetBytes: canonicalizeCampaignPlayProjection(packetFixture()),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+    })).rejects.toMatchObject({
+      code: "model_contract_failed",
+      modelEvidence: { errorCode: "narration_invalid" },
+    });
+    expect(contractRejectionEvents()).toEqual([{
+      narrationId: "narration-evidence-diagnostic",
+      campaignId: "campaign-harbor",
+      turnId: "turn-opening",
+      phase: "evidence",
+      errorCode: "model_contract_failed",
+      safeGenerationCode: null,
+      recoveryDiagnostic: null,
+      failedChecks: [],
+    }]);
+  });
+
+  it("classifies a bare semantic rejection and emits no event on success", async () => {
+    const invalidProposal = {
+      ...proposalFixture(),
+      beats: [{
+        ...proposalFixture().beats[0]!,
+        text: "The system exposes actor_public_keeper beside the harbor.",
+      }, ...proposalFixture().beats.slice(1)],
+    };
+    const generateObject = vi.fn(async () => ({
+      object: invalidProposal,
+      trace: trace(),
+    }));
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    await expect(narrator.narrate({
+      narrationId: "narration-semantic-diagnostic",
+      packetBytes: canonicalizeCampaignPlayProjection(packetFixture()),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+    })).rejects.toMatchObject({
+      code: "narration_invalid",
+      recoveryFeedback: null,
+    });
+    expect(contractRejectionEvents()).toMatchObject([{
+      narrationId: "narration-semantic-diagnostic",
+      phase: "semantic",
+      errorCode: "narration_invalid",
+      safeGenerationCode: null,
+      recoveryDiagnostic: null,
+      failedChecks: [],
+    }]);
+
+    narratorEvent.mockClear();
+    const validNarrator = createCampaignPlayNarrator({
+      generateObject: vi.fn(async () => ({
+        object: proposalFixture(),
+        trace: trace(),
+      })) as unknown as typeof safeGenerateObject,
+    });
+    await expect(validNarrator.narrate({
+      narrationId: "narration-success-no-diagnostic",
+      packetBytes: canonicalizeCampaignPlayProjection(packetFixture()),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+    })).resolves.toBeDefined();
+    expect(contractRejectionEvents()).toEqual([]);
+  });
+});
 
 describe("Campaign Play narrator", () => {
   it("compiles an opening proposal into code-owned narration bound to packet choices", () => {

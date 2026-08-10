@@ -227,6 +227,70 @@ interface CampaignPlayNarratorDependencies {
   generateObject: typeof safeGenerateObject;
 }
 
+type CampaignPlayNarratorContractRejectionPhase = "generation" | "evidence" | "semantic";
+
+function recoveryDiagnosticForEvent(
+  recoveryFeedback: CampaignPlayNarratorRecoveryFeedback | null,
+): CampaignPlayNarratorRecoveryFeedback["diagnostic"] | null {
+  if (recoveryFeedback === null) return null;
+  return recoveryFeedback.diagnostic === "narrator_generation_schema_mismatch" ||
+    recoveryFeedback.diagnostic === "narrator_packet_validation_mismatch"
+    ? recoveryFeedback.diagnostic
+    : null;
+}
+
+function emitNarratorContractRejection(
+  request: CampaignPlayNarratorRequest,
+  packet: CampaignPlayNarratorPacket | null,
+  error: CampaignPlayNarratorError,
+): void {
+  const nestedSemanticError = error.cause instanceof CampaignPlayNarratorError;
+  const safeGenerationCode = nestedSemanticError
+    ? null
+    : getSafeGenerateObjectErrorCode(error.cause);
+  const hasSafeGenerationTrace = nestedSemanticError
+    ? false
+    : getSafeGenerateObjectTrace(error.cause) !== null;
+  const phase: CampaignPlayNarratorContractRejectionPhase = nestedSemanticError
+    ? "semantic"
+    : safeGenerationCode !== null || hasSafeGenerationTrace || error.code === "transport_interrupted"
+      ? "generation"
+      : error.code === "model_contract_failed" &&
+          error.modelEvidence?.errorCode === "narration_invalid"
+        ? "evidence"
+        : "semantic";
+  log.event("narrator.contract_rejected", {
+    narrationId: request.narrationId,
+    campaignId: packet?.campaignId ?? null,
+    turnId: packet?.turnId ?? null,
+    phase,
+    errorCode: error.code,
+    safeGenerationCode: phase === "generation" ? safeGenerationCode : null,
+    recoveryDiagnostic: recoveryDiagnosticForEvent(error.recoveryFeedback),
+    failedChecks: error.recoveryFeedback?.failedChecks ?? [],
+  });
+}
+
+async function withNarratorContractRejectionDiagnostic<T>(
+  request: CampaignPlayNarratorRequest,
+  operation: () => Promise<T>,
+): Promise<T> {
+  let packet: CampaignPlayNarratorPacket | null = null;
+  try {
+    packet = campaignPlayNarratorPacketSchema.parse(JSON.parse(request.packetBytes) as unknown);
+  } catch {
+    packet = null;
+  }
+  try {
+    return await operation();
+  } catch (cause) {
+    if (cause instanceof CampaignPlayNarratorError) {
+      emitNarratorContractRejection(request, packet, cause);
+    }
+    throw cause;
+  }
+}
+
 export interface CampaignPlayNarrator {
   narrate(request: CampaignPlayNarratorRequest): Promise<CampaignPlayNarratorCandidate>;
   compile(input: {
@@ -1199,6 +1263,7 @@ export function createCampaignPlayNarrator(
   return {
     compile,
     async narrate(request) {
+      return withNarratorContractRejectionDiagnostic(request, async () => {
       let packet: CampaignPlayNarratorPacket;
       try {
         const parsed = JSON.parse(request.packetBytes) as unknown;
@@ -1319,6 +1384,7 @@ export function createCampaignPlayNarrator(
         }
         throw cause;
       }
+      });
     },
   };
 }
