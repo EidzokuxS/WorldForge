@@ -1,5 +1,6 @@
 import type { LanguageModel } from "ai";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import type { CampaignWorldReview } from "@worldforge/shared";
 import {
   buildStructuredOutputModelMetadata,
@@ -22,6 +23,18 @@ import {
   deriveCampaignPlayPossessionKey,
   deriveCampaignPlaySupportActorIds,
 } from "./campaign-play-projection.js";
+
+const gameMasterWarn = vi.hoisted(() => vi.fn());
+
+vi.mock("../lib/index.js", () => ({
+  createLogger: (tag: string) => ({
+    info: vi.fn(),
+    warn: tag === "campaign-play-game-master" ? gameMasterWarn : vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    event: vi.fn(),
+  }),
+}));
 
 const CAMPAIGN_ID = "campaign-game-master";
 const TURN_ID = "turn-action";
@@ -768,6 +781,7 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
   });
 
   it("forwards only the safe mechanical-authority check after reviewer rejection", async () => {
+    gameMasterWarn.mockClear();
     const rejectedProposal = {
       ...proposal,
       effects: [{
@@ -781,6 +795,11 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
         object: {
           verdict: "rejected",
           reason: "SENTINEL_REVIEW_REASON Dren Vask and private reviewer prose.",
+          failedChecks: [
+            "route_authority_missing",
+            "possession_authority_missing",
+            "route_authority_missing",
+          ],
         },
         trace: trace(),
       });
@@ -805,6 +824,18 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
     expect(feedbackText).not.toContain("SENTINEL_RAW_PROPOSAL");
     expect(feedbackText).not.toContain("Dren Vask");
     expect(feedbackText).not.toContain(rejectedProposal.effects[0]!.summary);
+    const warningPayload = gameMasterWarn.mock.calls.at(-1)?.[1] as Record<string, unknown>;
+    expect(warningPayload).toMatchObject({
+      code: "model_contract_failed",
+      reviewFailedChecks: [
+        "possession_authority_missing",
+        "route_authority_missing",
+      ],
+    });
+    expect(warningPayload).not.toHaveProperty("proposal");
+    expect(JSON.stringify(warningPayload)).not.toContain("SENTINEL_REVIEW_REASON");
+    expect(JSON.stringify(warningPayload)).not.toContain("SENTINEL_RAW_PROPOSAL");
+    expect(JSON.stringify(warningPayload)).not.toContain("Dren Vask");
     expect(generateObject).toHaveBeenCalledTimes(2);
   });
 
@@ -1020,10 +1051,47 @@ describe("Campaign Play Game Master", () => {
     expect(reviewOptions).toMatchObject({ strictSchema: true, allowRepair: false,
       allowTextFallback: false, retries: 1, abortSignal: workerController.signal, mode: "auto" });
     expect("timeout" in reviewOptions).toBe(false);
+    const reviewSchema = reviewOptions.schema as z.ZodType;
+    expect(reviewSchema.safeParse({
+      verdict: "accepted",
+      reason: "No mechanical claim changes.",
+      failedChecks: [],
+    }).success).toBe(true);
+    expect(reviewSchema.safeParse({
+      verdict: "accepted",
+      reason: "No mechanical claim changes.",
+      failedChecks: ["route_authority_missing"],
+    }).success).toBe(false);
+    expect(reviewSchema.safeParse({
+      verdict: "rejected",
+      reason: "A typed authority check failed.",
+      failedChecks: ["route_authority_missing", "route_authority_missing"],
+    }).success).toBe(true);
+    expect(reviewSchema.safeParse({
+      verdict: "rejected",
+      reason: "A typed authority check failed.",
+      failedChecks: [],
+    }).success).toBe(false);
+    expect(reviewSchema.safeParse({
+      verdict: "rejected",
+      reason: "A typed authority check failed.",
+      failedChecks: ["SENTINEL_UNKNOWN_CHECK"],
+    }).success).toBe(false);
+    const reviewSchemaJson = JSON.stringify(z.toJSONSchema(reviewSchema));
+    expect(reviewSchemaJson).toContain("possession_authority_missing");
+    expect(reviewSchemaJson).toContain("obligation_authority_missing");
+    expect(reviewSchemaJson).toContain("route_authority_missing");
+    expect(reviewSchemaJson).toContain("possession_transform_identity_incomplete");
+    expect(reviewSchemaJson).toContain("other_mechanical_authority_mismatch");
+    expect(reviewSchemaJson).toContain("minItems");
+    expect(reviewSchemaJson).toContain("maxItems");
     expect(String(reviewOptions.prompt)).toContain("A record_world_event is presentation evidence, never mechanical authority");
     expect(String(reviewOptions.prompt)).toContain("unless typedResourceEffects contains the matching possession effect");
     expect(String(reviewOptions.prompt)).toContain("unless typedResourceEffects contains the matching obligation effect");
     expect(String(reviewOptions.prompt)).toContain('"typedResourceEffects":[]');
+    expect(String(reviewOptions.prompt)).toContain(
+      "Set failedChecks to [] when verdict is accepted. When verdict is rejected, include each applicable safe check once: possession_authority_missing for an untyped possession or custody change; obligation_authority_missing for an untyped debt, payment, or duty change; route_authority_missing for an unsupported route or access claim; possession_transform_identity_incomplete when a typed transformation leaves retained possession identity incomplete; other_mechanical_authority_mismatch only when none of the specific checks applies. Do not copy event summaries, proposal text, player text, actor names, location names, provider text, or the free-form reason into failedChecks.",
+    );
     expect(String(options.prompt)).toContain("opaque handles");
     expect(String(options.prompt)).toContain("SOURCE_MOMENT is the exact accepted player-visible scene");
     expect(String(options.prompt)).toContain("PLAYER_PROFILE is protected authority for the player's durable identity, history, and capabilities");

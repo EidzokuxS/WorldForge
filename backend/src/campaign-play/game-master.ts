@@ -213,10 +213,26 @@ function createProposalSchema(
 const exposureProposalSchema = createExposureProposalSchema(handle);
 const effectProposalSchema = createEffectProposalSchema(handle, exposureProposalSchema);
 export const campaignPlayGameMasterProposalSchema = createProposalSchema(handle);
-const mechanicalAuthorityReviewSchema = z.object({
-  verdict: z.enum(["accepted", "rejected"]),
-  reason: line(CAMPAIGN_PLAY_LIMITS.text),
-}).strict();
+const MECHANICAL_AUTHORITY_FAILED_CHECK_VALUES = [
+  "possession_authority_missing",
+  "obligation_authority_missing",
+  "route_authority_missing",
+  "possession_transform_identity_incomplete",
+  "other_mechanical_authority_mismatch",
+] as const;
+const mechanicalAuthorityFailedCheckSchema = z.enum(MECHANICAL_AUTHORITY_FAILED_CHECK_VALUES);
+const mechanicalAuthorityReviewSchema = z.discriminatedUnion("verdict", [
+  z.object({
+    verdict: z.literal("accepted"),
+    reason: line(CAMPAIGN_PLAY_LIMITS.text),
+    failedChecks: z.array(mechanicalAuthorityFailedCheckSchema).length(0),
+  }).strict(),
+  z.object({
+    verdict: z.literal("rejected"),
+    reason: line(CAMPAIGN_PLAY_LIMITS.text),
+    failedChecks: z.array(mechanicalAuthorityFailedCheckSchema).min(1).max(5),
+  }).strict(),
+]);
 
 function mechanicalAuthorityReviewInput(
   rawProposal: unknown,
@@ -290,6 +306,7 @@ function mechanicalAuthorityReviewPrompt(
     "A route claim asserts where traversal goes or what traversal requires. Words such as passage, bond, stamp, clearance, gate, permit, or contract in a document, filing, job, title, or other non-traversal context do not by themselves assert route topology or access; judge the sentence's actual claim.",
     "The route itself may be named or described as a bridge, toll bridge, gate, or passage; that name alone does not add an intermediate structure or access rule. An explicit statement that no toll, payment, permission, stamp, or permit is required agrees with an open route carrying no access requirement.",
     "Calling a contradiction personal experience, uncertainty, hearsay, warning, or belief does not make it consistent with typed authority.",
+    "Set failedChecks to [] when verdict is accepted. When verdict is rejected, include each applicable safe check once: possession_authority_missing for an untyped possession or custody change; obligation_authority_missing for an untyped debt, payment, or duty change; route_authority_missing for an unsupported route or access claim; possession_transform_identity_incomplete when a typed transformation leaves retained possession identity incomplete; other_mechanical_authority_mismatch only when none of the specific checks applies. Do not copy event summaries, proposal text, player text, actor names, location names, provider text, or the free-form reason into failedChecks.",
     "Accept only when every mechanically durable claim in every reviewed summary is entailed by the supplied typed effects and route claims. Explain only the verdict basis.",
     `Keep reason on one line and within ${CAMPAIGN_PLAY_LIMITS.text} characters.`,
     `MECHANICAL_REVIEW_INPUT=${JSON.stringify(input)}`,
@@ -392,6 +409,26 @@ const gameMasterRecoveryFeedbackByError = new WeakMap<
   CampaignPlayGameMasterError,
   CampaignPlayGameMasterRecoveryFeedback
 >();
+const mechanicalAuthorityReviewFailedChecksByError = new WeakMap<
+  CampaignPlayGameMasterError,
+  readonly MechanicalAuthorityFailedCheck[]
+>();
+
+type MechanicalAuthorityFailedCheck = typeof MECHANICAL_AUTHORITY_FAILED_CHECK_VALUES[number];
+
+function canonicalizeMechanicalAuthorityFailedChecks(
+  failedChecks: readonly string[],
+): MechanicalAuthorityFailedCheck[] {
+  const supplied = new Set(failedChecks);
+  return MECHANICAL_AUTHORITY_FAILED_CHECK_VALUES.filter((check) => supplied.has(check));
+}
+
+function rememberMechanicalAuthorityReviewFailedChecks(
+  error: CampaignPlayGameMasterError,
+  failedChecks: readonly MechanicalAuthorityFailedCheck[],
+): void {
+  mechanicalAuthorityReviewFailedChecksByError.set(error, failedChecks);
+}
 
 function rememberCampaignPlayGameMasterRecoveryFeedback(
   error: CampaignPlayGameMasterError,
@@ -2140,6 +2177,10 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
             "model_contract_failed",
             { ...combined, errorCode: "mechanical_authority_rejected" },
           );
+          const reviewFailedChecks = canonicalizeMechanicalAuthorityFailedChecks(
+            (reviewed.object as { failedChecks?: readonly string[] }).failedChecks ?? [],
+          );
+          rememberMechanicalAuthorityReviewFailedChecks(error, reviewFailedChecks);
           rememberCampaignPlayGameMasterRecoveryFeedback(error, {
             diagnostic: "game_master_semantic_validation_mismatch",
             failedChecks: [{ check: "mechanical_authority_rejected" }],
@@ -2158,10 +2199,13 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
           modelEvidence: combined,
         });
       } catch (cause) {
+        const reviewFailedChecks = cause instanceof CampaignPlayGameMasterError
+          ? mechanicalAuthorityReviewFailedChecksByError.get(cause)
+          : undefined;
         log.warn("Game Master proposal failed semantic compilation.", {
           code: cause instanceof CampaignPlayGameMasterError ? cause.code : null,
           denial: cause instanceof CampaignPlayGameMasterError ? cause.denial : null,
-          proposal: generated.object,
+          ...(reviewFailedChecks === undefined ? { proposal: generated.object } : { reviewFailedChecks }),
           stack: cause instanceof Error ? cause.stack : String(cause),
         });
         if (cause instanceof CampaignPlayGameMasterError) {
@@ -2175,6 +2219,9 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
             wrapped,
             getCampaignPlayGameMasterRecoveryFeedback(cause),
           );
+          if (reviewFailedChecks !== undefined) {
+            rememberMechanicalAuthorityReviewFailedChecks(wrapped, reviewFailedChecks);
+          }
           throw wrapped;
         }
         throw cause;
