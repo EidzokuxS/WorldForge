@@ -35,8 +35,6 @@ No prompt or player-visible copy changed; humanizer/deslop review is not applica
 - Backend build (`npm run build`) passed.
 - `git diff --check` passed.
 - On the task-owned exact-entry shadow with the staged patch, GitNexus `detect_changes --scope staged` reported 3 files, 6 mapped shared-AI symbols, 36 affected execution flows, and critical risk. The mapped shared symbols include the existing `safeGenerateObject`/native-generation callers because the private helper lives in the shared file; no additional production file, exported interface, consumer, or acceptance path was edited. This is within Main's explicit authorization for the disclosed private diagnostic seam.
-- The staged implementation commit is pending before the live lane.
-
 The bounded implementation and initial note were committed and pushed as `38a1afe3c43098c4dea8e472774f0105ec95f2f1`; local `HEAD` equaled `origin/feat/revamp` before the lane. The protected `AGENTS.md` and `CLAUDE.md` files remained byte-for-byte unchanged and unstaged.
 
 Canonical r145 template state, config, and Brina card hashes are respectively `6cb291d11ce6578e3395a10d2c5d590070e3ccdd8b2b67451410869ce97897d2`, `d8362b1af976c00cb8f14c564c8196a2d1ab137743ff368ea83d762a4ad2e065`, and `4b48de7a32df6a6be5a91ab12f09bb87926b40d5940348c7581e298eaa12b60a`.
