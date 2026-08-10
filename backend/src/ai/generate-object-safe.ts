@@ -4,7 +4,7 @@ import {
   tool as defineTool,
   type LanguageModel,
 } from "ai";
-import type { ZodType } from "zod";
+import { z, type ZodType } from "zod";
 import { generateText, streamText } from "./raindrop-workshop.js";
 import { createLogger } from "../lib/index.js";
 import { extractReasoningText } from "./extract-reasoning-text.js";
@@ -1208,8 +1208,190 @@ function structuredOutputArgumentType(value: unknown): StructuredOutputArgumentT
 
 type StructuredOutputToolInputResult =
   | { kind: "found"; input: unknown }
-  | { kind: "invalid"; diagnostic: StructuredOutputInvalidToolCallDiagnostic }
+  | {
+      kind: "invalid";
+      diagnostic: StructuredOutputInvalidToolCallDiagnostic;
+      input: unknown;
+    }
   | { kind: "missing" };
+
+type StructuredOutputSchemaIssue = {
+  issueIndex: number;
+  code: string;
+  path: Array<string | number>;
+};
+
+type StructuredOutputSchemaDiagnostics = {
+  schemaParseOutcome: "valid" | "invalid" | "unavailable";
+  schemaIssueCount: number;
+  schemaIssuesTruncated: boolean;
+  schemaIssues: StructuredOutputSchemaIssue[];
+};
+
+type StructuredOutputZodIssue = {
+  code?: unknown;
+  path?: unknown;
+  errors?: unknown;
+  unionErrors?: unknown;
+};
+
+type StructuredOutputFlattenedIssue = {
+  code: string;
+  path: unknown[];
+};
+
+const STRUCTURED_OUTPUT_MAX_SCHEMA_ISSUES = 8;
+const STRUCTURED_OUTPUT_MAX_SCHEMA_PATH_SEGMENTS = 12;
+const STRUCTURED_OUTPUT_MAX_SCHEMA_WALK_NODES = 512;
+
+function structuredOutputUnavailableSchemaDiagnostics(): StructuredOutputSchemaDiagnostics {
+  return {
+    schemaParseOutcome: "unavailable",
+    schemaIssueCount: 0,
+    schemaIssuesTruncated: false,
+    schemaIssues: [],
+  };
+}
+
+function flattenStructuredOutputZodIssues(
+  issues: unknown,
+  prefix: unknown[] = [],
+): StructuredOutputFlattenedIssue[] {
+  if (!Array.isArray(issues)) return [];
+
+  const flattened: StructuredOutputFlattenedIssue[] = [];
+  for (const issue of issues) {
+    if (Array.isArray(issue)) {
+      flattened.push(...flattenStructuredOutputZodIssues(issue, prefix));
+      continue;
+    }
+    if (!issue || typeof issue !== "object") continue;
+    const current = issue as StructuredOutputZodIssue;
+    const issuePath = Array.isArray(current.path) ? current.path : [];
+    const path = [...prefix, ...issuePath];
+    const nested = Array.isArray(current.errors)
+      ? current.errors
+      : Array.isArray(current.unionErrors)
+        ? current.unionErrors
+        : null;
+    if (nested) {
+      const nestedIssues = flattenStructuredOutputZodIssues(nested, path);
+      if (nestedIssues.length > 0) {
+        flattened.push(...nestedIssues);
+        continue;
+      }
+    }
+
+    flattened.push({
+      code: typeof current.code === "string" ? current.code : "unknown",
+      path,
+    });
+  }
+  return flattened;
+}
+
+function collectStructuredOutputSchemaPropertyNames(schemaJson: unknown): Set<string> {
+  const names = new Set<string>();
+  const visited = new Set<object>();
+  let visitedCount = 0;
+
+  const visit = (value: unknown, depth: number): void => {
+    if (depth > 24 || visitedCount >= STRUCTURED_OUTPUT_MAX_SCHEMA_WALK_NODES) return;
+    if (!value || typeof value !== "object") return;
+    if (visited.has(value)) return;
+    visited.add(value);
+    visitedCount += 1;
+
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, depth + 1);
+      return;
+    }
+
+    const record = value as Record<string, unknown>;
+    const properties = record.properties;
+    if (properties && typeof properties === "object" && !Array.isArray(properties)) {
+      for (const [propertyName, propertySchema] of Object.entries(properties)) {
+        names.add(propertyName);
+        visit(propertySchema, depth + 1);
+      }
+    }
+
+    for (const key of [
+      "items",
+      "prefixItems",
+      "anyOf",
+      "oneOf",
+      "allOf",
+      "$defs",
+      "definitions",
+      "additionalProperties",
+      "contains",
+      "if",
+      "then",
+      "else",
+      "not",
+      "dependentSchemas",
+      "propertyNames",
+      "unevaluatedProperties",
+    ]) {
+      visit(record[key], depth + 1);
+    }
+  };
+
+  visit(schemaJson, 0);
+  return names;
+}
+
+function sanitizeStructuredOutputSchemaPath(
+  path: unknown[],
+  schemaPropertyNames: Set<string>,
+): Array<string | number> {
+  return path.slice(0, STRUCTURED_OUTPUT_MAX_SCHEMA_PATH_SEGMENTS).map((segment) => {
+    if (typeof segment === "number" && Number.isSafeInteger(segment) && segment >= 0) {
+      return segment;
+    }
+    if (typeof segment === "string" && schemaPropertyNames.has(segment)) {
+      return segment;
+    }
+    return "[dynamic]";
+  });
+}
+
+function buildStructuredOutputSchemaDiagnostics<T>(
+  input: unknown,
+  schema: ZodType<T>,
+): StructuredOutputSchemaDiagnostics {
+  try {
+    const parsed = schema.safeParse(input);
+    if (parsed.success) {
+      return {
+        schemaParseOutcome: "valid",
+        schemaIssueCount: 0,
+        schemaIssuesTruncated: false,
+        schemaIssues: [],
+      };
+    }
+
+    const schemaJson = z.toJSONSchema(schema as never);
+    const schemaPropertyNames = collectStructuredOutputSchemaPropertyNames(schemaJson);
+    const flattened = flattenStructuredOutputZodIssues(parsed.error.issues);
+    const schemaIssues = flattened
+      .slice(0, STRUCTURED_OUTPUT_MAX_SCHEMA_ISSUES)
+      .map((issue, issueIndex) => ({
+        issueIndex,
+        code: issue.code,
+        path: sanitizeStructuredOutputSchemaPath(issue.path, schemaPropertyNames),
+      }));
+    return {
+      schemaParseOutcome: "invalid",
+      schemaIssueCount: flattened.length,
+      schemaIssuesTruncated: flattened.length > STRUCTURED_OUTPUT_MAX_SCHEMA_ISSUES,
+      schemaIssues,
+    };
+  } catch {
+    return structuredOutputUnavailableSchemaDiagnostics();
+  }
+}
 
 function collectStructuredOutputToolCalls(
   result: Awaited<ReturnType<typeof generateText>>,
@@ -1273,6 +1455,7 @@ function extractStructuredOutputToolInput(
   const argument = structuredOutputToolArgument(invalidToolCall.call);
   return {
     kind: "invalid",
+    input: argument.value,
     diagnostic: {
       toolName: STRUCTURED_OUTPUT_TOOL_NAME,
       source: invalidToolCall.source,
@@ -1528,7 +1711,10 @@ async function attemptToolModeGenerate<T>(
     );
   }
   if (toolInputResult.kind === "invalid") {
-    log.event("llm.structured_output_invalid_tool_call", toolInputResult.diagnostic);
+    log.event("llm.structured_output_invalid_tool_call", {
+      ...toolInputResult.diagnostic,
+      ...buildStructuredOutputSchemaDiagnostics(toolInputResult.input, opts.schema),
+    });
     throw new SafeGenerateError(
       `safeGenerateObject tool mode: ${STRUCTURED_OUTPUT_TOOL_NAME} tool call was generated with invalid arguments`,
       trace,

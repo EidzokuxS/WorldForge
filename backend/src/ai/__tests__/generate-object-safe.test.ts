@@ -1033,6 +1033,10 @@ describe("safeGenerateObject", () => {
       stepToolCallCount: 0,
       matchingToolCallCount: 1,
       invalidMatchingToolCallCount: 1,
+      schemaParseOutcome: "invalid",
+      schemaIssueCount: 1,
+      schemaIssuesTruncated: false,
+      schemaIssues: [{ issueIndex: 0, code: "invalid_type", path: ["hp"] }],
     }]);
     expect(JSON.stringify(diagnostics)).not.toContain("raw-invalid-argument");
   });
@@ -1094,8 +1098,305 @@ describe("safeGenerateObject", () => {
       stepToolCallCount: 2,
       matchingToolCallCount: 1,
       invalidMatchingToolCallCount: 1,
+      schemaParseOutcome: "invalid",
+      schemaIssueCount: 1,
+      schemaIssuesTruncated: false,
+      schemaIssues: [{ issueIndex: 0, code: "invalid_type", path: [] }],
     }]);
     expect(JSON.stringify(diagnostics)).not.toContain("provider-response-prose");
+  });
+
+  it("records only safe schema issue coordinates for invalid arguments", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "openrouter",
+        providerName: "OpenRouter",
+        model: "tool-capable-model",
+        protocol: "openai-compatible",
+        baseUrl: "https://openrouter.ai/api/v1",
+        transport: "chat-completions",
+      }),
+    );
+    mockGenerateText.mockResolvedValue({
+      text: "",
+      finishReason: "tool-calls",
+      toolCalls: [{
+        type: "tool-call",
+        toolName: "structured_output",
+        invalid: true,
+        input: {
+          extraSentinel: "PLAYER_RAW_VALUE",
+          nested: { safeField: 7, rawActorName: "Dren Vask" },
+        },
+      }],
+    });
+
+    await expect(safeGenerateObject({
+      model: model as never,
+      schema: z.object({
+        nested: z.object({ safeField: z.string() }),
+      }).strict(),
+      prompt: "test",
+      mode: "tool",
+      retries: 1,
+      allowTextFallback: false,
+    })).rejects.toSatisfy((error: unknown) =>
+      getSafeGenerateObjectErrorCode(error) === "invalid_structured_tool_call"
+      && isSafeGenerateObjectError(error)
+    );
+
+    const [diagnostic] = mockLogEvent.mock.calls
+      .filter(([name]) => name === "llm.structured_output_invalid_tool_call")
+      .map(([, payload]) => payload);
+    expect(diagnostic).toMatchObject({
+      schemaParseOutcome: "invalid",
+      schemaIssueCount: 2,
+      schemaIssuesTruncated: false,
+      schemaIssues: [
+        { issueIndex: 0, code: "invalid_type", path: ["nested", "safeField"] },
+        { issueIndex: 1, code: "unrecognized_keys", path: [] },
+      ],
+    });
+    expect(JSON.stringify(diagnostic)).not.toContain("PLAYER_RAW_VALUE");
+    expect(JSON.stringify(diagnostic)).not.toContain("Dren Vask");
+    expect(JSON.stringify(diagnostic)).not.toContain("extraSentinel");
+    expect(JSON.stringify(diagnostic)).not.toContain("rawActorName");
+  });
+
+  it("masks dynamic record keys while preserving nested schema-owned paths", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "openrouter",
+        providerName: "OpenRouter",
+        model: "tool-capable-model",
+        protocol: "openai-compatible",
+        baseUrl: "https://openrouter.ai/api/v1",
+        transport: "chat-completions",
+      }),
+    );
+    mockGenerateText.mockResolvedValue({
+      text: "",
+      finishReason: "tool-calls",
+      toolCalls: [{
+        type: "tool-call",
+        toolName: "structured_output",
+        invalid: true,
+        input: { metadata: { PLAYER_SENTINEL: { known: "wrong" } } },
+      }],
+    });
+
+    await expect(safeGenerateObject({
+      model: model as never,
+      schema: z.object({
+        metadata: z.record(z.string(), z.object({ known: z.number() })),
+      }),
+      prompt: "test",
+      mode: "tool",
+      retries: 1,
+      allowTextFallback: false,
+    })).rejects.toSatisfy((error: unknown) =>
+      getSafeGenerateObjectErrorCode(error) === "invalid_structured_tool_call"
+      && isSafeGenerateObjectError(error)
+    );
+
+    const [diagnostic] = mockLogEvent.mock.calls
+      .filter(([name]) => name === "llm.structured_output_invalid_tool_call")
+      .map(([, payload]) => payload);
+    expect(diagnostic).toMatchObject({
+      schemaParseOutcome: "invalid",
+      schemaIssueCount: 1,
+      schemaIssuesTruncated: false,
+      schemaIssues: [{
+        issueIndex: 0,
+        code: "invalid_type",
+        path: ["metadata", "[dynamic]", "known"],
+      }],
+    });
+    expect(JSON.stringify(diagnostic)).not.toContain("PLAYER_SENTINEL");
+    expect(JSON.stringify(diagnostic)).not.toContain("wrong");
+  });
+
+  it("flattens union issue branches in order and caps safe coordinates", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "openrouter",
+        providerName: "OpenRouter",
+        model: "tool-capable-model",
+        protocol: "openai-compatible",
+        baseUrl: "https://openrouter.ai/api/v1",
+        transport: "chat-completions",
+      }),
+    );
+    const shape: Record<string, z.ZodTypeAny> = {
+      kind: z.union([z.literal("a"), z.literal("b"), z.literal("c")]),
+    };
+    for (let index = 0; index < 9; index += 1) shape[`field${index}`] = z.string();
+    mockGenerateText.mockResolvedValue({
+      text: "",
+      finishReason: "tool-calls",
+      toolCalls: [{
+        type: "tool-call",
+        toolName: "structured_output",
+        invalid: true,
+        input: { kind: "unexpected" },
+      }],
+    });
+
+    await expect(safeGenerateObject({
+      model: model as never,
+      schema: z.object(shape),
+      prompt: "test",
+      mode: "tool",
+      retries: 1,
+      allowTextFallback: false,
+    })).rejects.toSatisfy((error: unknown) =>
+      getSafeGenerateObjectErrorCode(error) === "invalid_structured_tool_call"
+      && isSafeGenerateObjectError(error)
+    );
+
+    const [diagnostic] = mockLogEvent.mock.calls
+      .filter(([name]) => name === "llm.structured_output_invalid_tool_call")
+      .map(([, payload]) => payload) as Array<Record<string, unknown>>;
+    expect(diagnostic).toMatchObject({
+      schemaParseOutcome: "invalid",
+      schemaIssueCount: 12,
+      schemaIssuesTruncated: true,
+      schemaIssues: [
+        { issueIndex: 0, code: "invalid_value", path: ["kind"] },
+        { issueIndex: 1, code: "invalid_value", path: ["kind"] },
+        { issueIndex: 2, code: "invalid_value", path: ["kind"] },
+        { issueIndex: 3, code: "invalid_type", path: ["field0"] },
+        { issueIndex: 4, code: "invalid_type", path: ["field1"] },
+        { issueIndex: 5, code: "invalid_type", path: ["field2"] },
+        { issueIndex: 6, code: "invalid_type", path: ["field3"] },
+        { issueIndex: 7, code: "invalid_type", path: ["field4"] },
+      ],
+    });
+    expect((diagnostic as { schemaIssues: unknown[] }).schemaIssues).toHaveLength(8);
+  });
+
+  it("reports valid schema input for an SDK-invalid call without changing the error", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "openrouter",
+        providerName: "OpenRouter",
+        model: "tool-capable-model",
+        protocol: "openai-compatible",
+        baseUrl: "https://openrouter.ai/api/v1",
+        transport: "chat-completions",
+      }),
+    );
+    mockGenerateText.mockResolvedValue({
+      text: "",
+      finishReason: "tool-calls",
+      toolCalls: [{
+        type: "tool-call",
+        toolName: "structured_output",
+        invalid: true,
+        input: { hp: 7 },
+      }],
+    });
+
+    await expect(safeGenerateObject({
+      model: model as never,
+      schema: z.object({ hp: z.number() }),
+      prompt: "test",
+      mode: "tool",
+      retries: 1,
+      allowTextFallback: false,
+    })).rejects.toSatisfy((error: unknown) =>
+      getSafeGenerateObjectErrorCode(error) === "invalid_structured_tool_call"
+      && isSafeGenerateObjectError(error)
+    );
+
+    const [diagnostic] = mockLogEvent.mock.calls
+      .filter(([name]) => name === "llm.structured_output_invalid_tool_call")
+      .map(([, payload]) => payload);
+    expect(diagnostic).toMatchObject({
+      schemaParseOutcome: "valid",
+      schemaIssueCount: 0,
+      schemaIssuesTruncated: false,
+      schemaIssues: [],
+    });
+  });
+
+  it("keeps scalar and missing argument carriers private", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "openrouter",
+        providerName: "OpenRouter",
+        model: "tool-capable-model",
+        protocol: "openai-compatible",
+        baseUrl: "https://openrouter.ai/api/v1",
+        transport: "chat-completions",
+      }),
+    );
+    mockGenerateText
+      .mockResolvedValueOnce({
+        text: "",
+        finishReason: "tool-calls",
+        toolCalls: [{
+          type: "tool-call",
+          toolName: "structured_output",
+          invalid: true,
+          args: "PLAYER_RAW_SCALAR",
+        }],
+      })
+      .mockResolvedValueOnce({
+        text: "",
+        finishReason: "tool-calls",
+        toolCalls: [{
+          type: "tool-call",
+          toolName: "structured_output",
+          invalid: true,
+        }],
+      });
+
+    const options = {
+      model: model as never,
+      schema: z.object({ hp: z.number() }),
+      prompt: "test",
+      mode: "tool" as const,
+      retries: 1,
+      allowTextFallback: false,
+    };
+    await expect(safeGenerateObject(options)).rejects.toSatisfy((error: unknown) =>
+      getSafeGenerateObjectErrorCode(error) === "invalid_structured_tool_call"
+    );
+    await expect(safeGenerateObject(options)).rejects.toSatisfy((error: unknown) =>
+      getSafeGenerateObjectErrorCode(error) === "invalid_structured_tool_call"
+    );
+    const diagnostics = mockLogEvent.mock.calls
+      .filter(([name]) => name === "llm.structured_output_invalid_tool_call")
+      .map(([, payload]) => payload) as Array<Record<string, unknown>>;
+    expect(diagnostics.map(({ argumentCarrier, argumentType, schemaParseOutcome, schemaIssueCount, schemaIssues }) =>
+      ({ argumentCarrier, argumentType, schemaParseOutcome, schemaIssueCount, schemaIssues }))).toEqual([
+        {
+          argumentCarrier: "args",
+          argumentType: "string",
+          schemaParseOutcome: "invalid",
+          schemaIssueCount: 1,
+          schemaIssues: [{ issueIndex: 0, code: "invalid_type", path: [] }],
+        },
+        {
+          argumentCarrier: "none",
+          argumentType: "missing",
+          schemaParseOutcome: "invalid",
+          schemaIssueCount: 1,
+          schemaIssues: [{ issueIndex: 0, code: "invalid_type", path: [] }],
+        },
+      ]);
+    expect(JSON.stringify(diagnostics)).not.toContain("PLAYER_RAW_SCALAR");
   });
 
   it("prefers a valid structured output call over an invalid matching call without logging invalid diagnostics", async () => {
