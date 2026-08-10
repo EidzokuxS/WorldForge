@@ -1219,6 +1219,11 @@ type StructuredOutputSchemaIssue = {
   issueIndex: number;
   code: string;
   path: Array<string | number>;
+  valueState: "present" | "missing" | "unavailable";
+  valueType: StructuredOutputArgumentType | null;
+  schemaLiteralCount: number;
+  schemaLiteralsTruncated: boolean;
+  schemaLiteralMatch: "exact" | "normalized_string" | "none" | "unavailable";
 };
 
 type StructuredOutputSchemaDiagnostics = {
@@ -1243,6 +1248,21 @@ type StructuredOutputFlattenedIssue = {
 const STRUCTURED_OUTPUT_MAX_SCHEMA_ISSUES = 8;
 const STRUCTURED_OUTPUT_MAX_SCHEMA_PATH_SEGMENTS = 12;
 const STRUCTURED_OUTPUT_MAX_SCHEMA_WALK_NODES = 512;
+const STRUCTURED_OUTPUT_MAX_SCHEMA_LITERALS = 32;
+const STRUCTURED_OUTPUT_MAX_SCHEMA_DEPTH = 24;
+
+type StructuredOutputSchemaLiteral = string | number | boolean | null;
+
+type StructuredOutputSchemaLiteralCollection = {
+  literals: StructuredOutputSchemaLiteral[];
+  truncated: boolean;
+  unavailable: boolean;
+};
+
+type StructuredOutputValueResolution =
+  | { state: "present"; value: unknown }
+  | { state: "missing" }
+  | { state: "unavailable" };
 
 function structuredOutputUnavailableSchemaDiagnostics(): StructuredOutputSchemaDiagnostics {
   return {
@@ -1366,6 +1386,222 @@ function sanitizeStructuredOutputSchemaPath(
   });
 }
 
+function isStructuredOutputSchemaLiteral(value: unknown): value is StructuredOutputSchemaLiteral {
+  return value === null || (
+    typeof value === "string"
+    || typeof value === "number"
+    || typeof value === "boolean"
+  );
+}
+
+function structuredOutputSchemaPointerToken(token: string): string {
+  return token.replace(/~1/g, "/").replace(/~0/g, "~");
+}
+
+function resolveStructuredOutputSchemaReference(
+  root: unknown,
+  reference: unknown,
+): unknown {
+  if (reference === "#") return root;
+  if (typeof reference !== "string" || !reference.startsWith("#/")) return undefined;
+  const parts = reference.slice(2).split("/").map(structuredOutputSchemaPointerToken);
+  let current: unknown = root;
+  for (const part of parts) {
+    if (!current || typeof current !== "object") return undefined;
+    if (!Object.prototype.hasOwnProperty.call(current, part)) return undefined;
+    current = (current as Record<string, unknown>)[part];
+  }
+  return current;
+}
+
+function resolveStructuredOutputValue(
+  input: unknown,
+  path: unknown[],
+): StructuredOutputValueResolution {
+  if (!Array.isArray(path)) return { state: "unavailable" };
+  let current: unknown = input;
+  try {
+    for (const segment of path) {
+      if (
+        !(
+          typeof segment === "string"
+          || (typeof segment === "number" && Number.isSafeInteger(segment) && segment >= 0)
+        )
+      ) {
+        return { state: "unavailable" };
+      }
+      if (current === null || (typeof current !== "object" && typeof current !== "function")) {
+        return { state: "missing" };
+      }
+      const key = String(segment);
+      if (!Object.prototype.hasOwnProperty.call(current, key)) {
+        return { state: "missing" };
+      }
+      current = (current as Record<string, unknown>)[key];
+    }
+  } catch {
+    return { state: "unavailable" };
+  }
+  return current === undefined
+    ? { state: "missing" }
+    : { state: "present", value: current };
+}
+
+function collectStructuredOutputSchemaLiterals(
+  schemaJson: unknown,
+  path: unknown[],
+): StructuredOutputSchemaLiteralCollection {
+  const literals: StructuredOutputSchemaLiteral[] = [];
+  const literalKeys = new Set<string>();
+  const visited = new WeakMap<object, Set<number>>();
+  let visitedCount = 0;
+  let truncated = false;
+  let unavailable = false;
+
+  const addLiteral = (value: unknown): void => {
+    if (!isStructuredOutputSchemaLiteral(value)) return;
+    const key = `${typeof value}:${value === null ? "null" : String(value)}`;
+    if (literalKeys.has(key)) return;
+    literalKeys.add(key);
+    if (literals.length >= STRUCTURED_OUTPUT_MAX_SCHEMA_LITERALS) {
+      truncated = true;
+      return;
+    }
+    literals.push(value);
+  };
+
+  const visit = (value: unknown, pathIndex: number, depth: number): void => {
+    if (depth > STRUCTURED_OUTPUT_MAX_SCHEMA_DEPTH || visitedCount >= STRUCTURED_OUTPUT_MAX_SCHEMA_WALK_NODES) {
+      unavailable = true;
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    const seenPathIndexes = visited.get(value);
+    if (seenPathIndexes?.has(pathIndex)) return;
+    if (seenPathIndexes) {
+      seenPathIndexes.add(pathIndex);
+    } else {
+      visited.set(value, new Set([pathIndex]));
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, pathIndex, depth + 1);
+      return;
+    }
+    visitedCount += 1;
+
+    const record = value as Record<string, unknown>;
+    if (record.$ref !== undefined) {
+      const referenced = resolveStructuredOutputSchemaReference(schemaJson, record.$ref);
+      if (referenced === undefined) {
+        unavailable = true;
+      } else {
+        visit(referenced, pathIndex, depth + 1);
+      }
+    }
+
+    if (pathIndex === path.length) {
+      addLiteral(record.const);
+      if (Array.isArray(record.enum)) {
+        for (const candidate of record.enum) addLiteral(candidate);
+      }
+    }
+
+    for (const key of ["anyOf", "oneOf", "allOf"]) {
+      visit(record[key], pathIndex, depth + 1);
+    }
+
+    for (const key of ["if", "then", "else", "not", "propertyNames", "unevaluatedProperties", "contains"]) {
+      visit(record[key], pathIndex, depth + 1);
+    }
+
+    if (pathIndex >= path.length) return;
+    const segment = path[pathIndex];
+    if (typeof segment === "string") {
+      const properties = record.properties;
+      const propertySchema = properties && typeof properties === "object" && !Array.isArray(properties)
+        ? (properties as Record<string, unknown>)[segment]
+        : undefined;
+      if (propertySchema !== undefined) {
+        visit(propertySchema, pathIndex + 1, depth + 1);
+      } else {
+        visit(record.additionalProperties, pathIndex + 1, depth + 1);
+        visit(record.unevaluatedProperties, pathIndex + 1, depth + 1);
+        const patternProperties = record.patternProperties;
+        if (patternProperties && typeof patternProperties === "object" && !Array.isArray(patternProperties)) {
+          for (const childSchema of Object.values(patternProperties as Record<string, unknown>)) {
+            visit(childSchema, pathIndex + 1, depth + 1);
+          }
+        }
+      }
+    } else if (typeof segment === "number" && Number.isSafeInteger(segment) && segment >= 0) {
+      const prefixItems = record.prefixItems;
+      if (Array.isArray(prefixItems) && prefixItems[segment] !== undefined) {
+        visit(prefixItems[segment], pathIndex + 1, depth + 1);
+      }
+      visit(record.items, pathIndex + 1, depth + 1);
+    } else {
+      unavailable = true;
+    }
+  };
+
+  visit(schemaJson, 0, 0);
+  return { literals, truncated, unavailable };
+}
+
+function classifyStructuredOutputSchemaIssue(
+  input: unknown,
+  issuePath: unknown[],
+  schemaJson: unknown,
+): Pick<StructuredOutputSchemaIssue, "valueState" | "valueType" | "schemaLiteralCount" | "schemaLiteralsTruncated" | "schemaLiteralMatch"> {
+  try {
+    const value = resolveStructuredOutputValue(input, issuePath);
+    const literals = collectStructuredOutputSchemaLiterals(schemaJson, issuePath);
+    const valueType = value.state === "present" ? structuredOutputArgumentType(value.value) : null;
+    const base = {
+      valueState: value.state,
+      valueType,
+      schemaLiteralCount: literals.literals.length,
+      schemaLiteralsTruncated: literals.truncated,
+    } as const;
+
+    if (literals.literals.length === 0) {
+      return { ...base, schemaLiteralMatch: "unavailable" };
+    }
+    if (value.state !== "present") {
+      return {
+        ...base,
+        schemaLiteralMatch: literals.unavailable ? "unavailable" : "none",
+      };
+    }
+
+    for (const literal of literals.literals) {
+      if (Object.is(value.value, literal)) {
+        return { ...base, schemaLiteralMatch: "exact" };
+      }
+    }
+    if (typeof value.value === "string") {
+      const normalized = value.value.trim().toLowerCase();
+      for (const literal of literals.literals) {
+        if (typeof literal === "string" && literal.trim().toLowerCase() === normalized) {
+          return { ...base, schemaLiteralMatch: "normalized_string" };
+        }
+      }
+    }
+    return {
+      ...base,
+      schemaLiteralMatch: literals.unavailable || literals.truncated ? "unavailable" : "none",
+    };
+  } catch {
+    return {
+      valueState: "unavailable",
+      valueType: null,
+      schemaLiteralCount: 0,
+      schemaLiteralsTruncated: false,
+      schemaLiteralMatch: "unavailable",
+    };
+  }
+}
+
 function buildStructuredOutputSchemaDiagnostics<T>(
   input: unknown,
   schema: ZodType<T>,
@@ -1390,6 +1626,7 @@ function buildStructuredOutputSchemaDiagnostics<T>(
         issueIndex,
         code: issue.code,
         path: sanitizeStructuredOutputSchemaPath(issue.path, schemaPropertyNames),
+        ...classifyStructuredOutputSchemaIssue(input, issue.path, schemaJson),
       }));
     return {
       schemaParseOutcome: "invalid",
