@@ -2402,7 +2402,9 @@ export function createCampaignPlayTurnRuntime(
     attempt: number,
   ): "auto" | "tool" => {
     if (attempt <= 1) return "auto";
-    if (kind === "judge") return "tool";
+    if (kind === "judge") {
+      return input.judgeRecoveryFeedback !== undefined ? "auto" : "tool";
+    }
     const previous = input.handle.sqlite.prepare(`SELECT error_code AS errorCode
       FROM campaign_play_model_stages
       WHERE campaign_id = ? AND turn_id = ? AND kind = ? AND attempt = ?`).get(

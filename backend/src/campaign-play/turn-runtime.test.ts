@@ -2650,6 +2650,7 @@ describe("Campaign Play player-action turn runtime", () => {
         turnId: admission.turnId,
       }),
       attempt: 1,
+      structuredOutputMode: "auto",
     });
     expect(judge.judge.mock.calls[0]![0]).not.toHaveProperty("recoveryFeedback");
   });
@@ -2708,6 +2709,10 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(secondRuntime.loadTurn(admission.turnId)).toMatchObject({ stage: "primary_settled" });
     expect(judge.judge).toHaveBeenCalledTimes(2);
     expect(judge.judge.mock.calls.map((call) => call[0]!.attempt)).toEqual([1, 2]);
+    expect(judge.judge.mock.calls.map((call) => call[0]!.structuredOutputMode)).toEqual([
+      "auto",
+      "auto",
+    ]);
     expect(judge.judge.mock.calls[1]![0]).toMatchObject({
       frame: expect.objectContaining({ campaignId: CAMPAIGN_ID, turnId: admission.turnId }),
       recoveryFeedback: recoveredFeedback,
