@@ -20,6 +20,7 @@ import {
   CAMPAIGN_PLAY_OPENING_NARRATOR_MAX_BEATS,
   CampaignPlayNarratorError,
   createCampaignPlayNarrator,
+  type CampaignPlayNarratorRecoveryFeedback,
   type CampaignPlayNarratorProposal,
 } from "./narrator.js";
 
@@ -995,6 +996,108 @@ describe("Campaign Play narrator", () => {
     };
     expect(noReplySchema.properties.actionSelections.items.properties.intentIndex)
       .toMatchObject({ minimum: 0, maximum: CAMPAIGN_PLAY_LIMITS.availableIntents - 1 });
+  });
+
+  it("derives a generation recovery frame from packet action-selection authority", async () => {
+    const basePacket = r45SingleObservationPacket();
+    const requiredPacket: CampaignPlayNarratorPacket = {
+      ...basePacket,
+      availableIntents: Array.from({ length: 7 }, (_value, intentIndex) => ({
+        ...basePacket.availableIntents[0]!,
+        handle: `choice_generation_${intentIndex}`,
+        label: intentIndex === 5 ? "Talk to Dren Vask" : `Observe option ${intentIndex}`,
+        kind: intentIndex === 5 ? "contact" as const : "observe" as const,
+        targets: intentIndex === 5
+          ? [{ handle: "actor_dren_vask", kind: "actor" as const }]
+          : [{ handle: "actor_dren_vask", kind: "actor" as const }],
+      })),
+    };
+    const requiredProposal = {
+      actionSelections: [5, 6, 0, 1].map((intentIndex) => ({
+        intentIndex,
+        detail: `option ${intentIndex}`,
+      })),
+      beats: [{
+        purpose: "consequence" as const,
+        observationIndexes: [0],
+        text: 'Dren Vask says, "Ask Vedris if you need more."',
+      }],
+    };
+    const generateObject = vi.fn(async (
+      _options: Parameters<typeof safeGenerateObject>[0],
+    ) => ({ object: requiredProposal, trace: trace() }));
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    const recoveryFeedback: CampaignPlayNarratorRecoveryFeedback = {
+      diagnostic: "narrator_generation_schema_mismatch" as const,
+      failedChecks: [{ check: "generation_schema_invalid" as const }],
+    };
+    const request = {
+      narrationId: "narration-generation-recovery-frame",
+      packetBytes: canonicalizeCampaignPlayProjection(requiredPacket),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+    };
+    await narrator.narrate(request);
+    const basePrompt = String(generateObject.mock.calls[0]![0].prompt);
+    expect(basePrompt).not.toContain("NARRATOR_GENERATION_RECOVERY");
+    await narrator.narrate({ ...request, narrationId: "narration-generation-recovery-frame-2", recoveryFeedback });
+    const recoveryPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    const frameStart = recoveryPrompt.indexOf("ACTION_SELECTION_INDEX_FRAME\n")
+      + "ACTION_SELECTION_INDEX_FRAME\n".length;
+    const frameEnd = recoveryPrompt.indexOf("\nEND_ACTION_SELECTION_INDEX_FRAME", frameStart);
+    const frameText = recoveryPrompt.slice(frameStart, frameEnd);
+    expect(JSON.parse(frameText)).toEqual({
+      entries: [
+        { actionSelectionIndex: 0, allowedIntentIndexes: [5] },
+        { actionSelectionIndex: 1, allowedIntentIndexes: [0, 1, 2, 3, 4, 6] },
+        { actionSelectionIndex: 2, allowedIntentIndexes: [0, 1, 2, 3, 4, 6] },
+        { actionSelectionIndex: 3, allowedIntentIndexes: [0, 1, 2, 3, 4, 6] },
+      ],
+      expectedActionSelectionCount: 4,
+    });
+    expect(recoveryPrompt).toContain(
+      "The prior response did not match the provider-facing schema. Regenerate a fresh object.",
+    );
+    expect(recoveryPrompt).toContain("set intentIndex to one integer from allowedIntentIndexes");
+    expect(recoveryPrompt).toContain('"diagnostic":"narrator_generation_schema_mismatch"');
+    expect(frameText).not.toContain("Mara Venn");
+    expect(frameText).not.toContain("choice_generation_0");
+
+    const oneIntentGenerateObject = vi.fn(async (
+      _options: Parameters<typeof safeGenerateObject>[0],
+    ) => ({
+      object: {
+        actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+        beats: [{
+          purpose: "consequence" as const,
+          observationIndexes: [0],
+          text: 'Dren Vask says, "Ask Vedris if you need more."',
+        }],
+      },
+      trace: trace(),
+    }));
+    const oneIntentNarrator = createCampaignPlayNarrator({
+      generateObject: oneIntentGenerateObject as unknown as typeof safeGenerateObject,
+    });
+    const oneIntentPacket = r45SingleObservationPacket();
+    await oneIntentNarrator.narrate({
+      ...request,
+      narrationId: "narration-generation-recovery-one-intent",
+      packetBytes: canonicalizeCampaignPlayProjection(oneIntentPacket),
+      recoveryFeedback,
+    });
+    const oneIntentPrompt = String(oneIntentGenerateObject.mock.calls[0]![0].prompt);
+    const oneIntentFrameStart = oneIntentPrompt.indexOf("ACTION_SELECTION_INDEX_FRAME\n")
+      + "ACTION_SELECTION_INDEX_FRAME\n".length;
+    const oneIntentFrameEnd = oneIntentPrompt.indexOf("\nEND_ACTION_SELECTION_INDEX_FRAME", oneIntentFrameStart);
+    expect(JSON.parse(oneIntentPrompt.slice(oneIntentFrameStart, oneIntentFrameEnd))).toEqual({
+      entries: [{ actionSelectionIndex: 0, allowedIntentIndexes: [0] }],
+      expectedActionSelectionCount: 1,
+    });
   });
 
   it("publishes ordinary moves as exact code-owned destinations", () => {

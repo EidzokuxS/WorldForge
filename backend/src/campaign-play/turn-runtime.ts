@@ -2646,7 +2646,7 @@ export function createCampaignPlayTurnRuntime(
       });
       const safeRecoveryFeedback = !deadlineExpired &&
           cause instanceof CampaignPlayNarratorError &&
-          cause.code === "narration_invalid"
+          (cause.code === "narration_invalid" || cause.code === "model_contract_failed")
         ? cause.recoveryFeedback
         : null;
       return safeRecoveryFeedback === null

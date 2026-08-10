@@ -3335,7 +3335,9 @@ describe("Campaign Play player-action turn runtime", () => {
     },
   );
 
-  it("automatically retries one receipt-keyed narration_invalid failure without replaying mechanics", async () => {
+  it.each(["narration_invalid", "model_contract_failed"] as const)(
+    "automatically retries one receipt-keyed %s failure without replaying mechanics",
+    async (failureCode) => {
     const successful = playerNarratorFixture();
     const recoveryFeedback = {
       diagnostic: "narrator_packet_validation_mismatch" as const,
@@ -3368,7 +3370,7 @@ describe("Campaign Play player-action turn runtime", () => {
         calls += 1;
         requests.push(request);
         if (calls === 1) {
-          throw new CampaignPlayNarratorError("narration_invalid", null, {
+          throw new CampaignPlayNarratorError(failureCode, null, {
             recoveryFeedback,
           });
         }
@@ -3431,6 +3433,8 @@ describe("Campaign Play player-action turn runtime", () => {
         turnId: result.turnId,
         attempt: 1,
         status: "failed",
+        // The runtime preserves its public narration_invalid classification while
+        // forwarding model_contract_failed recovery feedback privately.
         errorCode: "narration_invalid",
       }),
       expect.objectContaining({
@@ -3483,7 +3487,8 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(result.handle.sqlite.prepare("PRAGMA integrity_check").get())
       .toEqual({ integrity_check: "ok" });
     expect(result.handle.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
-  });
+    },
+  );
 
   it.each([
     {

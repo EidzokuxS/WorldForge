@@ -195,10 +195,15 @@ export type CampaignPlayNarratorPacketValidationFailure =
       }>;
     };
 
-export interface CampaignPlayNarratorRecoveryFeedback {
-  diagnostic: "narrator_packet_validation_mismatch";
-  failedChecks: CampaignPlayNarratorPacketValidationFailure[];
-}
+export type CampaignPlayNarratorRecoveryFeedback =
+  | {
+      diagnostic: "narrator_packet_validation_mismatch";
+      failedChecks: CampaignPlayNarratorPacketValidationFailure[];
+    }
+  | {
+      diagnostic: "narrator_generation_schema_mismatch";
+      failedChecks: [{ check: "generation_schema_invalid" }];
+    };
 
 interface CampaignPlayNarratorErrorOptions extends ErrorOptions {
   recoveryFeedback?: CampaignPlayNarratorRecoveryFeedback;
@@ -564,7 +569,8 @@ function buildActorScopeRepairFrame(
   observationActorNameFrame: ObservationActorNameFrameEntry[],
   recoveryFeedback?: CampaignPlayNarratorRecoveryFeedback,
 ): ActorScopeRepairFrameEntry[] | null {
-  const mismatchChecks = recoveryFeedback?.failedChecks.filter(
+  if (recoveryFeedback?.diagnostic !== "narrator_packet_validation_mismatch") return null;
+  const mismatchChecks = recoveryFeedback.failedChecks.filter(
     (check): check is Extract<
       CampaignPlayNarratorPacketValidationFailure,
       { check: "visible_actor_observation_mismatch" }
@@ -593,6 +599,38 @@ function buildActorScopeRepairFrame(
     }),
     allowedActorNames: check.allowedActors.map((actor) => actor.canonicalName),
   }));
+}
+
+interface ActionSelectionIndexFrameEntry {
+  actionSelectionIndex: number;
+  allowedIntentIndexes: number[];
+}
+
+interface ActionSelectionIndexFrame {
+  expectedActionSelectionCount: number;
+  entries: ActionSelectionIndexFrameEntry[];
+}
+
+function buildActionSelectionIndexFrame(
+  packet: CampaignPlayNarratorPacket,
+): ActionSelectionIndexFrame {
+  const expectedActionSelectionCount = Math.min(
+    CAMPAIGN_PLAY_LIMITS.suggestedActions,
+    packet.availableIntents.length,
+  );
+  const allIntentIndexes = packet.availableIntents.map((_intent, intentIndex) => intentIndex);
+  const requiredIntentIndex = requiredReplyIntentIndex(packet);
+  return {
+    expectedActionSelectionCount,
+    entries: Array.from({ length: expectedActionSelectionCount }, (_value, actionSelectionIndex) => ({
+      actionSelectionIndex,
+      allowedIntentIndexes: actionSelectionIndex === 0 && requiredIntentIndex !== null
+        ? [requiredIntentIndex]
+        : requiredIntentIndex === null
+          ? [...allIntentIndexes]
+          : allIntentIndexes.filter((intentIndex) => intentIndex !== requiredIntentIndex),
+    })),
+  };
 }
 
 function trailingIntentIndexSchema(
@@ -677,6 +715,13 @@ Each entry identifies one failed beat field. Keep its final observationIndexes g
 ACTOR_SCOPE_REPAIR_FRAME
 ${canonicalizeCampaignPlayProjection(actorScopeRepairFrame)}
 END_ACTOR_SCOPE_REPAIR_FRAME`;
+  const generationRecoveryBlock = recoveryFeedback?.diagnostic ===
+    "narrator_generation_schema_mismatch" ? `
+NARRATOR_GENERATION_RECOVERY
+The prior response did not match the provider-facing schema. Regenerate a fresh object. Rebuild actionSelections from ACTION_SELECTION_INDEX_FRAME: at each actionSelectionIndex, set intentIndex to one integer from allowedIntentIndexes, and use each selected index once. Keep every other schema, packet, grounding, visibility, and narration rule unchanged.
+ACTION_SELECTION_INDEX_FRAME
+${canonicalizeCampaignPlayProjection(buildActionSelectionIndexFrame(packet))}
+END_ACTION_SELECTION_INDEX_FRAME` : "";
   const semanticPacketBytes = canonicalizeCampaignPlayProjection({
     ...packet,
     visibleActors: packet.visibleActors.map((actor) => ({
@@ -764,7 +809,7 @@ Keep distant events, hidden actors, private goals, protected state, Judge reason
 
 NARRATOR_RECOVERY
 The prior proposal failed the safe checks below. Regenerate a fresh proposal from NARRATOR_PACKET. Correct every listed check. Do not reuse the rejected observation-index or action-selection arrangement. Every schema, grounding, identity, visibility, and action rule above remains unchanged.
-If a failed check requires changing observation coverage or observationIndexes, recompute permittedActorNames, quotedReferenceActorNames, and forbiddenActorNames for every beat from OBSERVATION_ACTOR_NAME_FRAME using its final observationIndexes. Then rewrite each beat so every actor name follows the rules above.${actorScopeRepairBlock}
+If a failed check requires changing observation coverage or observationIndexes, recompute permittedActorNames, quotedReferenceActorNames, and forbiddenActorNames for every beat from OBSERVATION_ACTOR_NAME_FRAME using its final observationIndexes. Then rewrite each beat so every actor name follows the rules above.${actorScopeRepairBlock}${generationRecoveryBlock}
 RECOVERY_DIAGNOSTIC
 ${canonicalizeCampaignPlayProjection(recoveryFeedback)}
 END_RECOVERY_DIAGNOSTIC`}`;
@@ -1214,7 +1259,17 @@ export function createCampaignPlayNarrator(
           isSafeGenerateObjectContractErrorCode(safeCode)
             ? "model_contract_failed"
             : "transport_interrupted";
-        throw new CampaignPlayNarratorError(code, modelEvidence, { cause });
+        throw new CampaignPlayNarratorError(code, modelEvidence, {
+          cause,
+          ...(safeCode === "schema_validation_failed"
+            ? {
+                recoveryFeedback: {
+                  diagnostic: "narrator_generation_schema_mismatch",
+                  failedChecks: [{ check: "generation_schema_invalid" }],
+                },
+              }
+            : {}),
+        });
       }
       const modelEvidence = evidence(
         generated.trace,
