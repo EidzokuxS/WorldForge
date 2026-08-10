@@ -1826,7 +1826,10 @@ export function createCampaignPlayActorReplanner(
         const useGenerationRecoverySchema = firstResult.rejectionArtifact === undefined
           || (
             firstResult.rejectionArtifact.phase === "compilation"
-            && firstResult.rejectionArtifact.reason === "target_outside_step_location"
+            && (
+              firstResult.rejectionArtifact.reason === "target_outside_step_location"
+              || firstResult.rejectionArtifact.reason === "route_not_traversable_from_step_location"
+            )
           );
         const secondResult = await runAttempt(
           recoveryModel,

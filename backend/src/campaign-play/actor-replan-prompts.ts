@@ -306,12 +306,16 @@ export function buildCampaignPlayActorReplanRecoveryPrompt(
     reviewViolations: feedback.reviewViolations,
     reviewViolationFields: feedback.reviewViolationFields,
   };
+  const routeRecoveryRule = feedback.reason === "route_not_traversable_from_step_location"
+    ? "\nFor a move step, omit route targets and choose exactly one non-current destination location that has exactly one open route from the actor's current location in ACTOR_REPLAN_FRAME."
+    : "";
   return `${basePrompt}
 
 ACTOR_REPLAN_RECOVERY
 Regenerate a fresh proposal from ACTOR_FRAME. Correct the listed invariant. Do not copy the rejected target arrangement. Satisfy every unchanged schema, compiler, and grounding-review rule.
 
 When reason is route_not_traversable_from_step_location, every move target listed in moveTargets is invalid for that step and must not be reused. Choose a different directly reachable destination supplied by ACTOR_FRAME, or replace that step with a non-move action grounded at its established location.
+${routeRecoveryRule}
 
 When reason is target_outside_step_location, regenerate with exactly one grounded step. For a non-move step, every location target must be the actor's current occupied location; never target another location. For a move step, target exactly one directly reachable destination location and no route handle.
 

@@ -1336,7 +1336,12 @@ describe("Campaign Play actor replanner", () => {
     const bypassModel = {} as LanguageModel;
     const recoveryModel = {} as LanguageModel;
     let callNumber = 0;
-    const generateObject = vi.fn(async (request: { prompt: string; model: LanguageModel }) => {
+    const generateObject = vi.fn(async (request: {
+      prompt: string;
+      model: LanguageModel;
+      mode: "auto" | "tool";
+      schema: unknown;
+    }) => {
       callNumber += 1;
       if (request.prompt.includes("ACTOR_PLAN_REVIEW\n")) {
         return { object: { verdict: "accepted", violations: [] }, trace: acceptedTrace() };
@@ -1376,8 +1381,18 @@ describe("Campaign Play actor replanner", () => {
       recoveryModel,
       bypassModel,
     ]);
+    expect(generateObject.mock.calls.map((call) => call[0]!.mode)).toEqual([
+      "auto",
+      "tool",
+      "tool",
+    ]);
     const firstPrompt = generateObject.mock.calls[0]![0].prompt;
     const recoveryPrompt = generateObject.mock.calls[1]![0].prompt;
+    const firstSchema = generateObject.mock.calls[0]![0].schema as z.ZodType;
+    const recoverySchema = generateObject.mock.calls[1]![0].schema as z.ZodType;
+    expect(firstSchema.safeParse(reverseMoveProposalFromPrompt(firstPrompt)).success).toBe(true);
+    expect(recoverySchema).not.toBe(firstSchema);
+    expect(recoverySchema.safeParse(singleStepProposalFromPrompt(recoveryPrompt)).success).toBe(true);
     expect(recoveryPrompt.startsWith(`${firstPrompt}\n\nACTOR_REPLAN_RECOVERY\n`)).toBe(true);
     const feedback = recoveryFeedbackFromPrompt(recoveryPrompt);
     expect(feedback).toMatchObject({
@@ -1389,6 +1404,9 @@ describe("Campaign Play actor replanner", () => {
       reviewViolationFields: "",
     });
     expect(feedback.moveTargets).toMatch(/^0:route:[^|]+\|1:route:[^|]+\|2:route:[^|]+$/);
+    expect(recoveryPrompt).toContain(
+      "For a move step, omit route targets and choose exactly one non-current destination location that has exactly one open route from the actor's current location in ACTOR_REPLAN_FRAME.",
+    );
     expect(recoveryPrompt).not.toContain("Follow the supplied route away from the current scene");
     expect(handle.sqlite.prepare(`SELECT attempt, status, schema_outcome AS schemaOutcome,
         error_code AS errorCode FROM campaign_play_model_stages

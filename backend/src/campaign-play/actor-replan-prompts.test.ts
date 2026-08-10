@@ -102,6 +102,9 @@ describe("campaign play actor replan prompt", () => {
     expect(prompt).toContain(
       "Choose a different directly reachable destination supplied by ACTOR_FRAME, or replace that step with a non-move action grounded at its established location",
     );
+    expect(prompt).not.toContain(
+      "For a move step, omit route targets and choose exactly one non-current destination location that has exactly one open route from the actor's current location in ACTOR_REPLAN_FRAME.",
+    );
     expect(prompt).toContain(
       "When reviewViolations lists outcome_not_established, rebuild each flagged step so its method and observableTrace describe only this actor's own attempt or a physical trace directly caused by that method and established by ACTOR_FRAME or an earlier accepted step",
     );
@@ -169,6 +172,39 @@ describe("campaign play actor replan prompt", () => {
       goalHandle: "goal:keep-gate-open",
       stepCount: 1,
       moveTargets: "",
+      reviewViolations: "",
+      reviewViolationFields: "",
+    });
+    expect(prompt).not.toContain("REJECTED_PROPOSAL_SENTINEL");
+    expect(prompt).not.toContain("provider response");
+  });
+
+  it("gives route-traversability recovery the exact destination rule", () => {
+    const basePrompt = buildCampaignPlayActorReplanPrompt(frame);
+    const prompt = buildCampaignPlayActorReplanRecoveryPrompt(basePrompt, {
+      phase: "compilation",
+      reason: "route_not_traversable_from_step_location",
+      goalHandle: "goal:keep-gate-open",
+      stepCount: 3,
+      moveTargets: "0:route:blocked|1:route:missing|2:route:closed",
+      reviewViolations: "",
+      reviewViolationFields: "",
+    });
+    const rule = "For a move step, omit route targets and choose exactly one non-current destination location that has exactly one open route from the actor's current location in ACTOR_REPLAN_FRAME.";
+
+    expect(prompt).toContain(rule);
+    expect(prompt.indexOf(rule)).toBe(prompt.lastIndexOf(rule));
+    expect(prompt.indexOf(rule)).toBeGreaterThan(prompt.indexOf("When reason is route_not_traversable_from_step_location"));
+    expect(prompt.indexOf(rule)).toBeLessThan(prompt.indexOf("When reason is target_outside_step_location"));
+    expect(prompt).toContain("SAFE_REJECTION_FEEDBACK");
+    const start = prompt.indexOf("SAFE_REJECTION_FEEDBACK\n") + "SAFE_REJECTION_FEEDBACK\n".length;
+    const end = prompt.indexOf("\nEND_SAFE_REJECTION_FEEDBACK", start);
+    expect(JSON.parse(prompt.slice(start, end))).toEqual({
+      phase: "compilation",
+      reason: "route_not_traversable_from_step_location",
+      goalHandle: "goal:keep-gate-open",
+      stepCount: 3,
+      moveTargets: "0:route:blocked|1:route:missing|2:route:closed",
       reviewViolations: "",
       reviewViolationFields: "",
     });
