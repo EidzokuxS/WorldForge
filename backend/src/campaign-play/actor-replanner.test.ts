@@ -1378,7 +1378,7 @@ describe("Campaign Play actor replanner", () => {
     expect(generateObject).toHaveBeenCalledTimes(3);
     expect(generateObject.mock.calls.map((call) => call[0]!.model)).toEqual([
       bypassModel,
-      recoveryModel,
+      bypassModel,
       bypassModel,
     ]);
     expect(generateObject.mock.calls.map((call) => call[0]!.mode)).toEqual([
@@ -1558,6 +1558,79 @@ describe("Campaign Play actor replanner", () => {
       .toEqual({ count: 1 });
     expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_replan_attempts
       WHERE campaign_id = ? AND job_id = ?`).get(CAMPAIGN_ID, jobId)).toEqual({ count: 2 });
+  });
+
+  it("terminates a route recovery schema-invalid attempt without a third call", async () => {
+    const { handle, token, jobId } = createReplanFixture();
+    const bypassModel = {} as LanguageModel;
+    const recoveryModel = {} as LanguageModel;
+    let callNumber = 0;
+    const generateObject = vi.fn(async (request: {
+      prompt: string;
+      model: LanguageModel;
+      mode: "auto" | "tool";
+      schema: unknown;
+    }) => {
+      callNumber += 1;
+      if (request.prompt.includes("ACTOR_PLAN_REVIEW\n")) {
+        return { object: { verdict: "accepted", violations: [] }, trace: acceptedTrace() };
+      }
+      return {
+        object: callNumber === 1
+          ? reverseMoveProposalFromPrompt(request.prompt)
+          : {},
+        trace: acceptedTrace(),
+      };
+    });
+    const replanner = createCampaignPlayActorReplanner(handle, {
+      now: () => 1_600,
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const outcome = await replanner.replan({
+      jobId,
+      token,
+      model: bypassModel,
+      recoveryModel,
+      temperature: 0.2,
+      maxOutputTokens: 100,
+      maximumInputTokens: 1_000,
+      maximumOutputTokens: 100,
+      maximumTotalTokens: 2_000,
+      maximumCostMicros: 10_000,
+      externalOperationDeadlineMs: 90_000,
+      signal: new AbortController().signal,
+      createdAt: 1_590,
+    });
+
+    expect(outcome).toEqual({
+      kind: "deferred",
+      jobId,
+      reason: "replan_invalid",
+      errorCode: "model_contract_invalid",
+      workerEpoch: 1,
+    });
+    expect(generateObject).toHaveBeenCalledTimes(2);
+    expect(generateObject.mock.calls.map((call) => call[0]!.model)).toEqual([
+      bypassModel,
+      bypassModel,
+    ]);
+    expect(generateObject.mock.calls.map((call) => call[0]!.mode)).toEqual([
+      "auto",
+      "auto",
+    ]);
+    expect(handle.sqlite.prepare(`SELECT attempt, status, schema_outcome AS schemaOutcome,
+        error_code AS errorCode FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = 'turn-player' AND kind = 'actor_replanner'
+      ORDER BY attempt`).all(CAMPAIGN_ID)).toEqual([
+      { attempt: 1, status: "interrupted", schemaOutcome: "invalid", errorCode: "model_contract_invalid" },
+      { attempt: 2, status: "interrupted", schemaOutcome: "invalid", errorCode: "model_contract_invalid" },
+    ]);
+    expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_replan_attempts
+      WHERE campaign_id = ? AND job_id = ?`).get(CAMPAIGN_ID, jobId)).toEqual({ count: 2 });
+    expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_plans
+      WHERE campaign_id = ? AND actor_id = 'actor-b' AND status = 'active'`).get(CAMPAIGN_ID))
+      .toEqual({ count: 0 });
   });
 
   it("keeps move and review rejection coordinates opaque and index-stable", async () => {
