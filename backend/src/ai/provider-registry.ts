@@ -118,6 +118,15 @@ function minimumOutputBudgetMiddleware(): LanguageModelMiddleware {
 }
 
 const zaiFetchDiagnosticLog = createLogger("zai-fetch-diagnostic");
+const ZAI_FETCH_SETTLEMENT_EVENT = "ai.zai_fetch.settlement";
+const MAX_ZAI_FETCH_SETTLEMENT_ELAPSED_MS = 10_000_000;
+
+function zaiFetchSettlementElapsedMs(startedAt: number): number {
+  return Math.max(
+    0,
+    Math.min(MAX_ZAI_FETCH_SETTLEMENT_ELAPSED_MS, Math.round(Date.now() - startedAt)),
+  );
+}
 
 function parseJsonBody(init: RequestInit | undefined): unknown {
   if (typeof init?.body !== "string") {
@@ -154,8 +163,31 @@ function createZaiThinkingDisabledFetch(
       requestInit: Parameters<typeof fetchImpl>[1],
       requestBody: unknown,
     ): Promise<Response> => {
+      const startedAt = Date.now();
       try {
         const response = await fetchImpl(requestInput, requestInit);
+        zaiFetchDiagnosticLog.event(
+          ZAI_FETCH_SETTLEMENT_EVENT,
+          {
+            ...buildZaiFetchDiagnostic({
+              input: requestInput,
+              init: requestInit,
+              body: requestBody,
+              response: {
+                status: response.status,
+                contentType: response.headers.get("content-type") ?? undefined,
+                requestId:
+                  response.headers.get("x-request-id") ??
+                  response.headers.get("request-id") ??
+                  undefined,
+              },
+            }),
+            settlement: {
+              outcome: "response",
+              elapsedMs: zaiFetchSettlementElapsedMs(startedAt),
+            },
+          },
+        );
         if (!response.ok) {
           const providerError = await readZaiProviderError(response);
           zaiFetchDiagnosticLog.event(
@@ -178,6 +210,20 @@ function createZaiThinkingDisabledFetch(
         }
         return response;
       } catch (error) {
+        zaiFetchDiagnosticLog.event(
+          ZAI_FETCH_SETTLEMENT_EVENT,
+          {
+            ...buildZaiFetchDiagnostic({
+              input: requestInput,
+              init: requestInit,
+              body: requestBody,
+            }),
+            settlement: {
+              outcome: requestInit?.signal?.aborted ? "aborted" : "fetch_error",
+              elapsedMs: zaiFetchSettlementElapsedMs(startedAt),
+            },
+          },
+        );
         zaiFetchDiagnosticLog.event(
           ZAI_FETCH_DIAGNOSTIC_EVENT,
           buildZaiFetchDiagnostic({

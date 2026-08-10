@@ -371,9 +371,16 @@ describe("createModel", () => {
     const fakeModel = { modelId: "glm-5.1" };
     mockOpenAIChatFn.mockReturnValue(fakeModel);
     let capturedBody: BodyInit | null | undefined;
-    const downstreamFetch = vi.fn(async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const response = new Response("{}", {
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+        "request-id": "req_success",
+      },
+    });
+    const downstreamFetch = vi.fn(async (_input: Parameters<typeof globalThis.fetch>[0], init?: Parameters<typeof globalThis.fetch>[1]) => {
       capturedBody = init?.body;
-      return new Response("{}", { status: 200 });
+      return response;
     });
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(downstreamFetch);
 
@@ -395,7 +402,7 @@ describe("createModel", () => {
     expect(mockWrapLanguageModel).toHaveBeenCalledTimes(1);
     expect(createOptions.fetch).toBeTypeOf("function");
 
-    await createOptions.fetch!("https://api.z.ai/api/paas/v4/chat/completions", {
+    const returned = await createOptions.fetch!("https://api.z.ai/api/paas/v4/chat/completions", {
       method: "POST",
       body: JSON.stringify({
         model: "glm-5.1",
@@ -405,11 +412,27 @@ describe("createModel", () => {
 
     const sentBody = JSON.parse(String(capturedBody));
     expect(sentBody.thinking).toEqual({ type: "disabled" });
-    expect(mockDiagnosticEvent).not.toHaveBeenCalled();
+    expect(returned).toBe(response);
+    await expect(returned.text()).resolves.toBe("{}");
+    expect(mockDiagnosticEvent).toHaveBeenCalledTimes(1);
+    const [eventName, payload] = mockDiagnosticEvent.mock.calls[0] as [string, unknown];
+    expect(eventName).toBe("ai.zai_fetch.settlement");
+    expect(payload).toMatchObject({
+      response: {
+        status: 200,
+        contentType: "application/json",
+        requestId: "req_success",
+      },
+      settlement: {
+        outcome: "response",
+      },
+    });
+    expect((payload as { settlement: { elapsedMs: number } }).settlement.elapsedMs).toBeGreaterThanOrEqual(0);
+    expect((payload as { settlement: { elapsedMs: number } }).settlement.elapsedMs).toBeLessThanOrEqual(10_000_000);
     fetchSpy.mockRestore();
   });
 
-  it("emits one bounded diagnostic for a structured non-success response and preserves the response", async () => {
+  it("emits a settlement and one bounded failure diagnostic for a structured non-success response", async () => {
     const fakeModel = { modelId: "glm-5.1" };
     mockOpenAIChatFn.mockReturnValue(fakeModel);
     const responseBody = JSON.stringify({
@@ -466,8 +489,19 @@ describe("createModel", () => {
 
     expect(returned).toBe(response);
     await expect(returned.text()).resolves.toBe(responseBody);
-    expect(mockDiagnosticEvent).toHaveBeenCalledTimes(1);
-    const [eventName, payload] = mockDiagnosticEvent.mock.calls[0] as [string, unknown];
+    expect(mockDiagnosticEvent).toHaveBeenCalledTimes(2);
+    const [settlementEventName, settlementPayload] = mockDiagnosticEvent.mock.calls[0] as [string, unknown];
+    expect(settlementEventName).toBe("ai.zai_fetch.settlement");
+    expect(settlementPayload).toMatchObject({
+      response: {
+        status: 400,
+        contentType: "application/json; charset=utf-8",
+        requestId: "req_123",
+      },
+      settlement: { outcome: "response" },
+    });
+    expect(JSON.stringify(settlementPayload)).not.toContain("providerError");
+    const [eventName, payload] = mockDiagnosticEvent.mock.calls[1] as [string, unknown];
     expect(eventName).toBe("ai.zai_fetch.failure");
     expect(payload).toMatchObject({
       request: {
@@ -489,7 +523,7 @@ describe("createModel", () => {
     fetchSpy.mockRestore();
   });
 
-  it("emits one bounded diagnostic and rethrows the original fetch error unchanged", async () => {
+  it("emits settlement and failure diagnostics and rethrows the original fetch error unchanged", async () => {
     const fakeModel = { modelId: "glm-5.1" };
     mockOpenAIChatFn.mockReturnValue(fakeModel);
     const thrown = new Error("provider secret and player prose");
@@ -516,13 +550,59 @@ describe("createModel", () => {
       }),
     ).rejects.toBe(thrown);
     expect(downstreamFetch).toHaveBeenCalledTimes(1);
-    expect(mockDiagnosticEvent).toHaveBeenCalledTimes(1);
-    const [eventName, payload] = mockDiagnosticEvent.mock.calls[0] as [string, unknown];
+    expect(mockDiagnosticEvent).toHaveBeenCalledTimes(2);
+    const [settlementEventName, settlementPayload] = mockDiagnosticEvent.mock.calls[0] as [string, unknown];
+    expect(settlementEventName).toBe("ai.zai_fetch.settlement");
+    expect(settlementPayload).toMatchObject({
+      settlement: { outcome: "fetch_error" },
+    });
+    const [eventName, payload] = mockDiagnosticEvent.mock.calls[1] as [string, unknown];
     expect(eventName).toBe("ai.zai_fetch.failure");
     expect(payload).toMatchObject({
       request: { method: "POST", endpointClass: "chat_completions" },
     });
     expect(JSON.stringify(payload)).not.toContain("provider secret");
+    fetchSpy.mockRestore();
+  });
+
+  it("classifies an aborted fetch separately while preserving error identity", async () => {
+    const fakeModel = { modelId: "glm-5.1" };
+    mockOpenAIChatFn.mockReturnValue(fakeModel);
+    const controller = new AbortController();
+    const thrown = new Error("abort secret and player prose");
+    const downstreamFetch = vi.fn(async (_input: Parameters<typeof globalThis.fetch>[0], init?: Parameters<typeof globalThis.fetch>[1]) => {
+      expect(init?.signal).toBe(controller.signal);
+      controller.abort();
+      throw thrown;
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(downstreamFetch);
+
+    createModel({
+      id: "glm",
+      name: "ZAI",
+      baseUrl: "https://api.z.ai/api/paas/v4",
+      apiKey: "secret-api-key",
+      model: "GLM-5.1",
+    }, { role: "storyteller", familyHint: "glm" });
+    const fetch = (mockCreateOpenAI.mock.calls.at(-1) as unknown[] | undefined)?.[0] as {
+      fetch?: typeof globalThis.fetch;
+    };
+
+    await expect(
+      fetch.fetch!("https://api.z.ai/api/paas/v4/chat/completions", {
+        method: "POST",
+        signal: controller.signal,
+        body: JSON.stringify({ model: "glm-5.1", messages: [] }),
+      }),
+    ).rejects.toBe(thrown);
+    expect(mockDiagnosticEvent).toHaveBeenCalledTimes(2);
+    const [settlementEventName, settlementPayload] = mockDiagnosticEvent.mock.calls[0] as [string, unknown];
+    expect(settlementEventName).toBe("ai.zai_fetch.settlement");
+    expect(settlementPayload).toMatchObject({ settlement: { outcome: "aborted" } });
+    const [eventName, payload] = mockDiagnosticEvent.mock.calls[1] as [string, unknown];
+    expect(eventName).toBe("ai.zai_fetch.failure");
+    expect(JSON.stringify(settlementPayload)).not.toContain("abort secret");
+    expect(JSON.stringify(payload)).not.toContain("abort secret");
     fetchSpy.mockRestore();
   });
 
