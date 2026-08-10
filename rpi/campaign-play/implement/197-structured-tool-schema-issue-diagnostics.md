@@ -27,6 +27,12 @@ Focused tests cover invalid object privacy, SDK-invalid/schema-valid input, dyna
 
 No prompt or player-visible copy changed; humanizer/deslop review is not applicable.
 
+## Acceptance correction
+
+The original private schema-property walker visited `$defs`, `definitions`, and `dependentSchemas` container objects but did not descend through their arbitrary named child schemas. The correction keeps the existing depth, node, cycle, path, and issue bounds while traversing each child schema value without treating map entry names as schema-owned properties. The existing `safeGenerateObject` diagnostic path now has a recursive Zod regression whose provider-facing JSON Schema contains a named `$defs` child: its child property remains visible in `schemaIssues.path`, while a dynamic sentinel record key remains `[dynamic]` and is absent from the event payload. No export, diagnostic field, acceptance, retry, or product behavior changed. A separate definitions/dependentSchemas fixture was not added because the regression exercises the private production path through the legitimate provider-facing `$defs` shape without exporting or mocking the walker.
+
+For this correction, current-source GitNexus queries again reported the nested walker and its diagnostics builder as absent from the registered index; the nearest indexed `extractStructuredOutputToolInput` owner was LOW risk with one direct caller and one affected Ai module. The previously disclosed Task 197 private shared-file authorization remains the only production-scope authority. The focused safe-generation suite passed 44/44, backend typecheck and build passed, and `git diff --check` passed. Staged `detect_changes` returned `No changes detected` for both registered repository aliases because the private nested helper is not indexed; the staged diff was reviewed directly and contains only the two owned source/test edits and this note correction.
+
 ## Static validation before r145
 
 - Focused `generate-object-safe.test.ts`: 43/43 passed.

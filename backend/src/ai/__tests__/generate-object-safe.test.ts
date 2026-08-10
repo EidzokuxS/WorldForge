@@ -1220,6 +1220,68 @@ describe("safeGenerateObject", () => {
     expect(JSON.stringify(diagnostic)).not.toContain("wrong");
   });
 
+  it("traverses named definition children while masking dynamic keys", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "openrouter",
+        providerName: "OpenRouter",
+        model: "tool-capable-model",
+        protocol: "openai-compatible",
+        baseUrl: "https://openrouter.ai/api/v1",
+        transport: "chat-completions",
+      }),
+    );
+    const Node: z.ZodTypeAny = z.lazy(() => z.object({
+      known: z.number(),
+      metadata: z.record(z.string(), z.object({ innerKnown: z.number() })),
+      child: Node.optional(),
+    }));
+    mockGenerateText.mockResolvedValue({
+      text: "",
+      finishReason: "tool-calls",
+      toolCalls: [{
+        type: "tool-call",
+        toolName: "structured_output",
+        invalid: true,
+        input: {
+          root: {
+            known: "wrong",
+            metadata: { PLAYER_SENTINEL: { innerKnown: "wrong" } },
+          },
+        },
+      }],
+    });
+
+    await expect(safeGenerateObject({
+      model: model as never,
+      schema: z.object({ root: Node }),
+      prompt: "test",
+      mode: "tool",
+      retries: 1,
+      allowTextFallback: false,
+    })).rejects.toSatisfy((error: unknown) =>
+      getSafeGenerateObjectErrorCode(error) === "invalid_structured_tool_call"
+      && isSafeGenerateObjectError(error)
+    );
+
+    const [diagnostic] = mockLogEvent.mock.calls
+      .filter(([name]) => name === "llm.structured_output_invalid_tool_call")
+      .map(([, payload]) => payload);
+    expect(diagnostic).toMatchObject({
+      schemaParseOutcome: "invalid",
+      schemaIssueCount: 2,
+      schemaIssuesTruncated: false,
+      schemaIssues: [
+        { issueIndex: 0, code: "invalid_type", path: ["root", "known"] },
+        { issueIndex: 1, code: "invalid_type", path: ["root", "metadata", "[dynamic]", "innerKnown"] },
+      ],
+    });
+    expect(JSON.stringify(diagnostic)).not.toContain("PLAYER_SENTINEL");
+    expect(JSON.stringify(diagnostic)).not.toContain("wrong");
+  });
+
   it("flattens union issue branches in order and caps safe coordinates", async () => {
     const model = {};
     rememberStructuredOutputModelMetadata(

@@ -1334,6 +1334,15 @@ function collectStructuredOutputSchemaPropertyNames(schemaJson: unknown): Set<st
       "propertyNames",
       "unevaluatedProperties",
     ]) {
+      if (key === "$defs" || key === "definitions" || key === "dependentSchemas") {
+        const namedSchemas = record[key];
+        if (namedSchemas && typeof namedSchemas === "object" && !Array.isArray(namedSchemas)) {
+          for (const childSchema of Object.values(namedSchemas as Record<string, unknown>)) {
+            visit(childSchema, depth + 2);
+          }
+          continue;
+        }
+      }
       visit(record[key], depth + 1);
     }
   };
