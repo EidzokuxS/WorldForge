@@ -447,6 +447,38 @@ export function getCampaignPlayGameMasterRecoveryFeedback(
 
 interface Dependencies { generateObject: typeof safeGenerateObject }
 
+type CampaignPlayGameMasterContractRejectedPhase =
+  | "generation"
+  | "evidence"
+  | "compilation"
+  | "review";
+
+function emitCampaignPlayGameMasterContractRejected(
+  error: CampaignPlayGameMasterError,
+  phase: CampaignPlayGameMasterContractRejectedPhase,
+  safeGenerationCode: string | null,
+): void {
+  const recoveryFeedback = getCampaignPlayGameMasterRecoveryFeedback(error);
+  try {
+    log.event("game_master.contract_rejected", {
+      phase,
+      errorCode: error.code,
+      modelEvidenceErrorCode: error.modelEvidence?.errorCode ?? null,
+      safeGenerationCode,
+      recoveryDiagnostic: recoveryFeedback?.diagnostic ?? null,
+      failedChecks: recoveryFeedback?.failedChecks ?? [],
+      reviewFailedChecks: mechanicalAuthorityReviewFailedChecksByError.get(error) ?? [],
+      denial: error.denial === null ? null : {
+        code: error.denial.code,
+        commandIndex: error.denial.commandIndex,
+        commandId: error.denial.commandId,
+      },
+    });
+  } catch {
+    // Diagnostics must never alter the existing error or recovery behavior.
+  }
+}
+
 function freeze<T>(value: T, seen = new Set<object>()): T {
   if (value === null || typeof value !== "object" || seen.has(value)) return value;
   seen.add(value);
@@ -2038,6 +2070,10 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
         throw new CampaignPlayGameMasterError("structured_output_unavailable", null);
       }
       const started = Date.now();
+      let phase: CampaignPlayGameMasterContractRejectedPhase = "generation";
+      let safeGenerationCode: string | null = null;
+      let planningStarted = false;
+      try {
       const promptText = prompt(
         request.frame,
         effectiveRuling,
@@ -2053,6 +2089,7 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
         );
       let generated;
       try {
+        planningStarted = true;
         generated = await dependencies.generateObject({
           model: request.model,
           schema: constrainedProposalSchema(
@@ -2072,6 +2109,7 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
         });
       } catch (cause) {
         const safeCode = getSafeGenerateObjectErrorCode(cause);
+        safeGenerationCode = safeCode;
         const trace = getSafeGenerateObjectTrace(cause);
         const value = trace ? evidence(trace, request.budget, Date.now() - started) : null;
         const code: CampaignPlayGameMasterErrorCode =
@@ -2080,6 +2118,7 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
             : "transport_interrupted";
         throw new CampaignPlayGameMasterError(code, value ? { ...value, errorCode: safeCode ?? code } : null, null, { cause });
       }
+      phase = "evidence";
       const modelEvidence = evidence(generated.trace, request.budget, Date.now() - started);
       if (modelEvidence.actualStrategy !== capability.primaryStrategy
         || modelEvidence.repairUsed || modelEvidence.retryUsed || modelEvidence.textFallbackUsed) {
@@ -2088,6 +2127,7 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
       if (overBudget(modelEvidence, request.budget, generated.trace.usage?.reasoningTokens)) {
         throw new CampaignPlayGameMasterError("stage_budget_exceeded", { ...modelEvidence, errorCode: "stage_budget_exceeded" });
       }
+      phase = "compilation";
       try {
         const compiled = compile(
             request.frame,
@@ -2108,6 +2148,7 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
             modelEvidence,
           });
         }
+        phase = "review";
         const reviewStarted = Date.now();
         let reviewed;
         try {
@@ -2126,6 +2167,7 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
           });
         } catch (cause) {
           const safeCode = getSafeGenerateObjectErrorCode(cause);
+          safeGenerationCode = safeCode;
           const trace = getSafeGenerateObjectTrace(cause);
           const reviewerEvidence = trace
             ? evidence(trace, request.budget, Date.now() - reviewStarted)
@@ -2223,6 +2265,12 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
             rememberMechanicalAuthorityReviewFailedChecks(wrapped, reviewFailedChecks);
           }
           throw wrapped;
+        }
+        throw cause;
+      }
+      } catch (cause) {
+        if (planningStarted && cause instanceof CampaignPlayGameMasterError) {
+          emitCampaignPlayGameMasterContractRejected(cause, phase, safeGenerationCode);
         }
         throw cause;
       }

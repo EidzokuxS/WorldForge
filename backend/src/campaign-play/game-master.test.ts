@@ -1,5 +1,5 @@
 import type { LanguageModel } from "ai";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import type { CampaignWorldReview } from "@worldforge/shared";
 import {
@@ -25,6 +25,7 @@ import {
 } from "./campaign-play-projection.js";
 
 const gameMasterWarn = vi.hoisted(() => vi.fn());
+const gameMasterEvent = vi.hoisted(() => vi.fn());
 
 vi.mock("../lib/index.js", () => ({
   createLogger: (tag: string) => ({
@@ -32,7 +33,7 @@ vi.mock("../lib/index.js", () => ({
     warn: tag === "campaign-play-game-master" ? gameMasterWarn : vi.fn(),
     error: vi.fn(),
     debug: vi.fn(),
-    event: vi.fn(),
+    event: tag === "campaign-play-game-master" ? gameMasterEvent : vi.fn(),
   }),
 }));
 
@@ -782,6 +783,7 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
 
   it("forwards only the safe mechanical-authority check after reviewer rejection", async () => {
     gameMasterWarn.mockClear();
+    gameMasterEvent.mockClear();
     const rejectedProposal = {
       ...proposal,
       effects: [{
@@ -836,6 +838,22 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
     expect(JSON.stringify(warningPayload)).not.toContain("SENTINEL_REVIEW_REASON");
     expect(JSON.stringify(warningPayload)).not.toContain("SENTINEL_RAW_PROPOSAL");
     expect(JSON.stringify(warningPayload)).not.toContain("Dren Vask");
+    expect(gameMasterEvent).toHaveBeenCalledTimes(1);
+    const [eventName, eventPayload] = gameMasterEvent.mock.calls[0]!;
+    expect(eventName).toBe("game_master.contract_rejected");
+    expect(eventPayload).toEqual({
+      phase: "review",
+      errorCode: "model_contract_failed",
+      modelEvidenceErrorCode: "mechanical_authority_rejected",
+      safeGenerationCode: null,
+      recoveryDiagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [{ check: "mechanical_authority_rejected" }],
+      reviewFailedChecks: ["possession_authority_missing", "route_authority_missing"],
+      denial: null,
+    });
+    expect(JSON.stringify(eventPayload)).not.toContain("SENTINEL_REVIEW_REASON");
+    expect(JSON.stringify(eventPayload)).not.toContain("SENTINEL_RAW_PROPOSAL");
+    expect(JSON.stringify(eventPayload)).not.toContain("Dren Vask");
     expect(generateObject).toHaveBeenCalledTimes(2);
   });
 
@@ -3385,5 +3403,210 @@ describe("Campaign Play Game Master", () => {
       budget,
     });
     expect(normalPrompt).not.toContain(sentence);
+  });
+});
+
+describe("Campaign Play Game Master contract rejection diagnostics", () => {
+  beforeEach(() => {
+    gameMasterEvent.mockClear();
+    gameMasterWarn.mockClear();
+  });
+
+  it("stays silent for an accepted plan", async () => {
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: proposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: { verdict: "accepted", reason: "No mechanical authority changes are present." },
+        trace: trace(),
+      });
+
+    await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget,
+    });
+
+    expect(gameMasterEvent).not.toHaveBeenCalled();
+  });
+
+  it("emits one generation diagnostic for a primary transport interruption", async () => {
+    const generateObject = vi.fn(async () => {
+      throw new Error("SENTINEL_PROVIDER_BODY_AND_STACK");
+    });
+
+    await expect(createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget,
+    })).rejects.toMatchObject({ code: "transport_interrupted" });
+
+    expect(gameMasterEvent).toHaveBeenCalledTimes(1);
+    const [eventName, eventPayload] = gameMasterEvent.mock.calls[0]!;
+    expect(eventName).toBe("game_master.contract_rejected");
+    expect(eventPayload).toEqual({
+      phase: "generation",
+      errorCode: "transport_interrupted",
+      modelEvidenceErrorCode: null,
+      safeGenerationCode: null,
+      recoveryDiagnostic: null,
+      failedChecks: [],
+      reviewFailedChecks: [],
+      denial: null,
+    });
+    expect(JSON.stringify(eventPayload)).not.toContain("SENTINEL_PROVIDER_BODY_AND_STACK");
+  });
+
+  it("classifies a returned evidence-invariant failure before compilation", async () => {
+    const generateObject = vi.fn(async () => ({
+      object: proposal,
+      trace: trace("repair"),
+    }));
+
+    await expect(createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget,
+    })).rejects.toMatchObject({ code: "model_contract_failed" });
+
+    expect(gameMasterEvent).toHaveBeenCalledTimes(1);
+    expect(gameMasterEvent.mock.calls[0]).toEqual([
+      "game_master.contract_rejected",
+      {
+        phase: "evidence",
+        errorCode: "model_contract_failed",
+        modelEvidenceErrorCode: "model_contract_failed",
+        safeGenerationCode: null,
+        recoveryDiagnostic: null,
+        failedChecks: [],
+        reviewFailedChecks: [],
+        denial: null,
+      },
+    ]);
+  });
+
+  it("classifies compiler recovery coordinates without proposal content", async () => {
+    const repeatedSummary = frame().actorContinuity[0]!.recentOwnActions[0]!.summary;
+    const repeatedProposal = {
+      ...proposal,
+      effects: [{ ...proposal.effects[0], summary: repeatedSummary }],
+    };
+    const generateObject = vi.fn(async () => ({ object: repeatedProposal, trace: trace() }));
+
+    await expect(createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget,
+    })).rejects.toMatchObject({ code: "model_contract_failed" });
+
+    expect(gameMasterEvent).toHaveBeenCalledTimes(1);
+    const [, eventPayload] = gameMasterEvent.mock.calls[0]!;
+    expect(eventPayload).toEqual({
+      phase: "compilation",
+      errorCode: "model_contract_failed",
+      modelEvidenceErrorCode: "model_contract_failed",
+      safeGenerationCode: null,
+      recoveryDiagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [{
+        check: "repeated_actor_dialogue",
+        effectIndex: 0,
+        fieldPath: "effects[0].summary",
+        performingActorHandle: "guard",
+        recentOwnActionIndex: 0,
+      }],
+      reviewFailedChecks: [],
+      denial: null,
+    });
+    expect(JSON.stringify(eventPayload)).not.toContain(repeatedSummary);
+  });
+
+  it("classifies Rulebook denial with only bounded denial coordinates", async () => {
+    const compoundRuling = ruling({
+      movementRouteHandle: "passage",
+      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 8 },
+      normalizedIntent: {
+        originalText: "I cross to South Harbor and ask the guard about passage delays.",
+        source: "freeform", choiceHandle: null, kind: "contact",
+        targets: [
+          { handle: "passage", kind: "route" },
+          { handle: "south", kind: "location" },
+          { handle: "guard", kind: "actor" },
+        ],
+        method: "Cross the passage, then ask the guard",
+        stakes: "Learn why crossings are delayed",
+      },
+    });
+    const candidate = {
+      elapsedMinutes: 5,
+      effects: [
+        { kind: "move_actor" as const, actorHandle: null },
+        {
+          kind: "record_world_event" as const,
+          eventClass: "interaction" as const,
+          performingActorHandle: "guard",
+          routeAccessClaims: [],
+          summary: "SENTINEL_RAW_EVENT_SUMMARY",
+          affectedHandles: ["you", "guard", "south"],
+        },
+      ],
+    };
+    const generateObject = vi.fn(async () => ({ object: candidate, trace: trace() }));
+
+    await expect(createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: compoundRuling, resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget,
+    })).rejects.toMatchObject({ code: "rulebook_denied" });
+
+    expect(gameMasterEvent).toHaveBeenCalledTimes(1);
+    const [, eventPayload] = gameMasterEvent.mock.calls[0]!;
+    expect(eventPayload).toMatchObject({
+      phase: "compilation",
+      errorCode: "rulebook_denied",
+      modelEvidenceErrorCode: "rulebook_denied",
+      safeGenerationCode: null,
+      recoveryDiagnostic: null,
+      failedChecks: [],
+      reviewFailedChecks: [],
+      denial: {
+        code: "precondition_failed",
+        commandIndex: expect.any(Number),
+        commandId: expect.any(String),
+      },
+    });
+    expect(eventPayload.denial).not.toHaveProperty("detail");
+    expect(JSON.stringify(eventPayload)).not.toContain("SENTINEL_RAW_EVENT_SUMMARY");
+    expect(JSON.stringify(eventPayload)).not.toContain("South Harbor");
+  });
+
+  it("classifies Mechanical Authority Reviewer generation failure as review", async () => {
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: proposal, trace: trace() })
+      .mockRejectedValueOnce(new Error("SENTINEL_REVIEW_PROVIDER_BODY"));
+
+    await expect(createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget,
+    })).rejects.toMatchObject({ code: "transport_interrupted" });
+
+    expect(gameMasterEvent).toHaveBeenCalledTimes(1);
+    const [, eventPayload] = gameMasterEvent.mock.calls[0]!;
+    expect(eventPayload).toEqual({
+      phase: "review",
+      errorCode: "transport_interrupted",
+      modelEvidenceErrorCode: "transport_interrupted",
+      safeGenerationCode: null,
+      recoveryDiagnostic: null,
+      failedChecks: [],
+      reviewFailedChecks: [],
+      denial: null,
+    });
+    expect(JSON.stringify(eventPayload)).not.toContain("SENTINEL_REVIEW_PROVIDER_BODY");
   });
 });
