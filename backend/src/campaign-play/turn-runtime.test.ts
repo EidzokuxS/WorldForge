@@ -1379,10 +1379,12 @@ describe("Campaign Play player-action turn runtime", () => {
     const bypassModel = {} as LanguageModel;
     const reasoningModel = {} as LanguageModel;
     const observedModels: LanguageModel[] = [];
+    const observedModes: Array<"auto" | "tool" | undefined> = [];
     let calls = 0;
     const gameMaster = {
       plan: vi.fn(async (request: Parameters<typeof successful.plan>[0]) => {
         observedModels.push(request.model);
+        observedModes.push(request.structuredOutputMode);
         calls += 1;
         if (calls === 1) throw new CampaignPlayGameMasterError("stage_timeout", null);
         return successful.plan(request);
@@ -1432,6 +1434,7 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(judge.judge).toHaveBeenCalledTimes(0);
     expect(gameMaster.plan).toHaveBeenCalledTimes(2);
     expect(observedModels).toEqual([bypassModel, bypassModel]);
+    expect(observedModes).toEqual(["auto", "auto"]);
     await advanceUntilStage(runtime, time, admission.turnId, "completed");
     expect(countForTurn(handle, "campaign_play_turn_results", admission.turnId)).toBe(1);
     expect(countForTurn(handle, "campaign_play_receipts", admission.turnId)).toBeGreaterThan(0);
@@ -1566,10 +1569,12 @@ describe("Campaign Play player-action turn runtime", () => {
     const bypassModel = {} as LanguageModel;
     const reasoningModel = {} as LanguageModel;
     const observedModels: LanguageModel[] = [];
+    const observedModes: Array<"auto" | "tool" | undefined> = [];
     let calls = 0;
     const gameMaster = {
       plan: vi.fn(async (request: Parameters<typeof successful.plan>[0]) => {
         observedModels.push(request.model);
+        observedModes.push(request.structuredOutputMode);
         calls += 1;
         if (calls === 1) throw new CampaignPlayGameMasterError("model_contract_failed", null);
         return successful.plan(request);
@@ -1620,6 +1625,7 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(judge.judge).toHaveBeenCalledTimes(0);
     expect(gameMaster.plan).toHaveBeenCalledTimes(2);
     expect(observedModels).toEqual([bypassModel, reasoningModel]);
+    expect(observedModes).toEqual(["auto", "auto"]);
     await advanceUntilStage(runtime, time, admission.turnId, "completed");
     expect(countForTurn(handle, "campaign_play_turn_results", admission.turnId)).toBe(1);
   });
@@ -2895,8 +2901,79 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(judge.judge).toHaveBeenCalledTimes(1);
     expect(gameMaster.plan).toHaveBeenCalledTimes(2);
     expect(observedGameMasterModels).toEqual([bypassGameMasterModel, bypassGameMasterModel]);
-    expect(observedGameMasterModes).toEqual(["auto", "tool"]);
+    expect(observedGameMasterModes).toEqual(["auto", "auto"]);
     expect(countForTurn(handle, "campaign_play_commands", admission.turnId)).toBe(2);
+  });
+
+  it("keeps Game Master provider recovery in tool mode", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening();
+    const time = fixedClock(2_652);
+    const judge = judgeFixture("deterministic");
+    const acceptedGameMaster = gameMasterFixture();
+    const languageModel = { specificationVersion: "v3" } as unknown as LanguageModel;
+    const reasoningModel = { specificationVersion: "v3" } as unknown as LanguageModel;
+    const observedModels: LanguageModel[] = [];
+    const observedModes: Array<"auto" | "tool" | undefined> = [];
+    let calls = 0;
+    const gameMaster = {
+      plan: vi.fn(async (request: Parameters<typeof acceptedGameMaster.plan>[0]) => {
+        observedModels.push(request.model);
+        observedModes.push(request.structuredOutputMode);
+        calls += 1;
+        throw new CampaignPlayGameMasterError("transport_interrupted", null);
+      }),
+    };
+    const runtime = turnRuntime(handle, time, judge, gameMaster, {
+      gameMasterModel: {
+        languageModel,
+        reasoningModel,
+        requested: {
+          providerId: "test",
+          model: "test-game-master-provider-recovery",
+          strategy: "strict_object",
+          pricing: TEST_MODEL_PRICING,
+        },
+        temperature: 0.2,
+        maximumInputTokens: 1_000,
+        maximumOutputTokens: 1_000,
+        maximumTotalTokens: 2_000,
+        maximumCostMicros: 10_000,
+      },
+    });
+    const admission = runtime.admitAction({
+      request: admissionRequest(state, "interrupted-game-master-provider"),
+      submittedAt: 2_652,
+    });
+    time.advance();
+    await runtime.runNextStage(admission.turnId);
+    time.advance();
+    const firstGameMaster = await runtime.runNextStage(admission.turnId);
+    expect(firstGameMaster.turn).toMatchObject({
+      stage: "interrupted",
+      interruptedStage: "judged",
+      errorCode: "provider_unavailable",
+      resumeEligible: true,
+    });
+    const interruptedTurn = runtime.loadTurn(admission.turnId)!;
+    time.advance();
+    await runtime.resumeInterruptedStage({
+      turnId: admission.turnId,
+      interruptedStage: "judged",
+      observedEpoch: interruptedTurn.workerEpoch,
+    });
+    time.advance();
+    await runtime.runNextStage(admission.turnId);
+    expect(runtime.loadTurn(admission.turnId)).toMatchObject({
+      stage: "interrupted",
+      interruptedStage: "judged",
+      errorCode: "provider_unavailable",
+      resumeEligible: true,
+    });
+    expect(judge.judge).toHaveBeenCalledTimes(1);
+    expect(gameMaster.plan).toHaveBeenCalledTimes(2);
+    expect(observedModels).toEqual([languageModel, languageModel]);
+    expect(observedModes).toEqual(["auto", "tool"]);
+    expect(countForTurn(handle, "campaign_play_commands", admission.turnId)).toBe(0);
   });
 
   it("forwards Game Master recovery feedback at the judged boundary without replaying Judge", async () => {

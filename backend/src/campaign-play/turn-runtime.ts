@@ -2422,7 +2422,9 @@ export function createCampaignPlayTurnRuntime(
         kind,
         attempt - 1,
       ) as { errorCode: string | null } | undefined;
-    return previous?.errorCode === "model_contract_invalid" ? "auto" : "tool";
+    return previous?.errorCode === "model_contract_invalid" || previous?.errorCode === "stage_timeout"
+      ? "auto"
+      : "tool";
   };
 
   const releaseActorBoundary = (
