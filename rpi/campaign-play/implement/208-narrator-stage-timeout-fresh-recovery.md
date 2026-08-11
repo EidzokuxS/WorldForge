@@ -90,14 +90,76 @@ three task ports remained unbound. Per the startup contract this prepare-gate
 failure freezes r157: no import, Save, Begin, player action, recovery,
 checkpoint, reload, or product cleanup was attempted.
 
+## Live r158 evidence
+
+The corrected fresh lane `pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r158`
+was materialized exactly once for campaign
+`6b85a49e-fef5-4359-95e2-051383f6fb66`. The generated state, config, and
+canonical Brina card were verified before runtime activity with SHA-256 values
+`6cb291d11ce6578e3395a10d2c5d590070e3ccdd8b2b67451410869ce97897d2`,
+`d8362b1af976c00cb8f14c564c8196a2d1ab137743ff368ea83d762a4ad2e065`, and
+`4b48de7a32df6a6be5a91ab12f09bb87926b40d5940348c7581e298eaa12b60a`.
+The input run-config was kept at the external task-owned path
+`R:\Temp\WorldForge-task208-r158\run-config.json`, outside both r158
+evidence roots. `--live-phase prepare` ran immediately after materialization
+and hash verification, before any runtime, watcher, browser/CDP, HTTP, or
+database inspection, and succeeded by creating the r158 session root. This
+corrects the r157 ordering defect; the r158 pre-runtime gate is passed.
+
+The one-time Brina import, Save/Continue, lower-wards / Local / Already here /
+Looking for work selections, and Begin completed. Opening reached a ready
+proper scene. Actions 1 through 33 each settled exactly once with one unique
+proper-scene binding. Read-only checkpoints were:
+
+| actions | turns | proper scenes / narration operations | receipts | Narrator attempts | world / runtime | integrity / FK |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| 10 | 10 | 10 / 10 | 37 | 11 | 22 / 166 | `ok` / `[]` |
+| 20 | 20 | 20 / 20 | 61 | 22 | 34 / 348 | `ok` / `[]` |
+| 30 | 31 (including Opening) | 30 / 30 | 86 | 35 | 45 / 567 | `ok` / `[]` |
+
+Existing non-Task-208 recoveries occurred naturally, including Narrator
+packet-validation recovery at action 6, generation-schema recovery at action
+19, and other Narrator recoveries at actions 26, 28, 29, and 31. No Narrator
+stage-timeout occurred, so direct live Task-208 recovery coverage is
+unavailable; no failure was manufactured.
+
+Action 34 is the first genuine terminal product/model-stage boundary. The
+single admitted turn is
+`turn-player-action:d7d36b146341d3937a1521b579f385fb8645f336`, with world
+version 49 and expected runtime revision 635. Its Game Master stage
+`3ff0a2960f3eda035816c80e1515b5bd41e962b3678a7dfc9b4cb9aaf43a355b` had
+attempt 1 end in the existing model-contract recovery path and attempt 2 then
+end at the shared deadline with `error_code=stage_timeout`,
+`schema_outcome=transport_error`, duration 90,473 ms, and no actual provider
+response metadata. Task 207's existing private event classified this failed
+invocation as `phase=review` with `errorCode=transport_interrupted` and only
+allowlisted empty coordinates; no raw provider or candidate data is retained.
+There is no downstream result, command, receipt, Narrator operation, proper
+scene, or binding for action 34. The authoritative turn remains
+`interrupted`, `retryEligible=1`, with no completion; the rendered page shows
+the stopped-turn fallback and an enabled Resume control. Resume is not used.
+
+At the terminal boundary the read-only copied database reported 35 turns, 94
+commands, 94 receipts, 33 Narrator operations, 39 Narrator attempts, and 33
+proper scenes; worldVersion was 49 and runtimeRevision 648. SQLite
+`integrity_check` was `ok` and `foreign_key_check` was empty. No later action,
+late acceptance, duplicate settlement, or mechanics replay was observed.
+The terminal database trio and backend/frontend logs were copied into the
+session evidence under `probes/terminal-action-34/`; generated evidence is
+uncommitted.
+
 ## Acceptance handoff
 
 Static acceptance is mapped to the repository deadline conditional, the
 attempt-1 allowlist, the timeout success/terminal regressions, the existing
 runtime/application recovery coverage, typecheck/build, diff, and GitNexus
 evidence above. The materialization/hash pre-runtime boundary is evidenced,
-but the prepare-gate failure makes live setup, opening, action checkpoints,
-natural timeout recovery, 60-action endurance, same-page reload, and product
-persistence unavailable. No runtime cleanup was needed; the task-owned failed
-session root is preserved as generated evidence and no task listener or page
-exists.
+but the r157 prepare-gate failure is preserved as immutable verification
+evidence. The corrected r158 materialization, canonical hashes, external
+run-config, pre-runtime prepare ordering, setup, Opening, actions 1-33,
+checkpoints, terminal action-34 identity, read-only persistence checks, and
+cleanup are evidenced above. Natural Task-208 Narrator stage-timeout recovery,
+actions 34-60, the 60-action endurance target, and same-page reload are
+unavailable because the first terminal Game Master stage-timeout boundary
+froze r158. No Resume, retry, replay, later click, or SQLite mutation was
+performed.
