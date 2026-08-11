@@ -18,7 +18,13 @@ An exact-entry GitNexus shadow was built at `38baf80f444da3662770c9b0db4f27fe9a3
 
 ## Static evidence
 
-The focused Game Master suite passes all diagnostic and existing assertions (68/68, exit 0). The directly affected Campaign Play application suite passes (15/15, exit 0). The turn-runtime suite passes all assertions (75/75, exit 0) in the clean rerun; an earlier run encountered the known Vitest worker `onTaskUpdate` shutdown timeout, and the bounded rerun completed cleanly without assertion failures. Backend typecheck and production build pass. Final `git diff --check` and staged GitNexus `detect_changes` are run before each commit and recorded with the exact staged scope.
+The focused Game Master suite passes all diagnostic and existing assertions (69/69, exit 0). The directly affected Campaign Play application suite passes (15/15, exit 0). The turn-runtime suite passes all assertions (75/75, exit 0) in the clean rerun; an earlier run encountered the known Vitest worker `onTaskUpdate` shutdown timeout, and the bounded rerun completed cleanly without assertion failures. Backend typecheck and production build pass. Final `git diff --check` and staged GitNexus `detect_changes` are run before each commit and recorded with the exact staged scope.
+
+### Acceptance correction: primary SafeGenerate contract failure
+
+The previously missing static scenario is now covered by one focused regression in `backend/src/campaign-play/game-master.test.ts`. It drives the real primary `safeGenerateObject` path with a `MockLanguageModelV3` that returns schema-invalid native JSON under the existing Z.AI metadata seam, producing the genuine `schema_validation_failed` SafeGenerate contract code. The caller still receives `CampaignPlayGameMasterError` with `code=model_contract_failed` and retained `modelEvidence.errorCode=schema_validation_failed`.
+
+The test asserts exactly one `game_master.contract_rejected` event with `phase=generation`, `errorCode=model_contract_failed`, `modelEvidenceErrorCode=schema_validation_failed`, `safeGenerationCode=schema_validation_failed`, null recovery diagnostic and denial, and empty `failedChecks`/`reviewFailedChecks`. Sentinel raw proposal/player/actor text and schema message text are absent from the event. The existing plain transport-interruption regression remains unchanged. The focused Game Master suite now passes 69/69; no production file, live lane, or r156 evidence changed.
 
 ## Live evidence
 

@@ -1,4 +1,5 @@
 import type { LanguageModel } from "ai";
+import { MockLanguageModelV3 } from "ai/test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import type { CampaignWorldReview } from "@worldforge/shared";
@@ -917,6 +918,43 @@ function model(): LanguageModel {
   rememberStructuredOutputModelMetadata(value, buildStructuredOutputModelMetadata({
     providerId: "test-provider", providerName: "Test Provider", model: "test-model",
     protocol: "openai-compatible", baseUrl: "https://example.invalid/v1", transport: "chat-completions",
+  }));
+  return value;
+}
+
+function schemaContractFailureModel(): LanguageModel {
+  const value = new MockLanguageModelV3({
+    provider: "test-provider",
+    modelId: "test-model",
+    doStream: async () => ({
+      stream: new ReadableStream({
+        start(controller) {
+          controller.enqueue({ type: "stream-start", warnings: [] });
+          controller.enqueue({ type: "text-start", id: "text-1" });
+          controller.enqueue({
+            type: "text-delta",
+            id: "text-1",
+            delta: JSON.stringify({
+              SENTINEL_RAW_PROPOSAL: "SENTINEL_PLAYER_AND_ACTOR_PROSE",
+            }),
+          });
+          controller.enqueue({ type: "text-end", id: "text-1" });
+          controller.enqueue({
+            type: "finish",
+            usage: {
+              inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
+              outputTokens: { total: 12, text: 12, reasoning: undefined },
+            },
+            finishReason: { unified: "stop", raw: undefined },
+          });
+          controller.close();
+        },
+      }),
+    }),
+  });
+  rememberStructuredOutputModelMetadata(value, buildStructuredOutputModelMetadata({
+    providerId: "test-provider", providerName: "Test Provider", model: "test-model",
+    protocol: "openai-compatible", baseUrl: "https://api.z.ai/v1", transport: "chat-completions",
   }));
   return value;
 }
@@ -3456,6 +3494,34 @@ describe("Campaign Play Game Master contract rejection diagnostics", () => {
       denial: null,
     });
     expect(JSON.stringify(eventPayload)).not.toContain("SENTINEL_PROVIDER_BODY_AND_STACK");
+  });
+
+  it("emits the SafeGenerate contract code for a primary schema failure", async () => {
+    await expect(createCampaignPlayGameMaster().plan({
+      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      model: schemaContractFailureModel(), temperature: 0.2, budget,
+    })).rejects.toMatchObject({
+      code: "model_contract_failed",
+      modelEvidence: { errorCode: "schema_validation_failed" },
+    });
+
+    expect(gameMasterEvent).toHaveBeenCalledTimes(1);
+    const [eventName, eventPayload] = gameMasterEvent.mock.calls[0]!;
+    expect(eventName).toBe("game_master.contract_rejected");
+    expect(eventPayload).toEqual({
+      phase: "generation",
+      errorCode: "model_contract_failed",
+      modelEvidenceErrorCode: "schema_validation_failed",
+      safeGenerationCode: "schema_validation_failed",
+      recoveryDiagnostic: null,
+      failedChecks: [],
+      reviewFailedChecks: [],
+      denial: null,
+    });
+    const serialized = JSON.stringify(eventPayload);
+    expect(serialized).not.toContain("SENTINEL_RAW_PROPOSAL");
+    expect(serialized).not.toContain("SENTINEL_PLAYER_AND_ACTOR_PROSE");
+    expect(serialized).not.toContain("schema-validation");
   });
 
   it("classifies a returned evidence-invariant failure before compilation", async () => {
