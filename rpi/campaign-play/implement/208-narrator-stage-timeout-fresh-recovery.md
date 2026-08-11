@@ -247,3 +247,15 @@ the isolated `GSD_CAMPAIGNS_ROOT` requirement was absent. The contract forbids
 retrying prepare or creating a replacement lane, so all r159 rendered,
 persistence, recovery, checkpoint, 60-action, and reload criteria are
 unavailable; no r159 Task-208 live recovery claim is made.
+
+For r160, the corrected isolated campaigns root and pre-runtime prepare gate
+passed before any runtime activity. The Opening boundary above is the first
+genuine live defect for this lane, so r160 player actions, checkpoints,
+Task-208 player-action recovery, 60-action endurance, and same-page reload are
+unavailable. Backend/frontend/browser processes, CDP, and ports 4460/4461/4462
+were absent after capture. The generated r160 session/world evidence is
+preserved; the task-owned browser profile and external temporary evidence
+directory remain at their exact paths because the shell cleanup operation was
+blocked by the execution policy, and were not touched through an unsafe
+workaround. Protected AGENTS.md and CLAUDE.md remained byte-identical and
+unstaged.
