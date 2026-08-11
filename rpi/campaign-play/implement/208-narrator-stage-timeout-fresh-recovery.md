@@ -176,6 +176,57 @@ was never created. Consequently Opening, Task-208 timeout recovery, all
 player-action bindings, checkpoints, 60-action endurance, and same-page reload
 are unavailable for r159.
 
+## Live r160 evidence
+
+The unchanged-source lane `pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r160`
+was materialized exactly once for campaign
+`6b85a49e-fef5-4359-95e2-051383f6fb66` from entry
+`fac33275f4c868070fed1aec46c812b9d841d6fd`. The materializer JSON supplied
+the exact isolated `environment.GSD_CAMPAIGNS_ROOT` value
+`R:\\Projects\\WorldForge\\output\\playtests\\campaign-world-runs\\pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r160\\campaigns`;
+the campaign directory was present beneath that root and outside the session
+root. The external run-config was
+`R:\\Temp\\WorldForge-task208-r160\\run-config.json`. The single
+`--live-phase prepare` invocation ran with that exact environment root before
+runtime, HTTP, browser/CDP, watcher, helper, or database activity and
+succeeded. Pre-runtime state/config/card hashes matched the canonical values
+`6cb291d11ce6578e3395a10d2c5d590070e3ccdd8b2b67451410869ce97897d2`,
+`d8362b1af976c00cb8f14c564c8196a2d1ab137743ff368ea83d762a4ad2e065`, and
+`4b48de7a32df6a6be5a91ab12f09bb87926b40d5940348c7581e298eaa12b60a`.
+
+Task-owned backend/frontend/browser resources ran on ports 4460/4461/4462.
+The one Brina card import/file assignment completed on the same page after a
+25.638-second parse response; the one Save/Continue, lower-wards / Local /
+Already here / Looking for work selections, and one Begin completed. Opening
+mechanics and visibility settled once, reaching worldVersion 12 and
+runtimeRevision 21, but the required ready proper scene never became
+available. Opening turn
+`turn-opening:f94c371d7dd7c633beaf92361c2cb2b69cf4326e` reached Narrator
+stage `0276a80c392d964114dc5393bf9f44ad124a4a667865018741b37b7bff3fa692`,
+attempt 1, and persisted `stage_timeout` after 90,035 ms. The retained safe
+`narrator.contract_rejected` event classified phase `generation`,
+`errorCode=transport_interrupted`, `safeGenerationCode=text_fallback_disabled`,
+`recoveryDiagnostic=null`, and empty failedChecks. No Narrator operation or
+attempt row was created, no proper scene or turn result was written, and no
+Task-208 attempt 2 occurred: the existing `driveNarration` automatic-recovery
+route is gated to completed `player_action` turns, while this boundary is an
+interrupted `opening` turn. The authoritative rendered state remained
+“Action received” without enabled controls; its active turn was interrupted
+and retry-eligible. No Resume, retry, replay, or later click was made.
+
+Read-only inspection used a copied database trio with `query_only=ON` at
+`R:\\Temp\\WorldForge-task208-r160\\terminal-db`. It reported
+`integrity_check=ok`, an empty `foreign_key_check`, one opening turn, zero turn
+results, zero narration operations/attempts, zero proper scenes, eight unique
+opening commands and receipts, and 19 unique turn events. The state row was
+`setup_phase=ready`, `worldVersion=12`, `runtimeRevision=21`; no player-action
+checkpoint, 60-action endurance, or same-page reload was reached. Provider
+cause and HTTP settlement metadata for the failed Narrator call were not
+retained, so Task-208 live recovery coverage is unavailable and no cause is
+inferred. Generated r160 session/world evidence remains preserved.
+The read-only database copy hashes were `state.db=29CC7604A0387DDFC22C47F6BFBC1B3A6B2F8553D2F4716BE0C9802CFE683FF3`, `state.db-wal=C8E316E1265A4B0A5E2CC24472CD51050D1E0B662589CE6C6E3A572460A8E86D`, and `state.db-shm=6EF4258C190295100BAFC6C24083DBF567EC419C03FB8A235E40E67A7BDB5BCF`.
+The preserved backend/stdout, frontend/stdout, and frontend/stderr evidence hashes are respectively `7E93595D6C5D01B67D4F00641847DFBDAA188C145FE0C788AF0CCC71340394F0`, `8BF5A0089EDF2190BF03DF125496739B8982B5B40BD5093158B33FAA19A2EF08`, and `76F453A99211B87D3FACE3F2DFCB3FDEF65E903AE19321689AE075B67F48ED65`.
+
 ## Acceptance handoff
 
 Static acceptance is mapped to the repository deadline conditional, the
