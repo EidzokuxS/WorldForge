@@ -421,6 +421,7 @@ interface ObservationActorNameFrameEntry {
   observationIndex: number;
   permittedActorNames: string[];
   quotedReferenceActorNames: string[];
+  sourceReferenceActorNames: string[];
   forbiddenActorNames: string[];
 }
 
@@ -528,6 +529,17 @@ function occurrenceInsideDialogueQuoteSpan(
   return spans.some((span) => occurrence.start >= span.start && occurrence.end <= span.end);
 }
 
+function exactTextOccurrences(textValue: string, exactText: string): TextOccurrence[] {
+  if (exactText.length === 0) return [];
+  const occurrences: TextOccurrence[] = [];
+  let start = textValue.indexOf(exactText);
+  while (start >= 0) {
+    occurrences.push({ start, end: start + exactText.length });
+    start = textValue.indexOf(exactText, start + 1);
+  }
+  return occurrences;
+}
+
 interface ActorNameMatcher {
   aliasesForActor: (actor: CampaignPlayVisibleActor) => string[];
   matchedAlias: (textValue: string, actorName: string) => string | null;
@@ -591,28 +603,41 @@ function buildObservationActorNameFrame(
     const permittedActorNames = packet.visibleActors
       .filter((actor) => permittedNames.has(actor.name))
       .map((actor) => actor.name);
-    const quotedReferenceActorNames = packet.visibleActors
+    const dialogueQuoteSpans = balancedDialogueQuoteSpans(observation.text);
+    const sourceReferenceActorNames = packet.visibleActors
       .filter((actor) => {
         if (permittedNames.has(actor.name)) return false;
         const occurrences = matcher.occurrencesForActor(observation.text, actor);
-        if (occurrences.length === 0) return false;
-        const spans = balancedDialogueQuoteSpans(observation.text);
-        return occurrences.every((occurrence) => occurrenceInsideDialogueQuoteSpan(occurrence, spans));
+        return occurrences.some((occurrence) =>
+          !occurrenceInsideDialogueQuoteSpan(occurrence, dialogueQuoteSpans));
+      })
+      .map((actor) => actor.name);
+    const quotedReferenceActorNames = packet.visibleActors
+      .filter((actor) => {
+        if (permittedNames.has(actor.name) || sourceReferenceActorNames.includes(actor.name)) {
+          return false;
+        }
+        const occurrences = matcher.occurrencesForActor(observation.text, actor);
+        return occurrences.length > 0 && occurrences.every((occurrence) =>
+          occurrenceInsideDialogueQuoteSpan(occurrence, dialogueQuoteSpans));
       })
       .map((actor) => actor.name);
     return {
       observationIndex,
       permittedActorNames,
       quotedReferenceActorNames,
+      sourceReferenceActorNames,
       forbiddenActorNames: packet.visibleActors
         .filter((actor) => !permittedActorNames.includes(actor.name)
-          && !quotedReferenceActorNames.includes(actor.name))
+          && !quotedReferenceActorNames.includes(actor.name)
+          && !sourceReferenceActorNames.includes(actor.name))
         .map((actor) => actor.name),
     };
   });
 }
 
-type ActorScopeRepairScope = "permitted" | "quoted_reference" | "forbidden";
+type ActorScopeRepairScope =
+  "permitted" | "quoted_reference" | "source_reference" | "forbidden";
 
 interface ActorScopeRepairFrameEntry {
   beatIndex: number;
@@ -658,6 +683,8 @@ function buildActorScopeRepairFrame(
         ? "permitted"
         : frameEntry?.quotedReferenceActorNames.includes(check.matchedActor.canonicalName)
           ? "quoted_reference"
+          : frameEntry?.sourceReferenceActorNames.includes(check.matchedActor.canonicalName)
+            ? "source_reference"
           : "forbidden";
       return { observationIndex, scope };
     }),
@@ -791,10 +818,13 @@ function buildPrompt(
     observationActorNameFrame,
     recoveryFeedback,
   );
+  const actorScopeRepairHasSourceReference = actorScopeRepairFrame?.some((entry) =>
+    entry.matchedActorScopeByObservation.some(({ scope }) => scope === "source_reference"),
+  ) ?? false;
   const actorScopeRepairBlock = actorScopeRepairFrame === null ? "" : `
 ACTOR_SCOPE_REPAIR
 Each entry identifies one failed beat field. Keep its final observationIndexes grounded; do not change them merely to authorize a name. If the matched actor is forbidden for every listed observation, remove its canonical name and matched alias from that field. If the matched actor is a quoted reference for any listed observation and is never permitted, keep it only inside balanced quoted dialogue and do not depict that actor speaking, moving, arriving, watching, or otherwise acting. Rewrite the listed field, then check every actor name against OBSERVATION_ACTOR_NAME_FRAME.
-ACTOR_SCOPE_REPAIR_FRAME
+${actorScopeRepairHasSourceReference ? "If a matched actor is a source reference, either copy the corresponding observation text exactly or remove the actor's canonical name and matched alias from that field.\n" : ""}ACTOR_SCOPE_REPAIR_FRAME
 ${canonicalizeCampaignPlayProjection(actorScopeRepairFrame)}
 END_ACTOR_SCOPE_REPAIR_FRAME`;
   const generationRecoveryBlock = recoveryFeedback?.diagnostic ===
@@ -850,11 +880,11 @@ When a newObservation has a non-null consequence.performingActorName, the beat c
 
 observationSubjects, when present, is code-owned identity binding for the non-performing visible actors affected by each current observation. OBSERVATION_ACTOR_NAME_FRAME turns the performer and subject bindings into literal visible-actor names for every observation index. Match observationSubjects by observationHandle. If an observation names a performing actor and binds exactly one other actor, an unnamed person, silhouette, hooded figure, traveler, witness, or other human target in that observation is the bound actor, never the player. Preserve the bound name or a clearly separate third-person reference. Do not replace a bound actor with "you", even when sourceMoment previously confused their identity or the player stands nearby.
 
-OBSERVATION_ACTOR_NAME_FRAME separates visible actor names for each observation index into permittedActorNames, quotedReferenceActorNames, and forbiddenActorNames. permittedActorNames are the performer and bound subjects. quotedReferenceActorNames are visible actors named only inside accepted dialogue enclosed by balanced straight or curly single or double quotes; they are referents, not participants. Apostrophes inside words are not quote boundaries.
+OBSERVATION_ACTOR_NAME_FRAME separates visible actor names for each observation index into permittedActorNames, quotedReferenceActorNames, sourceReferenceActorNames, and forbiddenActorNames. permittedActorNames are the performer and bound subjects. quotedReferenceActorNames are visible actors named only inside accepted dialogue enclosed by balanced straight or curly single or double quotes; they are referents, not participants. sourceReferenceActorNames are visible actors named in accepted observation text outside balanced quoted dialogue but not authorized as performers or subjects. A sourceReferenceActorName may appear only inside an exact verbatim copy of that observation's text. Do not paraphrase the reference or repeat the name elsewhere; the exact source text is the entire authority for that actor. Apostrophes inside words are not quote boundaries.
 
-For each beat, union each name list from every frame entry named by its observationIndexes. A permittedActorName may be described acting in the beat. A quotedReferenceActorName may appear only inside dialogue enclosed by balanced straight or curly single or double quotes that preserves a permitted speaker's accepted reference. It does not authorize a new claim about that actor, and the beat must not describe that actor speaking, moving, arriving, watching, or otherwise acting. Do not write a forbiddenActorName or a unique part of it anywhere in the beat. Actorless sounds, traces, silhouettes, and motion remain unattributed. The same rule applies to weather and other scene changes, even when earlier context makes a visible actor seem like the likely source. Resemblance is not identity.
+For each beat, union each name list from every frame entry named by its observationIndexes. A permittedActorName may be described acting in the beat. A quotedReferenceActorName may appear only inside dialogue enclosed by balanced straight or curly single or double quotes that preserves a permitted speaker's accepted reference. It does not authorize a new claim about that actor, and the beat must not describe that actor speaking, moving, arriving, watching, or otherwise acting. A sourceReferenceActorName may appear only inside an exact verbatim copy of the corresponding accepted observation text. Do not paraphrase the source reference or repeat the name elsewhere. Do not write a forbiddenActorName or a unique part of it anywhere in the beat. Actorless sounds, traces, silhouettes, and motion remain unattributed. The same rule applies to weather and other scene changes, even when earlier context makes a visible actor seem like the likely source. Resemblance is not identity.
 
-Before finalizing each beat, check every visible actor name or unique name fragment. Outside balanced quoted dialogue, every name must belong to permittedActorNames. Inside balanced quoted dialogue, every other visible actor name must belong to quotedReferenceActorNames. Remove any unmatched actor reference. If the actor matters but is not permitted by those observations, put the orientation in a separate beat with observationIndexes: [].
+Before finalizing each beat, check every visible actor name or unique name fragment. Outside balanced quoted dialogue, every name must belong to permittedActorNames or sourceReferenceActorNames. A sourceReferenceActorName must be inside an exact verbatim copy of its selected observation text. Inside balanced quoted dialogue, every other visible actor name must belong to quotedReferenceActorNames. Remove any unmatched actor reference. If the actor matters but is not permitted by those observations, put the orientation in a separate beat with observationIndexes: [].
 
 An actor may still be present in visibleActors without being bound to a current observation. Put any orientation mention of that actor in a separate beat with observationIndexes: []. On a movement turn, assign the travel observation to its consequence beat, then orient the player to unbound people at the destination in a separate empty-index beat. Do not attach an unbound actor name to the travel observation.
 
@@ -895,7 +925,7 @@ Keep distant events, hidden actors, private goals, protected state, Judge reason
 
 NARRATOR_RECOVERY
 The prior proposal failed the safe checks below. Regenerate a fresh proposal from NARRATOR_PACKET. Correct every listed check. Do not reuse the rejected observation-index or action-selection arrangement. Every schema, grounding, identity, visibility, and action rule above remains unchanged.
-If a failed check requires changing observation coverage or observationIndexes, recompute permittedActorNames, quotedReferenceActorNames, and forbiddenActorNames for every beat from OBSERVATION_ACTOR_NAME_FRAME using its final observationIndexes. Then rewrite each beat so every actor name follows the rules above.${actorScopeRepairBlock}${generationRecoveryBlock}
+If a failed check requires changing observation coverage or observationIndexes, recompute permittedActorNames, quotedReferenceActorNames, sourceReferenceActorNames, and forbiddenActorNames for every beat from OBSERVATION_ACTOR_NAME_FRAME using its final observationIndexes. Then rewrite each beat so every actor name follows the rules above.${actorScopeRepairBlock}${generationRecoveryBlock}
 RECOVERY_DIAGNOSTIC
 ${canonicalizeCampaignPlayProjection(recoveryFeedback)}
 END_RECOVERY_DIAGNOSTIC`}`;
@@ -1094,6 +1124,9 @@ function assertProposalForPacket(
     const quotedReferenceActorNames = new Set(
       frameEntries.flatMap((entry) => entry.quotedReferenceActorNames),
     );
+    const sourceReferenceActorNames = new Set(
+      frameEntries.flatMap((entry) => entry.sourceReferenceActorNames),
+    );
     const forbiddenActorNames = new Set(
       frameEntries.flatMap((entry) => entry.forbiddenActorNames),
     );
@@ -1147,6 +1180,21 @@ function assertProposalForPacket(
           return occurrences.length === 0
             || !occurrences.every((occurrence) =>
               occurrenceInsideDialogueQuoteSpan(occurrence, beatQuoteSpans));
+        }
+        if (sourceReferenceActorNames.has(actor.name)) {
+          const sourceObservationTexts = beat.observationIndexes
+            .map((observationIndex) => {
+              const frameEntry = observationActorNameFrame[observationIndex];
+              if (!frameEntry?.sourceReferenceActorNames.includes(actor.name)) return null;
+              return packet.newObservations[observationIndex]?.text ?? null;
+            })
+            .filter((text): text is string => text !== null);
+          const sourceSpans = sourceObservationTexts.flatMap((text) =>
+            exactTextOccurrences(beat.text, text));
+          const occurrences = actorNameMatcher.occurrencesForActor(beat.text, actor);
+          return occurrences.length === 0
+            || !occurrences.every((occurrence) => sourceSpans.some((span) =>
+              occurrence.start >= span.start && occurrence.end <= span.end));
         }
         return forbiddenActorNames.has(actor.name) || !quotedReferenceActorNames.has(actor.name);
       });

@@ -201,6 +201,62 @@ function r45SingleObservationPacket(): CampaignPlayNarratorPacket {
   };
 }
 
+function r161SourceReferenceText(): string {
+  return "Vedris Kast doesn't turn from the guard post. His voice stays low, meant for Dren, not you. The post remains still.";
+}
+
+function r161SourceReferencePacket(): CampaignPlayNarratorPacket {
+  const packet = r45SingleObservationPacket();
+  const observation = packet.newObservations[0]!;
+  const consequence = observation.consequence!;
+  const sourceText = r161SourceReferenceText();
+  const sourceConsequence = {
+    ...consequence,
+    whatChanged: sourceText,
+    performingActorHandle: "actor_vedris_kast",
+    performingActorName: "Vedris Kast",
+  };
+
+  return {
+    ...packet,
+    turnId: "turn-r161-source-reference",
+    sourceMoment: "Vedris Kast holds the guard post while Dren waits nearby.",
+    newObservations: [{
+      ...observation,
+      text: sourceText,
+      consequence: sourceConsequence,
+    }],
+    consequences: [sourceConsequence],
+  };
+}
+
+function r161MultiSourceReferencePacket(): CampaignPlayNarratorPacket {
+  const packet = r161SourceReferencePacket();
+  const firstObservation = packet.newObservations[0]!;
+  const firstConsequence = firstObservation.consequence!;
+  const secondText = "Vedris Kast checks the south gate while Dren Vask waits by the post.";
+  const secondConsequence = {
+    ...firstConsequence,
+    observationHandle: "observation_vedris_south_gate",
+    whatChanged: secondText,
+  };
+
+  return {
+    ...packet,
+    turnId: "turn-r161-source-reference-multi",
+    newObservations: [
+      firstObservation,
+      {
+        ...firstObservation,
+        observationHandle: secondConsequence.observationHandle,
+        text: secondText,
+        consequence: secondConsequence,
+      },
+    ],
+    consequences: [firstConsequence, secondConsequence],
+  };
+}
+
 const budget = {
   maximumInputTokens: 1_000,
   maximumOutputTokens: 2_048,
@@ -1616,24 +1672,8 @@ describe("Campaign Play narrator", () => {
       "narration-curly-quoted-reference",
     )).not.toThrow();
 
-    const unbalancedPacket: CampaignPlayNarratorPacket = {
-      ...curlyPacket,
-      newObservations: curlyPacket.newObservations.map((observation, index) => index === 0
-        ? {
-            ...observation,
-            text: 'Dren Vask says, “Ask Vedris if you need more.,',
-            consequence: observation.consequence === null ? null : {
-              ...observation.consequence,
-              whatChanged: 'Dren Vask says, “Ask Vedris if you need more.,',
-            },
-          }
-        : observation),
-      consequences: curlyPacket.consequences.map((consequence, index) => index === 0
-        ? { ...consequence, whatChanged: 'Dren Vask says, “Ask Vedris if you need more.,' }
-        : consequence),
-    };
     expect(() => compile(
-      unbalancedPacket,
+      curlyPacket,
       'Dren Vask says, “Ask Vedris if you need more.,',
       "narration-unbalanced-quoted-reference",
     )).toThrowError(CampaignPlayNarratorError);
@@ -1793,6 +1833,163 @@ describe("Campaign Play narrator", () => {
         })],
       }),
     }));
+  });
+
+  it("accepts only exact source text for a visible source-reference actor", () => {
+    const packet = r161SourceReferencePacket();
+    const sourceText = r161SourceReferenceText();
+    const compile = (text: string, narrationId: string) => createCampaignPlayNarrator().compile({
+      narrationId,
+      packet,
+      proposal: {
+        actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+        beats: [{
+          purpose: "consequence",
+          observationIndexes: [0],
+          text,
+        }],
+      },
+      createdAt: 1_000,
+    });
+
+    expect(() => compile(sourceText, "narration-r161-exact-source-reference")).not.toThrow();
+    for (const [label, text] of [
+      ["paraphrase", "Vedris Kast keeps his back to the guard post and mentions Dren quietly."],
+      ["extra-occurrence", `${sourceText} Dren waits by the gate.`],
+      ["invented-action", `${sourceText} Dren watches the guard post.`],
+    ] as const) {
+      expect(() => compile(text, `narration-r161-${label}`)).toThrowError(expect.objectContaining({
+        code: "narration_invalid",
+        recoveryFeedback: expect.objectContaining({
+          failedChecks: [expect.objectContaining({
+            check: "visible_actor_observation_mismatch",
+            fieldPath: "beats[0].text",
+            observationIndexes: [0],
+            matchedActor: expect.objectContaining({
+              canonicalName: "Dren Vask",
+              matchedAlias: "Dren",
+            }),
+          })],
+        }),
+      }));
+    }
+  });
+
+  it("derives source-reference frame entries for canonical names and aliases", async () => {
+    const packet = r161MultiSourceReferencePacket();
+    const firstText = r161SourceReferenceText();
+    const secondText = "Vedris Kast checks the south gate while Dren Vask waits by the post.";
+    const generateObject = vi.fn(async (
+      _options: Parameters<typeof safeGenerateObject>[0],
+    ) => ({
+      object: {
+        actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+        beats: [{
+          purpose: "consequence" as const,
+          observationIndexes: [0, 1],
+          text: `${firstText} ${secondText}`,
+        }],
+      },
+      trace: trace(),
+    }));
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    await narrator.narrate({
+      narrationId: "narration-r161-source-reference-frame",
+      packetBytes: canonicalizeCampaignPlayProjection(packet),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+    });
+
+    const prompt = String(generateObject.mock.calls[0]![0].prompt);
+    expect(prompt).toContain(
+      '[{"forbiddenActorNames":["Mara Venn"],"observationIndex":0,"permittedActorNames":["Vedris Kast"],"quotedReferenceActorNames":[],"sourceReferenceActorNames":["Dren Vask"]},{"forbiddenActorNames":["Mara Venn"],"observationIndex":1,"permittedActorNames":["Vedris Kast"],"quotedReferenceActorNames":[],"sourceReferenceActorNames":["Dren Vask"]}]',
+    );
+    const frameStart = prompt.indexOf("OBSERVATION_ACTOR_NAME_FRAME\n")
+      + "OBSERVATION_ACTOR_NAME_FRAME\n".length;
+    const frameEnd = prompt.indexOf("\nEND_OBSERVATION_ACTOR_NAME_FRAME", frameStart);
+    const frame = prompt.slice(frameStart, frameEnd);
+    expect(frame).not.toContain(firstText);
+    expect(frame).not.toContain(secondText);
+    expect(frame).not.toContain("actor_dren_vask");
+    expect(prompt).toContain(
+      "sourceReferenceActorNames are visible actors named in accepted observation text outside balanced quoted dialogue but not authorized as performers or subjects.",
+    );
+  });
+
+  it("classifies source references in the actor-scope recovery frame", async () => {
+    const packet = r161SourceReferencePacket();
+    const sourceText = r161SourceReferenceText();
+    const generateObject = vi.fn(async (
+      _options: Parameters<typeof safeGenerateObject>[0],
+    ) => ({
+      object: {
+        actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+        beats: [{
+          purpose: "consequence" as const,
+          observationIndexes: [0],
+          text: sourceText,
+        }],
+      },
+      trace: trace(),
+    }));
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    const request = {
+      narrationId: "narration-r161-source-reference-recovery",
+      packetBytes: canonicalizeCampaignPlayProjection(packet),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+    };
+    await narrator.narrate(request);
+    const recoveryFeedback: CampaignPlayNarratorRecoveryFeedback = {
+      diagnostic: "narrator_packet_validation_mismatch",
+      failedChecks: [{
+        check: "visible_actor_observation_mismatch",
+        beatIndex: 0,
+        fieldPath: "beats[0].text",
+        observationIndexes: [0],
+        matchedActor: {
+          canonicalId: "actor_dren_vask",
+          canonicalName: "Dren Vask",
+          matchedAlias: "Dren",
+        },
+        allowedActors: [{
+          canonicalId: "actor_vedris_kast",
+          canonicalName: "Vedris Kast",
+        }],
+        sourceObservationPerformers: [{
+          observationIndex: 0,
+          canonicalId: "actor_vedris_kast",
+          canonicalName: "Vedris Kast",
+        }],
+      }],
+    };
+    await narrator.narrate({ ...request, recoveryFeedback });
+    const recoveryPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    expect(recoveryPrompt).toContain(
+      "If a matched actor is a source reference, either copy the corresponding observation text exactly or remove the actor's canonical name and matched alias from that field.",
+    );
+    expect(recoveryPrompt).toContain(
+      '"matchedActorScopeByObservation":[{"observationIndex":0,"scope":"source_reference"}]',
+    );
+    const actorScopeFrameStart = recoveryPrompt.indexOf("ACTOR_SCOPE_REPAIR_FRAME")
+      + "ACTOR_SCOPE_REPAIR_FRAME".length;
+    const actorScopeFrameEnd = recoveryPrompt.indexOf("END_ACTOR_SCOPE_REPAIR_FRAME");
+    const actorScopeFrame = recoveryPrompt.slice(actorScopeFrameStart, actorScopeFrameEnd);
+    expect(actorScopeFrame).not.toContain("actor_dren_vask");
+    expect(actorScopeFrame).not.toContain(sourceText);
+    expect(recoveryPrompt).not.toContain("provider response");
+    expect(recoveryPrompt.indexOf("ACTOR_SCOPE_REPAIR_FRAME")).toBeLessThan(
+      recoveryPrompt.indexOf("RECOVERY_DIAGNOSTIC"),
+    );
   });
 
   it("accepts a combined observation reference without actor diagnostics", () => {
@@ -2018,7 +2215,7 @@ describe("Campaign Play narrator", () => {
     })).not.toThrow();
   });
 
-  it("exposes literal forbidden actor names for an actorless current observation", async () => {
+  it("exposes source-reference actor names for an actorless current observation", async () => {
     const consequence = {
       observationHandle: "observation_wind_shift",
       performingActorHandle: null,
@@ -2082,8 +2279,9 @@ describe("Campaign Play narrator", () => {
     const prompt = String(generateObject.mock.calls[0]![0].prompt);
     expect(prompt).toContain("OBSERVATION_ACTOR_NAME_FRAME");
     expect(prompt).toContain(
-      '[{"forbiddenActorNames":["Mara Venn"],"observationIndex":0,"permittedActorNames":[],"quotedReferenceActorNames":[]}]',
+      '[{"forbiddenActorNames":[],"observationIndex":0,"permittedActorNames":[],"quotedReferenceActorNames":[],"sourceReferenceActorNames":["Mara Venn"]}]',
     );
+    expect(prompt).not.toContain('"forbiddenActorNames":["Mara Venn"]');
     expect(prompt).toContain("quotedReferenceActorNames");
   });
 
@@ -2118,7 +2316,7 @@ describe("Campaign Play narrator", () => {
 
     const prompt = String(generateObject.mock.calls[0]![0].prompt);
     expect(prompt).toContain(
-      '[{"forbiddenActorNames":["Mara Venn"],"observationIndex":0,"permittedActorNames":["Dren Vask"],"quotedReferenceActorNames":["Vedris Kast"]}]',
+      '[{"forbiddenActorNames":["Mara Venn"],"observationIndex":0,"permittedActorNames":["Dren Vask"],"quotedReferenceActorNames":["Vedris Kast"],"sourceReferenceActorNames":[]}]',
     );
   });
 
@@ -2374,10 +2572,10 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("do not retain the stale absence claim");
     expect(prompt).toContain("observationSubjects, when present, is code-owned identity binding");
     expect(prompt).toContain(
-      "OBSERVATION_ACTOR_NAME_FRAME separates visible actor names for each observation index into permittedActorNames, quotedReferenceActorNames, and forbiddenActorNames. permittedActorNames are the performer and bound subjects. quotedReferenceActorNames are visible actors named only inside accepted dialogue enclosed by balanced straight or curly single or double quotes; they are referents, not participants. Apostrophes inside words are not quote boundaries.",
+      "OBSERVATION_ACTOR_NAME_FRAME separates visible actor names for each observation index into permittedActorNames, quotedReferenceActorNames, sourceReferenceActorNames, and forbiddenActorNames. permittedActorNames are the performer and bound subjects. quotedReferenceActorNames are visible actors named only inside accepted dialogue enclosed by balanced straight or curly single or double quotes; they are referents, not participants. sourceReferenceActorNames are visible actors named in accepted observation text outside balanced quoted dialogue but not authorized as performers or subjects. A sourceReferenceActorName may appear only inside an exact verbatim copy of that observation's text. Do not paraphrase the reference or repeat the name elsewhere; the exact source text is the entire authority for that actor. Apostrophes inside words are not quote boundaries.",
     );
     expect(prompt).toContain(
-      "For each beat, union each name list from every frame entry named by its observationIndexes. A permittedActorName may be described acting in the beat. A quotedReferenceActorName may appear only inside dialogue enclosed by balanced straight or curly single or double quotes that preserves a permitted speaker's accepted reference. It does not authorize a new claim about that actor, and the beat must not describe that actor speaking, moving, arriving, watching, or otherwise acting. Do not write a forbiddenActorName or a unique part of it anywhere in the beat.",
+      "For each beat, union each name list from every frame entry named by its observationIndexes. A permittedActorName may be described acting in the beat. A quotedReferenceActorName may appear only inside dialogue enclosed by balanced straight or curly single or double quotes that preserves a permitted speaker's accepted reference. It does not authorize a new claim about that actor, and the beat must not describe that actor speaking, moving, arriving, watching, or otherwise acting. A sourceReferenceActorName may appear only inside an exact verbatim copy of the corresponding accepted observation text. Do not paraphrase the source reference or repeat the name elsewhere. Do not write a forbiddenActorName or a unique part of it anywhere in the beat.",
     );
     expect(prompt).toContain("Actorless sounds, traces, silhouettes, and motion remain unattributed");
     expect(prompt).toContain("Resemblance is not identity");
@@ -2390,7 +2588,7 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Never merge the player with a named or unnamed actor");
     expect(prompt).toContain("is not approaching or watching \"you\" without that identity evidence");
     expect(prompt).toContain(
-      "Before finalizing each beat, check every visible actor name or unique name fragment. Outside balanced quoted dialogue, every name must belong to permittedActorNames. Inside balanced quoted dialogue, every other visible actor name must belong to quotedReferenceActorNames. Remove any unmatched actor reference.",
+      "Before finalizing each beat, check every visible actor name or unique name fragment. Outside balanced quoted dialogue, every name must belong to permittedActorNames or sourceReferenceActorNames. A sourceReferenceActorName must be inside an exact verbatim copy of its selected observation text. Inside balanced quoted dialogue, every other visible actor name must belong to quotedReferenceActorNames. Remove any unmatched actor reference.",
     );
     expect(prompt).toContain("Remove any unmatched actor reference");
     expect(prompt).toContain("If removing a beat loses no supported information, omit it");
@@ -2507,7 +2705,7 @@ describe("Campaign Play narrator", () => {
 
 NARRATOR_RECOVERY
 The prior proposal failed the safe checks below. Regenerate a fresh proposal from NARRATOR_PACKET. Correct every listed check. Do not reuse the rejected observation-index or action-selection arrangement. Every schema, grounding, identity, visibility, and action rule above remains unchanged.
-If a failed check requires changing observation coverage or observationIndexes, recompute permittedActorNames, quotedReferenceActorNames, and forbiddenActorNames for every beat from OBSERVATION_ACTOR_NAME_FRAME using its final observationIndexes. Then rewrite each beat so every actor name follows the rules above.
+If a failed check requires changing observation coverage or observationIndexes, recompute permittedActorNames, quotedReferenceActorNames, sourceReferenceActorNames, and forbiddenActorNames for every beat from OBSERVATION_ACTOR_NAME_FRAME using its final observationIndexes. Then rewrite each beat so every actor name follows the rules above.
 RECOVERY_DIAGNOSTIC
 ${canonicalizeCampaignPlayProjection(recoveryFeedback)}
 END_RECOVERY_DIAGNOSTIC`);
@@ -2569,7 +2767,7 @@ END_RECOVERY_DIAGNOSTIC`);
 
 NARRATOR_RECOVERY
 The prior proposal failed the safe checks below. Regenerate a fresh proposal from NARRATOR_PACKET. Correct every listed check. Do not reuse the rejected observation-index or action-selection arrangement. Every schema, grounding, identity, visibility, and action rule above remains unchanged.
-If a failed check requires changing observation coverage or observationIndexes, recompute permittedActorNames, quotedReferenceActorNames, and forbiddenActorNames for every beat from OBSERVATION_ACTOR_NAME_FRAME using its final observationIndexes. Then rewrite each beat so every actor name follows the rules above.
+If a failed check requires changing observation coverage or observationIndexes, recompute permittedActorNames, quotedReferenceActorNames, sourceReferenceActorNames, and forbiddenActorNames for every beat from OBSERVATION_ACTOR_NAME_FRAME using its final observationIndexes. Then rewrite each beat so every actor name follows the rules above.
 ACTOR_SCOPE_REPAIR
 Each entry identifies one failed beat field. Keep its final observationIndexes grounded; do not change them merely to authorize a name. If the matched actor is forbidden for every listed observation, remove its canonical name and matched alias from that field. If the matched actor is a quoted reference for any listed observation and is never permitted, keep it only inside balanced quoted dialogue and do not depict that actor speaking, moving, arriving, watching, or otherwise acting. Rewrite the listed field, then check every actor name against OBSERVATION_ACTOR_NAME_FRAME.
 ACTOR_SCOPE_REPAIR_FRAME
