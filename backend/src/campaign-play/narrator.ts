@@ -697,6 +697,24 @@ function buildActionSelectionIndexFrame(
   };
 }
 
+interface ObservationCoverageRepairFrame {
+  expectedObservationCount: number;
+  requiredObservationIndexes: number[];
+}
+
+function buildObservationCoverageRepairFrame(
+  packet: CampaignPlayNarratorPacket,
+): ObservationCoverageRepairFrame {
+  const expectedObservationCount = packet.newObservations.length;
+  return {
+    expectedObservationCount,
+    requiredObservationIndexes: Array.from(
+      { length: expectedObservationCount },
+      (_value, observationIndex) => observationIndex,
+    ),
+  };
+}
+
 function trailingIntentIndexSchema(
   requiredIntentIndex: number,
   availableIntentCount: number,
@@ -785,7 +803,11 @@ NARRATOR_GENERATION_RECOVERY
 The prior response did not match the provider-facing schema. Regenerate a fresh object. Rebuild actionSelections from ACTION_SELECTION_INDEX_FRAME: at each actionSelectionIndex, set intentIndex to one integer from allowedIntentIndexes, and use each selected index once. Keep every other schema, packet, grounding, visibility, and narration rule unchanged.
 ACTION_SELECTION_INDEX_FRAME
 ${canonicalizeCampaignPlayProjection(buildActionSelectionIndexFrame(packet))}
-END_ACTION_SELECTION_INDEX_FRAME` : "";
+END_ACTION_SELECTION_INDEX_FRAME
+Rebuild beat observationIndexes from OBSERVATION_COVERAGE_REPAIR_FRAME. Across all beats combined, include every requiredObservationIndex exactly once, include no other index, and produce exactly expectedObservationCount observationIndexes entries. Keep each listed observation grounded in that beat's visible narration.
+OBSERVATION_COVERAGE_REPAIR_FRAME
+${canonicalizeCampaignPlayProjection(buildObservationCoverageRepairFrame(packet))}
+END_OBSERVATION_COVERAGE_REPAIR_FRAME` : "";
   const semanticPacketBytes = canonicalizeCampaignPlayProjection({
     ...packet,
     visibleActors: packet.visibleActors.map((actor) => ({

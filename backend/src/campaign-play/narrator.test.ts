@@ -1260,6 +1260,7 @@ describe("Campaign Play narrator", () => {
     await narrator.narrate(request);
     const basePrompt = String(generateObject.mock.calls[0]![0].prompt);
     expect(basePrompt).not.toContain("NARRATOR_GENERATION_RECOVERY");
+    expect(basePrompt).not.toContain("OBSERVATION_COVERAGE_REPAIR_FRAME");
     await narrator.narrate({ ...request, narrationId: "narration-generation-recovery-frame-2", recoveryFeedback });
     const recoveryPrompt = String(generateObject.mock.calls[1]![0].prompt);
     const frameStart = recoveryPrompt.indexOf("ACTION_SELECTION_INDEX_FRAME\n")
@@ -1279,9 +1280,80 @@ describe("Campaign Play narrator", () => {
       "The prior response did not match the provider-facing schema. Regenerate a fresh object.",
     );
     expect(recoveryPrompt).toContain("set intentIndex to one integer from allowedIntentIndexes");
+    const coverageFrameStart = recoveryPrompt.indexOf("OBSERVATION_COVERAGE_REPAIR_FRAME\n")
+      + "OBSERVATION_COVERAGE_REPAIR_FRAME\n".length;
+    const coverageFrameEnd = recoveryPrompt.indexOf("\nEND_OBSERVATION_COVERAGE_REPAIR_FRAME", coverageFrameStart);
+    expect(JSON.parse(recoveryPrompt.slice(coverageFrameStart, coverageFrameEnd))).toEqual({
+      expectedObservationCount: 1,
+      requiredObservationIndexes: [0],
+    });
+    expect(recoveryPrompt).toContain(
+      "Rebuild beat observationIndexes from OBSERVATION_COVERAGE_REPAIR_FRAME. Across all beats combined, include every requiredObservationIndex exactly once, include no other index, and produce exactly expectedObservationCount observationIndexes entries. Keep each listed observation grounded in that beat's visible narration.",
+    );
+    expect(recoveryPrompt.indexOf("END_ACTION_SELECTION_INDEX_FRAME")).toBeLessThan(
+      recoveryPrompt.indexOf("OBSERVATION_COVERAGE_REPAIR_FRAME"),
+    );
+    expect(recoveryPrompt.indexOf("END_OBSERVATION_COVERAGE_REPAIR_FRAME")).toBeLessThan(
+      recoveryPrompt.indexOf("RECOVERY_DIAGNOSTIC"),
+    );
     expect(recoveryPrompt).toContain('"diagnostic":"narrator_generation_schema_mismatch"');
     expect(frameText).not.toContain("Mara Venn");
     expect(frameText).not.toContain("choice_generation_0");
+    expect(recoveryPrompt.slice(coverageFrameStart, coverageFrameEnd)).not.toContain("Mara Venn");
+    expect(recoveryPrompt.slice(coverageFrameStart, coverageFrameEnd)).not.toContain("Dren Vask");
+    expect(recoveryPrompt.slice(coverageFrameStart, coverageFrameEnd)).not.toContain("actor_");
+
+    const zeroGenerateObject = vi.fn(async (
+      _options: Parameters<typeof safeGenerateObject>[0],
+    ) => ({ object: proposalFixture(), trace: trace() }));
+    const zeroNarrator = createCampaignPlayNarrator({
+      generateObject: zeroGenerateObject as unknown as typeof safeGenerateObject,
+    });
+    await zeroNarrator.narrate({
+      ...request,
+      narrationId: "narration-generation-recovery-zero-observations",
+      packetBytes: canonicalizeCampaignPlayProjection(packetFixture()),
+      recoveryFeedback,
+    });
+    const zeroPrompt = String(zeroGenerateObject.mock.calls[0]![0].prompt);
+    const zeroFrameStart = zeroPrompt.indexOf("OBSERVATION_COVERAGE_REPAIR_FRAME\n")
+      + "OBSERVATION_COVERAGE_REPAIR_FRAME\n".length;
+    const zeroFrameEnd = zeroPrompt.indexOf("\nEND_OBSERVATION_COVERAGE_REPAIR_FRAME", zeroFrameStart);
+    expect(JSON.parse(zeroPrompt.slice(zeroFrameStart, zeroFrameEnd))).toEqual({
+      expectedObservationCount: 0,
+      requiredObservationIndexes: [],
+    });
+
+    const multiGenerateObject = vi.fn(async (
+      _options: Parameters<typeof safeGenerateObject>[0],
+    ) => ({
+      object: {
+        actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+        beats: [{
+          purpose: "consequence" as const,
+          observationIndexes: [0, 1],
+          text: "Dren Vask says to ask Vedris as Vedris Kast checks the remaining jars.",
+        }],
+      },
+      trace: trace(),
+    }));
+    const multiNarrator = createCampaignPlayNarrator({
+      generateObject: multiGenerateObject as unknown as typeof safeGenerateObject,
+    });
+    await multiNarrator.narrate({
+      ...request,
+      narrationId: "narration-generation-recovery-multi-observations",
+      packetBytes: canonicalizeCampaignPlayProjection(r45ActorAttributionPacket()),
+      recoveryFeedback,
+    });
+    const multiPrompt = String(multiGenerateObject.mock.calls[0]![0].prompt);
+    const multiFrameStart = multiPrompt.indexOf("OBSERVATION_COVERAGE_REPAIR_FRAME\n")
+      + "OBSERVATION_COVERAGE_REPAIR_FRAME\n".length;
+    const multiFrameEnd = multiPrompt.indexOf("\nEND_OBSERVATION_COVERAGE_REPAIR_FRAME", multiFrameStart);
+    expect(JSON.parse(multiPrompt.slice(multiFrameStart, multiFrameEnd))).toEqual({
+      expectedObservationCount: 2,
+      requiredObservationIndexes: [0, 1],
+    });
 
     const oneIntentGenerateObject = vi.fn(async (
       _options: Parameters<typeof safeGenerateObject>[0],
@@ -2445,6 +2517,7 @@ END_RECOVERY_DIAGNOSTIC`);
     );
     expect(recoveryPrompt).not.toContain("rejected prose");
     expect(recoveryPrompt).not.toContain("provider response");
+    expect(recoveryPrompt).not.toContain("OBSERVATION_COVERAGE_REPAIR_FRAME");
   });
 
   it("forwards only safe visible-actor mismatch coordinates in narrator recovery", async () => {
