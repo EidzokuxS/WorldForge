@@ -830,17 +830,23 @@ export function createCampaignPlayApplication(
           failedOperation.errorCode !== "provider_unavailable" &&
           failedOperation.errorCode !== "stage_timeout")
       ) return;
+      const actorObservationMismatch = operation.recoveryFeedback?.diagnostic ===
+          "narrator_packet_validation_mismatch" &&
+        operation.recoveryFeedback.failedChecks.some((check) =>
+          check.check === "visible_actor_observation_mismatch");
       // Safe compiler coordinates let the existing bypass Narrator correct the
       // rejected arrangement directly. Without them, retain the broader
       // default-reasoning recovery introduced for opaque semantic failures.
       // A tool-transport rejection has no compiler coordinates. Its native JSON
       // recovery therefore uses the same default-reasoning path as an opaque
-      // semantic failure, while retaining the frozen provider and model.
+      // semantic failure, while retaining the frozen provider and model. Actor
+      // observation mismatches also use that default-reasoning construction so
+      // the model can repair its narration with the existing safe coordinates.
       let recoveryRuntime = runtime;
       if (
         failedOperation.errorCode === "provider_unavailable" ||
         (failedOperation.errorCode === "narration_invalid" &&
-          operation.recoveryFeedback === undefined)
+          (operation.recoveryFeedback === undefined || actorObservationMismatch))
       ) {
         const originalCreateModel = dependencies.createModel;
         let recoveryStorytellerModelCreated = false;

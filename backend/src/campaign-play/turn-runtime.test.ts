@@ -3671,21 +3671,49 @@ describe("Campaign Play player-action turn runtime", () => {
       label: "keeps bypass when safe compiler feedback identifies the failed checks",
       failure: "semantic_safe" as const,
       safeCompilerFeedback: true,
+      actorObservationMismatch: false,
+      recoveryFails: false,
       expectedRecoveryOptions: { role: "storyteller", reasoningMode: "bypass" },
+    },
+    {
+      label: "uses default reasoning for visible actor observation mismatch feedback",
+      failure: "semantic_actor" as const,
+      safeCompilerFeedback: false,
+      actorObservationMismatch: true,
+      recoveryFails: false,
+      expectedRecoveryOptions: { role: "storyteller" },
+    },
+    {
+      label: "keeps actor observation mismatch recovery terminal after one failed retry",
+      failure: "semantic_actor" as const,
+      safeCompilerFeedback: false,
+      actorObservationMismatch: true,
+      recoveryFails: true,
+      expectedRecoveryOptions: { role: "storyteller" },
     },
     {
       label: "uses default reasoning when the semantic failure has no safe feedback",
       failure: "semantic_opaque" as const,
       safeCompilerFeedback: false,
+      actorObservationMismatch: false,
+      recoveryFails: false,
       expectedRecoveryOptions: { role: "storyteller" },
     },
     {
       label: "uses default reasoning with native JSON after tool transport rejection",
       failure: "provider" as const,
       safeCompilerFeedback: false,
+      actorObservationMismatch: false,
+      recoveryFails: false,
       expectedRecoveryOptions: { role: "storyteller" },
     },
-  ])("$label", async ({ failure, safeCompilerFeedback, expectedRecoveryOptions }) => {
+  ])("$label", async ({
+    failure,
+    safeCompilerFeedback,
+    actorObservationMismatch,
+    recoveryFails,
+    expectedRecoveryOptions,
+  }) => {
     const prepared = await createCompletedPlayerActionForApplication();
     closeTracked(prepared.handle);
 
@@ -3743,6 +3771,7 @@ describe("Campaign Play player-action turn runtime", () => {
             consequence?: { performingActorName?: string | null } | null;
           }>;
           observationSubjects?: Array<{ actors: Array<{ name: string }> }>;
+          visibleActors: Array<{ name: string }>;
         };
         const promptText = (options.prompt as Array<{
           content?: Array<{ type?: string; text?: string }>;
@@ -3773,18 +3802,46 @@ describe("Campaign Play player-action turn runtime", () => {
         }));
         const usesToolMode = (options.tools?.length ?? 0) > 0;
         observedStructuredOutputModes.push(usesToolMode ? "tool" : "auto");
+        if (generatedCalls === 2 && recoveryFails) {
+          throw new Error("actor observation recovery interrupted");
+        }
         if (generatedCalls === 1) {
           if (failure === "provider") throw new Error("transport interrupted");
+          const firstObservation = packet.newObservations[0];
+          const permittedActorNames = new Set([
+            ...(firstObservation?.consequence?.performingActorName
+              ? [firstObservation.consequence.performingActorName]
+              : []),
+            ...(packet.observationSubjects?.[0]?.actors ?? []).map((actor) => actor.name),
+          ]);
+          const actorMismatchName = packet.visibleActors.find((actor) =>
+            !permittedActorNames.has(actor.name))?.name;
+          if (actorObservationMismatch) expect(actorMismatchName).toBeDefined();
+          const observationIndexes = packet.newObservations.map((_observation, index) => index);
+          const actorMismatchBeats = actorObservationMismatch
+            ? [
+                {
+                  purpose: "consequence",
+                  observationIndexes: observationIndexes.slice(0, 1),
+                  text: `${actorMismatchName} remains visible.`,
+                },
+                ...(observationIndexes.length > 1
+                  ? [{
+                      purpose: "consequence",
+                      observationIndexes: observationIndexes.slice(1),
+                      text: "The accepted result holds.",
+                    }]
+                  : []),
+              ]
+            : null;
           const proposal = {
-            beats: [{
-              purpose: "consequence",
-              observationIndexes: safeCompilerFeedback
-                ? []
-                : packet.newObservations.map((_observation, index) => index),
-              text: safeCompilerFeedback
-                ? `You see the first accepted result at ${packet.currentLocation.name}.`
-                : packet.currentLocation.handle,
-            }],
+            beats: actorMismatchBeats ?? [{
+                purpose: "consequence",
+                observationIndexes: safeCompilerFeedback ? [] : observationIndexes,
+                text: safeCompilerFeedback
+                  ? `You see the first accepted result at ${packet.currentLocation.name}.`
+                  : packet.currentLocation.handle,
+              }],
             actionSelections,
           };
           return {
@@ -3905,16 +3962,26 @@ describe("Campaign Play player-action turn runtime", () => {
         packet_hash AS packetHash, receipt_ids_json AS receiptIdsJson,
         status, current_attempt AS currentAttempt, error_code AS errorCode
       FROM campaign_play_narration_operations
-      WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, prepared.turnId);
+      WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, prepared.turnId) as {
+        operationId: string;
+        resultId: string;
+        turnId: string;
+        narrationId: string;
+        packetHash: string;
+        receiptIdsJson: string;
+        status: string;
+        currentAttempt: number;
+        errorCode: string | null;
+      };
     expect(operation).toMatchObject({
       operationId: prepared.pending.operationId,
       resultId: prepared.pending.resultId,
       turnId: prepared.pending.turnId,
       narrationId: prepared.pending.narrationId,
       packetHash: prepared.pending.packetHash,
-      status: "complete",
+      status: recoveryFails ? "failed" : "complete",
       currentAttempt: 2,
-      errorCode: null,
+      errorCode: recoveryFails ? "provider_unavailable" : null,
     });
     expect(JSON.parse((operation as { receiptIdsJson: string }).receiptIdsJson))
       .toEqual(prepared.pending.receiptIds);
@@ -3950,29 +4017,34 @@ describe("Campaign Play player-action turn runtime", () => {
         campaignId: CAMPAIGN_ID,
         turnId: prepared.turnId,
         attempt: 2,
-        status: "accepted",
-        errorCode: null,
+        status: recoveryFails ? "failed" : "accepted",
+        errorCode: recoveryFails ? "provider_unavailable" : null,
       }),
     ]);
     expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
       FROM campaign_play_narration_attempts WHERE campaign_id = ?`).get(CAMPAIGN_ID))
       .toEqual({ count: 2 });
-    expect(handle.sqlite.prepare(`SELECT operation_id AS operationId, narration_id AS narrationId,
+    const properScene = handle.sqlite.prepare(`SELECT operation_id AS operationId, narration_id AS narrationId,
         turn_id AS turnId, packet_hash AS packetHash, attempt_id AS attemptId
       FROM campaign_play_proper_scenes
       WHERE campaign_id = ? AND operation_id = ?`).get(
       CAMPAIGN_ID,
       prepared.pending.operationId,
-    )).toMatchObject({
-      operationId: prepared.pending.operationId,
-      narrationId: prepared.pending.narrationId,
-      turnId: prepared.turnId,
-      packetHash: prepared.pending.packetHash,
-      attemptId: attempts[1]!.attemptId,
-    });
+    );
+    if (recoveryFails) {
+      expect(properScene).toBeUndefined();
+    } else {
+      expect(properScene).toMatchObject({
+        operationId: prepared.pending.operationId,
+        narrationId: prepared.pending.narrationId,
+        turnId: prepared.turnId,
+        packetHash: prepared.pending.packetHash,
+        attemptId: attempts[1]!.attemptId,
+      });
+    }
     expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
       FROM campaign_play_proper_scenes WHERE campaign_id = ?`).get(CAMPAIGN_ID))
-      .toEqual({ count: 1 });
+      .toEqual({ count: recoveryFails ? 0 : 1 });
     expect(playerActionMechanicsSnapshot(handle, prepared.turnId)).toEqual(prepared.mechanics);
     expect(handle.sqlite.prepare("PRAGMA integrity_check").get())
       .toEqual({ integrity_check: "ok" });
