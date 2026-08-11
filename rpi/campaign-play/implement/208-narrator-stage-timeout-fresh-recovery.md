@@ -148,6 +148,34 @@ The terminal database trio and backend/frontend logs were copied into the
 session evidence under `probes/terminal-action-34/`; generated evidence is
 uncommitted.
 
+## Live r159 evidence
+
+The unchanged-source lane `pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r159`
+was materialized exactly once for campaign
+`6b85a49e-fef5-4359-95e2-051383f6fb66` from entry
+`9a8d0df61a71f0e94ab43f21489664c4ef861799`. Before any runtime, HTTP,
+browser/CDP, watcher, helper, or database activity, the generated state and
+config matched the canonical SHA-256 values
+`6cb291d11ce6578e3395a10d2c5d590070e3ccdd8b2b67451410869ce97897d2` and
+`d8362b1af976c00cb8f14c564c8196a2d1ab137743ff368ea83d762a4ad2e065`; the
+canonical Brina card matched
+`4b48de7a32df6a6be5a91ab12f09bb87926b40d5940348c7581e298eaa12b60a`.
+The input run-config was kept at the external task-owned path
+`R:\Temp\WorldForge-task208-r159\run-config.json`, outside both evidence
+roots. The required single `--live-phase prepare` invocation then stopped
+before creating the session root or starting any runtime with
+`Template-backed live evidence requires an isolated GSD_CAMPAIGNS_ROOT.`
+(`e2e/campaign-play/live-session.ts:77`). No backend, frontend, browser/CDP,
+watcher, HTTP request, or database inspection was performed after
+materialization; ports 4450/4451/4452 remained unused. Per the r159 startup
+contract, this is the immutable first verification boundary: prepare was not
+retried, no import/Save/Begin/action/recovery/checkpoint/reload was attempted,
+and no product or SQLite state was changed. The materialized world-run root
+and external run-config are preserved as evidence; the expected session root
+was never created. Consequently Opening, Task-208 timeout recovery, all
+player-action bindings, checkpoints, 60-action endurance, and same-page reload
+are unavailable for r159.
+
 ## Acceptance handoff
 
 Static acceptance is mapped to the repository deadline conditional, the
@@ -162,4 +190,9 @@ cleanup are evidenced above. Natural Task-208 Narrator stage-timeout recovery,
 actions 34-60, the 60-action endurance target, and same-page reload are
 unavailable because the first terminal Game Master stage-timeout boundary
 froze r158. No Resume, retry, replay, later click, or SQLite mutation was
-performed.
+performed. The r159 materialization/hash boundary is also evidenced above,
+but its single prepare invocation failed before session-root creation because
+the isolated `GSD_CAMPAIGNS_ROOT` requirement was absent. The contract forbids
+retrying prepare or creating a replacement lane, so all r159 rendered,
+persistence, recovery, checkpoint, 60-action, and reload criteria are
+unavailable; no r159 Task-208 live recovery claim is made.
