@@ -605,11 +605,20 @@ function openingRequest(
 }
 
 describe("CampaignPlayApplication", () => {
-  it("allows one player-action timeout recovery without widening Opening recovery", () => {
+  it("allows player-action and Opening visibility timeout recovery without widening other Opening recovery", () => {
     expect(campaignPlayMayAutomaticallyResumeExternalStage({
       turnKind: "player_action",
       interruptedStage: "admitted",
       routeKind: "full_authority",
+      errorCode: "stage_timeout",
+      attempt: 1,
+      wasResume: false,
+      alreadyAttempted: false,
+    })).toBe(true);
+    expect(campaignPlayMayAutomaticallyResumeExternalStage({
+      turnKind: "opening",
+      interruptedStage: "visibility_projected",
+      routeKind: undefined,
       errorCode: "stage_timeout",
       attempt: 1,
       wasResume: false,
@@ -623,6 +632,60 @@ describe("CampaignPlayApplication", () => {
       attempt: 1,
       wasResume: false,
       alreadyAttempted: false,
+    })).toBe(false);
+    expect(campaignPlayMayAutomaticallyResumeExternalStage({
+      turnKind: "opening",
+      interruptedStage: "primary_settled",
+      routeKind: undefined,
+      errorCode: "stage_timeout",
+      attempt: 1,
+      wasResume: false,
+      alreadyAttempted: false,
+    })).toBe(false);
+    expect(campaignPlayMayAutomaticallyResumeExternalStage({
+      turnKind: "opening",
+      interruptedStage: "planned",
+      routeKind: undefined,
+      errorCode: "stage_timeout",
+      attempt: 1,
+      wasResume: false,
+      alreadyAttempted: false,
+    })).toBe(false);
+    expect(campaignPlayMayAutomaticallyResumeExternalStage({
+      turnKind: "opening",
+      interruptedStage: "actors_settled",
+      routeKind: undefined,
+      errorCode: "stage_timeout",
+      attempt: 1,
+      wasResume: false,
+      alreadyAttempted: false,
+    })).toBe(false);
+    expect(campaignPlayMayAutomaticallyResumeExternalStage({
+      turnKind: "opening",
+      interruptedStage: "visibility_projected",
+      routeKind: undefined,
+      errorCode: "model_contract_invalid",
+      attempt: 1,
+      wasResume: false,
+      alreadyAttempted: false,
+    })).toBe(false);
+    expect(campaignPlayMayAutomaticallyResumeExternalStage({
+      turnKind: "opening",
+      interruptedStage: "visibility_projected",
+      routeKind: undefined,
+      errorCode: "stage_timeout",
+      attempt: 2,
+      wasResume: true,
+      alreadyAttempted: true,
+    })).toBe(false);
+    expect(campaignPlayMayAutomaticallyResumeExternalStage({
+      turnKind: "opening",
+      interruptedStage: "visibility_projected",
+      routeKind: undefined,
+      errorCode: "stage_timeout",
+      attempt: 1,
+      wasResume: false,
+      alreadyAttempted: true,
     })).toBe(false);
     expect(campaignPlayMayAutomaticallyResumeExternalStage({
       turnKind: "player_action",

@@ -133,8 +133,11 @@ export function campaignPlayMayAutomaticallyResumeExternalStage(input: {
 }): boolean {
   if (input.wasResume || input.alreadyAttempted || input.attempt !== 1) return false;
   if (input.errorCode === "provider_unavailable") return true;
+  if (input.errorCode === "stage_timeout") {
+    return input.turnKind === "player_action"
+      || (input.turnKind === "opening" && input.interruptedStage === "visibility_projected");
+  }
   if (input.turnKind !== "player_action") return false;
-  if (input.errorCode === "stage_timeout") return true;
   if (input.errorCode !== "model_contract_invalid") return false;
   if (input.routeKind === "full_authority") {
     return input.interruptedStage === "admitted" || input.interruptedStage === "judged";
