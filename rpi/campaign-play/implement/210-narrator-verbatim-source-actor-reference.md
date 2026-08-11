@@ -66,23 +66,67 @@ final diff review are recorded below after completion.
 
 ## Live r162 evidence
 
-Pending the single fresh built lane
-`pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r162` for campaign
-`6b85a49e-fef5-4359-95e2-051383f6fb66` on ports `4480/4481/4482`. The lane
-must use the materializer's exact isolated `GSD_CAMPAIGNS_ROOT`, an external
-run-config, and the sole pre-runtime `--live-phase prepare` before any runtime,
-HTTP, browser, or database activity. Canonical pre-runtime hashes are state
+The single fresh built lane
+`pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r162` was materialized once
+for campaign `6b85a49e-fef5-4359-95e2-051383f6fb66`. The materializer returned
+the isolated campaigns root
+`R:\Projects\WorldForge\output\playtests\campaign-world-runs\pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r162\campaigns`,
+which was exported as `GSD_CAMPAIGNS_ROOT`. The external run-config was kept
+outside both evidence roots. The sole `--live-phase prepare` ran before any
+runtime, HTTP, browser, or database inspection and succeeded, creating the
+session root. Pre-runtime hashes matched exactly: state
 `6cb291d11ce6578e3395a10d2c5d590070e3ccdd8b2b67451410869ce97897d2`, config
 `d8362b1af976c00cb8f14c564c8196a2d1ab137743ff368ea83d762a4ad2e065`, and
-Brina `4b48de7a32df6a6be5a91ab12f09bb87926b40d5940348c7581e298eaa12b60a`.
+Brina card `4b48de7a32df6a6be5a91ab12f09bb87926b40d5940348c7581e298eaa12b60a`.
+
+Setup was one Brina import/file assignment, one Save/Continue, the exact
+`lower-wards` / `Local` / `Already here` / `Looking for work` selections, and
+one Begin. Opening reached ready with a proper `alderman-hallway` scene. The
+first product action was submitted once; a runner decision probe later left a
+harness-only pending-decision artifact, so subsequent actions were driven from
+the rendered enabled controls with authoritative state readback. Action 1
+naturally used the existing packet-coverage recovery and settled once; no
+source-reference recovery occurred.
+
+Actions 1 through 11 each settled once with one proper-scene binding. The
+checkpoint at 10 had 10 completed/10 bound player actions, worldVersion 22,
+runtimeRevision 201, 10 narration operations, 11 Narrator attempts, 37
+commands/receipts, `integrity_check=ok`, and an empty foreign-key check.
+
+Action 12 was submitted once and then frozen at the first genuine terminal
+boundary. Its turn is
+`turn-player-action:5a506ca92ad78ac2816a6b63a2c757b47423a278`; Game Master
+stage `091060d2c8a5a093abd7d6f2e5e384b0b744df140641a2e77fd1c1a1ca4af6b1`
+attempt 1 reached `stage_timeout` after 45,111 ms and attempt 2 ended
+`model_contract_invalid` after 9,100 ms. The turn persisted
+`stage=interrupted`, `interrupted_stage=admitted`, `resume_eligible=1`,
+`worker_epoch=2`, with no final world version or turn result. The rendered page
+showed the existing disabled choices and `Resume`; no Resume or later click was
+performed. Counts at the frozen boundary were 13 turns (12 completed,
+including Opening), 11 proper scenes/operations, 12 Narrator attempts, 39
+commands/receipts, worldVersion 23, runtimeRevision 224,
+`integrity_check=ok`, and an empty foreign-key check. The latest receipt and
+proper scene still belong to action 11, proving no action-12 downstream
+command, receipt, scene, or late write. Task 210's source-reference live
+coverage is unavailable because this unrelated Game Master defect occurred
+first; r162 is not a 60-action or reload acceptance run.
 
 ## Acceptance handoff
 
 - Source-reference classification, exact-span authority, privacy, prompt
-  isolation, and unchanged mismatch semantics: focused Narrator tests above.
+  isolation, and unchanged mismatch semantics: focused Narrator suite 44/44.
 - Existing performer, subject, quoted-reference, forbidden-name, coverage,
   recovery, deadline, CAS, persistence, mechanics, and no-attempt-3 behavior:
-  directly affected existing suites and final static checks pending below.
-- Built-product setup, checkpoints 10/20/30/40/50/60, natural source-reference
-  recovery, 60 unique proper-scene bindings, same-page reload, and cleanup:
-  unavailable until r162 completes or freezes at its first genuine defect.
+  focused runtime/application suites 92/92; backend typecheck/build and
+  `git diff --check` passed. The initial parallel Vitest run had only the known
+  post-pass worker-shutdown timeout; the single-thread rerun exited 0.
+- GitNexus exact-source reindex completed; staged `detect_changes` reported
+  only the three owned paths, 20 private/test/note symbols, zero affected
+  processes, and low risk. The exact shadow was removed afterward.
+- Built-product setup and Opening: passed once as recorded above. Action
+  checkpoints 20/30/40/50/60, natural source-reference recovery, 60 unique
+  bindings, same-page reload, and post-reload persistence: unavailable because
+  action 12 froze at the first genuine Game Master terminal defect.
+- Task-owned r162 runtime/page/profile/helpers were cleaned after evidence;
+  generated r162 session/world evidence remains uncommitted. AGENTS.md and
+  CLAUDE.md remain pre-existing unstaged dirt.
