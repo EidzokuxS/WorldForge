@@ -152,3 +152,86 @@ none remaining. Pre-existing AGENTS.md and CLAUDE.md dirt remains untouched.
 - Persistence and cleanup: terminal world/runtime/counts, integrity/FK,
   no-late-write read, task-owned resource absence, and protected-file
   preservation are recorded above.
+
+## Live r165 evidence
+
+The unchanged-source lane `pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r165`
+was run from entry commit `de1c9d85beb4432a2b234527b6c84f032c4d90f4` for
+campaign `6b85a49e-fef5-4359-95e2-051383f6fb66`. Materialization returned and
+the runtime used the isolated campaigns root
+`R:\Projects\WorldForge\output\playtests\campaign-world-runs\pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r165\campaigns`.
+The external run-config was `R:\Temp\WorldForge-task212-r165\run-config.json`.
+The sole `--live-phase prepare` ran before runtime, HTTP, browser, or database
+inspection. The pre-runtime manifest records the required state hash
+`6cb291d11ce6578e3395a10d2c5d590070e3ccdd8b2b67451410869ce97897d2`, config
+hash `d8362b1af976c00cb8f14c564c8196a2d1ab137743ff368ea83d762a4ad2e065`, and
+the imported Brina card hash
+`4b48de7a32df6a6be5a91ab12f09bb87926b40d5940348c7581e298eaa12b60a`.
+
+Setup was performed once: one Brina import/file assignment, one Save/Continue,
+lower-wards / Local / Already here / Looking for work, and one Begin. Opening
+reached ready with a proper scene. Actions 1 through 20 were each read-
+reconciled, submitted once, and bound to one unique proper scene. The action
+ledger is preserved at
+`output/playtests/campaign-play/pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r165.session/browser-actions.jsonl`.
+
+Read-only checkpoint evidence:
+
+- At action 10, turn
+  `turn-player-action:cfc19af29fd54e3ec34674e89369a1d92e059dcc` was completed
+  with `worldVersion=22`, `runtimeRevision=240`, and one proper-scene binding
+  for each of the first 10 actions. The exact read-only database copy reported
+  `integrity_check=ok` and an empty `foreign_key_check`.
+- At action 20, the read-only copy reported 20 completed/bound player
+  actions, `worldVersion=33`, `runtimeRevision=481`, 72 commands, 72 receipts,
+  20 Narrator operations, 30 Narrator attempts, 20 proper scenes, 21 turn
+  results, 21 turns, 29 Actor jobs, and 20 Actor plans. It reported
+  `integrity_check=ok` and an empty `foreign_key_check`.
+
+Action 3 naturally exercised the existing packet-coverage Narrator recovery:
+attempt 1 returned bounded packet-validation feedback and attempt 2 completed.
+No visible-actor observation mismatch recovery occurred, so direct live Task
+212 coverage is unavailable; no inference is made from the other recovery.
+
+Action 21 was selected from the rendered ready state exactly once after
+reconciliation: choice handle `choice_ef0aa72736c6c35cf19be37f`, label
+`Talk to Dren Vask: ask about the sealed doors`. The authoritative boundary is
+turn `turn-player-action:e104887b70a9453280959bdcf8521c484a1b0e89`, with
+`stage=primary_settled`, `status=interrupted`, `interrupted_stage=null`,
+`error_code=null`, `worker_epoch=4`, and no completion or final world version.
+Its Game Master stage completed on attempt 1, then Actor Replanner stage
+`actor-replan-stage:e824bce72a9118d0dcf3cf6a8c020850` attempt 1
+`model-stage-row:e30db965bb6cd04b300935f0e4719c23` ended with
+`schema_outcome=transport_error` and `error_code=stage_timeout` at the local
+deadline. There was no attempt 2, no Narrator operation, no result, no proper
+scene, and no actor plan. The page rendered the existing Resume control and
+disabled normal choices; no Resume or later action was submitted.
+
+The action-21 read-only reconciliation reported `worldVersion=34`,
+`runtimeRevision=499`, `integrity_check=ok`, and an empty
+`foreign_key_check`. A second state read preserved the same interrupted
+boundary and counts, with no late write. Existing action-21 commands and
+receipts were from settled world acting; no downstream Narrator/scene write
+was present. This is the first terminal built-product boundary, so actions
+30/40/50/60, 60 unique bindings, and same-page reload are unavailable.
+
+Generated r165 session/world evidence remains uncommitted. The task-owned
+backend PID 56264, frontend PID 86876, page, ports 4510/4511/4512, and the
+external temporary directory were closed or removed; independent checks found
+no remaining process, port, or temporary directory. The pre-existing
+`AGENTS.md` and `CLAUDE.md` changes remain untouched and unstaged.
+
+## r165 acceptance handoff
+
+- Static Task 212 implementation and neighboring recovery criteria remain
+  covered by the accepted tests, typecheck, build, and prior commit evidence;
+  no source or test changed in r165.
+- Canonical materialization, isolated root, prepare ordering, one-time setup,
+  ready Opening, and the first 20 rendered action bindings are evidenced above.
+- Persistence at actions 10 and 20, and the terminal action-21 boundary,
+  include world/runtime revisions, exact-once counts, integrity, and foreign
+  key checks. No late write or duplicate action was observed.
+- The natural Task 212 visible-actor recovery, checkpoints after 30/40/50/60,
+  60 unique bindings, and same-page reload are unavailable because action 21
+  froze at Actor Replanner attempt 1 `stage_timeout`. No causal provider claim
+  is made.
