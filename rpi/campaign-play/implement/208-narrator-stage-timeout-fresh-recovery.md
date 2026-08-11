@@ -62,26 +62,42 @@ provider-unavailable, narration-invalid, CAS, late-provider, and fencing tests
 remain covered.
 
 Backend typecheck and production build passed. `git diff --check` passed. A
-staged GitNexus `detect_changes` run will be recorded with the implementation
-commit and must remain limited to the two Narrator recovery owners, focused
-tests, and this note. Protected `AGENTS.md` and `CLAUDE.md` remain unstaged and
-byte-preserved.
+staged GitNexus `detect_changes` run was recorded with the implementation
+commit and remained limited to the two Narrator recovery owners, focused tests,
+and this note. The registered index was stale and reported no mapped source
+symbols for the staged files; the exact-entry shadow impact above is the
+authoritative scope evidence. Protected `AGENTS.md` and `CLAUDE.md` remain
+unstaged and byte-preserved.
 
 ## Live r157 evidence
 
-Pending implementation commit and the required pre-runtime materialization/hash
-gate. The fresh lane is `pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r157`
-for campaign `6b85a49e-fef5-4359-95e2-051383f6fb66`, using task-owned ports
-4430/4431/4432. Canonical hashes are state
-`6cb291d11ce6578e3395a10d2c5d590070e3ccdd8b2b67451410869ce97897d2`, config
-`d8362b1af976c00cb8f14c564c8196a2d1ab137743ff368ea83d762a4ad2e065`, and
-Brina card `4b48de7a32df6a6be5a91ab12f09bb87926b40d5940348c7581e298eaa12b60a`.
+The fresh lane `pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r157` was
+materialized exactly once for campaign
+`6b85a49e-fef5-4359-95e2-051383f6fb66`. Before any runtime, browser, or HTTP
+activity, the generated state and config matched the canonical hashes
+`6cb291d11ce6578e3395a10d2c5d590070e3ccdd8b2b67451410869ce97897d2` and
+`d8362b1af976c00cb8f14c564c8196a2d1ab137743ff368ea83d762a4ad2e065`; the
+canonical Brina card matched
+`4b48de7a32df6a6be5a91ab12f09bb87926b40d5940348c7581e298eaa12b60a`.
+The required `--live-phase prepare` gate was then invoked with ports
+4430/4431/4432 still unused, but it stopped before database inspection or
+runtime startup with `Campaign Play live evidence path already exists for
+pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r157` at
+`e2e/campaign-play/live-session.ts:258`. The only pre-existing path was the
+task-owned generated session root containing `build/run-config.json`; no
+backend, frontend, browser/CDP, watcher, or HTTP process was started and all
+three task ports remained unbound. Per the startup contract this prepare-gate
+failure freezes r157: no import, Save, Begin, player action, recovery,
+checkpoint, reload, or product cleanup was attempted.
 
 ## Acceptance handoff
 
 Static acceptance is mapped to the repository deadline conditional, the
 attempt-1 allowlist, the timeout success/terminal regressions, the existing
 runtime/application recovery coverage, typecheck/build, diff, and GitNexus
-evidence above. Live setup, opening, action checkpoints, natural timeout
-recovery, 60-action endurance, same-page reload, persistence, and cleanup are
-unavailable until r157 is run from the pushed implementation.
+evidence above. The materialization/hash pre-runtime boundary is evidenced,
+but the prepare-gate failure makes live setup, opening, action checkpoints,
+natural timeout recovery, 60-action endurance, same-page reload, and product
+persistence unavailable. No runtime cleanup was needed; the task-owned failed
+session root is preserved as generated evidence and no task listener or page
+exists.
