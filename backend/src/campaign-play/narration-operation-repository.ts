@@ -815,11 +815,14 @@ export function createCampaignPlayNarrationOperationRepository(
     }
     packetForOperation(handle, operation);
     const activeDeadlineAt = kind === "automatic"
-      ? operation.automaticDeadlineAt
+      ? operation.errorCode === "stage_timeout"
+        ? preparedAt + CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS
+        : operation.automaticDeadlineAt
       : preparedAt + CAMPAIGN_PLAY_MANUAL_NARRATION_WINDOW_MS;
     if (
       !Number.isSafeInteger(activeDeadlineAt) || activeDeadlineAt <= preparedAt ||
-      (kind === "automatic" && preparedAt >= operation.automaticDeadlineAt)
+      (kind === "automatic" && operation.errorCode !== "stage_timeout" &&
+        preparedAt >= operation.automaticDeadlineAt)
     ) {
       throw new CampaignPlayNarrationOperationError(
         "operation_not_recoverable",

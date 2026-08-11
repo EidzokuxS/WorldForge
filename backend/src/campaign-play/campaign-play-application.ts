@@ -824,7 +824,8 @@ export function createCampaignPlayApplication(
         failedOperation?.status !== "failed" || failedOperation.currentAttempt !== 1 ||
         failedOperation.currentAttemptId !== operation.attemptId ||
         (failedOperation.errorCode !== "narration_invalid" &&
-          failedOperation.errorCode !== "provider_unavailable")
+          failedOperation.errorCode !== "provider_unavailable" &&
+          failedOperation.errorCode !== "stage_timeout")
       ) return;
       // Safe compiler coordinates let the existing bypass Narrator correct the
       // rejected arrangement directly. Without them, retain the broader

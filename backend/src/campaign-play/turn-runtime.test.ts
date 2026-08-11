@@ -4023,6 +4023,244 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(result.handle.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 
+  it("automatically retries a first Narrator timeout with the same identity and settles once", async () => {
+    const successful = playerNarratorFixture();
+    const requests: Parameters<typeof successful.narrate>[0][] = [];
+    let calls = 0;
+    const narrator: TestNarrator = {
+      compile: successful.compile,
+      narrate: vi.fn(async (request) => {
+        requests.push(request);
+        calls += 1;
+        if (calls === 1) throw new CampaignPlayNarratorError("stage_timeout", null);
+        return successful.narrate(request);
+      }),
+    };
+    const result = await runPendingNarrationThroughApplication(narrator);
+    const operation = result.handle.sqlite.prepare(`SELECT operation_id AS operationId,
+        result_id AS resultId, turn_id AS turnId, narration_id AS narrationId,
+        packet_hash AS packetHash, receipt_ids_json AS receiptIdsJson,
+        status, current_attempt AS currentAttempt, current_attempt_id AS currentAttemptId,
+        error_code AS errorCode
+      FROM campaign_play_narration_operations
+      WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, result.turnId) as {
+        operationId: string;
+        resultId: string;
+        turnId: string;
+        narrationId: string;
+        packetHash: string;
+        receiptIdsJson: string;
+        status: string;
+        currentAttempt: number;
+        currentAttemptId: string;
+        errorCode: string | null;
+      };
+    const attempts = result.handle.sqlite.prepare(`SELECT attempt_id AS attemptId,
+        operation_id AS operationId, campaign_id AS campaignId, turn_id AS turnId,
+        attempt, status, error_code AS errorCode
+      FROM campaign_play_narration_attempts
+      WHERE campaign_id = ? AND operation_id = ? ORDER BY attempt`).all(
+      CAMPAIGN_ID,
+      operation.operationId,
+    ) as Array<{
+      attemptId: string;
+      operationId: string;
+      campaignId: string;
+      turnId: string;
+      attempt: number;
+      status: string;
+      errorCode: string | null;
+    }>;
+    expect(requests.map((request) => request.structuredOutputMode)).toEqual(["auto", "auto"]);
+    expect(requests.map((request) => request.recoveryFeedback)).toEqual([undefined, undefined]);
+    expect(attempts).toHaveLength(2);
+    expect(new Set(attempts.map((attempt) => attempt.attemptId)).size).toBe(2);
+    expect(attempts).toEqual([
+      expect.objectContaining({
+        operationId: operation.operationId,
+        campaignId: CAMPAIGN_ID,
+        turnId: result.turnId,
+        attempt: 1,
+        status: "failed",
+        errorCode: "stage_timeout",
+      }),
+      expect.objectContaining({
+        operationId: operation.operationId,
+        campaignId: CAMPAIGN_ID,
+        turnId: result.turnId,
+        attempt: 2,
+        status: "accepted",
+        errorCode: null,
+      }),
+    ]);
+    expect(operation).toMatchObject({
+      operationId: result.pending.operationId,
+      resultId: result.pending.resultId,
+      turnId: result.pending.turnId,
+      narrationId: result.pending.narrationId,
+      packetHash: result.pending.packetHash,
+      status: "complete",
+      currentAttempt: 2,
+      errorCode: null,
+    });
+    expect(JSON.parse(operation.receiptIdsJson)).toEqual(result.pending.receiptIds);
+    expect(result.handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_proper_scenes WHERE campaign_id = ? AND operation_id = ?`).get(
+      CAMPAIGN_ID,
+      operation.operationId,
+    )).toEqual({ count: 1 });
+    expect(playerActionMechanicsSnapshot(result.handle, result.turnId)).toEqual(result.mechanics);
+    expect(result.handle.sqlite.prepare("PRAGMA integrity_check").get())
+      .toEqual({ integrity_check: "ok" });
+    expect(result.handle.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
+  it("stops after one automatic retry when the first Narrator attempt times out", async () => {
+    const successful = playerNarratorFixture();
+    const requests: Parameters<typeof successful.narrate>[0][] = [];
+    const narrator: TestNarrator = {
+      compile: successful.compile,
+      narrate: vi.fn(async (request) => {
+        requests.push(request);
+        throw new CampaignPlayNarratorError("stage_timeout", null);
+      }),
+    };
+    const result = await runPendingNarrationThroughApplication(narrator);
+    const operation = result.handle.sqlite.prepare(`SELECT operation_id AS operationId,
+        status, current_attempt AS currentAttempt, error_code AS errorCode
+      FROM campaign_play_narration_operations
+      WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, result.turnId) as {
+        operationId: string;
+        status: string;
+        currentAttempt: number;
+        errorCode: string | null;
+      };
+    const attempts = result.handle.sqlite.prepare(`SELECT attempt, status,
+        error_code AS errorCode
+      FROM campaign_play_narration_attempts
+      WHERE campaign_id = ? AND operation_id = ? ORDER BY attempt`).all(
+      CAMPAIGN_ID,
+      operation.operationId,
+    ) as Array<{ attempt: number; status: string; errorCode: string | null }>;
+    expect(requests.map((request) => request.structuredOutputMode)).toEqual(["auto", "auto"]);
+    expect(requests.map((request) => request.recoveryFeedback)).toEqual([undefined, undefined]);
+    expect(attempts).toEqual([
+      { attempt: 1, status: "failed", errorCode: "stage_timeout" },
+      { attempt: 2, status: "failed", errorCode: "stage_timeout" },
+    ]);
+    expect(operation).toMatchObject({
+      status: "failed",
+      currentAttempt: 2,
+      errorCode: "stage_timeout",
+    });
+    expect(result.handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_proper_scenes WHERE campaign_id = ?`).get(CAMPAIGN_ID))
+      .toEqual({ count: 0 });
+    expect(playerActionMechanicsSnapshot(result.handle, result.turnId)).toEqual(result.mechanics);
+    expect(createCampaignPlayReadModel(result.handle).loadState()).toMatchObject({
+      narration: null,
+      narrationOperation: { status: "failed", attempt: 2 },
+    });
+    expect(result.handle.sqlite.prepare("PRAGMA integrity_check").get())
+      .toEqual({ integrity_check: "ok" });
+    expect(result.handle.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
+  it("gives a timed-out automatic recovery a fresh deadline without changing operation identity", async () => {
+    const time = fixedClock(100_000);
+    const prepared = await createCompletedPlayerActionForApplication(time, 1);
+    const successful = playerNarratorFixture();
+    let calls = 0;
+    const narrator: TestNarrator = {
+      compile: successful.compile,
+      narrate: vi.fn(async (request) => {
+        calls += 1;
+        if (calls === 1) throw new CampaignPlayNarratorError("stage_timeout", null);
+        return successful.narrate(request);
+      }),
+    };
+    const runtime = turnRuntime(
+      prepared.handle,
+      time,
+      judgeFixture("deterministic"),
+      gameMasterFixture(),
+      { narrator },
+    );
+    const first = await runtime.runNarration(prepared.turnId);
+    expect(first).toMatchObject({ status: "failed", attempt: 1 });
+    const persistedBefore = prepared.handle.sqlite.prepare(`SELECT
+        automatic_deadline_at AS automaticDeadlineAt,
+        active_deadline_at AS activeDeadlineAt,
+        operation_id AS operationId, result_id AS resultId, narration_id AS narrationId,
+        packet_hash AS packetHash, receipt_ids_json AS receiptIdsJson
+      FROM campaign_play_narration_operations WHERE campaign_id = ? AND turn_id = ?`).get(
+      CAMPAIGN_ID,
+      prepared.turnId,
+    ) as {
+      automaticDeadlineAt: number;
+      activeDeadlineAt: number;
+      operationId: string;
+      resultId: string;
+      narrationId: string;
+      packetHash: string;
+      receiptIdsJson: string;
+    };
+    expect(persistedBefore.automaticDeadlineAt).toBe(persistedBefore.activeDeadlineAt);
+    time.advanceBy(persistedBefore.automaticDeadlineAt - time.clock.now() + 1);
+    const recoveryPreparedAt = time.clock.now();
+    const token = runtime.prepareNarrationRecovery({
+      operationId: first!.operationId,
+      resultId: first!.resultId,
+      narrationId: first!.narrationId,
+      packetHash: first!.packetHash,
+      receiptIds: first!.receiptIds,
+    }, "automatic");
+    expect(token).toMatchObject({
+      operationId: persistedBefore.operationId,
+      resultId: persistedBefore.resultId,
+      turnId: prepared.turnId,
+      narrationId: persistedBefore.narrationId,
+      packetHash: persistedBefore.packetHash,
+      receiptIds: JSON.parse(persistedBefore.receiptIdsJson),
+      attempt: 2,
+      deadlineAt: recoveryPreparedAt + CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS,
+    });
+    const persistedRecovery = prepared.handle.sqlite.prepare(`SELECT
+        automatic_deadline_at AS automaticDeadlineAt,
+        active_deadline_at AS activeDeadlineAt
+      FROM campaign_play_narration_operations WHERE campaign_id = ? AND operation_id = ?`).get(
+      CAMPAIGN_ID,
+      first!.operationId,
+    ) as { automaticDeadlineAt: number; activeDeadlineAt: number };
+    expect(persistedRecovery).toEqual({
+      automaticDeadlineAt: persistedBefore.automaticDeadlineAt,
+      activeDeadlineAt: recoveryPreparedAt + CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS,
+    });
+    const completed = await runtime.runNarration(prepared.turnId, token);
+    expect(completed).toMatchObject({
+      operationId: first!.operationId,
+      resultId: first!.resultId,
+      turnId: first!.turnId,
+      narrationId: first!.narrationId,
+      packetHash: first!.packetHash,
+      receiptIds: first!.receiptIds,
+      status: "complete",
+      attempt: 2,
+    });
+    expect(calls).toBe(2);
+    expect(prepared.handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_narration_attempts WHERE campaign_id = ? AND operation_id = ?`).get(
+      CAMPAIGN_ID,
+      first!.operationId,
+    )).toEqual({ count: 2 });
+    expect(prepared.handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_proper_scenes WHERE campaign_id = ? AND operation_id = ?`).get(
+      CAMPAIGN_ID,
+      first!.operationId,
+    )).toEqual({ count: 1 });
+    expect(playerActionMechanicsSnapshot(prepared.handle, prepared.turnId)).toEqual(prepared.mechanics);
+  });
+
   it("enforces one persisted automatic deadline when a late provider ignores abort", async () => {
     const time = deadlineClock(100_000);
     const prepared = await createCompletedPlayerActionForApplication(time, 1);
@@ -4336,7 +4574,6 @@ describe("Campaign Play player-action turn runtime", () => {
   });
 
   const nonRetryableNarrationFailures = [
-    { label: "timeout", expectedErrorCode: "stage_timeout", createError: () => new CampaignPlayNarratorError("stage_timeout", null) },
     { label: "budget", expectedErrorCode: "stage_budget_exceeded", createError: () => new CampaignPlayNarratorError("stage_budget_exceeded", null) },
   ] as const;
 
