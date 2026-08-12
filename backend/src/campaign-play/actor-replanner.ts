@@ -5,6 +5,7 @@ import {
   getSafeGenerateObjectTrace,
   isSafeGenerateObjectContractErrorCode,
   safeGenerateObject,
+  type SafeGenerateErrorCode,
   type SafeGenerateTrace,
 } from "../ai/generate-object-safe.js";
 import { createLogger } from "../lib/index.js";
@@ -1031,10 +1032,13 @@ export function createCampaignPlayActorReplanner(
         },
       });
 
+      type ActorReplanContractRejectionPhase = "generation" | "evidence" | "compilation" | "review";
       type AttemptFailure = {
         kind: "failed";
         modelWorkerEpoch: number;
         attemptNumber: number;
+        modelStageRowId: string;
+        attemptId: string | null;
         errorCode:
           | "model_contract_invalid"
           | "provider_unavailable"
@@ -1048,6 +1052,9 @@ export function createCampaignPlayActorReplanner(
         stageEvidence?: ReturnType<typeof acceptedTrace>;
         rejectionArtifact?: CampaignPlayActorPlanRejectionArtifact;
         contractInvalid: boolean;
+        contractRejectionPhase: ActorReplanContractRejectionPhase;
+        safeGenerationCode: SafeGenerateErrorCode | null;
+        proposalGenerationStarted: boolean;
       };
       type AttemptResult =
         | { kind: "replanned"; plan: CampaignPlayActorPlan; modelWorkerEpoch: number; attemptNumber: number }
@@ -1089,6 +1096,47 @@ export function createCampaignPlayActorReplanner(
           ...recoveryFeedbackFromArtifact(artifact),
         });
       };
+      const loggedContractRejectionAttempts = new Set<string>();
+      const emitContractRejectionDiagnostic = (failure: AttemptFailure): void => {
+        if (!failure.proposalGenerationStarted
+          || !["model_contract_invalid", "provider_unavailable", "stage_timeout"].includes(failure.errorCode)) {
+          return;
+        }
+        const attemptKey = `${failure.attemptNumber}:${failure.modelWorkerEpoch}`;
+        if (loggedContractRejectionAttempts.has(attemptKey)) return;
+        loggedContractRejectionAttempts.add(attemptKey);
+        const recovery = failure.rejectionArtifact === undefined
+          ? null
+          : recoveryFeedbackFromArtifact(failure.rejectionArtifact);
+        const phase = failure.contractRejectionPhase;
+        try {
+          log.event("actor_replan.contract_rejected", {
+            campaignId: handle.campaignId,
+            turnId: frame.turnId,
+            jobId: request.jobId,
+            stageId,
+            modelStageRowId: failure.modelStageRowId,
+            attemptId: failure.attemptId,
+            actorId: frame.actorId,
+            attemptNumber: failure.attemptNumber,
+            modelWorkerEpoch: failure.modelWorkerEpoch,
+            phase,
+            errorCode: failure.errorCode,
+            safeGenerationCode: phase === "generation" || phase === "review"
+              ? failure.safeGenerationCode
+              : null,
+            recoveryPhase: recovery?.phase ?? null,
+            recoveryReason: recovery?.reason ?? null,
+            goalHandle: recovery?.goalHandle ?? null,
+            stepCount: recovery?.stepCount ?? null,
+            moveTargets: recovery?.moveTargets ?? "",
+            reviewViolations: recovery?.reviewViolations ?? "",
+            reviewViolationFields: recovery?.reviewViolationFields ?? "",
+          });
+        } catch {
+          // Diagnostics must never alter the Actor Replanner outcome.
+        }
+      };
       const isContractGenerationFailure = (error: unknown): boolean => {
         const code = getSafeGenerateObjectErrorCode(error);
         return isSafeGenerateObjectContractErrorCode(code);
@@ -1113,12 +1161,16 @@ export function createCampaignPlayActorReplanner(
         let stageEvidence: ReturnType<typeof acceptedTrace> | undefined;
         let rejectionArtifact: CampaignPlayActorPlanRejectionArtifact | undefined;
         let contractInvalid = false;
+        let contractRejectionPhase: ActorReplanContractRejectionPhase = "generation";
+        let safeGenerationCode: SafeGenerateErrorCode | null = null;
+        let proposalGenerationStarted = false;
         let processStoppedAfterProviderReturn = false;
         try {
           requireTurnLease(handle, request.token, startedAt);
           assertOperationLive();
           let generated: Awaited<ReturnType<typeof safeGenerateObject>>;
           try {
+            proposalGenerationStarted = true;
             generated = await runProvider(() => dependencies.generateObject<CampaignPlayActorReplanProposal>({
               model: proposalModel,
               schema: proposalSchemaForAttempt,
@@ -1133,10 +1185,12 @@ export function createCampaignPlayActorReplanner(
               abortSignal: operation.signal,
             }));
           } catch (cause) {
+            safeGenerationCode = getSafeGenerateObjectErrorCode(cause);
             if (isContractGenerationFailure(cause)) contractInvalid = true;
             throw cause;
           }
           observedTrace = generated.trace;
+          contractRejectionPhase = "evidence";
           assertOperationLive();
           try {
             request.injectFault?.("after_provider_return");
@@ -1166,6 +1220,7 @@ export function createCampaignPlayActorReplanner(
             throw cause;
           }
           assertOperationLive();
+          contractRejectionPhase = "compilation";
           let plan: CampaignPlayActorPlan;
           try {
             plan = compilePlan(handle, frame, compilation, proposal);
@@ -1201,6 +1256,7 @@ export function createCampaignPlayActorReplanner(
           };
           let reviewed: { object: GroundingReview; trace: SafeGenerateTrace };
           try {
+            contractRejectionPhase = "review";
             reviewed = await runProvider(() => dependencies.generateObject<GroundingReview>({
               model: reviewModel,
               schema: campaignPlayActorPlanGroundingReviewSchema,
@@ -1218,6 +1274,7 @@ export function createCampaignPlayActorReplanner(
               abortSignal: operation.signal,
             }));
           } catch (cause) {
+            safeGenerationCode = getSafeGenerateObjectErrorCode(cause);
             if (isContractGenerationFailure(cause)) contractInvalid = true;
             throw cause;
           }
@@ -1495,6 +1552,8 @@ export function createCampaignPlayActorReplanner(
             kind: "failed",
             modelWorkerEpoch,
             attemptNumber,
+            modelStageRowId,
+            attemptId,
             errorCode,
             schemaOutcome,
             durationMs,
@@ -1502,6 +1561,9 @@ export function createCampaignPlayActorReplanner(
             stageEvidence,
             rejectionArtifact,
             contractInvalid: contractInvalid && errorCode === "model_contract_invalid",
+            contractRejectionPhase,
+            safeGenerationCode,
+            proposalGenerationStarted,
           };
         }
       };
@@ -1537,6 +1599,7 @@ export function createCampaignPlayActorReplanner(
             })()
           : null;
         const deferInvalidReplan = rejectedSchedule !== null;
+        emitContractRejectionDiagnostic(failure);
         emitRejectionDiagnostic(failure);
         try {
           requireTurnLease(handle, request.token, interruptedAt);
@@ -1692,6 +1755,7 @@ export function createCampaignPlayActorReplanner(
       const mayEscalate = (contractRecovery || stageTimeoutRecovery) &&
         !request.signal?.aborted && dependencies.now() < request.token.expiresAt;
       if (mayEscalate) {
+        emitContractRejectionDiagnostic(firstResult);
         const retryStartedAt = dependencies.now();
         const retryDeadlineAt = stageTimeoutRecovery
           ? retryStartedAt + request.externalOperationDeadlineMs

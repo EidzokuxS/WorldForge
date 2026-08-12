@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { Writable } from "node:stream";
 import type { LanguageModel } from "ai";
+import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { closeDb } from "../db/index.js";
@@ -19,6 +20,10 @@ import {
 } from "../campaign-world/world-repository.test-support.js";
 import { calculateCampaignWorldContentHash } from "../campaign-world/world-snapshot.js";
 import { safeGenerateObject, type SafeGenerateTrace } from "../ai/generate-object-safe.js";
+import {
+  buildStructuredOutputModelMetadata,
+  rememberStructuredOutputModelMetadata,
+} from "../ai/structured-output-capabilities.js";
 import {
   __setTurnFileDispatchForTest,
   resetLoggerForTest,
@@ -89,6 +94,10 @@ async function flushActorReplanLogs(): Promise<void> {
 
 function rejectionDiagnostics(capture: ActorReplanLogCapture): Array<Record<string, unknown>> {
   return capture.records().filter((record) => record.event === "actor_replan.rejected");
+}
+
+function contractRejectionDiagnostics(capture: ActorReplanLogCapture): Array<Record<string, unknown>> {
+  return capture.records().filter((record) => record.event === "actor_replan.contract_rejected");
 }
 
 beforeEach(() => {
@@ -395,6 +404,47 @@ function acceptedTrace(outputTokens = 25, reasoningTokens = 0): SafeGenerateTrac
     response: { modelId: "actor-replanner" },
     finishReason: "stop",
   };
+}
+
+function schemaContractFailureModel(): LanguageModel {
+  const value = new MockLanguageModelV3({
+    provider: "test-provider",
+    modelId: "actor-replanner",
+    doStream: async () => ({
+      stream: new ReadableStream({
+        start(controller) {
+          controller.enqueue({ type: "stream-start", warnings: [] });
+          controller.enqueue({ type: "text-start", id: "text-1" });
+          controller.enqueue({
+            type: "text-delta",
+            id: "text-1",
+            delta: JSON.stringify({
+              SENTINEL_RAW_PROPOSAL: "SENTINEL_PLAYER_AND_ACTOR_PROSE",
+            }),
+          });
+          controller.enqueue({ type: "text-end", id: "text-1" });
+          controller.enqueue({
+            type: "finish",
+            usage: {
+              inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
+              outputTokens: { total: 12, text: 12, reasoning: undefined },
+            },
+            finishReason: { unified: "stop", raw: undefined },
+          });
+          controller.close();
+        },
+      }),
+    }),
+  });
+  rememberStructuredOutputModelMetadata(value, buildStructuredOutputModelMetadata({
+    providerId: "test-provider",
+    providerName: "Test Provider",
+    model: "actor-replanner",
+    protocol: "openai-compatible",
+    baseUrl: "https://api.z.ai/v1",
+    transport: "chat-completions",
+  }));
+  return value;
 }
 
 function createReplanFixture(): {
@@ -894,6 +944,97 @@ describe("Campaign Play actor replanner", () => {
       frozenBaseWorldVersion: expect.any(Number),
       deadlineAt: expect.any(Number),
     });
+  });
+
+  it("emits one bounded generation diagnostic for a SafeGenerate contract failure", async () => {
+    const { handle, token, jobId } = createReplanFixture();
+    const logCapture = captureActorReplanLogs();
+    const failingModel = schemaContractFailureModel();
+    const recoveryModel = {} as LanguageModel;
+    let callNumber = 0;
+    const generateObject = vi.fn(async (request: {
+      prompt: string;
+      model: LanguageModel;
+      mode: "auto" | "tool";
+      schema: unknown;
+    }) => {
+      callNumber += 1;
+      if (callNumber === 1) {
+        return safeGenerateObject(request as never);
+      }
+      if (request.prompt.includes("ACTOR_PLAN_REVIEW\n")) {
+        return { object: { verdict: "accepted", violations: [] }, trace: acceptedTrace() };
+      }
+      return { object: singleStepProposalFromPrompt(request.prompt), trace: acceptedTrace() };
+    });
+    const replanner = createCampaignPlayActorReplanner(handle, {
+      now: () => 1_600,
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const outcome = await replanner.replan({
+      jobId,
+      token,
+      model: failingModel,
+      recoveryModel,
+      temperature: 0.2,
+      maxOutputTokens: 100,
+      maximumInputTokens: 1_000,
+      maximumOutputTokens: 100,
+      maximumTotalTokens: 2_000,
+      maximumCostMicros: 10_000,
+      externalOperationDeadlineMs: 90_000,
+      signal: new AbortController().signal,
+      createdAt: 1_590,
+    });
+
+    expect(outcome).toMatchObject({ kind: "replanned", jobId, workerEpoch: 1 });
+    expect(generateObject).toHaveBeenCalledTimes(3);
+    expect(generateObject.mock.calls.map((call) => call[0]!.mode)).toEqual([
+      "auto",
+      "tool",
+      "tool",
+    ]);
+    await flushActorReplanLogs();
+    const diagnostics = contractRejectionDiagnostics(logCapture);
+    expect(diagnostics).toHaveLength(1);
+    const diagnosticPayload = diagnostics[0]!.payload as Record<string, unknown>;
+    expect(diagnosticPayload).toMatchObject({
+      campaignId: CAMPAIGN_ID,
+      turnId: "turn-player",
+      jobId,
+      stageId: expect.stringMatching(/^actor-replan-stage:/),
+      modelStageRowId: expect.any(String),
+      attemptId: expect.stringMatching(/^actor-replan-attempt:/),
+      actorId: "actor-b",
+      attemptNumber: 1,
+      modelWorkerEpoch: 1,
+      phase: "generation",
+      errorCode: "model_contract_invalid",
+      safeGenerationCode: "schema_validation_failed",
+      recoveryPhase: null,
+      recoveryReason: null,
+      goalHandle: null,
+      stepCount: null,
+      moveTargets: "",
+      reviewViolations: "",
+      reviewViolationFields: "",
+    });
+    expect(rejectionDiagnostics(logCapture)).toEqual([]);
+    const serialized = JSON.stringify(diagnosticPayload);
+    expect(serialized).not.toContain("SENTINEL_RAW_PROPOSAL");
+    expect(serialized).not.toContain("SENTINEL_PLAYER_AND_ACTOR_PROSE");
+    expect(serialized).not.toContain("schema-validation");
+    expect(handle.sqlite.prepare(`SELECT attempt, status, schema_outcome AS schemaOutcome,
+        error_code AS errorCode FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = 'turn-player' AND kind = 'actor_replanner'
+      ORDER BY attempt`).all(CAMPAIGN_ID)).toEqual([
+      { attempt: 1, status: "interrupted", schemaOutcome: "invalid", errorCode: "model_contract_invalid" },
+      { attempt: 2, status: "accepted", schemaOutcome: "valid", errorCode: null },
+    ]);
+    expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_plans
+      WHERE campaign_id = ? AND actor_id = 'actor-b' AND status = 'active'`).get(CAMPAIGN_ID))
+      .toEqual({ count: 1 });
   });
 
   it("runs one schema-invalid recovery attempt and settles once", async () => {
