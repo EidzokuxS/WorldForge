@@ -74,20 +74,72 @@ applicable. Generated r166 evidence is intentionally not tracked.
 
 ## Live evidence
 
-Pending implementation push and the single fresh lane
-`pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r166` on ports 4520/4521/4522.
-The lane must use the materializer-returned isolated `GSD_CAMPAIGNS_ROOT`, an
-external run-config, one pre-runtime `--live-phase prepare`, canonical state,
-config, and Brina hashes, one canonical setup, sequential read-before-click
-actions, checkpoints at 10/20/30/40/50/60, and one same-page reload only after
-60 bindings. Natural Task 213 recovery will be reported only if observed;
-otherwise it is unavailable rather than inferred.
+The implementation was pushed at `78834ce6aa313f8c8300c3aa4e175291ade4efb9`
+before the single fresh lane `pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r166`
+(`6b85a49e-fef5-4359-95e2-051383f6fb66`). Materialization ran once and returned
+the isolated campaigns root
+`output/playtests/campaign-world-runs/pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r166/campaigns`.
+The input run-config was outside both evidence roots and `GSD_CAMPAIGNS_ROOT`
+was exported to that exact path. The sole `--live-phase prepare` ran before
+runtime, HTTP, browser, or database inspection and created the session root.
+The pre-runtime hashes matched: state
+`6cb291d11ce6578e3395a10d2c5d590070e3ccdd8b2b67451410869ce97897d2`, config
+`d8362b1af976c00cb8f14c564c8196a2d1ab137743ff368ea83d762a4ad2e065`, and Brina
+`4b48de7a32df6a6be5a91ab12f09bb87926b40d5940348c7581e298eaa12b60a`.
+
+Setup was performed once: one Brina import, one Save/Continue, the exact
+`lower-wards / Local / Already here / Looking for work` choices, and one Begin.
+The Opening reached ready with a proper scene. Actions 1 through 53 each used
+one reconciled rendered enabled choice and produced one durable turn, one
+proper-scene binding, and exactly-once commands/receipts; no Task 213 timeout
+recovery occurred naturally.
+
+Read-only checkpoint evidence:
+
+| completed/bound | world/runtime | turns/results/narrations | proper scenes/operations | commands/receipts | integrity/FK |
+|---|---|---|---|---|---|
+| 10/10 | 22/179 | 11/11/11 | 10/10 | 35/35 | `ok` / `[]` |
+| 20/20 | 32/334 | 21/21/21 | 20/20 | 57/57 | `ok` / `[]` |
+| 30/30 | 42/495 | 31/31/31 | 30/30 | 79/79 | `ok` / `[]` |
+| 40/40 | 53/663 | 41/41/41 | 40/40 | 102/102 | `ok` / `[]` |
+| 50/50 | 65/876 | 51/51/51 | 50/50 | 128/128 | `ok` / `[]` |
+
+The final durable action was 53
+(`turn-player-action:21e6434bd1b784847f1d4944532d14b7135c1c99`, with its
+corresponding completed Narrator operation/proper-scene binding); authoritative
+state was `ready`, `worldVersion=68`, `runtimeRevision=930`, with no active
+turn. Before action 54 the runner held a pending-decision record for the
+currently rendered enabled choice `choice_acdd73733c7242799ccba7cc` and its
+reconciled visible-state hash. The documented DOM, Playwright, keyboard, and
+CDP input routes all timed out or disconnected before dispatch; repeated
+read-only state reconciliation remained `ready`, `worldVersion=68`,
+`runtimeRevision=930`, with no new turn, command, receipt, operation, scene, or
+write. No later product click was attempted. This is a verification boundary,
+not a proven product defect, and the submitted action remains unproven.
+
+Task 213's natural stage-timeout recovery evidence is unavailable: no first
+attempt with persisted `stage_timeout` occurred during actions 1-53. Actions
+54-60 and the same-page reload are unavailable because the first safe
+verification boundary prevented an unproven repeat. Generated session/world
+evidence remains untracked.
+
+Cleanup completed: the task-owned backend/frontend trees, ports 4520-4522,
+browser tab/profile session, external run-config, and read-only database copies
+are absent; the r166 session/world evidence roots remain preserved. The only
+working-tree changes are the pre-existing unstaged `AGENTS.md` and `CLAUDE.md`
+plus this note.
 
 ## Acceptance handoff
 
-Static evidence covers the exact fresh-timeout attempt lifecycle, accepted and
-terminal retry fences, migration trigger matrix, repository parity, and
-neighboring recovery behavior. Live acceptance remains pending until r166
-freezes at its first authoritative defect or reaches 60/60 plus reload. The
-natural timeout-recovery criterion, checkpoints, persistence integrity, and
-reload are unavailable until that run completes.
+Static acceptance is complete: the Actor Replanner has a fresh, fenced
+stage-timeout attempt-2 operation; the repository validator and migration
+guards enforce the reason-aware chain; model-contract-invalid, route, provider,
+budget, lease, CAS, and no-attempt-3 behavior remain covered by the focused
+suites. The build, typecheck, diff check, staged detect_changes, commit, and
+push all passed.
+
+Live setup, hashes, Opening, actions 1-53, checkpoints 10/20/30/40/50, clean
+integrity/FK, and no duplicate or late write through the boundary are directly
+evidenced above. Natural Task 213 recovery, checkpoint 60, 60/60 unique
+bindings, and same-page reload are unavailable; no inference is made from
+static tests or the verification-only action-54 boundary.
