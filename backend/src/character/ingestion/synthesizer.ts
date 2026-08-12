@@ -22,6 +22,22 @@ import type {
 
 const log = createLogger("ingestion-synthesizer");
 const IMPORT_GENERATION_TIMEOUT_MS = 45_000;
+const IMPORT_GENERATION_OPERATION_BUDGET_MS = IMPORT_GENERATION_TIMEOUT_MS * 2;
+
+async function withImportedGenerationBudget<T>(
+  operation: (abortSignal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(),
+    IMPORT_GENERATION_OPERATION_BUDGET_MS,
+  );
+  try {
+    return await operation(controller.signal);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 const looseRichCharacterSchema = richCharacterSchema.extend({
   race: z.string().default(""),
@@ -368,7 +384,7 @@ FIELD LIMITS (must be respected literally):
       hasCard: !!sources.card,
       hasResearch: !!researchDigest,
     });
-    const result = await generateObject({
+    const generationOptions = {
       model: isImportedCharacter
         ? createModel(ctx.gen.provider, { role: "generator", reasoningMode: "bypass" })
         : createModel(ctx.gen.provider),
@@ -377,8 +393,19 @@ FIELD LIMITS (must be respected literally):
       temperature: ctx.gen.temperature,
       maxOutputTokens: clampTokens(ctx.gen.maxTokens),
       retries: 1,
-      timeout: isImportedCharacter ? { totalMs: IMPORT_GENERATION_TIMEOUT_MS } : undefined,
-    });
+    };
+    const result = isImportedCharacter
+      ? await withImportedGenerationBudget((abortSignal) =>
+          generateObject({
+            ...generationOptions,
+            timeout: { totalMs: IMPORT_GENERATION_OPERATION_BUDGET_MS },
+            abortSignal,
+          }),
+        )
+      : await generateObject({
+          ...generationOptions,
+          timeout: undefined,
+        });
     return normalizeLooseRichOutput(result.object, {
       fallbackTags: sources.card?.tags ?? [],
       knownLocations: ctx.locationNames,

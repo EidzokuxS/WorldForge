@@ -20,6 +20,22 @@ import type { ResolvedRole } from "../../ai/resolve-role-model.js";
 
 const log = createLogger("assess-original-powerstats");
 const IMPORT_GENERATION_TIMEOUT_MS = 45_000;
+const IMPORT_GENERATION_OPERATION_BUDGET_MS = IMPORT_GENERATION_TIMEOUT_MS * 2;
+
+async function withImportedGenerationBudget<T>(
+  operation: (abortSignal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(),
+    IMPORT_GENERATION_OPERATION_BUDGET_MS,
+  );
+  try {
+    return await operation(controller.signal);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /**
  * Stage 4 (original branch) — LLM-only PowerStats inference for ORIGINAL or
@@ -97,7 +113,7 @@ GROUNDING RULES:
       hasCard: !!cardText,
       hasOverride: !!overrideText,
     });
-    const { object: rawObject } = await generateObject({
+    const generationOptions = {
       model: isImportedCharacter
         ? createModel(role.provider, { role: "generator", reasoningMode: "bypass" })
         : createModel(role.provider),
@@ -106,8 +122,19 @@ GROUNDING RULES:
       temperature: Math.min(role.temperature, 0.3),
       maxOutputTokens: clampTokens(role.maxTokens),
       retries: 1,
-      timeout: isImportedCharacter ? { totalMs: IMPORT_GENERATION_TIMEOUT_MS } : undefined,
-    });
+    };
+    const { object: rawObject } = isImportedCharacter
+      ? await withImportedGenerationBudget((abortSignal) =>
+          generateObject({
+            ...generationOptions,
+            timeout: { totalMs: IMPORT_GENERATION_OPERATION_BUDGET_MS },
+            abortSignal,
+          }),
+        )
+      : await generateObject({
+          ...generationOptions,
+          timeout: undefined,
+        });
 
     try {
       return normalizeLlmPowerStats(recordFromUnknown(rawObject));

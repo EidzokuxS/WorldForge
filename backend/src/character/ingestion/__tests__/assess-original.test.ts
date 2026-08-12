@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { CharacterDraft } from "@worldforge/shared";
 import rogueDraft from "./fixtures/draft-rogue.json" with { type: "json" };
 
@@ -60,7 +60,11 @@ describe("assessOriginalCharacterPowerStats", () => {
     expect(out.powerStats).toBeDefined();
     expect(out.powerStats!.attackPotency.tier).toBe("Street");
     expect(Array.isArray(out.powerStats!.hax)).toBe(true);
-    expect(mockGenerateObject.mock.calls[0]?.[0]).toMatchObject({ retries: 1 });
+    expect(mockGenerateObject.mock.calls[0]?.[0]).toMatchObject({
+      retries: 1,
+      timeout: undefined,
+    });
+    expect(mockGenerateObject.mock.calls[0]?.[0]).not.toHaveProperty("abortSignal");
   });
 
   it("bounds imported-card assessment with bypass reasoning and one provider attempt", async () => {
@@ -78,8 +82,85 @@ describe("assessOriginalCharacterPowerStats", () => {
     });
     expect(mockGenerateObject.mock.calls[0]?.[0]).toMatchObject({
       retries: 1,
-      timeout: { totalMs: 45_000 },
+      timeout: { totalMs: 90_000 },
     });
+    expect(mockGenerateObject.mock.calls[0]?.[0].abortSignal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("accepts an imported power response after 45 seconds within the shared budget", async () => {
+    vi.useFakeTimers();
+    let operationSignal: AbortSignal | undefined;
+    mockGenerateObject.mockImplementationOnce(async (opts: { abortSignal?: AbortSignal }) => {
+      operationSignal = opts.abortSignal;
+      await waitFor(45_001);
+      return { object: humanStats };
+    });
+
+    const pending = assessOriginalCharacterPowerStats(importedAssessmentInput());
+    await vi.advanceTimersByTimeAsync(45_001);
+    const assessed = await pending;
+
+    expect(assessed.powerStats).toEqual(humanStats);
+    expect(operationSignal).toBeInstanceOf(AbortSignal);
+    expect(operationSignal?.aborted).toBe(false);
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+    expect(mockGenerateObject.mock.calls[0]?.[0]).toMatchObject({
+      timeout: { totalMs: 90_000 },
+    });
+  });
+
+  it("lets an imported power fallback finish inside the remaining shared budget", async () => {
+    vi.useFakeTimers();
+    let operationSignal: AbortSignal | undefined;
+    let primaryFailedAt = -1;
+    let fallbackFinishedAt = -1;
+    mockGenerateObject.mockImplementationOnce(async (opts: { abortSignal?: AbortSignal }) => {
+      operationSignal = opts.abortSignal;
+      const startedAt = Date.now();
+      await waitFor(10_000);
+      primaryFailedAt = Date.now() - startedAt;
+      await waitFor(20_000);
+      fallbackFinishedAt = Date.now() - startedAt;
+      if (operationSignal?.aborted) {
+        throw new Error("shared operation budget expired");
+      }
+      return { object: humanStats };
+    });
+
+    const pending = assessOriginalCharacterPowerStats(importedAssessmentInput());
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(pending).resolves.toMatchObject({ powerStats: humanStats });
+
+    expect(primaryFailedAt).toBe(10_000);
+    expect(fallbackFinishedAt).toBe(30_000);
+    expect(operationSignal?.aborted).toBe(false);
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+  });
+
+  it("fences an imported power fallback at the shared budget without a second window", async () => {
+    vi.useFakeTimers();
+    let operationSignal: AbortSignal | undefined;
+    let fallbackStartedAt = -1;
+    mockGenerateObject.mockImplementationOnce(async (opts: { abortSignal?: AbortSignal }) => {
+      operationSignal = opts.abortSignal;
+      const startedAt = Date.now();
+      await waitFor(89_000);
+      fallbackStartedAt = Date.now() - startedAt;
+      await waitFor(2_000);
+      if (operationSignal?.aborted) {
+        throw new Error("shared operation budget expired");
+      }
+      return { object: humanStats };
+    });
+
+    const pending = assessOriginalCharacterPowerStats(importedAssessmentInput());
+    const rejection = expect(pending).rejects.toThrow(IngestionPipelineError);
+    await vi.advanceTimersByTimeAsync(91_000);
+    await rejection;
+
+    expect(fallbackStartedAt).toBe(89_000);
+    expect(operationSignal?.aborted).toBe(true);
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
   });
 
   it("prompt marks character as ORIGINAL and names it", async () => {
@@ -170,3 +251,21 @@ describe("assessOriginalCharacterPowerStats", () => {
     expect(mockGenerateObject).toHaveBeenCalledTimes(1);
   });
 });
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+function waitFor(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function importedAssessmentInput() {
+  return {
+    draft: rogueDraft as unknown as CharacterDraft,
+    cardText: "A cat-burglar with a grappling hook.",
+    role,
+    premise: "A port city",
+    isImportedCharacter: true,
+  };
+}

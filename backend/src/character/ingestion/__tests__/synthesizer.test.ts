@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type {
   IngestionContext,
   IngestionSources,
@@ -170,8 +170,85 @@ describe("synthesizeDraftFromSources priority merge", () => {
       reasoningMode: "bypass",
     });
     expect(mockGenerateObject.mock.calls[0]?.[0]).toMatchObject({
-      timeout: { totalMs: 45_000 },
+      timeout: { totalMs: 90_000 },
     });
+    expect(mockGenerateObject.mock.calls[0]?.[0].abortSignal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("accepts an imported primary response after 45 seconds within the shared budget", async () => {
+    vi.useFakeTimers();
+    let operationSignal: AbortSignal | undefined;
+    mockGenerateObject.mockImplementationOnce(async (opts: { abortSignal?: AbortSignal }) => {
+      operationSignal = opts.abortSignal;
+      await waitFor(45_001);
+      return { object: richOutput };
+    });
+
+    const pending = synthesizeDraftFromSources(importedSynthesisInput());
+    await vi.advanceTimersByTimeAsync(45_001);
+    const draft = await pending;
+
+    expect(draft.provenance).toMatchObject({ sourceKind: "import" });
+    expect(operationSignal).toBeInstanceOf(AbortSignal);
+    expect(operationSignal?.aborted).toBe(false);
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+    expect(mockGenerateObject.mock.calls[0]?.[0]).toMatchObject({
+      timeout: { totalMs: 90_000 },
+    });
+  });
+
+  it("lets an imported fallback finish inside the remaining shared budget", async () => {
+    vi.useFakeTimers();
+    let operationSignal: AbortSignal | undefined;
+    let primaryFailedAt = -1;
+    let fallbackFinishedAt = -1;
+    mockGenerateObject.mockImplementationOnce(async (opts: { abortSignal?: AbortSignal }) => {
+      operationSignal = opts.abortSignal;
+      const startedAt = Date.now();
+      await waitFor(10_000);
+      primaryFailedAt = Date.now() - startedAt;
+      await waitFor(20_000);
+      fallbackFinishedAt = Date.now() - startedAt;
+      if (operationSignal?.aborted) {
+        throw new Error("shared operation budget expired");
+      }
+      return { object: richOutput };
+    });
+
+    const pending = synthesizeDraftFromSources(importedSynthesisInput());
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(pending).resolves.toBeDefined();
+
+    expect(primaryFailedAt).toBe(10_000);
+    expect(fallbackFinishedAt).toBe(30_000);
+    expect(operationSignal?.aborted).toBe(false);
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+  });
+
+  it("fences an imported fallback at the shared budget without a second window", async () => {
+    vi.useFakeTimers();
+    let operationSignal: AbortSignal | undefined;
+    let fallbackStartedAt = -1;
+    mockGenerateObject.mockImplementationOnce(async (opts: { abortSignal?: AbortSignal }) => {
+      operationSignal = opts.abortSignal;
+      const startedAt = Date.now();
+      await waitFor(89_000);
+      fallbackStartedAt = Date.now() - startedAt;
+      await waitFor(2_000);
+      if (operationSignal?.aborted) {
+        throw new Error("shared operation budget expired");
+      }
+      return { object: richOutput };
+    });
+
+    const pending = synthesizeDraftFromSources(importedSynthesisInput());
+    const rejection = expect(pending).rejects.toThrow(IngestionPipelineError);
+    await vi.advanceTimersByTimeAsync(91_000);
+    await rejection;
+
+    expect(fallbackStartedAt).toBe(89_000);
+    expect(operationSignal?.aborted).toBe(true);
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
   });
 
   it("preserves default reasoning and retry behavior outside import", async () => {
@@ -184,6 +261,7 @@ describe("synthesizeDraftFromSources priority merge", () => {
 
     expect(mockCreateModel).toHaveBeenCalledWith(ctx.gen.provider);
     expect(mockGenerateObject.mock.calls[0]?.[0]).toMatchObject({ timeout: undefined });
+    expect(mockGenerateObject.mock.calls[0]?.[0]).not.toHaveProperty("abortSignal");
   });
 
   it("override text appears in PRIORITY 1 section before PRIORITY 2", async () => {
@@ -343,3 +421,20 @@ describe("synthesizeDraftFromSources priority merge", () => {
     expect(mockGenerateObject).toHaveBeenCalledTimes(1);
   });
 });
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+function waitFor(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function importedSynthesisInput() {
+  return {
+    sources: sources({ mode: "import", card: gojoCard as never }),
+    classification: baseClassification,
+    researchDigest: null,
+    ctx,
+  };
+}
