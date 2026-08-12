@@ -68,20 +68,84 @@ boundaries were preserved.
 
 ## Live r171 evidence
 
-The single fresh r171 lane and its materializer, hashes, setup journey, import
-budget observation, endurance checkpoints, persistence reload, and cleanup are
-recorded here after the static gate. Frozen r170 remains immutable.
+The single fresh r171 materialization used the returned isolated campaigns
+root:
+
+`output/playtests/campaign-world-runs/pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r171/campaigns`
+
+The run configuration stayed outside both evidence roots at
+`output/playtests/campaign-play-run-configs/pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r171.json`.
+The sole `--live-phase prepare` ran before runtime, HTTP, browser, or database
+activity. The materializer manifest and direct hash check matched the required
+state DB `6cb291d11ce6578e3395a10d2c5d590070e3ccdd8b2b67451410869ce97897d2`,
+config `d8362b1af976c00cb8f14c564c8196a2d1ab137743ff368ea83d762a4ad2e065`, and
+Brina card `4b48de7a32df6a6be5a91ab12f09bb87926b40d5940348c7581e298eaa12b60a`.
+The isolated lane used ports 4560, 4561, and 4562 with matching API and CORS
+configuration. The browser preflight showed the expected WorldForge character
+surface.
+
+The setup journey used one Import card click and one canonical Brina file
+assignment. The one parse request returned 200 after 23,288 ms, and the page
+showed imported `Brina Hael`, `CHARACTER_CARD`, and an enabled Continue action.
+The bounded backend log records Stage 3 native JSON success in 17,956 ms and
+Stage 4 native JSON success in 3,263 ms, with no fallback in either stage. This
+is the unchanged fast primary path; it does not prove the provider branch after
+45 seconds. The deterministic tests above own that timing proof.
+
+The one Save/Continue click returned 200 from `/play/player` after 2,023 ms and
+advanced to `/play`. The one opening flow selected lower-wards, Local, Already
+here, and Looking for work, then clicked Begin once. The opening request returned
+202 and reached a ready proper scene at `alderman-hallway` with Brina present.
+
+The endurance lane then completed and durably bound actions 1 through 21. The
+checkpoints were:
+
+- action 10: completed/bound 10/10, world/runtime 23/191, one request with
+  202, proper scene, integrity `ok`, empty foreign-key check;
+- action 20: completed/bound 20/20, world/runtime 33/393, one request with
+  202, proper scene, integrity `ok`, empty foreign-key check.
+
+At action 22 the single POST returned 202 and the turn reached `completed`, but
+the narration operation ended `failed` on attempt 2. The bounded backend log
+records `model_contract_failed` / `schema_validation_failed` for
+`turn-player-action:e69d7e98c8bad673701c69a1fd76142f8f0ca20c`, with the native
+JSON attempt taking 89,842 ms and text fallback disabled for that narrator call.
+The authoritative state advanced to world/runtime 35/419 but had
+`narration=null`, so it was not a proper scene. The exact action-22 pending
+decision remains signed and preserved; browser-actions contains exactly 21
+unique bound entries (1 through 21), and the boundary snapshot has
+`integrity_check=ok` with no foreign-key violations. This is a Campaign Play
+narrator defect outside Task 215, not an import-budget observation.
+
+The lane froze at that first genuine defect. It did not retry, resume, replay,
+switch provider or model, click again, reload, or run finalize. The complete
+bounded session, world evidence, and runtime logs remain under the r171 roots;
+the final 60-action and reload criteria are intentionally unclaimed. Frozen
+r170 remains immutable.
 
 ## Acceptance handoff
 
-- Static: the shared-signal and 90,000 ms timeout contract is covered by the
-  focused deterministic tests; safe-generation external-abort behavior and
-  repository gates are recorded after execution.
-- Rendered and persistence: the r171 setup, Save/Continue, ready Opening,
-  checkpoints, integrity checks, and reload evidence are recorded after the
-  one live lane.
-- Live budget: the imported Stage 3 and Stage 4 observations, including any
-  first genuine boundary, are recorded without inferring provider causes.
-- Endurance and cleanup: the final bound-action count, durable anchors,
-  preserved evidence roots, and task-owned resource cleanup are recorded after
-  the lane.
+- Imported Stage 3 primary after 45 seconds: deterministic fake-clock test
+  accepts completion before the shared 90,000 ms deadline; the live import used
+  the fast native JSON path and did not exercise this provider timing branch.
+- Imported Stage 3 early fallback: deterministic test proves the existing text
+  fallback can use only the remaining shared budget.
+- Imported Stage 3 exhausted budget: deterministic test proves no second full
+  provider window and no late result.
+- Imported Stage 4: the same three deterministic budget cases pass for power
+  assessment, with the live fast native JSON assessment completing in 3,263 ms.
+- Parse, research, generate, non-import assessment, fast imported success, one
+  outer import attempt, public error mapping, and pre-Save zero-write behavior:
+  focused and full ingestion suites pass; the live lane adds one parse 200, one
+  import success, and one Save 200 without a second assignment.
+- Rendered and durable setup: the imported character page, Save/Continue,
+  selected opening route, and ready Opening proper scene are captured. The
+  action-10 and action-20 checkpoints prove durable bindings, anchors, actor and
+  narration records, integrity `ok`, and empty foreign-key checks.
+- Endurance and reload: not achieved because the first genuine narrator defect
+  froze action 22 at completed/bound 22/21. No reload or finalization was
+  attempted, and no later evidence is inferred.
+- Cleanup: cleanup is limited to the exact task-owned runtime, browser, helper,
+  and external run-config paths after this evidence commit. The session,
+  campaign world, and bounded logs remain preserved. Protected dirty
+  `AGENTS.md` and `CLAUDE.md` remain untouched and unstaged.
