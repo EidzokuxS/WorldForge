@@ -187,3 +187,98 @@ test changed.
 The remaining acceptance gap is therefore live verification only: restore a
 supported browser input/read route before attempting a future fresh lane. No
 product repair is selected by this boundary.
+
+## r168 unchanged-source live lane (2026-08-12)
+
+The required entry was `705bc32b06fc96c3ce04ea8b238e2444e7229885` on
+`feat/revamp`, equal to `origin/feat/revamp`; only the pre-existing protected
+`AGENTS.md` and `CLAUDE.md` dirt remained. The immutable lane was
+`pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r168` for campaign
+`6b85a49e-fef5-4359-95e2-051383f6fb66`.
+
+### Disposable browser preflight
+
+Before materializing r168, a task-owned scratch campaigns root outside the
+repository and evidence roots was used. A task-owned backend on 4540 and
+frontend on 4541 were started with the frontend API target explicitly set to
+`http://127.0.0.1:4540`. The backend health endpoint and frontend HTTP page
+both returned successfully. The supported browser control opened the direct
+HTTP page, read its rendered no-campaign DOM, reloaded the same page, and read
+the DOM again without an internal error URL or product write. The preflight
+tab, processes, ports, helpers, and scratch root were then removed before
+Phase B.
+
+### Materialization, prepare, and setup
+
+Materialization ran exactly once and returned the isolated campaigns root
+`output/playtests/campaign-world-runs/pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r168/campaigns`.
+The sole `--live-phase prepare` ran with that exact `GSD_CAMPAIGNS_ROOT`
+before runtime, HTTP, browser, or database inspection. The canonical hashes
+matched: state
+`6cb291d11ce6578e3395a10d2c5d590070e3ccdd8b2b67451410869ce97897d2`, config
+`d8362b1af976c00cb8f14c564c8196a2d1ab137743ff368ea83d762a4ad2e065`, and
+Brina card
+`4b48de7a32df6a6be5a91ab12f09bb87926b40d5940348c7581e298eaa12b60a`.
+The canonical journey performed one Brina import, one Save/Continue, the
+`lower-wards / Local / Already here / Looking for work` selections, and one
+Begin. The Opening reached ready with a proper scene.
+
+### Rendered and authoritative journey
+
+Actions 1 through 19 each used one reconciled rendered enabled choice and
+settled exactly once with one completed player-action turn, one Narrator
+operation, one proper-scene binding, and matching commands/receipts. No
+duplicate scene binding or late write was observed. Checkpoint 10 was
+completed/bound `10/10`, with `worldVersion=22`, `runtimeRevision=190`,
+11 turns/results, 10 proper scenes/operations, 39 commands/receipts,
+`integrity_check=ok`, and `foreign_key_check=[]`.
+
+Action 20 reached the first terminal built-in recovery boundary. The active
+turn was
+`turn-player-action:e9b5b6e81f5e6f5ee6d738897f51b1473c65401d`, job
+`actor-job:0000:2f781b22f10ddf83876003f0`, stage
+`actor-replan-stage:a7a2ce5e3284aee011c5e2bd5a7380ca`, with attempt 1
+`actor-replan-attempt:610c389e6809aacc510707c008bbe848` and attempt 2
+`actor-replan-attempt:40ae808c6daf2b6a5e48232343e2e89d`.
+
+Attempt 1 was a retained `model_contract_invalid` interruption and opened its
+existing shared-deadline recovery. Attempt 2 preserved the same job/stage/
+turn/frame/frozen-world/provider/model identity and the shared deadline
+`1786527155617`, then ended as `stage_timeout`/`transport_error` at the local
+deadline. The turn persisted `interrupted` with `retryEligible=true`; it has
+no result, Narrator operation, proper scene, attempt 3, or late write. The
+read-only database boundary had `worldVersion=33`, `runtimeRevision=456`,
+19 completed player-action results, 19 proper scenes, 19 Narrator operations,
+27 Narrator attempts, 68 commands, 68 receipts, 25 Actor jobs, and 16 Actor
+plans. Duplicate scene groups were empty; integrity was `ok` and the foreign
+key check was empty. The rendered same-page state showed the stopped-turn
+surface with Resume visible and all action controls disabled; no Resume or
+later click was made.
+
+This is a genuine terminal model-stage boundary after the existing recovery
+was exhausted, so the lane is frozen as `Needs attention`. It is not evidence
+of a provider cause and does not authorize a repair. Task 213's direct live
+coverage remains unavailable: no first Actor Replanner attempt with persisted
+`stage_timeout` occurred, and the observed timeout was attempt 2 after a
+different first-attempt error. Checkpoints 20/30/40/50/60, 60/60 bindings,
+and same-page reload are unavailable; no inference is made.
+
+Cleanup closed the r168 page, stopped the task-owned backend/frontend trees,
+verified ports 4540-4542 were free, and preserved the generated session/world
+evidence roots. The task-owned temporary helpers, run-config, database copies,
+and scratch artifacts were removed. No production source, test, or frozen
+lane changed.
+
+### Acceptance handoff
+
+The disposable browser preflight, isolated materialization/prepare ordering,
+canonical hashes, one-time setup, ready Opening, actions 1-19, checkpoint 10,
+clean persistence, and no-duplicate/no-late-write evidence are direct live
+observations. The first terminal action-20 Actor Replanner boundary is direct
+authoritative evidence with exact bounded identities, two attempts, shared
+deadline, and no downstream write. Natural Task 213 first-attempt timeout
+recovery, checkpoints 20/30/40/50/60, 60 unique bindings, and same-page reload
+remain unavailable because the lane froze at that boundary.
+
+The note-only `git diff --check` passed, and staged GitNexus
+`detect_changes --scope staged --repo WorldForge` reported no source changes.
