@@ -1231,6 +1231,7 @@ function validateModelStages(
   selection: CampaignPlayTurnModelSelection,
 ): ModelStageRow[] {
   const stages = selectModelStages(handle, row.turnId);
+  const stageById = new Map(stages.map((stage) => [stage.id, stage]));
   const grouped = new Map<string, ModelStageRow[]>();
   const actorReplannerStages = new Map(
     (handle.sqlite.prepare(`SELECT job_id AS jobId, worker_epoch AS workerEpoch
@@ -1285,6 +1286,23 @@ function validateModelStages(
     chain.set(attempt.attemptNumber, attempt);
     linkedAttemptChains.set(attempt.jobId, chain);
   }
+  const retryChainDeadlineValid = (
+    firstAttempt: LinkedActorReplanAttempt,
+    laterAttempt: LinkedActorReplanAttempt,
+  ): boolean => {
+    const firstStage = stageById.get(firstAttempt.modelStageRowId);
+    if (firstStage?.status !== "interrupted") return false;
+    const modelContractInvalid = firstStage.schemaOutcome === "invalid"
+      && firstStage.errorCode === "model_contract_invalid"
+      && laterAttempt.createdAt < firstAttempt.deadlineAt
+      && laterAttempt.deadlineAt === firstAttempt.deadlineAt;
+    const stageTimeout = firstStage.schemaOutcome === "transport_error"
+      && firstStage.errorCode === "stage_timeout"
+      && laterAttempt.createdAt >= firstAttempt.deadlineAt
+      && laterAttempt.deadlineAt > laterAttempt.createdAt
+      && laterAttempt.deadlineAt > firstAttempt.deadlineAt;
+    return modelContractInvalid || stageTimeout;
+  };
   for (const stage of stages) {
     try {
       campaignPlayModelStageSchema.parse({
@@ -1329,7 +1347,7 @@ function validateModelStages(
       ? false
       : linkedAttempt.attemptNumber === 1
         ? laterLinkedAttempt === undefined || (
-            laterLinkedAttempt.deadlineAt === linkedAttempt.deadlineAt &&
+            retryChainDeadlineValid(linkedAttempt, laterLinkedAttempt) &&
             laterLinkedAttempt.frameHash === linkedAttempt.frameHash &&
             laterLinkedAttempt.frozenBaseWorldVersion === linkedAttempt.frozenBaseWorldVersion &&
             laterLinkedAttempt.requestedProviderId === linkedAttempt.requestedProviderId &&
@@ -1342,7 +1360,7 @@ function validateModelStages(
         : priorLinkedAttempt !== undefined &&
           priorLinkedAttempt.attemptNumber === 1 &&
           priorLinkedAttempt.retryConsumedAt === linkedAttempt.createdAt &&
-          priorLinkedAttempt.deadlineAt === linkedAttempt.deadlineAt &&
+          retryChainDeadlineValid(priorLinkedAttempt, linkedAttempt) &&
           priorLinkedAttempt.frameHash === linkedAttempt.frameHash &&
           priorLinkedAttempt.frozenBaseWorldVersion === linkedAttempt.frozenBaseWorldVersion &&
           priorLinkedAttempt.requestedProviderId === linkedAttempt.requestedProviderId &&

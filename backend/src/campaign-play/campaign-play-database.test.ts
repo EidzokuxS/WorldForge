@@ -403,6 +403,206 @@ function settleRulebookCommand(
   };
 }
 
+interface ActorReplanAttemptFixture {
+  handle: CampaignPlayDatabaseHandle;
+  actorId: string;
+  goalId: string;
+  jobId: string;
+  stageId: string;
+  firstModelStageId: string;
+  firstAttemptId: string;
+  turnId: string;
+  frameHash: string;
+  frozenBaseWorldVersion: number;
+  firstDeadlineAt: number;
+}
+
+function createActorReplanAttemptFixture(campaignId: string): ActorReplanAttemptFixture {
+  createAcceptedCampaign(campaignId);
+  const handle = openPlay(campaignId);
+  insertPlayState(handle);
+  insertTurn(handle);
+  const actorGoal = handle.sqlite.prepare(`
+    SELECT a.id AS actorId, g.id AS goalId
+    FROM actors a JOIN actor_goals g ON g.actor_id = a.id
+    WHERE a.campaign_id = ? AND a.controller = 'agent'
+    ORDER BY a.id LIMIT 1
+  `).get(campaignId) as { actorId: string; goalId: string };
+  const state = handle.sqlite.prepare(`
+    SELECT world_version AS worldVersion
+    FROM campaign_play_states WHERE campaign_id = ?
+  `).get(campaignId) as { worldVersion: number };
+  const suffix = campaignId.slice(0, 8);
+  const planId = `plan-${suffix}`;
+  const jobId = `job-${suffix}`;
+  const stageId = `actor-replan-stage-${suffix}`;
+  const firstModelStageId = `actor-replan-model-one-${suffix}`;
+  const firstAttemptId = `actor-replan-attempt-one-${suffix}`;
+  handle.sqlite.prepare(`
+    INSERT INTO campaign_play_actor_plans (
+      plan_id, campaign_id, actor_id, goal_id, plan_version, intent_json,
+      preconditions_json, cadence_minutes, priority, steps_json,
+      status, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, 1, '{"kind":"wait","targets":[],"method":null,"stakes":null}',
+      '[]', 30, 3,
+      '[{"stepId":"step-one","order":0,"intent":{"kind":"wait","targets":[],"method":null,"stakes":null},"elapsedBounds":{"minimumMinutes":0,"maximumMinutes":30}}]',
+      'active', 1900, 1900)
+  `).run(planId, campaignId, actorGoal.actorId, actorGoal.goalId);
+  handle.sqlite.prepare(`
+    INSERT INTO campaign_play_actor_schedules (
+      schedule_id, campaign_id, actor_id, plan_id,
+      next_act_at_world_time_minutes, last_act_at_world_time_minutes,
+      priority, agency_debt, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, 30, NULL, 3, 0, 1905, 1905)
+  `).run(`schedule-${suffix}`, campaignId, actorGoal.actorId, planId);
+  handle.sqlite.prepare(`
+    UPDATE campaign_play_states
+    SET world_time_minutes = 30
+    WHERE campaign_id = ?
+  `).run(campaignId);
+  handle.sqlite.prepare(`
+    UPDATE campaign_play_turns
+    SET stage = 'primary_settled', final_world_version = ?,
+      worker_lease_owner = 'worker-one', worker_epoch = 1,
+      worker_lease_expires_at = 10000, updated_at = 1909
+    WHERE id = 'turn-one' AND campaign_id = ?
+  `).run(state.worldVersion, campaignId);
+  const dueAuthority = handle.sqlite.prepare(`
+    SELECT world_version AS worldVersion, runtime_revision AS runtimeRevision
+    FROM campaign_play_states WHERE campaign_id = ?
+  `).get(campaignId) as { worldVersion: number; runtimeRevision: number };
+  const dueDecisions = JSON.stringify([{
+    dueOrder: 0,
+    actorId: actorGoal.actorId,
+    scheduleId: `schedule-${suffix}`,
+    planId,
+    nextActAtWorldTimeMinutes: 30,
+    priority: 3,
+    agencyDebt: 0,
+    cadenceMinutes: 30,
+    disposition: "wake",
+    dueReason: "scheduled",
+    jobId,
+  }]);
+  handle.sqlite.prepare(`
+    INSERT INTO campaign_play_actor_due_sets (
+      turn_id, campaign_id, settled_world_time_minutes, base_world_version,
+      base_runtime_revision, decisions_json, due_set_hash, created_at
+    ) VALUES ('turn-one', ?, 30, ?, ?, ?, ?, 1909)
+  `).run(campaignId, dueAuthority.worldVersion, dueAuthority.runtimeRevision, dueDecisions, HASH_B);
+  handle.sqlite.prepare(`
+    INSERT INTO campaign_play_actor_jobs (
+      job_id, campaign_id, turn_id, actor_id, admitted_plan_id, plan_id, due_reason,
+      frozen_base_world_version, worker_epoch, stage, proposal_id,
+      defer_reason, claim_turn_worker_epoch, created_at, completed_at
+    ) VALUES (?, ?, 'turn-one', ?, ?, ?, 'scheduled', ?, 0, 'queued', NULL,
+      NULL, NULL, 1910, NULL)
+  `).run(jobId, campaignId, actorGoal.actorId, planId, planId, state.worldVersion);
+  handle.sqlite.prepare(`
+    UPDATE campaign_play_actor_jobs
+    SET stage = 'claimed', worker_epoch = 1, claim_turn_worker_epoch = 1
+    WHERE job_id = ? AND campaign_id = ?
+  `).run(jobId, campaignId);
+  handle.sqlite.prepare(`
+    INSERT INTO campaign_play_model_stages (
+      id, stage_id, attempt, campaign_id, turn_id, kind, status,
+      worker_epoch, requested_provider_id, requested_model,
+      requested_strategy, schema_outcome, created_at
+    ) VALUES (?, ?, 1, ?, 'turn-one', 'actor_replanner', 'started', 1,
+      'provider', 'model', 'strict_object', 'pending', 2000)
+  `).run(firstModelStageId, stageId, campaignId);
+  handle.sqlite.prepare(`
+    INSERT INTO campaign_play_actor_replan_attempts (
+      attempt_id, campaign_id, job_id, stage_id, model_stage_row_id,
+      turn_id, actor_id, attempt_number, model_worker_epoch,
+      actor_job_worker_epoch, claim_turn_worker_epoch, frame_hash,
+      frozen_base_world_version, deadline_at, requested_provider_id, requested_model,
+      requested_strategy, retry_consumed_at, created_at
+    ) VALUES (?, ?, ?, ?, ?, 'turn-one', ?, 1, 1, 1, 1, ?, ?, 3000,
+      'provider', 'model', 'strict_object', NULL, 2000)
+  `).run(
+    firstAttemptId,
+    campaignId,
+    jobId,
+    stageId,
+    firstModelStageId,
+    actorGoal.actorId,
+    HASH_C,
+    state.worldVersion,
+  );
+  return {
+    handle,
+    actorId: actorGoal.actorId,
+    goalId: actorGoal.goalId,
+    jobId,
+    stageId,
+    firstModelStageId,
+    firstAttemptId,
+    turnId: "turn-one",
+    frameHash: HASH_C,
+    frozenBaseWorldVersion: state.worldVersion,
+    firstDeadlineAt: 3000,
+  };
+}
+
+function finishActorReplanFirstStage(
+  fixture: ActorReplanAttemptFixture,
+  input: { schemaOutcome: "invalid" | "transport_error"; errorCode: string },
+): void {
+  fixture.handle.sqlite.prepare(`
+    UPDATE campaign_play_model_stages
+    SET status = 'interrupted', schema_outcome = ?, duration_ms = 5,
+      error_code = ?, completed_at = 3005
+    WHERE id = ?
+  `).run(input.schemaOutcome, input.errorCode, fixture.firstModelStageId);
+}
+
+function consumeActorReplanRetry(
+  fixture: ActorReplanAttemptFixture,
+  retryConsumedAt: number,
+): void {
+  fixture.handle.sqlite.prepare(`
+    UPDATE campaign_play_actor_replan_attempts
+    SET retry_consumed_at = CAST(? AS INTEGER)
+    WHERE attempt_id = ?
+  `).run(retryConsumedAt, fixture.firstAttemptId);
+}
+
+function insertActorReplanSecondAttempt(
+  fixture: ActorReplanAttemptFixture,
+  input: { attemptId: string; modelStageId: string; createdAt: number; deadlineAt: number },
+): void {
+  fixture.handle.sqlite.prepare(`
+    INSERT INTO campaign_play_model_stages (
+      id, stage_id, attempt, campaign_id, turn_id, kind, status,
+      worker_epoch, requested_provider_id, requested_model,
+      requested_strategy, schema_outcome, created_at
+    ) VALUES (?, ?, 2, ?, 'turn-one', 'actor_replanner', 'started', 2,
+      'provider', 'model', 'strict_object', 'pending', ?)
+  `).run(input.modelStageId, fixture.stageId, fixture.handle.campaignId, input.createdAt);
+  fixture.handle.sqlite.prepare(`
+    INSERT INTO campaign_play_actor_replan_attempts (
+      attempt_id, campaign_id, job_id, stage_id, model_stage_row_id,
+      turn_id, actor_id, attempt_number, model_worker_epoch,
+      actor_job_worker_epoch, claim_turn_worker_epoch, frame_hash,
+      frozen_base_world_version, deadline_at, requested_provider_id, requested_model,
+      requested_strategy, retry_consumed_at, created_at
+    ) VALUES (?, ?, ?, ?, ?, 'turn-one', ?, 2, 2, 1, 1, ?, ?, ?,
+      'provider', 'model', 'strict_object', NULL, ?)
+  `).run(
+    input.attemptId,
+    fixture.handle.campaignId,
+    fixture.jobId,
+    fixture.stageId,
+    input.modelStageId,
+    fixture.actorId,
+    fixture.frameHash,
+    fixture.frozenBaseWorldVersion,
+    input.deadlineAt,
+    input.createdAt,
+  );
+}
+
 describe("Campaign Play core and Rulebook storage", () => {
   it("migrates fresh campaign databases with the twenty-eight Campaign Play tables", () => {
     const databasePath = createMigratedCampaign(root, CAMPAIGN_A);
@@ -785,7 +985,7 @@ describe("Campaign Play core and Rulebook storage", () => {
       .get() as { sql: string };
     expect(after.sql).toContain("job.defer_reason = 'actor_capacity'");
     expect(opened.sqlite.prepare(`SELECT max(created_at) AS latest
-      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_785_988_800_000 });
+      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_786_075_200_000 });
     expect((opened.sqlite.prepare(`SELECT sql FROM sqlite_master
       WHERE type = 'trigger' AND name = 'campaign_play_turn_terminal_result'`)
       .get() as { sql: string }).sql).toContain("'certified_observe'");
@@ -2179,6 +2379,121 @@ describe("Campaign Play core and Rulebook storage", () => {
     `).run(pressure.id)).toThrow();
     expect(handle.sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
     expect(handle.sqlite.pragma("foreign_key_check")).toEqual([]);
+  });
+
+  it("enforces the reason-aware Actor Replanner retry trigger matrix", () => {
+    const sharedDeadlineContract = createActorReplanAttemptFixture("33333333-3333-4333-8333-333333333333");
+    finishActorReplanFirstStage(sharedDeadlineContract, {
+      schemaOutcome: "invalid",
+      errorCode: "model_contract_invalid",
+    });
+    consumeActorReplanRetry(sharedDeadlineContract, 2010);
+    expect(() => insertActorReplanSecondAttempt(sharedDeadlineContract, {
+      attemptId: "actor-replan-attempt-two-33333333",
+      modelStageId: "actor-replan-model-two-33333333",
+      createdAt: 2010,
+      deadlineAt: 3000,
+    })).not.toThrow();
+
+    const freshDeadlineContract = createActorReplanAttemptFixture("44444444-4444-4444-8444-444444444444");
+    finishActorReplanFirstStage(freshDeadlineContract, {
+      schemaOutcome: "invalid",
+      errorCode: "model_contract_invalid",
+    });
+    consumeActorReplanRetry(freshDeadlineContract, 2010);
+    expect(() => insertActorReplanSecondAttempt(freshDeadlineContract, {
+      attemptId: "actor-replan-attempt-two-44444444",
+      modelStageId: "actor-replan-model-two-44444444",
+      createdAt: 2010,
+      deadlineAt: 3900,
+    })).toThrow(/campaign_play_actor_replan_attempt_identity_invalid|campaign_play_actor_replan_retry_not_authorized/);
+
+    const freshDeadlineTimeout = createActorReplanAttemptFixture("55555555-5555-4555-8555-555555555555");
+    finishActorReplanFirstStage(freshDeadlineTimeout, {
+      schemaOutcome: "transport_error",
+      errorCode: "stage_timeout",
+    });
+    consumeActorReplanRetry(freshDeadlineTimeout, 3000);
+    expect(() => insertActorReplanSecondAttempt(freshDeadlineTimeout, {
+      attemptId: "actor-replan-attempt-two-55555555",
+      modelStageId: "actor-replan-model-two-55555555",
+      createdAt: 3000,
+      deadlineAt: 3900,
+    })).not.toThrow();
+
+    const sharedDeadlineTimeout = createActorReplanAttemptFixture("66666666-6666-4666-8666-666666666666");
+    finishActorReplanFirstStage(sharedDeadlineTimeout, {
+      schemaOutcome: "transport_error",
+      errorCode: "stage_timeout",
+    });
+    consumeActorReplanRetry(sharedDeadlineTimeout, 3000);
+    expect(() => insertActorReplanSecondAttempt(sharedDeadlineTimeout, {
+      attemptId: "actor-replan-attempt-two-66666666",
+      modelStageId: "actor-replan-model-two-66666666",
+      createdAt: 3000,
+      deadlineAt: 3000,
+    })).toThrow(/campaign_play_actor_replan_attempt_identity_invalid|campaign_play_actor_replan_retry_not_authorized/);
+
+    const expiredDeadlineTimeout = createActorReplanAttemptFixture("77777777-7777-4777-8777-777777777777");
+    finishActorReplanFirstStage(expiredDeadlineTimeout, {
+      schemaOutcome: "transport_error",
+      errorCode: "stage_timeout",
+    });
+    consumeActorReplanRetry(expiredDeadlineTimeout, 3001);
+    expect(() => insertActorReplanSecondAttempt(expiredDeadlineTimeout, {
+      attemptId: "actor-replan-attempt-two-77777777",
+      modelStageId: "actor-replan-model-two-77777777",
+      createdAt: 3001,
+      deadlineAt: 3000,
+    })).toThrow(/campaign_play_actor_replan_attempt_identity_invalid|campaign_play_actor_replan_retry_not_authorized/);
+
+    const providerUnavailable = createActorReplanAttemptFixture("88888888-8888-4888-8888-888888888888");
+    finishActorReplanFirstStage(providerUnavailable, {
+      schemaOutcome: "transport_error",
+      errorCode: "provider_unavailable",
+    });
+    expect(() => consumeActorReplanRetry(providerUnavailable, 3000)).toThrow(/campaign_play_actor_replan_retry_not_authorized|campaign_play_actor_replan_attempt_identity_immutable/);
+    expect(() => insertActorReplanSecondAttempt(providerUnavailable, {
+      attemptId: "actor-replan-attempt-two-88888888",
+      modelStageId: "actor-replan-model-two-88888888",
+      createdAt: 3000,
+      deadlineAt: 3900,
+    })).toThrow(/campaign_play_actor_replan_retry_not_authorized|campaign_play_actor_replan_attempt_identity_invalid/);
+
+    const attemptThree = createActorReplanAttemptFixture("99999999-9999-4999-8999-999999999999");
+    finishActorReplanFirstStage(attemptThree, {
+      schemaOutcome: "transport_error",
+      errorCode: "stage_timeout",
+    });
+    consumeActorReplanRetry(attemptThree, 3000);
+    expect(() => insertActorReplanSecondAttempt(attemptThree, {
+      attemptId: "actor-replan-attempt-two-99999999",
+      modelStageId: "actor-replan-model-two-99999999",
+      createdAt: 3000,
+      deadlineAt: 3900,
+    })).not.toThrow();
+    expect(() => attemptThree.handle.sqlite.prepare(`
+      UPDATE campaign_play_actor_replan_attempts
+      SET retry_consumed_at = 3010
+      WHERE attempt_id = ?
+    `).run(attemptThree.firstAttemptId)).toThrow(/campaign_play_actor_replan_attempts_update_guard|campaign_play_actor_replan_attempt_identity_immutable/);
+    expect(() => attemptThree.handle.sqlite.prepare(`
+      INSERT INTO campaign_play_model_stages (
+        id, stage_id, attempt, campaign_id, turn_id, kind, status,
+        worker_epoch, requested_provider_id, requested_model,
+        requested_strategy, schema_outcome, created_at
+      ) VALUES (?, ?, 3, ?, 'turn-one', 'actor_replanner', 'started', 3,
+        'provider', 'model', 'strict_object', 'pending', 4000)
+    `).run(
+      "actor-replan-model-three-99999999",
+      attemptThree.stageId,
+      attemptThree.handle.campaignId,
+    )).toThrow();
+
+    for (const fixture of [sharedDeadlineContract, freshDeadlineTimeout, attemptThree]) {
+      expect(fixture.handle.sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
+      expect(fixture.handle.sqlite.pragma("foreign_key_check")).toEqual([]);
+    }
   });
 
   it("persists one actor job and idempotent visibility evidence", () => {

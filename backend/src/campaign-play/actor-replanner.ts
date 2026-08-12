@@ -858,30 +858,24 @@ export function createCampaignPlayActorReplanner(
       if (!Number.isSafeInteger(deadlineAt) || deadlineAt <= providerStartedAt) {
         throw new CampaignPlayActorReplannerError("replan_input_invalid");
       }
-      const operationController = new AbortController();
-      let deadlineReached = false;
-      let deadlineSettled = false;
-      let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
-      let resolveDeadline!: () => void;
-      const deadlineSignal = new Promise<void>((resolve) => {
-        resolveDeadline = resolve;
-      });
       let upstreamAbortSettled = false;
       let resolveUpstreamAbort!: () => void;
       const upstreamAbortSignal = new Promise<void>((resolve) => {
         resolveUpstreamAbort = resolve;
       });
-      const markDeadline = (): void => {
-        if (deadlineReached) return;
-        deadlineReached = true;
-        operationController.abort();
-        if (!deadlineSettled) {
-          deadlineSettled = true;
-          resolveDeadline();
-        }
+      type AttemptOperation = {
+        startedAt: number;
+        deadlineAt: number;
+        signal: AbortSignal;
+        abort: () => void;
+        isDeadlineReached: () => boolean;
+        assertLive: () => void;
+        runProvider: <T>(work: () => Promise<T>) => Promise<T>;
+        dispose: () => void;
       };
+      let activeAttemptOperation: AttemptOperation | undefined;
       const onUpstreamAbort = (): void => {
-        operationController.abort();
+        activeAttemptOperation?.abort();
         if (!upstreamAbortSettled) {
           upstreamAbortSettled = true;
           resolveUpstreamAbort();
@@ -889,52 +883,89 @@ export function createCampaignPlayActorReplanner(
       };
       if (request.signal?.aborted) onUpstreamAbort();
       else request.signal?.addEventListener("abort", onUpstreamAbort, { once: true });
-      const deadlineDelay = Math.max(0, deadlineAt - providerStartedAt);
-      deadlineTimer = dependencies.setTimer(markDeadline, deadlineDelay);
+      const createAttemptOperation = (startedAt: number, attemptDeadlineAt: number): AttemptOperation => {
+        const controller = new AbortController();
+        let deadlineReached = false;
+        let deadlineSettled = false;
+        let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+        let resolveDeadline!: () => void;
+        const deadlineSignal = new Promise<void>((resolve) => {
+          resolveDeadline = resolve;
+        });
+        const markDeadline = (): void => {
+          if (deadlineReached) return;
+          deadlineReached = true;
+          controller.abort();
+          if (!deadlineSettled) {
+            deadlineSettled = true;
+            resolveDeadline();
+          }
+        };
+        const markDeadlineIfExpired = (): void => {
+          if (dependencies.now() >= attemptDeadlineAt) markDeadline();
+        };
+        const operation: AttemptOperation = {
+          startedAt,
+          deadlineAt: attemptDeadlineAt,
+          signal: controller.signal,
+          abort: () => controller.abort(),
+          isDeadlineReached: () => {
+            markDeadlineIfExpired();
+            return deadlineReached;
+          },
+          assertLive: () => {
+            if (request.signal?.aborted) {
+              throw new CampaignPlayActorReplannerError("replan_epoch_lost");
+            }
+            markDeadlineIfExpired();
+            if (deadlineReached || controller.signal.aborted) {
+              throw new CampaignPlayActorReplanDeadlineError();
+            }
+          },
+          runProvider: async <T>(work: () => Promise<T>): Promise<T> => {
+            operation.assertLive();
+            const provider = Promise.resolve().then(work);
+            void provider.catch(() => undefined);
+            try {
+              return await Promise.race([
+                provider,
+                deadlineSignal.then(() => {
+                  throw new CampaignPlayActorReplanDeadlineError();
+                }),
+                upstreamAbortSignal.then(() => {
+                  throw new CampaignPlayActorReplannerError("replan_epoch_lost");
+                }),
+              ]);
+            } catch (error) {
+              if (request.signal?.aborted) {
+                throw new CampaignPlayActorReplannerError("replan_epoch_lost");
+              }
+              if (deadlineReached || dependencies.now() >= attemptDeadlineAt) {
+                markDeadline();
+                throw new CampaignPlayActorReplanDeadlineError();
+              }
+              throw error;
+            }
+          },
+          dispose: () => {
+            if (deadlineTimer !== undefined) {
+              dependencies.clearTimer(deadlineTimer);
+              deadlineTimer = undefined;
+            }
+            if (activeAttemptOperation === operation) activeAttemptOperation = undefined;
+          },
+        };
+        const deadlineDelay = Math.max(0, attemptDeadlineAt - dependencies.now());
+        deadlineTimer = dependencies.setTimer(markDeadline, deadlineDelay);
+        activeAttemptOperation = operation;
+        if (request.signal?.aborted) controller.abort();
+        return operation;
+      };
       const clearDeadline = (): void => {
-        if (deadlineTimer !== undefined) {
-          dependencies.clearTimer(deadlineTimer);
-          deadlineTimer = undefined;
-        }
+        activeAttemptOperation?.dispose();
         request.signal?.removeEventListener("abort", onUpstreamAbort);
       };
-      const markDeadlineIfExpired = (): void => {
-        if (dependencies.now() >= deadlineAt) markDeadline();
-      };
-      const assertOperationLive = (): void => {
-        if (request.signal?.aborted) {
-          throw new CampaignPlayActorReplannerError("replan_epoch_lost");
-        }
-        markDeadlineIfExpired();
-        if (deadlineReached || operationController.signal.aborted) {
-          throw new CampaignPlayActorReplanDeadlineError();
-        }
-      };
-      const runProvider = async <T>(work: () => Promise<T>): Promise<T> => {
-        assertOperationLive();
-        const provider = Promise.resolve().then(work);
-        void provider.catch(() => undefined);
-        try {
-          return await Promise.race([
-            provider,
-            deadlineSignal.then(() => {
-              throw new CampaignPlayActorReplanDeadlineError();
-            }),
-            upstreamAbortSignal.then(() => {
-              throw new CampaignPlayActorReplannerError("replan_epoch_lost");
-            }),
-          ]);
-        } catch (error) {
-          if (request.signal?.aborted) {
-            throw new CampaignPlayActorReplannerError("replan_epoch_lost");
-          }
-          if (deadlineReached || dependencies.now() >= deadlineAt) {
-            markDeadline();
-            throw new CampaignPlayActorReplanDeadlineError();
-          }
-          throw error;
-        }
-      };
+      const firstAttemptOperation = createAttemptOperation(providerStartedAt, deadlineAt);
       try {
       turnRepository.commitActorTransition({
         token: request.token,
@@ -1072,8 +1103,12 @@ export function createCampaignPlayActorReplanner(
         proposalSchemaForAttempt: ZodType<CampaignPlayActorReplanProposal>,
         proposalMode: "auto" | "tool",
         prompt: string,
+        operation: AttemptOperation,
       ): Promise<AttemptResult> => {
-        const startedAt = dependencies.now();
+        const startedAt = operation.startedAt;
+        const attemptDeadlineAt = operation.deadlineAt;
+        const assertOperationLive = operation.assertLive;
+        const runProvider = operation.runProvider;
         let observedTrace: Readonly<SafeGenerateTrace> | undefined;
         let stageEvidence: ReturnType<typeof acceptedTrace> | undefined;
         let rejectionArtifact: CampaignPlayActorPlanRejectionArtifact | undefined;
@@ -1095,7 +1130,7 @@ export function createCampaignPlayActorReplanner(
               allowRepair: false,
               allowTextFallback: false,
               retries: 1,
-              abortSignal: operationController.signal,
+              abortSignal: operation.signal,
             }));
           } catch (cause) {
             if (isContractGenerationFailure(cause)) contractInvalid = true;
@@ -1180,7 +1215,7 @@ export function createCampaignPlayActorReplanner(
               allowRepair: false,
               allowTextFallback: false,
               retries: 1,
-              abortSignal: operationController.signal,
+              abortSignal: operation.signal,
             }));
           } catch (cause) {
             if (isContractGenerationFailure(cause)) contractInvalid = true;
@@ -1289,17 +1324,30 @@ export function createCampaignPlayActorReplanner(
                       AND attempt.requested_provider_id = ?
                       AND attempt.requested_model = ?
                       AND attempt.requested_strategy = 'strict_object'
-                      AND (attempt.attempt_number = 1 OR EXISTS (
-                        SELECT 1 FROM campaign_play_actor_replan_attempts prior_attempt
-                        WHERE prior_attempt.job_id = attempt.job_id
-                          AND prior_attempt.attempt_number = 1
-                          AND prior_attempt.retry_consumed_at IS NOT NULL
-                          AND prior_attempt.deadline_at = attempt.deadline_at
-                          AND prior_attempt.frame_hash = attempt.frame_hash
-                          AND prior_attempt.frozen_base_world_version = attempt.frozen_base_world_version
-                          AND prior_attempt.requested_provider_id = attempt.requested_provider_id
-                          AND prior_attempt.requested_model = attempt.requested_model
-                      ))
+                       AND (attempt.attempt_number = 1 OR EXISTS (
+                         SELECT 1 FROM campaign_play_actor_replan_attempts prior_attempt
+                         JOIN campaign_play_model_stages prior_model
+                           ON prior_model.id = prior_attempt.model_stage_row_id
+                         WHERE prior_attempt.job_id = attempt.job_id
+                           AND prior_attempt.stage_id = attempt.stage_id
+                           AND prior_attempt.turn_id = attempt.turn_id
+                           AND prior_attempt.actor_id = attempt.actor_id
+                           AND prior_attempt.attempt_number = 1
+                           AND prior_attempt.retry_consumed_at = attempt.created_at
+                           AND prior_attempt.frame_hash = attempt.frame_hash
+                           AND prior_attempt.frozen_base_world_version = attempt.frozen_base_world_version
+                           AND prior_attempt.requested_provider_id = attempt.requested_provider_id
+                           AND prior_attempt.requested_model = attempt.requested_model
+                           AND ((prior_model.schema_outcome = 'invalid'
+                             AND prior_model.error_code = 'model_contract_invalid'
+                             AND attempt.created_at < prior_attempt.deadline_at
+                             AND attempt.deadline_at = prior_attempt.deadline_at)
+                             OR (prior_model.schema_outcome = 'transport_error'
+                             AND prior_model.error_code = 'stage_timeout'
+                             AND attempt.created_at >= prior_attempt.deadline_at
+                             AND attempt.deadline_at > attempt.created_at
+                             AND attempt.deadline_at > prior_attempt.deadline_at))
+                       ))
                       AND model.status = 'started' AND model.id = attempt.model_stage_row_id
                       AND model.stage_id = attempt.stage_id
                       AND model.worker_epoch = attempt.model_worker_epoch
@@ -1320,7 +1368,7 @@ export function createCampaignPlayActorReplanner(
                     request.token.epoch,
                     turn.frameHash,
                     frame.baseWorldVersion,
-                    deadlineAt,
+                    attemptDeadlineAt,
                     acceptedAt,
                     requestedModel.providerId,
                     requestedModel.model,
@@ -1428,7 +1476,7 @@ export function createCampaignPlayActorReplanner(
           const epochLost = (error instanceof CampaignPlayActorReplannerError
             && error.code === "replan_epoch_lost") || request.signal?.aborted === true;
           const deadlineExceeded = error instanceof CampaignPlayActorReplanDeadlineError
-            || (deadlineReached && !request.signal?.aborted);
+            || (operation.isDeadlineReached() && !request.signal?.aborted);
           const budgetExceeded = error instanceof CampaignPlayActorReplannerError
             && error.code === "replan_budget_exceeded";
           const persistenceFailed = error instanceof CampaignPlayActorReplannerError
@@ -1602,7 +1650,7 @@ export function createCampaignPlayActorReplanner(
           : { kind: "interrupted", jobId: request.jobId, errorCode: failure.errorCode, workerEpoch };
       };
 
-      const firstResult = await runAttempt(
+      let firstResult = await runAttempt(
         request.model,
         request.model,
         firstModelWorkerEpoch,
@@ -1612,6 +1660,7 @@ export function createCampaignPlayActorReplanner(
         proposalSchema,
         "auto",
         proposalPrompt,
+        firstAttemptOperation,
       );
       if (firstResult.kind === "replanned") {
         return { kind: "replanned", jobId: request.jobId, plan: firstResult.plan, workerEpoch };
@@ -1625,20 +1674,36 @@ export function createCampaignPlayActorReplanner(
           contractInvalid: false,
         });
       }
-      if (deadlineReached || dependencies.now() >= deadlineAt) {
-        return finalizeFailure({
+      const firstAttemptTimedOut = firstAttemptOperation.isDeadlineReached() || dependencies.now() >= deadlineAt;
+      if (firstAttemptTimedOut) {
+        firstResult = {
           ...firstResult,
           errorCode: "stage_timeout",
           schemaOutcome: "transport_error",
           contractInvalid: false,
-        });
+        };
+        if (!linkedCall) return finalizeFailure(firstResult);
       }
       const recoveryModel = request.recoveryModel;
-      const mayEscalate = linkedCall && firstResult.contractInvalid &&
+      const stageTimeoutRecovery = linkedCall !== undefined && firstResult.errorCode === "stage_timeout";
+      const contractRecovery = linkedCall !== undefined && firstResult.contractInvalid &&
         recoveryModel !== undefined &&
         dependencies.now() < request.token.expiresAt && dependencies.now() < deadlineAt;
+      const mayEscalate = (contractRecovery || stageTimeoutRecovery) &&
+        !request.signal?.aborted && dependencies.now() < request.token.expiresAt;
       if (mayEscalate) {
         const retryStartedAt = dependencies.now();
+        const retryDeadlineAt = stageTimeoutRecovery
+          ? retryStartedAt + request.externalOperationDeadlineMs
+          : deadlineAt;
+        if (!Number.isSafeInteger(retryDeadlineAt) || retryDeadlineAt <= retryStartedAt) {
+          return finalizeFailure({
+            ...firstResult,
+            errorCode: "persistence_failed",
+            schemaOutcome: "transport_error",
+            contractInvalid: false,
+          });
+        }
         const secondModelWorkerEpoch = firstModelWorkerEpoch + 1;
         const secondAttemptNumber = firstAttemptNumber + 1;
         const secondModelStageRowId = stableId("model-stage-row", {
@@ -1651,7 +1716,13 @@ export function createCampaignPlayActorReplanner(
           modelWorkerEpoch: secondModelWorkerEpoch,
         });
         try {
-          assertOperationLive();
+          if (stageTimeoutRecovery) {
+            if (request.signal?.aborted) {
+              throw new CampaignPlayActorReplannerError("replan_epoch_lost");
+            }
+          } else {
+            firstAttemptOperation.assertLive();
+          }
           requireTurnLease(handle, request.token, retryStartedAt);
           turnRepository.commitActorTransition({
             token: request.token,
@@ -1673,7 +1744,8 @@ export function createCampaignPlayActorReplanner(
             committedAt: retryStartedAt,
             mutate(context) {
               const firstStage = context.sqlite.prepare(`SELECT model.status AS status,
-                  model.error_code AS errorCode, attempt.deadline_at AS deadlineAt,
+                  model.error_code AS errorCode, model.schema_outcome AS schemaOutcome,
+                  attempt.deadline_at AS deadlineAt,
                   attempt.frame_hash AS frameHash,
                   attempt.frozen_base_world_version AS frozenBaseWorldVersion,
                   attempt.requested_provider_id AS requestedProviderId,
@@ -1694,12 +1766,17 @@ export function createCampaignPlayActorReplanner(
               ) as {
                 status: string;
                 errorCode: string | null;
+                schemaOutcome: string;
                 deadlineAt: number;
                 frameHash: string;
                 frozenBaseWorldVersion: number;
                 requestedProviderId: string;
                 requestedModel: string;
               } | undefined;
+              const retryErrorCode = stageTimeoutRecovery ? "stage_timeout" : "model_contract_invalid";
+              const retryStartsInAllowedWindow = stageTimeoutRecovery
+                ? retryStartedAt >= deadlineAt
+                : retryStartedAt < deadlineAt;
               if (firstStage?.status !== "started"
                 || firstStage.errorCode !== null
                 || firstStage.deadlineAt !== deadlineAt
@@ -1707,7 +1784,7 @@ export function createCampaignPlayActorReplanner(
                 || firstStage.frozenBaseWorldVersion !== frame.baseWorldVersion
                 || firstStage.requestedProviderId !== requestedModel.providerId
                 || firstStage.requestedModel !== requestedModel.model
-                || retryStartedAt >= deadlineAt) {
+                || !retryStartsInAllowedWindow) {
                 throw new CampaignPlayActorReplannerError("replan_epoch_lost");
               }
               const firstTrace = firstResult.trace;
@@ -1719,17 +1796,19 @@ export function createCampaignPlayActorReplanner(
               const modelUpdate = context.sqlite.prepare(`UPDATE campaign_play_model_stages SET
                 status = 'interrupted', actual_provider_id = ?, actual_model = ?,
                 actual_strategy = ?, input_tokens = ?, output_tokens = ?, finish_reason = ?,
-                duration_ms = ?, schema_outcome = 'invalid', error_code = 'model_contract_invalid',
+                duration_ms = ?, schema_outcome = ?, error_code = ?,
                 completed_at = ? WHERE id = ? AND stage_id = ? AND attempt = ?
                   AND worker_epoch = ? AND status = 'started'`).run(
                 hasActual ? actualProviderId : null,
                 hasActual ? actualModel : null,
                 hasActual ? "strict_object" : null,
                 firstResult.stageEvidence?.inputTokens ?? firstTrace?.usage?.inputTokens ?? null,
-                firstResult.stageEvidence?.outputTokens ?? firstTrace?.usage?.outputTokens ?? null,
-                firstResult.stageEvidence?.finishReason ?? firstTrace?.finishReason ?? null,
-                firstResult.durationMs,
-                retryStartedAt,
+                 firstResult.stageEvidence?.outputTokens ?? firstTrace?.usage?.outputTokens ?? null,
+                 firstResult.stageEvidence?.finishReason ?? firstTrace?.finishReason ?? null,
+                 firstResult.durationMs,
+                 stageTimeoutRecovery ? "transport_error" : "invalid",
+                 retryErrorCode,
+                 retryStartedAt,
                 firstModelStageRowId,
                 stageId,
                 firstAttemptNumber,
@@ -1741,8 +1820,10 @@ export function createCampaignPlayActorReplanner(
                   AND attempt_number = 1 AND retry_consumed_at IS NULL
                   AND model_stage_row_id = ? AND actor_job_worker_epoch = ?
                   AND claim_turn_worker_epoch = ? AND frame_hash = ?
-                  AND frozen_base_world_version = ? AND deadline_at = ?
-                  AND ? < deadline_at AND requested_provider_id = ?
+                   AND frozen_base_world_version = ? AND deadline_at = ?
+                   AND ((? = 'model_contract_invalid' AND ? < deadline_at)
+                     OR (? = 'stage_timeout' AND ? >= deadline_at))
+                   AND requested_provider_id = ?
                   AND requested_model = ? AND requested_strategy = 'strict_object'`).run(
                 retryStartedAt,
                 firstAttemptId,
@@ -1753,8 +1834,11 @@ export function createCampaignPlayActorReplanner(
                 request.token.epoch,
                 turn.frameHash,
                 frame.baseWorldVersion,
-                deadlineAt,
-                retryStartedAt,
+                 deadlineAt,
+                 retryErrorCode,
+                 retryStartedAt,
+                 retryErrorCode,
+                 retryStartedAt,
                 requestedModel.providerId,
                 requestedModel.model,
               );
@@ -1795,9 +1879,9 @@ export function createCampaignPlayActorReplanner(
                 workerEpoch,
                 request.token.epoch,
                 turn.frameHash,
-                frame.baseWorldVersion,
-                deadlineAt,
-                requestedModel.providerId,
+                 frame.baseWorldVersion,
+                 retryDeadlineAt,
+                 requestedModel.providerId,
                 requestedModel.model,
                 retryStartedAt,
               );
@@ -1823,6 +1907,12 @@ export function createCampaignPlayActorReplanner(
             contractInvalid: false,
           });
         }
+        const secondAttemptOperation = stageTimeoutRecovery
+          ? (() => {
+              firstAttemptOperation.dispose();
+              return createAttemptOperation(retryStartedAt, retryDeadlineAt);
+            })()
+          : firstAttemptOperation;
         const useGenerationRecoverySchema = firstResult.rejectionArtifact === undefined
           || (
             firstResult.rejectionArtifact.phase === "compilation"
@@ -1833,23 +1923,29 @@ export function createCampaignPlayActorReplanner(
           );
         const useRouteRecoveryAutoMode = firstResult.rejectionArtifact?.phase === "compilation"
           && firstResult.rejectionArtifact.reason === "route_not_traversable_from_step_location";
+        const useTimeoutRecoveryNormalPath = stageTimeoutRecovery;
         const secondResult = await runAttempt(
-          useRouteRecoveryAutoMode ? request.model : recoveryModel,
+          useTimeoutRecoveryNormalPath || useRouteRecoveryAutoMode ? request.model : recoveryModel!,
           request.model,
           secondModelWorkerEpoch,
           secondAttemptNumber,
           secondModelStageRowId,
           secondAttemptId,
-          useGenerationRecoverySchema
+          useTimeoutRecoveryNormalPath
+            ? proposalSchema
+            : useGenerationRecoverySchema
             ? generationRecoveryProposalSchema
             : proposalSchema,
-          useRouteRecoveryAutoMode ? "auto" : "tool",
-          firstResult.rejectionArtifact === undefined
+          useTimeoutRecoveryNormalPath || useRouteRecoveryAutoMode ? "auto" : "tool",
+          useTimeoutRecoveryNormalPath
+            ? proposalPrompt
+            : firstResult.rejectionArtifact === undefined
             ? buildCampaignPlayActorReplanGenerationRecoveryPrompt(proposalPrompt)
             : buildCampaignPlayActorReplanRecoveryPrompt(
                 proposalPrompt,
                 recoveryFeedbackFromArtifact(firstResult.rejectionArtifact),
               ),
+          secondAttemptOperation,
         );
         if (secondResult.kind === "replanned") {
           return { kind: "replanned", jobId: request.jobId, plan: secondResult.plan, workerEpoch };
