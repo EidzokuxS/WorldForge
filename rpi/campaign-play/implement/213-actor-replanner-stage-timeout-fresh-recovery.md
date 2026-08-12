@@ -143,3 +143,47 @@ integrity/FK, and no duplicate or late write through the boundary are directly
 evidenced above. Natural Task 213 recovery, checkpoint 60, 60/60 unique
 bindings, and same-page reload are unavailable; no inference is made from
 static tests or the verification-only action-54 boundary.
+
+## r167 unchanged-source live lane (2026-08-12)
+
+The required entry was `8bbe0bddd4ba63d2695f512319038b3899b5d83f` on
+`feat/revamp`, equal to `origin/feat/revamp`; only the pre-existing protected
+`AGENTS.md` and `CLAUDE.md` dirt remained. The immutable lane was
+`pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r167` for campaign
+`6b85a49e-fef5-4359-95e2-051383f6fb66`. Materialization ran exactly once and
+returned the isolated campaigns root
+`output/playtests/campaign-world-runs/pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r167/campaigns`.
+The run-config was kept outside both evidence roots, and the sole
+`--live-phase prepare` ran with that exact `GSD_CAMPAIGNS_ROOT` before any
+runtime, HTTP, browser, or database inspection.
+
+The pre-runtime hashes matched the canonical values: state
+`6cb291d11ce6578e3395a10d2c5d590070e3ccdd8b2b67451410869ce97897d2`, config
+`d8362b1af976c00cb8f14c564c8196a2d1ab137743ff368ea83d762a4ad2e065`, and
+Brina card `4b48de7a32df6a6be5a91ab12f09bb87926b40d5940348c7581e298eaa12b60a`.
+The task-owned backend started on 4530. The first frontend launch used its
+default API target and rendered the service-unavailable surface; it was
+stopped without any product setup or write. A second task-owned frontend was
+then launched on 4531 with the backend API target corrected to 4530.
+
+Before the required one-time import/setup journey could begin, the supported
+browser control layer lost access to the same task-owned tab. Its supported
+reload/read operation was rejected by URL policy after the tab held a browser
+error-page URL. Reconciliation established no Brina import, Save/Continue,
+setup selection, Begin, player click, POST, admission, turn, command, receipt,
+Narrator operation, proper scene, or database write. No ambiguous product
+dispatch occurred, and no direct API or alternate browser route was used.
+Under the r167 pre-dispatch recovery rule this is a verification/environment
+boundary, not a product defect; the lane is frozen before setup.
+
+Rendered Opening, actions 1-60, checkpoints, Task 213 natural timeout
+recovery, 60 unique bindings, and same-page reload are unavailable. The
+generated r167 session/world roots are preserved. Cleanup stopped the
+task-owned backend/frontend trees and verified ports 4530-4532 were free; the
+browser session was finalized, and the external helper/run-config were
+removed. Task-owned logs remain as bounded evidence. No production source or
+test changed.
+
+The remaining acceptance gap is therefore live verification only: restore a
+supported browser input/read route before attempting a future fresh lane. No
+product repair is selected by this boundary.
