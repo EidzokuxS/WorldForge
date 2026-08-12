@@ -815,15 +815,9 @@ export function createCampaignPlayNarrationOperationRepository(
     }
     packetForOperation(handle, operation);
     const activeDeadlineAt = kind === "automatic"
-      ? operation.errorCode === "stage_timeout"
-        ? preparedAt + CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS
-        : operation.automaticDeadlineAt
+      ? preparedAt + CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS
       : preparedAt + CAMPAIGN_PLAY_MANUAL_NARRATION_WINDOW_MS;
-    if (
-      !Number.isSafeInteger(activeDeadlineAt) || activeDeadlineAt <= preparedAt ||
-      (kind === "automatic" && operation.errorCode !== "stage_timeout" &&
-        preparedAt >= operation.automaticDeadlineAt)
-    ) {
+    if (!Number.isSafeInteger(activeDeadlineAt) || activeDeadlineAt <= preparedAt) {
       throw new CampaignPlayNarrationOperationError(
         "operation_not_recoverable",
         "Campaign Play narration recovery window has expired.",

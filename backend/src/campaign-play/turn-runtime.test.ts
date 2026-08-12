@@ -4315,100 +4315,112 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(result.handle.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 
-  it("gives a timed-out automatic recovery a fresh deadline without changing operation identity", async () => {
-    const time = fixedClock(100_000);
-    const prepared = await createCompletedPlayerActionForApplication(time, 1);
-    const successful = playerNarratorFixture();
-    let calls = 0;
-    const narrator: TestNarrator = {
-      compile: successful.compile,
-      narrate: vi.fn(async (request) => {
-        calls += 1;
-        if (calls === 1) throw new CampaignPlayNarratorError("stage_timeout", null);
-        return successful.narrate(request);
-      }),
-    };
-    const runtime = turnRuntime(
-      prepared.handle,
-      time,
-      judgeFixture("deterministic"),
-      gameMasterFixture(),
-      { narrator },
-    );
-    const first = await runtime.runNarration(prepared.turnId);
-    expect(first).toMatchObject({ status: "failed", attempt: 1 });
-    const persistedBefore = prepared.handle.sqlite.prepare(`SELECT
+  it.each([
+    ["narration_invalid", "narration_invalid"],
+    ["provider_unavailable", "transport_interrupted"],
+    ["stage_timeout", "stage_timeout"],
+  ] as const)(
+    "gives a %s automatic recovery a fresh deadline without changing operation identity",
+    async (_label, firstErrorCode) => {
+      const time = fixedClock(100_000);
+      const prepared = await createCompletedPlayerActionForApplication(time, 1);
+      const successful = playerNarratorFixture();
+      let calls = 0;
+      const narrator: TestNarrator = {
+        compile: successful.compile,
+        narrate: vi.fn(async (request) => {
+          calls += 1;
+          if (calls === 1) throw new CampaignPlayNarratorError(firstErrorCode, null);
+          return successful.narrate(request);
+        }),
+      };
+      const runtime = turnRuntime(
+        prepared.handle,
+        time,
+        judgeFixture("deterministic"),
+        gameMasterFixture(),
+        { narrator },
+      );
+      const first = await runtime.runNarration(prepared.turnId);
+      expect(first).toMatchObject({ status: "failed", attempt: 1 });
+      const persistedBefore = prepared.handle.sqlite.prepare(`SELECT
         automatic_deadline_at AS automaticDeadlineAt,
         active_deadline_at AS activeDeadlineAt,
+        error_code AS errorCode,
         operation_id AS operationId, result_id AS resultId, narration_id AS narrationId,
         packet_hash AS packetHash, receipt_ids_json AS receiptIdsJson
       FROM campaign_play_narration_operations WHERE campaign_id = ? AND turn_id = ?`).get(
-      CAMPAIGN_ID,
-      prepared.turnId,
-    ) as {
-      automaticDeadlineAt: number;
-      activeDeadlineAt: number;
-      operationId: string;
-      resultId: string;
-      narrationId: string;
-      packetHash: string;
-      receiptIdsJson: string;
-    };
-    expect(persistedBefore.automaticDeadlineAt).toBe(persistedBefore.activeDeadlineAt);
-    time.advanceBy(persistedBefore.automaticDeadlineAt - time.clock.now() + 1);
-    const recoveryPreparedAt = time.clock.now();
-    const token = runtime.prepareNarrationRecovery({
-      operationId: first!.operationId,
-      resultId: first!.resultId,
-      narrationId: first!.narrationId,
-      packetHash: first!.packetHash,
-      receiptIds: first!.receiptIds,
-    }, "automatic");
-    expect(token).toMatchObject({
-      operationId: persistedBefore.operationId,
-      resultId: persistedBefore.resultId,
-      turnId: prepared.turnId,
-      narrationId: persistedBefore.narrationId,
-      packetHash: persistedBefore.packetHash,
-      receiptIds: JSON.parse(persistedBefore.receiptIdsJson),
-      attempt: 2,
-      deadlineAt: recoveryPreparedAt + CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS,
-    });
-    const persistedRecovery = prepared.handle.sqlite.prepare(`SELECT
+        CAMPAIGN_ID,
+        prepared.turnId,
+      ) as {
+        automaticDeadlineAt: number;
+        activeDeadlineAt: number;
+        operationId: string;
+        resultId: string;
+        narrationId: string;
+        packetHash: string;
+        receiptIdsJson: string;
+        errorCode: string | null;
+      };
+      expect(persistedBefore.errorCode).toBe(firstErrorCode === "transport_interrupted"
+        ? "provider_unavailable"
+        : firstErrorCode);
+      expect(persistedBefore.automaticDeadlineAt).toBe(persistedBefore.activeDeadlineAt);
+      time.advanceBy(persistedBefore.automaticDeadlineAt - time.clock.now() + 1);
+      const recoveryPreparedAt = time.clock.now();
+      const token = runtime.prepareNarrationRecovery({
+        operationId: first!.operationId,
+        resultId: first!.resultId,
+        narrationId: first!.narrationId,
+        packetHash: first!.packetHash,
+        receiptIds: first!.receiptIds,
+      }, "automatic");
+      expect(token).toMatchObject({
+        operationId: persistedBefore.operationId,
+        resultId: persistedBefore.resultId,
+        turnId: prepared.turnId,
+        narrationId: persistedBefore.narrationId,
+        packetHash: persistedBefore.packetHash,
+        receiptIds: JSON.parse(persistedBefore.receiptIdsJson),
+        attempt: 2,
+        deadlineAt: recoveryPreparedAt + CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS,
+      });
+      const persistedRecovery = prepared.handle.sqlite.prepare(`SELECT
         automatic_deadline_at AS automaticDeadlineAt,
         active_deadline_at AS activeDeadlineAt
       FROM campaign_play_narration_operations WHERE campaign_id = ? AND operation_id = ?`).get(
-      CAMPAIGN_ID,
-      first!.operationId,
-    ) as { automaticDeadlineAt: number; activeDeadlineAt: number };
-    expect(persistedRecovery).toEqual({
-      automaticDeadlineAt: persistedBefore.automaticDeadlineAt,
-      activeDeadlineAt: recoveryPreparedAt + CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS,
-    });
-    const completed = await runtime.runNarration(prepared.turnId, token);
-    expect(completed).toMatchObject({
-      operationId: first!.operationId,
-      resultId: first!.resultId,
-      turnId: first!.turnId,
-      narrationId: first!.narrationId,
-      packetHash: first!.packetHash,
-      receiptIds: first!.receiptIds,
-      status: "complete",
-      attempt: 2,
-    });
-    expect(calls).toBe(2);
-    expect(prepared.handle.sqlite.prepare(`SELECT COUNT(*) AS count
+        CAMPAIGN_ID,
+        first!.operationId,
+      ) as { automaticDeadlineAt: number; activeDeadlineAt: number };
+      expect(persistedRecovery).toEqual({
+        automaticDeadlineAt: persistedBefore.automaticDeadlineAt,
+        activeDeadlineAt: recoveryPreparedAt + CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS,
+      });
+      const completed = await runtime.runNarration(prepared.turnId, token);
+      expect(completed).toMatchObject({
+        operationId: first!.operationId,
+        resultId: first!.resultId,
+        turnId: first!.turnId,
+        narrationId: first!.narrationId,
+        packetHash: first!.packetHash,
+        receiptIds: first!.receiptIds,
+        status: "complete",
+        attempt: 2,
+      });
+      expect(calls).toBe(2);
+      expect(prepared.handle.sqlite.prepare(`SELECT COUNT(*) AS count
       FROM campaign_play_narration_attempts WHERE campaign_id = ? AND operation_id = ?`).get(
-      CAMPAIGN_ID,
-      first!.operationId,
-    )).toEqual({ count: 2 });
-    expect(prepared.handle.sqlite.prepare(`SELECT COUNT(*) AS count
+        CAMPAIGN_ID,
+        first!.operationId,
+      )).toEqual({ count: 2 });
+      expect(prepared.handle.sqlite.prepare(`SELECT COUNT(*) AS count
       FROM campaign_play_proper_scenes WHERE campaign_id = ? AND operation_id = ?`).get(
-      CAMPAIGN_ID,
-      first!.operationId,
-    )).toEqual({ count: 1 });
-    expect(playerActionMechanicsSnapshot(prepared.handle, prepared.turnId)).toEqual(prepared.mechanics);
-  });
+        CAMPAIGN_ID,
+        first!.operationId,
+      )).toEqual({ count: 1 });
+      expect(playerActionMechanicsSnapshot(prepared.handle, prepared.turnId)).toEqual(prepared.mechanics);
+    },
+  );
 
   it("enforces one persisted automatic deadline when a late provider ignores abort", async () => {
     const time = deadlineClock(100_000);
@@ -4441,6 +4453,7 @@ describe("Campaign Play player-action turn runtime", () => {
     );
     const first = await runtime.runNarration(prepared.turnId);
     expect(first).toMatchObject({ status: "failed", attempt: 1 });
+    const recoveryPreparedAt = time.clock.now();
     const secondToken = runtime.prepareNarrationRecovery({
       operationId: first!.operationId,
       resultId: first!.resultId,
@@ -4464,7 +4477,9 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(persistedDeadline.automaticDeadlineAt).toBe(
       completedAt + CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS,
     );
-    expect(persistedDeadline.activeDeadlineAt).toBe(persistedDeadline.automaticDeadlineAt);
+    expect(persistedDeadline.activeDeadlineAt).toBe(
+      recoveryPreparedAt + CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS,
+    );
     const inFlight = runtime.runNarration(prepared.turnId, secondToken);
     expect(narrator.narrate).toHaveBeenCalledTimes(2);
     time.advanceBy(persistedDeadline.activeDeadlineAt - time.clock.now());
