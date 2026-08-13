@@ -128,3 +128,56 @@ rendered recovery failing to rehydrate because the launched frontend used the
 wrong API base, leaving the page in `Loading campaign` after one product-owned
 reload. The required 60-action journey and final reload are therefore
 unavailable and must not be claimed.
+
+### r181 GLM 5 Turbo acceptance boundary
+
+- Entry and product implementation commit: `38dfa4441b01572037f2485d959127a51515246b`;
+  branch entry and origin were `f580b121c99bd5b00702a06e84b05f20dfa4de46`.
+  The frontend was built with `NEXT_PUBLIC_API_BASE=http://127.0.0.1:4660`,
+  served on `4661`, and the backend used `4660` with CORS for `4661`.
+- The disposable Chromium preflight made a no-write state read and a same-URL
+  hard reload. Both requests targeted `127.0.0.1:4660` and returned `200`; no
+  request targeted `localhost:3001`. The scratch processes and root were
+  removed before the acceptance lane.
+- Exactly one fresh lane,
+  `pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r181`, was materialized for
+  campaign `6b85a49e-fef5-4359-95e2-051383f6fb66` with
+  `zai-coding-plan/glm-5-turbo`. Exactly one live-phase `prepare` ran. The
+  canonical state, config, and Brina card hashes were respectively
+  `6cb291d11ce6578e3395a10d2c5d590070e3ccdd8b2b67451410869ce97897d2`,
+  `d8362b1af976c00cb8f14c564c8196a2d1ab137743ff368ea83d762a4ad2e065`, and
+  `4b48de7a32df6a6be5a91ab12f09bb87926b40d5940348c7581e298eaa12b60a`.
+- Rendered setup completed once: Brina import, Save/Continue,
+  `lower-wards`, `Local`, `Already here`, `Looking for work`, Begin, and a
+  ready Opening (`turn-opening:7c88293760fd96f238dae91efbdbb6a663e2e820`,
+  runtime revision 15).
+- Action 1 had one signed choice and one rendered click for handle
+  `choice_09154dcdd872b9f63bc3b8b4` (`Talk to Dren Vask: accept the delivery
+  work`). The backend admitted exactly one durable turn
+  `turn-player-action:b3eb3de14fde34e6abb85ab4abf8d9ef2666bb7f`; its durable
+  stage completed once, with one proper scene
+  `narration:49ac93eae606be93bb0509e977954986fe94a0cf` and complete operation
+  `narration-operation:dd1f2b62a6be398ffaf544ebe0125b9d934e75a0`.
+  Authoritative state was `phase=ready`, `activeTurn=null`, world version 13,
+  runtime revision 39. The action owned three commands, three receipts, and
+  three world events; the campaign contained one player-action turn and no
+  duplicate identity.
+- The first genuine boundary was rendered control: from the signed decision,
+  the browser remained on the exact play URL showing `Loading campaign` with
+  no enabled control through the 120,000 ms bound, while direct authority was
+  already ready. The CDP capture contained no verified product-owned document
+  reload in this interval. No second click, POST, Resume, Try again, operator
+  reload, or repair was issued. Therefore no rendered proper-scene bind was
+  claimed and actions 2-60, checkpoints, and the final same-page reload were
+  not attempted.
+- A task-owned read-only SQLite backup had `query_only=1`,
+  `integrity_check=ok`, and zero foreign-key violations. Backend/frontend
+  processes were stopped, ports 4660/4661/4662 were free, and the temporary
+  run-config, helper scripts, scratch/preflight root, and read-only DB copy
+  were removed. Generated r181 session/world evidence and protected dirt were
+  preserved.
+
+Purpose: Needs attention. r181 reached the first action's durable ready state
+exactly once, but Chromium did not render that scene or enabled controls within
+120 seconds. The required 60-action journey and final same-page reload remain
+unavailable and must not be claimed.
