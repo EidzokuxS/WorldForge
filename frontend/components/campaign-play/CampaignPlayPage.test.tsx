@@ -146,6 +146,44 @@ function turnRead(
   };
 }
 
+function narrationOperation(
+  status: "pending" | "complete",
+  turnId = "turn-1",
+): NonNullable<CampaignPlayState["narrationOperation"]> {
+  return {
+    operationId: "narration-operation-1",
+    resultId: "result-1",
+    turnId,
+    narrationId: "narration-1",
+    packetHash: "b".repeat(64),
+    receiptIds: ["receipt-1"],
+    status,
+    attemptId: status === "pending" ? "narration-attempt-1" : "narration-attempt-2",
+    attempt: status === "pending" ? 1 : 2,
+    conciseResult: {
+      displayText: "The signal answers.",
+      suggestedActions: [{ choiceHandle: "choice-follow", label: "Follow the signal" }],
+    },
+    createdAt: 200,
+    completedAt: status === "complete" ? 300 : null,
+  };
+}
+
+function completedTurnReadWithOperation(
+  operation: NonNullable<CampaignPlayState["narrationOperation"]>,
+  sequence = 3,
+): CampaignPlayTurnReadResponse {
+  const completedRead = turnRead("completed", sequence);
+  if (completedRead.result.status !== "completed") throw new Error("expected completed turn");
+  return {
+    ...completedRead,
+    result: {
+      ...completedRead.result,
+      narrationOperation: operation,
+    },
+  };
+}
+
 function progressed(sequence: number, progress: "settling" | "revealing"): CampaignPlaySseEvent {
   return {
     sequence,
@@ -704,5 +742,161 @@ describe("CampaignPlayPage durable state", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("could not be completed");
     await waitFor(() => expect(screen.getByRole("button", { name: "Return to scene" })).toHaveFocus());
     expect(screen.getByLabelText("Your action")).toBeEnabled();
+  });
+
+  it("keeps one accepted action reconciling through stream and authority transport loss", async () => {
+    const initial = state("ready");
+    const pending = state("ready");
+    pending.narrationOperation = narrationOperation("pending");
+    const settled = state("ready");
+    settled.narration!.turnId = "turn-1";
+    settled.narration!.displayText = "The signal answers after the line goes quiet.";
+    settled.narration!.beats[0]!.text = settled.narration!.displayText;
+    let stateCalls = 0;
+    api.loadState.mockImplementation(async () => {
+      stateCalls += 1;
+      if (stateCalls === 1) return initial;
+      if (stateCalls === 2) throw new Error("authority read unavailable");
+      if (stateCalls === 3) return pending;
+      return settled;
+    });
+    api.loadTurn.mockImplementation(async () => {
+      if (stateCalls === 3) return completedTurnReadWithOperation(narrationOperation("pending"));
+      return turnRead("completed", 4);
+    });
+    api.admitTurn.mockResolvedValue({ turnId: "turn-1", sequence: 1 });
+    api.streamEvents
+      .mockRejectedValueOnce(new Error("stream closed"))
+      .mockRejectedValueOnce(new Error("stream closed again"))
+      .mockImplementation(() => new Promise(() => {}));
+
+    render(<CampaignPlayPage campaignId="campaign-1" reconnectDelayMilliseconds={0} />);
+    const input = await screen.findByLabelText("Your action");
+    fireEvent.change(input, { target: { value: "I wait for the signal." } });
+    fireEvent.click(screen.getByRole("button", { name: "Act" }));
+
+    await waitFor(() => expect(screen.getByText(settled.narration!.displayText)).toBeInTheDocument());
+    expect(input).toBeEnabled();
+    expect(api.admitTurn).toHaveBeenCalledTimes(1);
+    expect(api.resumeTurn).not.toHaveBeenCalled();
+    expect(screen.queryByText("The game service is temporarily unavailable.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  });
+
+  it("does not let a slower processing snapshot overwrite a newer ready projection", async () => {
+    const initial = state("ready");
+    const slowProcessing = state("turn_active", publicTurn("processing", "settling", 2));
+    const newerReady = state("ready");
+    newerReady.runtimeRevision = 5;
+    newerReady.narration!.turnId = "turn-1";
+    newerReady.narration!.displayText = "The newer authority snapshot is ready.";
+    let stateCalls = 0;
+    let releaseSlow!: () => void;
+    const slowRead = new Promise<void>((resolve) => { releaseSlow = resolve; });
+    api.loadState.mockImplementation(async () => {
+      stateCalls += 1;
+      if (stateCalls === 1) return initial;
+      if (stateCalls === 2) {
+        await slowRead;
+        return slowProcessing;
+      }
+      return newerReady;
+    });
+    let turnCalls = 0;
+    api.loadTurn.mockImplementation(async () => {
+      turnCalls += 1;
+      if (turnCalls === 1) {
+        const completedRead = turnRead("completed", 3);
+        completedRead.runtimeRevision = 5;
+        return completedRead;
+      }
+      const processingRead = turnRead("processing", 2);
+      processingRead.runtimeRevision = 4;
+      return processingRead;
+    });
+    api.admitTurn.mockResolvedValue({ turnId: "turn-1", sequence: 1 });
+    api.streamEvents.mockRejectedValue(new Error("stream closed"));
+
+    const page = render(
+      <CampaignPlayPage campaignId="campaign-1" reconnectDelayMilliseconds={0} />,
+    );
+    const input = await screen.findByLabelText("Your action");
+    fireEvent.change(input, { target: { value: "I wait for the newer read." } });
+    fireEvent.click(screen.getByRole("button", { name: "Act" }));
+    await waitFor(() => expect(stateCalls).toBe(2));
+
+    page.rerender(<CampaignPlayPage campaignId="campaign-1" reconnectDelayMilliseconds={1} />);
+    await waitFor(() => expect(input).toBeEnabled());
+    releaseSlow();
+    await waitFor(() => expect(turnCalls).toBeGreaterThanOrEqual(2));
+
+    expect(input).toBeEnabled();
+    expect(screen.queryByText("The game service is temporarily unavailable.")).not.toBeInTheDocument();
+    expect(api.admitTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps reconciling the same cursor across repeated stream failures", async () => {
+    const first = state("turn_active", publicTurn("processing", "interpreting", 1));
+    const second = state("turn_active", publicTurn("processing", "settling", 2));
+    const settled = state("ready");
+    settled.narration!.turnId = "turn-1";
+    api.loadState
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(second)
+      .mockResolvedValueOnce(settled);
+    api.loadTurn
+      .mockResolvedValueOnce(turnRead("processing", 1))
+      .mockResolvedValueOnce(turnRead("processing", 2))
+      .mockResolvedValueOnce(turnRead("completed", 3));
+    api.streamEvents
+      .mockRejectedValueOnce(new Error("first stream close"))
+      .mockRejectedValueOnce(new Error("second stream close"));
+
+    render(<CampaignPlayPage campaignId="campaign-1" reconnectDelayMilliseconds={0} />);
+
+    await waitFor(() => expect(screen.getByLabelText("Your action")).toBeEnabled());
+    expect(api.admitTurn).not.toHaveBeenCalled();
+    expect(api.streamEvents).toHaveBeenNthCalledWith(
+      1,
+      "campaign-1",
+      "turn-1",
+      expect.objectContaining({ afterSequence: 1 }),
+    );
+    expect(api.streamEvents).toHaveBeenNthCalledWith(
+      2,
+      "campaign-1",
+      "turn-1",
+      expect.objectContaining({ afterSequence: 2 }),
+    );
+    expect(api.loadState).toHaveBeenCalledTimes(3);
+  });
+
+  it("rehydrates a narration-pending turn without posting a new action", async () => {
+    const pending = state("ready");
+    pending.narrationOperation = narrationOperation("pending");
+    const settled = state("ready");
+    settled.narration!.turnId = "turn-1";
+    settled.narration!.displayText = "The rehydrated scene is ready.";
+    settled.narration!.beats[0]!.text = settled.narration!.displayText;
+    api.loadState.mockResolvedValueOnce(pending).mockResolvedValue(settled);
+    api.loadTurn
+      .mockResolvedValueOnce(completedTurnReadWithOperation(narrationOperation("pending")))
+      .mockResolvedValue(turnRead("completed", 4));
+    api.streamEvents
+      .mockRejectedValueOnce(new Error("stream unavailable"))
+      .mockImplementation(() => new Promise(() => {}));
+
+    render(<CampaignPlayPage campaignId="campaign-1" reconnectDelayMilliseconds={0} />);
+
+    const input = await screen.findByLabelText("Your action");
+    await waitFor(() => expect(screen.getByText(settled.narration!.displayText)).toBeInTheDocument());
+    expect(input).toBeEnabled();
+    expect(api.admitTurn).not.toHaveBeenCalled();
+    expect(api.resumeTurn).not.toHaveBeenCalled();
+    expect(api.streamEvents).toHaveBeenCalledWith(
+      "campaign-1",
+      "turn-1",
+      expect.objectContaining({ afterSequence: 3 }),
+    );
   });
 });
