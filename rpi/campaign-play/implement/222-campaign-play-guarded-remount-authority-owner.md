@@ -57,3 +57,34 @@ unchanged.
 Disposable Chromium failure-injection and the r182 GLM 5 Turbo acceptance lane
 remain to be run after the pushed implementation build. No live campaign lane
 has been materialized by this task at this point.
+
+## Preflight boundary
+
+The disposable preflight used a fresh scratch root on ports 4670/4671 (4672
+remained unused), built the frontend with
+`NEXT_PUBLIC_API_BASE=http://127.0.0.1:4670`, and verified the rendered setup,
+Brina import, opening choices, Begin, and Opening. Chromium sent exactly one
+player-action POST/202 to port 4670 for
+`turn-player-action:2c2501122194764f64e27af50c5179b6bcd9fa1d`; no second POST,
+Resume request, or operator reload occurred. The product automatic recovery
+guard was observed in session storage with value `1`, and the current
+navigation entry was a reload.
+
+The backend durably reached `phase=ready`, `activeTurn=null`,
+`worldVersion=12`, `runtimeRevision=44`, with the same turn bound to a
+completed operation and proper scene. Authority GETs used the correct
+`127.0.0.1:4670` URL and returned HTTP 200 repeatedly, but Chromium remained
+on `Loading campaign` with controls disabled beyond 120 seconds. Directly
+running the checked-in frontend authority parser against the same 200 response
+returned `CampaignPlayApiError` (`status=200`, invalid response): the
+`narrationOperation` payload contains the existing shared-contract optional
+`sourceKind: "model_accepted"` field, while
+`parseNarrationOperation` still rejects any key outside its older exact-key
+set. The remounted React state therefore stayed null despite the ready
+authority response. This is a separate frontend API contract mismatch, not a
+second-reader/remount ownership failure; no parser or backend change was made
+under Task 222. The r182 lane was not materialized. Task-owned preflight
+processes, ports, browser, scratch root, and temporary logs were cleaned.
+
+Status: Needs attention at the first product boundary above; r182 acceptance
+criteria are unavailable and remain unclaimed.
