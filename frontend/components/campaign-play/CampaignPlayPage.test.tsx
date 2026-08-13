@@ -1065,6 +1065,76 @@ describe("CampaignPlayPage durable state", () => {
     )).toBeNull();
   });
 
+  it("gives a guarded remount one serial state reader after a timed-out read", async () => {
+    const reload = stubLocationReload();
+    const guardKey =
+      "worldforge:campaign-play:authority-recovery-reload:campaign-1:turn-1";
+    window.sessionStorage.setItem(guardKey, "1");
+    const settled = state("ready");
+    settled.narration!.turnId = "turn-1";
+    settled.narration!.displayText = "The serial remount scene is ready.";
+    settled.narration!.beats[0]!.text = settled.narration!.displayText;
+    const stale = state("turn_active", publicTurn("processing", "settling", 2));
+    let stateCalls = 0;
+    let inFlight = 0;
+    let maxInFlight = 0;
+    let lateResolve: ((value: CampaignPlayState) => void) | null = null;
+    api.loadState.mockImplementation((
+      _targetCampaignId: string,
+      options?: { signal?: AbortSignal },
+    ) => {
+      stateCalls += 1;
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        inFlight -= 1;
+      };
+      if (stateCalls === 1) {
+        return new Promise<CampaignPlayState>((resolve) => {
+          lateResolve = (value) => {
+            finish();
+            resolve(value);
+          };
+          options?.signal?.addEventListener("abort", finish, { once: true });
+        });
+      }
+      finish();
+      return Promise.resolve(settled);
+    });
+    api.streamEvents.mockImplementation(() => new Promise(() => {}));
+
+    vi.useFakeTimers();
+    render(<CampaignPlayPage campaignId="campaign-1" reconnectDelayMilliseconds={0} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(stateCalls).toBe(1);
+    expect(maxInFlight).toBe(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.runOnlyPendingTimersAsync();
+      await Promise.resolve();
+    });
+
+    expect(stateCalls).toBe(2);
+    expect(maxInFlight).toBe(1);
+    expect(screen.getByText(settled.narration!.displayText)).toBeInTheDocument();
+    expect(screen.getByLabelText("Your action")).toBeEnabled();
+    expect(api.admitTurn).not.toHaveBeenCalled();
+    expect(api.resumeTurn).not.toHaveBeenCalled();
+    expect(reload).not.toHaveBeenCalled();
+    expect(window.sessionStorage.getItem(guardKey)).toBeNull();
+
+    await act(async () => {
+      lateResolve?.(stale);
+      await Promise.resolve();
+    });
+    expect(screen.getByText(settled.narration!.displayText)).toBeInTheDocument();
+    expect(screen.getByLabelText("Your action")).toBeEnabled();
+  }, 15_000);
+
   it("keeps a guarded turn reconciling when the first post-reload authority read fails", async () => {
     const processing = state("turn_active", publicTurn("processing", "settling", 2));
     const settled = state("ready");

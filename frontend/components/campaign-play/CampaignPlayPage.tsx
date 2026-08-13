@@ -741,6 +741,15 @@ export function CampaignPlayPage({
         turnId: recoveryTurnId,
         sequence: readNavigationSequence(campaignId),
       });
+      setLoading(false);
+      return () => {
+        controller.abort();
+        mountedRef.current = false;
+        clearAuthorityRecoveryFailure();
+        if (automaticReloadRequestRef.current?.campaignId === campaignId) {
+          automaticReloadRequestRef.current = null;
+        }
+      };
     }
     void (async () => {
       try {
