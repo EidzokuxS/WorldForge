@@ -82,6 +82,53 @@ const state = {
   projectionHash: "a".repeat(64),
 };
 
+const readyNarration = {
+  narrationId: "narration-one",
+  turnId: "turn-one",
+  beats: [{ beatId: "beat-one", text: "The yard waits under the rain." }],
+  displayText: "The yard waits under the rain.",
+  suggestedActions: [{ choiceHandle: "wait", label: "Wait 10 minutes" }],
+  effects: [],
+  createdAt: 10,
+};
+
+const readyNarrationOperation = {
+  operationId: "narration-operation-one",
+  resultId: "result-one",
+  turnId: "turn-one",
+  narrationId: "narration-one",
+  packetHash: "b".repeat(64),
+  receiptIds: ["receipt-one"],
+  status: "complete" as const,
+  attemptId: "narration-attempt-one",
+  attempt: 1,
+  conciseResult: {
+    displayText: readyNarration.displayText,
+    suggestedActions: readyNarration.suggestedActions,
+  },
+  createdAt: 10,
+  completedAt: 11,
+};
+
+const readyState = {
+  ...state,
+  phase: "ready" as const,
+  character: {
+    name: "Mara",
+    monogram: "M",
+    descriptor: "Signal cartographer",
+    accent: "ember",
+  },
+  currentLocation: {
+    handle: "location-yard",
+    name: "Signal Yard",
+    description: "Rain crosses the rails.",
+  },
+  narration: readyNarration,
+  narrationOperation: readyNarrationOperation,
+  utilityActions: [{ choiceHandle: "wait", label: "Wait 10 minutes" }],
+};
+
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
     status,
@@ -147,6 +194,53 @@ afterEach(() => {
 });
 
 describe("Campaign Play API", () => {
+  it.each([undefined, "model_accepted", "deterministic_continuity"] as const)(
+    "accepts a ready narration operation with sourceKind %s",
+    async (sourceKind) => {
+      const narrationOperation = sourceKind === undefined
+        ? { ...readyNarrationOperation }
+        : { ...readyNarrationOperation, sourceKind };
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+        ...readyState,
+        narrationOperation,
+      })));
+
+      await expect(loadCampaignPlayState("campaign-one")).resolves.toMatchObject({
+        phase: "ready",
+        narration: readyNarration,
+        narrationOperation,
+        utilityActions: readyState.utilityActions,
+      });
+    },
+  );
+
+  it.each([
+    "unsupported_source",
+    "model_accepted_extra",
+  ])("rejects an invalid narration operation sourceKind: %s", async (sourceKind) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+      ...readyState,
+      narrationOperation: { ...readyNarrationOperation, sourceKind },
+    })));
+
+    await expect(loadCampaignPlayState("campaign-one"))
+      .rejects.toMatchObject({ code: "service_unavailable", invalidResponse: true });
+  });
+
+  it("rejects unrelated narration operation keys even when sourceKind is valid", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+      ...readyState,
+      narrationOperation: {
+        ...readyNarrationOperation,
+        sourceKind: "model_accepted",
+        unexpected: true,
+      },
+    })));
+
+    await expect(loadCampaignPlayState("campaign-one"))
+      .rejects.toMatchObject({ code: "service_unavailable", invalidResponse: true });
+  });
+
   it("loads starting possessions while opening is still required", async () => {
     const openingState = {
       ...state,

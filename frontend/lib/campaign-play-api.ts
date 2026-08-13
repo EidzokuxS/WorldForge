@@ -490,22 +490,25 @@ function parseNarration(value: unknown): CampaignPlayNarration | null {
 }
 
 function parseNarrationOperation(value: unknown): CampaignPlayNarrationOperation | null {
+  const operationKeys = [
+    "operationId",
+    "resultId",
+    "turnId",
+    "narrationId",
+    "packetHash",
+    "receiptIds",
+    "status",
+    "attemptId",
+    "attempt",
+    "conciseResult",
+    "createdAt",
+    "completedAt",
+  ] as const;
+  const hasSourceKind = isObject(value) && Object.prototype.hasOwnProperty.call(value, "sourceKind");
   if (
     !isObject(value) ||
-    !hasExactKeys(value, [
-      "operationId",
-      "resultId",
-      "turnId",
-      "narrationId",
-      "packetHash",
-      "receiptIds",
-      "status",
-      "attemptId",
-      "attempt",
-      "conciseResult",
-      "createdAt",
-      "completedAt",
-    ]) ||
+    !hasExactKeys(value, hasSourceKind ? [...operationKeys, "sourceKind"] : operationKeys) ||
+    (hasSourceKind && !isOneOf(value.sourceKind, ["model_accepted", "deterministic_continuity"] as const)) ||
     !isId(value.operationId) || !isId(value.resultId) || !isId(value.turnId) ||
     !isId(value.narrationId) || !isHash(value.packetHash) ||
     !isOneOf(value.status, CAMPAIGN_PLAY_NARRATION_OPERATION_STATUS_VALUES) ||

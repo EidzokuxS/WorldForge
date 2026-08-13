@@ -88,3 +88,26 @@ processes, ports, browser, scratch root, and temporary logs were cleaned.
 
 Status: Needs attention at the first product boundary above; r182 acceptance
 criteria are unavailable and remain unclaimed.
+
+## Source-kind decoder correction
+
+The frontend `parseNarrationOperation` decoder now accepts the historical
+operation key set and, when present, the one shared-contract optional
+`sourceKind` key. Its only accepted values are `model_accepted` and
+`deterministic_continuity`; unrelated keys and unsupported values remain
+invalid. `hasExactKeys` and all operation/status/attempt/result invariants are
+unchanged. No backend, shared schema, prompt, provider, model, persistence,
+reload, polling, or player-visible copy changed.
+
+Current-head GitNexus exact-entry lookup did not index the private parser
+symbol. The narrowest indexed owner, `loadCampaignPlayState`, reports a
+CRITICAL propagation graph (24 impacted symbols, 7 direct callers, 8
+processes, 4 modules), including non-game loaders, because the decoder feeds
+the shared state loader. The edit remains confined to the local parser seam
+and its focused tests; no additional production owner was required.
+
+Focused API and Campaign Play page tests: 61 passed. Full frontend suite: 525
+passed in 76 files. Frontend typecheck, production build with
+`NEXT_PUBLIC_API_BASE=http://127.0.0.1:4670`, touched-file ESLint, and
+`git diff --check`: passed. GitNexus detect is still required immediately
+before commit. Real Chromium preflight and r182 remain pending.
