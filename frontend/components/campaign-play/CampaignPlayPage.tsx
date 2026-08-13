@@ -74,6 +74,8 @@ export interface CampaignPlayPageProps {
 }
 
 const AUTHORITY_READ_DEADLINE_MS = 5_000;
+const AUTHORITY_RECOVERY_RELOAD_DELAY_MS = 15_000;
+const AUTHORITY_RECOVERY_RELOAD_KEY_PREFIX = "worldforge:campaign-play:authority-recovery-reload:";
 
 const ERROR_COPY: Record<CampaignPlayPublicErrorCode, string> = {
   campaign_not_found: "Campaign unavailable.",
@@ -169,6 +171,55 @@ function readNavigationSequence(campaignId: string): number {
       Number.isSafeInteger(value.lastSeenSequence) && value.lastSeenSequence >= 0
     ? value.lastSeenSequence
     : 0;
+}
+
+function authorityRecoveryReloadKey(campaignId: string, turnId: string): string {
+  return `${AUTHORITY_RECOVERY_RELOAD_KEY_PREFIX}${campaignId}:${turnId}`;
+}
+
+function hasAuthorityRecoveryReloadGuard(campaignId: string, turnId: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.sessionStorage.getItem(authorityRecoveryReloadKey(campaignId, turnId)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function readAuthorityRecoveryReloadTurnId(campaignId: string): string | null {
+  if (typeof window === "undefined") return null;
+  const prefix = `${AUTHORITY_RECOVERY_RELOAD_KEY_PREFIX}${campaignId}:`;
+  try {
+    for (let index = 0; index < window.sessionStorage.length; index += 1) {
+      const key = window.sessionStorage.key(index);
+      if (key?.startsWith(prefix) && window.sessionStorage.getItem(key) === "1") {
+        return key.slice(prefix.length);
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function armAuthorityRecoveryReloadGuard(campaignId: string, turnId: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const key = authorityRecoveryReloadKey(campaignId, turnId);
+    window.sessionStorage.setItem(key, "1");
+    return window.sessionStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function clearAuthorityRecoveryReloadGuard(campaignId: string, turnId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(authorityRecoveryReloadKey(campaignId, turnId));
+  } catch {
+    // The page can still settle using its in-memory authority projection.
+  }
 }
 
 function isAbortError(error: unknown): boolean {
@@ -445,12 +496,62 @@ export function CampaignPlayPage({
   const lastSequenceRef = useRef({ campaignId, sequence: 0 });
   const followedTurnRef = useRef<FollowedTurn | null>(null);
   const authorityAppliedRef = useRef<AuthorityApplication | null>(null);
+  const authorityRecoveryFailureRef = useRef<{
+    campaignId: string;
+    turnId: string;
+    timer: number;
+  } | null>(null);
+  const authorityRecoveryControllerRef = useRef<AbortController | null>(null);
+  const automaticReloadRequestRef = useRef<{ campaignId: string; turnId: string } | null>(null);
   campaignIdRef.current = campaignId;
 
   const setFollowedTurn = useCallback((next: FollowedTurn | null) => {
     followedTurnRef.current = next;
     setFollowedTurnState(next);
   }, []);
+
+  const clearAuthorityRecoveryFailure = useCallback((target?: Pick<FollowedTurn, "campaignId" | "turnId">) => {
+    const current = authorityRecoveryFailureRef.current;
+    if (current === null || (target !== undefined && (
+      current.campaignId !== target.campaignId || current.turnId !== target.turnId
+    ))) return;
+    window.clearTimeout(current.timer);
+    authorityRecoveryFailureRef.current = null;
+  }, []);
+
+  const noteAuthorityRecoveryFailure = useCallback((target: FollowedTurn) => {
+    if (
+      !mountedRef.current ||
+      campaignIdRef.current !== target.campaignId ||
+      followedTurnRef.current?.campaignId !== target.campaignId ||
+      followedTurnRef.current.turnId !== target.turnId ||
+      (automaticReloadRequestRef.current?.campaignId === target.campaignId &&
+        automaticReloadRequestRef.current.turnId === target.turnId) ||
+      hasAuthorityRecoveryReloadGuard(target.campaignId, target.turnId)
+    ) return;
+    const current = authorityRecoveryFailureRef.current;
+    if (current?.campaignId === target.campaignId && current.turnId === target.turnId) return;
+    clearAuthorityRecoveryFailure();
+    const timer = window.setTimeout(() => {
+      if (
+        !mountedRef.current ||
+        campaignIdRef.current !== target.campaignId ||
+        followedTurnRef.current?.campaignId !== target.campaignId ||
+        followedTurnRef.current.turnId !== target.turnId ||
+        automaticReloadRequestRef.current !== null ||
+        hasAuthorityRecoveryReloadGuard(target.campaignId, target.turnId)
+      ) return;
+      if (!armAuthorityRecoveryReloadGuard(target.campaignId, target.turnId)) return;
+      automaticReloadRequestRef.current = target;
+      authorityRecoveryControllerRef.current?.abort();
+      window.location.reload();
+    }, AUTHORITY_RECOVERY_RELOAD_DELAY_MS);
+    authorityRecoveryFailureRef.current = {
+      campaignId: target.campaignId,
+      turnId: target.turnId,
+      timer,
+    };
+  }, [clearAuthorityRecoveryFailure]);
 
   const draft = drafts[campaignId] ?? readStoredDraft(campaignId);
   const campaignState = state?.campaignId === campaignId ? state : null;
@@ -489,8 +590,9 @@ export function CampaignPlayPage({
     const followedId = followedTurnRef.current?.campaignId === campaignId
       ? followedTurnRef.current.turnId
       : null;
+    const recoveryTurnId = readAuthorityRecoveryReloadTurnId(campaignId);
     const trackedTurnId = preferredTurnId ?? followedId ?? nextState.activeTurn?.turnId ??
-      nextState.narrationOperation?.turnId ?? null;
+      nextState.narrationOperation?.turnId ?? recoveryTurnId;
     const snapshotRevision = nextState.runtimeRevision;
     const projectionRank = authorityProjectionRank(nextState, null, trackedTurnId);
     const previous = authorityAppliedRef.current;
@@ -528,6 +630,14 @@ export function CampaignPlayPage({
       : null;
     const terminalTurn = nextState.activeTurn?.status === "interrupted" ||
       nextState.activeTurn?.status === "failed";
+    if (trackedTurnId !== null && (projectionReady || terminalTurn)) {
+      clearAuthorityRecoveryReloadGuard(campaignId, trackedTurnId);
+      clearAuthorityRecoveryFailure({ campaignId, turnId: trackedTurnId });
+      if (automaticReloadRequestRef.current?.campaignId === campaignId &&
+        automaticReloadRequestRef.current.turnId === trackedTurnId) {
+        automaticReloadRequestRef.current = null;
+      }
+    }
     const shouldFollow = processingTurn !== null || (
       trackedTurnId !== null && !projectionReady && !terminalTurn
     );
@@ -562,7 +672,7 @@ export function CampaignPlayPage({
       }
     }
     return { applied: true, trackedTurnId, projectionReady, nextSequence };
-  }, [campaignId, recordSequence, setFollowedTurn]);
+  }, [campaignId, clearAuthorityRecoveryFailure, recordSequence, setFollowedTurn]);
 
   const refreshAuthority = useCallback(async (
     preferredTurnId?: string,
@@ -624,6 +734,14 @@ export function CampaignPlayPage({
   useEffect(() => {
     mountedRef.current = true;
     const controller = new AbortController();
+    const recoveryTurnId = readAuthorityRecoveryReloadTurnId(campaignId);
+    if (recoveryTurnId !== null) {
+      setFollowedTurn({
+        campaignId,
+        turnId: recoveryTurnId,
+        sequence: readNavigationSequence(campaignId),
+      });
+    }
     void (async () => {
       try {
         let authority = await refreshAuthority(undefined, {
@@ -640,10 +758,15 @@ export function CampaignPlayPage({
         }
       } catch (error) {
         if (!controller.signal.aborted && mountedRef.current) {
-          setState(null);
-          setTurnRead(null);
-          setFollowedTurn(null);
-          setRequestError({ campaignId, code: errorCode(error) });
+          if (readAuthorityRecoveryReloadTurnId(campaignId) === null) {
+            setState(null);
+            setTurnRead(null);
+            setFollowedTurn(null);
+            setRequestError({ campaignId, code: errorCode(error) });
+          } else {
+            setConnection("disconnected");
+            setRequestError(null);
+          }
         }
       } finally {
         if (!controller.signal.aborted && mountedRef.current) setLoading(false);
@@ -652,11 +775,15 @@ export function CampaignPlayPage({
     return () => {
       controller.abort();
       mountedRef.current = false;
+      clearAuthorityRecoveryFailure();
+      if (automaticReloadRequestRef.current?.campaignId === campaignId) {
+        automaticReloadRequestRef.current = null;
+      }
     };
-  }, [campaignId, reconnectDelayMilliseconds, refreshAuthority, setFollowedTurn]);
+  }, [campaignId, clearAuthorityRecoveryFailure, reconnectDelayMilliseconds, refreshAuthority, setFollowedTurn]);
 
   useEffect(() => {
-    if (loading || followedTurn === null || followedTurn.campaignId !== campaignId) return;
+    if (followedTurn === null || followedTurn.campaignId !== campaignId) return;
     const controller = new AbortController();
     let cursor = followedTurn.sequence;
 
@@ -707,12 +834,13 @@ export function CampaignPlayPage({
     })();
 
     return () => controller.abort();
-  }, [campaignId, followedTurn, loading, reconnectDelayMilliseconds, recordSequence]);
+  }, [campaignId, followedTurn, reconnectDelayMilliseconds, recordSequence]);
 
   useEffect(() => {
-    if (loading || followedTurn === null || followedTurn.campaignId !== campaignId) return;
+    if (followedTurn === null || followedTurn.campaignId !== campaignId) return;
     const controller = new AbortController();
     const followed = followedTurn;
+    authorityRecoveryControllerRef.current = controller;
     let cursor = followed.sequence;
 
     void (async () => {
@@ -727,6 +855,7 @@ export function CampaignPlayPage({
         } catch (error) {
           if (controller.signal.aborted || campaignIdRef.current !== campaignId) return;
           if (!isAbortError(error) && mountedRef.current) setConnection("disconnected");
+          noteAuthorityRecoveryFailure(followed);
           await waitForReconnect(reconnectDelayMilliseconds, controller.signal);
           continue;
         }
@@ -734,9 +863,25 @@ export function CampaignPlayPage({
         if (controller.signal.aborted || campaignIdRef.current !== campaignId) return;
         const stateApplication = applyAuthorityState(nextState, followed.turnId);
         if (!stateApplication.applied) {
-          setConnection("disconnected");
+          const readyProjectionRejected = nextState.phase === "ready" &&
+            nextState.activeTurn === null && isStateProjectionReady(nextState, followed.turnId);
+          const readyWithoutCurrentProjection = nextState.phase === "ready" &&
+            nextState.activeTurn === null && !isStateProjectionReady(nextState, followed.turnId);
+          if (readyProjectionRejected || readyWithoutCurrentProjection) noteAuthorityRecoveryFailure(followed);
+          else clearAuthorityRecoveryFailure(followed);
+          if (mountedRef.current) setConnection("disconnected");
           await waitForReconnect(reconnectDelayMilliseconds, controller.signal);
           continue;
+        }
+        const stateShowsActiveWork = nextState.activeTurn?.status === "processing" ||
+          (nextState.narrationOperation?.turnId === followed.turnId &&
+            (nextState.narrationOperation.status === "pending" ||
+              nextState.narrationOperation.status === "running"));
+        if (stateShowsActiveWork || nextState.phase !== "ready" || nextState.activeTurn !== null ||
+          stateApplication.projectionReady) {
+          clearAuthorityRecoveryFailure(followed);
+        } else {
+          noteAuthorityRecoveryFailure(followed);
         }
         setRequestError((current) => (
           current?.campaignId === campaignId && current.code === "service_unavailable"
@@ -770,11 +915,14 @@ export function CampaignPlayPage({
         } catch (error) {
           if (controller.signal.aborted || campaignIdRef.current !== campaignId) return;
           if (!isAbortError(error) && mountedRef.current) setConnection("disconnected");
+          if (stateShowsActiveWork) clearAuthorityRecoveryFailure(followed);
+          else noteAuthorityRecoveryFailure(followed);
           await waitForReconnect(reconnectDelayMilliseconds, controller.signal);
           continue;
         }
         if (controller.signal.aborted || campaignIdRef.current !== campaignId) return;
         if (authorityTurn.runtimeRevision !== nextState.runtimeRevision) {
+          clearAuthorityRecoveryFailure(followed);
           setConnection("disconnected");
           await waitForReconnect(reconnectDelayMilliseconds, controller.signal);
           continue;
@@ -782,12 +930,18 @@ export function CampaignPlayPage({
         if (followedTurnRef.current?.turnId !== followed.turnId) return;
         setTurnRead(authorityTurn);
         const terminalStatus = authorityTurn?.turn.status;
-        const projectionReady = isTurnProjectionReady(
-          nextState,
-          authorityTurn,
-          followed.turnId,
-        );
-        if (terminalStatus !== "processing" && projectionReady) {
+        // The turn-detail response is secondary metadata. CampaignPlayState
+        // owns the rendered scene and control lock, so a completed result
+        // there cannot release a still-processing or stale state projection.
+        const projectionReady = isStateProjectionReady(nextState, followed.turnId);
+        const terminalTurn = terminalStatus === "interrupted" || terminalStatus === "failed";
+        if (terminalTurn || projectionReady) {
+          clearAuthorityRecoveryReloadGuard(campaignId, followed.turnId);
+          clearAuthorityRecoveryFailure(followed);
+          if (automaticReloadRequestRef.current?.campaignId === campaignId &&
+            automaticReloadRequestRef.current.turnId === followed.turnId) {
+            automaticReloadRequestRef.current = null;
+          }
           recordSequence(campaignId, authorityTurn.turn.lastEventSequence);
           setFollowedTurn(null);
           setConnection("idle");
@@ -804,22 +958,52 @@ export function CampaignPlayPage({
           return;
         }
 
+        if (
+          stateShowsActiveWork ||
+          nextState.phase !== "ready" ||
+          nextState.activeTurn !== null ||
+          projectionReady
+        ) {
+          clearAuthorityRecoveryFailure(followed);
+        }
         cursor = authorityTurn.turn.lastEventSequence ?? cursor;
         recordSequence(campaignId, cursor);
         setConnection("connected");
         await waitForReconnect(reconnectDelayMilliseconds, controller.signal);
       }
     })();
-    return () => controller.abort();
-  }, [applyAuthorityState, campaignId, followedTurn, loading, reconnectDelayMilliseconds, recordSequence, setFollowedTurn]);
+    return () => {
+      controller.abort();
+      if (authorityRecoveryControllerRef.current === controller) {
+        authorityRecoveryControllerRef.current = null;
+      }
+      clearAuthorityRecoveryFailure(followed);
+    };
+  }, [
+    applyAuthorityState,
+    campaignId,
+    clearAuthorityRecoveryFailure,
+    followedTurn,
+    noteAuthorityRecoveryFailure,
+    reconnectDelayMilliseconds,
+    recordSequence,
+    setFollowedTurn,
+  ]);
 
   const beginFollowing = useCallback((turnId: string, sequence: number) => {
+    clearAuthorityRecoveryFailure();
+    if (automaticReloadRequestRef.current !== null && (
+      automaticReloadRequestRef.current.campaignId !== campaignId ||
+      automaticReloadRequestRef.current.turnId !== turnId
+    )) {
+      automaticReloadRequestRef.current = null;
+    }
     setTurnRead(null);
     setEventProgress(null);
     setFollowedTurn({ campaignId, turnId, sequence });
     recordSequence(campaignId, sequence);
     window.setTimeout(() => progressRef.current?.focus(), 0);
-  }, [campaignId, recordSequence, setFollowedTurn]);
+  }, [campaignId, clearAuthorityRecoveryFailure, recordSequence, setFollowedTurn]);
 
   const reconcileRequestFailure = useCallback(async (
     operation: PendingOperation,
@@ -972,7 +1156,10 @@ export function CampaignPlayPage({
     }
   }, [campaignId, campaignState?.narrationOperation, recoveringNarrationId, refreshAuthority]);
 
-  if (loading || (state !== null && campaignState === null)) {
+  const recoveringGuardedTurn = followedTurn?.campaignId === campaignId &&
+    readAuthorityRecoveryReloadTurnId(campaignId) !== null;
+  if (loading || (state !== null && campaignState === null) ||
+    (campaignState === null && recoveringGuardedTurn)) {
     return <section aria-live="polite" className="grid min-h-dvh place-items-center">Loading campaign</section>;
   }
 

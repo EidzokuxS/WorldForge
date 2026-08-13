@@ -5,7 +5,7 @@ import type {
   CampaignPlayState,
   CampaignPlayTurnReadResponse,
 } from "@worldforge/shared";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
   loadState: vi.fn(),
@@ -41,6 +41,17 @@ vi.mock("@/lib/campaign-play-api", () => ({
 
 import { CampaignPlayPage } from "./CampaignPlayPage";
 import { CampaignPlayApiError } from "@/lib/campaign-play-api";
+
+const initialLocation = window.location;
+
+function stubLocationReload(): ReturnType<typeof vi.fn> {
+  const reload = vi.fn();
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: { ...initialLocation, reload },
+  });
+  return reload;
+}
 
 function state(
   phase: CampaignPlayState["phase"],
@@ -226,6 +237,7 @@ function interrupted(sequence: number): CampaignPlaySseEvent {
 beforeEach(() => {
   vi.resetAllMocks();
   window.localStorage.clear();
+  window.sessionStorage.clear();
   window.history.replaceState({}, "");
   vi.stubGlobal("crypto", { randomUUID: vi.fn(() => "request-1") });
   api.streamEvents.mockImplementation(() => new Promise(() => {}));
@@ -234,6 +246,14 @@ beforeEach(() => {
     attemptId: "narration-attempt-2",
     attempt: 2,
     status: "running",
+  });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: initialLocation,
   });
 });
 
@@ -470,6 +490,7 @@ describe("CampaignPlayPage durable state", () => {
 
   it("deduplicates replayed events and unlocks only after exact turn and state refetch", async () => {
     const completedState = state("ready");
+    completedState.narration!.turnId = "turn-1";
     completedState.narration!.suggestedActions = [{
       choiceHandle: "choice-next",
       label: "Follow the new signal",
@@ -492,7 +513,7 @@ describe("CampaignPlayPage durable state", () => {
     const input = await screen.findByLabelText("Your action");
     await waitFor(() => expect(input).toBeEnabled());
     expect(api.loadState).toHaveBeenCalledTimes(2);
-    expect(api.loadTurn).toHaveBeenCalledTimes(2);
+    expect(api.loadTurn).toHaveBeenCalledTimes(1);
     expect(window.history.state.campaignPlay).toEqual({
       campaignId: "campaign-1",
       lastSeenSequence: 3,
@@ -521,10 +542,12 @@ describe("CampaignPlayPage durable state", () => {
   });
 
   it("refetches authority after a sequence gap and reconnects from the durable cursor", async () => {
+    const settled = state("ready");
+    settled.narration!.turnId = "turn-1";
     api.loadState
       .mockResolvedValueOnce(state("turn_active", publicTurn("processing", "interpreting", 1)))
       .mockResolvedValueOnce(state("turn_active", publicTurn("processing", "settling", 2)))
-      .mockResolvedValueOnce(state("ready"));
+      .mockResolvedValueOnce(settled);
     api.loadTurn
       .mockResolvedValueOnce(turnRead("processing", 1))
       .mockResolvedValueOnce(turnRead("processing", 2))
@@ -550,10 +573,12 @@ describe("CampaignPlayPage durable state", () => {
   });
 
   it("refetches after disconnect and reconnects from the durable cursor", async () => {
+    const settled = state("ready");
+    settled.narration!.turnId = "turn-1";
     api.loadState
       .mockResolvedValueOnce(state("turn_active", publicTurn("processing", "interpreting", 1)))
       .mockResolvedValueOnce(state("turn_active", publicTurn("processing", "settling", 2)))
-      .mockResolvedValueOnce(state("ready"));
+      .mockResolvedValueOnce(settled);
     api.loadTurn
       .mockResolvedValueOnce(turnRead("processing", 1))
       .mockResolvedValueOnce(turnRead("processing", 2))
@@ -573,9 +598,11 @@ describe("CampaignPlayPage durable state", () => {
   });
 
   it("offers durable Resume only for an eligible interrupted turn", async () => {
+    const settled = state("ready");
+    settled.narration!.turnId = "turn-1";
     api.loadState
       .mockResolvedValueOnce(state("turn_active", publicTurn("interrupted", null, 2)))
-      .mockResolvedValueOnce(state("ready"));
+      .mockResolvedValueOnce(settled);
     api.loadTurn
       .mockResolvedValueOnce(turnRead("interrupted", 2))
       .mockResolvedValueOnce(turnRead("completed", 4));
@@ -600,7 +627,7 @@ describe("CampaignPlayPage durable state", () => {
     ));
     await waitFor(() => expect(screen.getByLabelText("Your action")).toBeEnabled());
     expect(api.loadState).toHaveBeenCalledTimes(2);
-    expect(api.loadTurn).toHaveBeenCalledTimes(2);
+    expect(api.loadTurn).toHaveBeenCalledTimes(1);
   });
 
   it("rejects late authority from the previous campaign after navigation", async () => {
@@ -955,4 +982,266 @@ describe("CampaignPlayPage durable state", () => {
       expect.objectContaining({ afterSequence: 3 }),
     );
   });
+
+  it("automatically reloads once after continuous authority failure without reposting", async () => {
+    const reload = stubLocationReload();
+    api.loadState
+      .mockResolvedValueOnce(state("ready"))
+      .mockRejectedValue(new Error("authority unavailable"));
+    api.admitTurn.mockResolvedValue({ turnId: "turn-1", sequence: 1 });
+
+    render(<CampaignPlayPage campaignId="campaign-1" reconnectDelayMilliseconds={500} />);
+    const input = await screen.findByLabelText("Your action");
+    vi.useFakeTimers();
+    fireEvent.change(input, { target: { value: "I wait through the silence." } });
+    fireEvent.click(screen.getByRole("button", { name: "Act" }));
+
+    await act(async () => { await Promise.resolve(); });
+    expect(api.admitTurn).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(api.admitTurn).toHaveBeenCalledTimes(1);
+    expect(api.resumeTurn).not.toHaveBeenCalled();
+    expect(window.sessionStorage.getItem(
+      "worldforge:campaign-play:authority-recovery-reload:campaign-1:turn-1",
+    )).toBe("1");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reload for a successfully read processing snapshot", async () => {
+    const reload = stubLocationReload();
+    const processing = state("turn_active", publicTurn("processing", "settling", 2));
+    api.loadState
+      .mockResolvedValueOnce(state("ready"))
+      .mockResolvedValue(processing);
+    api.loadTurn.mockResolvedValue(turnRead("processing", 2));
+    api.admitTurn.mockResolvedValue({ turnId: "turn-1", sequence: 1 });
+
+    render(<CampaignPlayPage campaignId="campaign-1" reconnectDelayMilliseconds={500} />);
+    const input = await screen.findByLabelText("Your action");
+    vi.useFakeTimers();
+    fireEvent.change(input, { target: { value: "I keep watch." } });
+    fireEvent.click(screen.getByRole("button", { name: "Act" }));
+    await act(async () => { await Promise.resolve(); });
+    expect(api.admitTurn).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(reload).not.toHaveBeenCalled();
+    expect(window.sessionStorage.length).toBe(0);
+  });
+
+  it("rehydrates the guarded turn after reload and clears the guard on the exact scene", async () => {
+    const reload = stubLocationReload();
+    window.sessionStorage.setItem(
+      "worldforge:campaign-play:authority-recovery-reload:campaign-1:turn-1",
+      "1",
+    );
+    const processing = state("turn_active", publicTurn("processing", "settling", 2));
+    const settled = state("ready");
+    settled.narration!.turnId = "turn-1";
+    settled.narration!.displayText = "The durable scene returns after reload.";
+    settled.narration!.beats[0]!.text = settled.narration!.displayText;
+    api.loadState.mockResolvedValueOnce(processing).mockResolvedValue(settled);
+    api.loadTurn.mockResolvedValue(turnRead("completed", 3));
+    api.streamEvents.mockImplementation(() => new Promise(() => {}));
+
+    render(<CampaignPlayPage campaignId="campaign-1" reconnectDelayMilliseconds={1} />);
+
+    expect(await screen.findByText(settled.narration!.displayText)).toBeInTheDocument();
+    expect(screen.getByLabelText("Your action")).toBeEnabled();
+    expect(api.admitTurn).not.toHaveBeenCalled();
+    expect(api.resumeTurn).not.toHaveBeenCalled();
+    expect(reload).not.toHaveBeenCalled();
+    expect(window.sessionStorage.getItem(
+      "worldforge:campaign-play:authority-recovery-reload:campaign-1:turn-1",
+    )).toBeNull();
+  });
+
+  it("keeps a guarded turn reconciling when the first post-reload authority read fails", async () => {
+    const processing = state("turn_active", publicTurn("processing", "settling", 2));
+    const settled = state("ready");
+    settled.narration!.turnId = "turn-1";
+    settled.narration!.displayText = "The first read fails, then the durable scene returns.";
+    settled.narration!.beats[0]!.text = settled.narration!.displayText;
+    window.sessionStorage.setItem(
+      "worldforge:campaign-play:authority-recovery-reload:campaign-1:turn-1",
+      "1",
+    );
+    api.loadState
+      .mockRejectedValueOnce(new Error("reload authority unavailable"))
+      .mockResolvedValueOnce(processing)
+      .mockResolvedValue(settled);
+    api.loadTurn
+      .mockResolvedValueOnce(turnRead("processing", 2))
+      .mockResolvedValue(turnRead("completed", 3));
+
+    render(<CampaignPlayPage campaignId="campaign-1" reconnectDelayMilliseconds={1} />);
+
+    expect(await screen.findByText(settled.narration!.displayText)).toBeInTheDocument();
+    expect(screen.getByLabelText("Your action")).toBeEnabled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(api.admitTurn).not.toHaveBeenCalled();
+    expect(api.resumeTurn).not.toHaveBeenCalled();
+  });
+
+  it("reloads when an exact ready projection is repeatedly rejected as stale", async () => {
+    const reload = stubLocationReload();
+    const processing = state("turn_active", publicTurn("processing", "settling", 2));
+    processing.runtimeRevision = 5;
+    const staleReady = state("ready");
+    staleReady.runtimeRevision = 4;
+    staleReady.narration!.turnId = "turn-1";
+    staleReady.narration!.displayText = "A ready scene the client cannot apply.";
+    staleReady.narration!.beats[0]!.text = staleReady.narration!.displayText;
+    api.loadState.mockResolvedValueOnce(state("ready")).mockResolvedValueOnce(processing)
+      .mockResolvedValue(staleReady);
+    api.loadTurn.mockResolvedValue(turnRead("processing", 2));
+    api.admitTurn.mockResolvedValue({ turnId: "turn-1", sequence: 1 });
+
+    render(<CampaignPlayPage campaignId="campaign-1" reconnectDelayMilliseconds={500} />);
+    const input = await screen.findByLabelText("Your action");
+    vi.useFakeTimers();
+    fireEvent.change(input, { target: { value: "I wait." } });
+    fireEvent.click(screen.getByRole("button", { name: "Act" }));
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(api.admitTurn).toHaveBeenCalledTimes(1);
+    expect(api.resumeTurn).not.toHaveBeenCalled();
+  });
+
+  it("does not reload from an SSE-only failure", async () => {
+    const reload = stubLocationReload();
+    const settled = state("ready");
+    settled.narration!.turnId = "turn-1";
+    settled.narration!.displayText = "The stream can fail while authority remains clear.";
+    settled.narration!.beats[0]!.text = settled.narration!.displayText;
+    api.loadState.mockResolvedValueOnce(state("ready")).mockResolvedValue(settled);
+    api.loadTurn.mockResolvedValue(turnRead("completed", 3));
+    api.admitTurn.mockResolvedValue({ turnId: "turn-1", sequence: 1 });
+    api.streamEvents.mockRejectedValue(new Error("stream closed"));
+
+    render(<CampaignPlayPage campaignId="campaign-1" reconnectDelayMilliseconds={500} />);
+    const input = await screen.findByLabelText("Your action");
+    fireEvent.change(input, { target: { value: "I listen." } });
+    fireEvent.click(screen.getByRole("button", { name: "Act" }));
+    await waitFor(() => expect(screen.getByText(settled.narration!.displayText)).toBeInTheDocument());
+
+    expect(reload).not.toHaveBeenCalled();
+    expect(api.admitTurn).toHaveBeenCalledTimes(1);
+    expect(input).toBeEnabled();
+  });
+
+  it("clears an old guard before allowing a distinct later turn to reload once", async () => {
+    const reload = stubLocationReload();
+    const first = state("ready");
+    first.narration!.turnId = "turn-1";
+    first.narration!.displayText = "The first durable scene is restored.";
+    first.narration!.beats[0]!.text = first.narration!.displayText;
+    window.sessionStorage.setItem(
+      "worldforge:campaign-play:authority-recovery-reload:campaign-1:turn-1",
+      "1",
+    );
+    api.loadState.mockResolvedValueOnce(first).mockRejectedValue(new Error("later authority unavailable"));
+    api.admitTurn.mockResolvedValue({ turnId: "turn-2", sequence: 2 });
+
+    render(<CampaignPlayPage campaignId="campaign-1" reconnectDelayMilliseconds={500} />);
+    const input = await screen.findByLabelText("Your action");
+    expect(window.sessionStorage.getItem(
+      "worldforge:campaign-play:authority-recovery-reload:campaign-1:turn-1",
+    )).toBeNull();
+
+    vi.useFakeTimers();
+    fireEvent.change(input, { target: { value: "I take the next step." } });
+    fireEvent.click(screen.getByRole("button", { name: "Act" }));
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+
+    expect(api.admitTurn).toHaveBeenCalledTimes(1);
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(window.sessionStorage.getItem(
+      "worldforge:campaign-play:authority-recovery-reload:campaign-1:turn-1",
+    )).toBeNull();
+    expect(window.sessionStorage.getItem(
+      "worldforge:campaign-play:authority-recovery-reload:campaign-1:turn-2",
+    )).toBe("1");
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not carry a campaign guard across navigation", async () => {
+    const reload = stubLocationReload();
+    window.sessionStorage.setItem(
+      "worldforge:campaign-play:authority-recovery-reload:campaign-1:turn-1",
+      "1",
+    );
+    const campaignTwo = state("ready");
+    campaignTwo.campaignId = "campaign-2";
+    campaignTwo.narration!.turnId = "opening-2";
+    api.loadState.mockImplementation(async (targetCampaignId: string) => {
+      if (targetCampaignId === "campaign-1") throw new Error("campaign one unavailable");
+      return campaignTwo;
+    });
+
+    const view = render(<CampaignPlayPage campaignId="campaign-1" />);
+    await waitFor(() => expect(api.loadState).toHaveBeenCalledWith("campaign-1", expect.anything()));
+    view.rerender(<CampaignPlayPage campaignId="campaign-2" />);
+
+    expect(await view.findByLabelText("Your action")).toBeEnabled();
+    expect(reload).not.toHaveBeenCalled();
+    expect(window.sessionStorage.getItem(
+      "worldforge:campaign-play:authority-recovery-reload:campaign-1:turn-1",
+    )).toBe("1");
+    expect(api.admitTurn).not.toHaveBeenCalled();
+  });
+
+  it("ignores a late authority result after its read deadline and finalizes the newer scene", async () => {
+    const initial = state("ready");
+    const settled = state("ready");
+    settled.narration!.turnId = "turn-1";
+    settled.narration!.displayText = "The newer read wins after the timeout.";
+    settled.narration!.beats[0]!.text = settled.narration!.displayText;
+    let releaseLate: ((value: CampaignPlayState) => void) | null = null;
+    let stateCalls = 0;
+    api.loadState.mockImplementation(async () => {
+      stateCalls += 1;
+      if (stateCalls === 1) return initial;
+      if (stateCalls === 2) {
+        return new Promise<CampaignPlayState>((resolve) => {
+          releaseLate = resolve;
+        });
+      }
+      return settled;
+    });
+    api.loadTurn.mockResolvedValue(turnRead("completed", 4));
+    api.admitTurn.mockResolvedValue({ turnId: "turn-1", sequence: 1 });
+
+    render(<CampaignPlayPage campaignId="campaign-1" reconnectDelayMilliseconds={0} />);
+    const input = await screen.findByLabelText("Your action");
+    fireEvent.change(input, { target: { value: "I wait for the newer read." } });
+    fireEvent.click(screen.getByRole("button", { name: "Act" }));
+
+    await waitFor(() => expect(stateCalls).toBeGreaterThanOrEqual(3), { timeout: 6_000 });
+    await waitFor(() => expect(screen.getByText(settled.narration!.displayText)).toBeInTheDocument());
+    await act(async () => {
+      releaseLate?.(state("turn_active", publicTurn("processing", "settling", 2)));
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText(settled.narration!.displayText)).toBeInTheDocument();
+    expect(input).toBeEnabled();
+    expect(api.admitTurn).toHaveBeenCalledTimes(1);
+    expect(api.resumeTurn).not.toHaveBeenCalled();
+  }, 15_000);
 });
