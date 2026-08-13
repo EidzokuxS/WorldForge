@@ -1146,13 +1146,16 @@ export function createCampaignPlayActorScheduler(
             && (latestReplanAttempt.errorCode === "provider_unavailable"
               || latestReplanAttempt.errorCode === "stage_timeout"
               || latestReplanAttempt.errorCode === "stage_budget_exceeded");
-          const expectedDeferReason = decision.disposition === "defer"
-            ? decision.reason
-            : controlBudget ? "control_budget"
-            : invalidReplan ? "replan_invalid" : "replan_capacity";
+          const compatibleDeferReason = decision.disposition === "defer"
+            ? job.deferReason === decision.reason
+            : controlBudget
+              ? job.deferReason === "control_budget"
+              : invalidReplan
+                ? job.deferReason === "replan_invalid" || job.deferReason === "control_budget"
+                : job.deferReason === "replan_capacity";
           if (
             proposalRows.length !== 0 || job.proposalId !== null ||
-            job.deferReason !== expectedDeferReason || replanned !== null ||
+            !compatibleDeferReason || replanned !== null ||
             job.planId !== decision.planId
           ) {
             throw new CampaignPlayActorSchedulerError("scheduler_job_invalid");

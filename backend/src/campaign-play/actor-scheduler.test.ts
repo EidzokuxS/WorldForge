@@ -19,9 +19,10 @@ import {
   type CampaignPlayActorDueSet,
 } from "./actor-scheduler.js";
 import { openCampaignPlayDatabase, type CampaignPlayDatabaseHandle } from "./campaign-play-database.js";
-import { canonicalizeCampaignPlayProjection, hashCampaignPlayProjection,
+import { canonicalizeCampaignPlayProjection, deriveCampaignPlayActorReplanStageId, hashCampaignPlayProjection,
   type CampaignPlayProjectionRecord } from "./campaign-play-projection.js";
 import { createCampaignPlayStateRepository } from "./campaign-play-state-repository.js";
+import type { CampaignPlayMutationContext } from "./campaign-play-state-repository.js";
 import { createCampaignPlayTurnRepository } from "./campaign-play-turn-repository.js";
 
 const CAMPAIGN_ID = "11111111-1111-4111-8111-111111111111";
@@ -318,6 +319,85 @@ function freezeCurrent(handle: CampaignPlayDatabaseHandle): CampaignPlayActorDue
     expectedWorldVersion: state.authority.worldVersion,
     expectedRuntimeRevision: state.authority.runtimeRevision,
   });
+}
+
+type DeferredModelError = "model_contract_invalid" | "provider_unavailable"
+  | "stage_timeout" | "stage_budget_exceeded";
+
+function createDeferredModelValidationFixture(
+  errorCode: DeferredModelError | null,
+  deferReason: string,
+) {
+  const fixture = createReadyFixture();
+  const scheduler = createCampaignPlayActorScheduler(fixture.handle);
+  const dueSet = freezeCurrent(fixture.handle);
+  let jobs = scheduler.listTurnJobs("turn-player");
+  fixture.states.commitRuntime({
+    event: {
+      eventId: `scheduler-validation-jobs-${errorCode ?? "none"}-${deferReason}`,
+      turnId: "turn-player",
+      kind: "actor_job_transitioned",
+      workerEpoch: 3,
+      protectedPayloadHash: hashCampaignPlayProjection(dueSet),
+      createdAt: 1_600,
+    },
+    mutate(context) {
+      jobs = scheduler.admitDueSet({ dueSet, context, createdAt: 1_600 });
+    },
+  });
+  const target = jobs.find((job) => job.actorId === "actor-b");
+  if (!target) throw new Error("Scheduler validation fixture requires actor-b.");
+  if (deferReason === "replan_invalid") {
+    fixture.handle.sqlite.prepare(`UPDATE campaign_play_turns SET
+        worker_lease_owner = 'scheduler-validation', worker_lease_expires_at = 2_000
+      WHERE id = 'turn-player' AND stage = 'primary_settled' AND worker_epoch = 3
+        AND worker_lease_owner IS NULL`).run();
+    fixture.handle.sqlite.prepare(`UPDATE campaign_play_actor_jobs SET
+        stage = 'claimed', worker_epoch = 1, claim_turn_worker_epoch = 3
+      WHERE job_id = ? AND stage = 'queued'`).run(target.jobId);
+  }
+  if (errorCode !== null) {
+    const stageId = deriveCampaignPlayActorReplanStageId(target.jobId);
+    fixture.handle.sqlite.prepare(`INSERT INTO campaign_play_model_stages (
+        id, stage_id, attempt, campaign_id, turn_id, kind, status, worker_epoch,
+        requested_provider_id, requested_model, requested_strategy,
+        schema_outcome, created_at
+      ) VALUES (?, ?, 1, ?, 'turn-player', 'actor_replanner', 'started', 1,
+        'test-provider', 'actor-replanner', 'strict_object', 'pending', 1_600)`).run(
+      `scheduler-validation-model-${errorCode}`, stageId, CAMPAIGN_ID,
+    );
+    fixture.handle.sqlite.prepare(`UPDATE campaign_play_model_stages SET
+        status = 'interrupted', duration_ms = 20, schema_outcome = ?,
+        error_code = ?, completed_at = 1_620
+      WHERE id = ? AND status = 'started'`).run(
+      errorCode === "model_contract_invalid" ? "invalid" : "transport_error",
+      errorCode,
+      `scheduler-validation-model-${errorCode}`,
+    );
+  }
+  for (const job of jobs) {
+    const reason = job.jobId === target.jobId ? deferReason : "replan_capacity";
+    fixture.handle.sqlite.prepare(`UPDATE campaign_play_actor_jobs SET
+        stage = 'deferred', defer_reason = ?, completed_at = 1_600
+      WHERE job_id = ? AND stage IN ('queued', 'claimed')`).run(reason, job.jobId);
+  }
+  return { ...fixture, scheduler, dueSet, targetJobId: target.jobId };
+}
+
+function validationContext(
+  fixture: ReturnType<typeof createDeferredModelValidationFixture>,
+  dueSet: CampaignPlayActorDueSet,
+): CampaignPlayMutationContext {
+  return {
+    sqlite: fixture.handle.sqlite,
+    campaignId: fixture.handle.campaignId,
+    priorWorldVersion: dueSet.baseWorldVersion,
+    targetWorldVersion: dueSet.baseWorldVersion,
+    priorRuntimeRevision: dueSet.baseRuntimeRevision,
+    targetRuntimeRevision: dueSet.baseRuntimeRevision,
+    runtimeEventSequence: null,
+    mechanicalHash: () => "",
+  };
 }
 
 function persistIncapacitatedCondition(
@@ -670,6 +750,52 @@ describe("Campaign Play actor scheduler", () => {
     );
 
     expect(() => scheduler.validateTurnSettlement(dueSet.turnId))
+      .toThrow("scheduler_job_invalid");
+  });
+
+  it.each([
+    ["model_contract_invalid", "replan_invalid"],
+    ["model_contract_invalid", "control_budget"],
+    ["provider_unavailable", "control_budget"],
+    ["stage_timeout", "control_budget"],
+    ["stage_budget_exceeded", "control_budget"],
+  ] as const)("accepts %s with deferred reason %s", (errorCode, deferReason) => {
+    const fixture = createDeferredModelValidationFixture(errorCode, deferReason);
+    expect(() => fixture.scheduler.validateTurnSettlement(
+      "turn-player", validationContext(fixture, fixture.dueSet),
+    )).not.toThrow();
+    expect(fixture.scheduler.listTurnJobs("turn-player").find((job) => job.jobId === fixture.targetJobId))
+      .toMatchObject({ stage: "deferred", deferReason });
+  });
+
+  it.each([
+    ["provider_unavailable", "replan_invalid"],
+    ["stage_timeout", "replan_invalid"],
+    ["stage_budget_exceeded", "replan_invalid"],
+    ["model_contract_invalid", "replan_capacity"],
+    ["model_contract_invalid", "actor_capacity"],
+  ] as const)("rejects incompatible %s with deferred reason %s", (errorCode, deferReason) => {
+    const fixture = createDeferredModelValidationFixture(errorCode, deferReason);
+    expect(() => fixture.scheduler.validateTurnSettlement(
+      "turn-player", validationContext(fixture, fixture.dueSet),
+    ))
+      .toThrow("scheduler_job_invalid");
+  });
+
+  it("rejects a deferred actor job while its latest model stage is still started", () => {
+    const fixture = createDeferredModelValidationFixture(null, "replan_capacity");
+    const scheduler = fixture.scheduler;
+    const stageId = deriveCampaignPlayActorReplanStageId(fixture.targetJobId);
+    fixture.handle.sqlite.prepare(`INSERT INTO campaign_play_model_stages (
+        id, stage_id, attempt, campaign_id, turn_id, kind, status, worker_epoch,
+        requested_provider_id, requested_model, requested_strategy,
+        schema_outcome, created_at
+      ) VALUES ('scheduler-validation-started', ?, 1, ?, 'turn-player',
+        'actor_replanner', 'started', 1, 'test-provider', 'actor-replanner',
+        'strict_object', 'pending', 1_600)`).run(stageId, CAMPAIGN_ID);
+    expect(() => scheduler.validateTurnSettlement(
+      "turn-player", validationContext(fixture, fixture.dueSet),
+    ))
       .toThrow("scheduler_job_invalid");
   });
 

@@ -2408,8 +2408,66 @@ describe("Campaign Play actor replanner", () => {
       });
     expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_plans
       WHERE campaign_id = ? AND actor_id = 'actor-b' AND plan_id <> 'actor-replanner-plan'`).get(
-        CAMPAIGN_ID,
-      )).toEqual({ count: 0 });
+      CAMPAIGN_ID,
+    )).toEqual({ count: 0 });
+  });
+
+  it("defers an authorized contract recovery when its full retry window cannot fit", async () => {
+    const { handle, token, jobId } = createReplanFixture();
+    const generateObject = vi.fn(async (request: { prompt: string }) => ({
+      object: reverseMoveProposalFromPrompt(request.prompt),
+      trace: acceptedTrace(),
+    }));
+    const replanner = createCampaignPlayActorReplanner(handle, {
+      now: () => 1_600,
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const outcome = await replanner.replan({
+      jobId,
+      token,
+      model: {} as LanguageModel,
+      recoveryModel: {} as LanguageModel,
+      temperature: 0.2,
+      maxOutputTokens: 100,
+      maximumInputTokens: 1_000,
+      maximumOutputTokens: 100,
+      maximumTotalTokens: 2_000,
+      maximumCostMicros: 10_000,
+      externalOperationDeadlineMs: 90_000,
+      controlDeadlineAt: 1_650,
+      deferOnControlBudgetExhaustion: true,
+      createdAt: 1_590,
+    });
+
+    expect(outcome).toEqual({
+      kind: "deferred",
+      jobId,
+      reason: "control_budget",
+      errorCode: "model_contract_invalid",
+      workerEpoch: 1,
+    });
+    expect(generateObject).toHaveBeenCalledTimes(1);
+    expect(handle.sqlite.prepare(`SELECT attempt, status, schema_outcome AS schemaOutcome,
+        error_code AS errorCode
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = 'turn-player' AND kind = 'actor_replanner'
+      ORDER BY attempt`).all(CAMPAIGN_ID)).toEqual([
+      { attempt: 1, status: "interrupted", schemaOutcome: "invalid", errorCode: "model_contract_invalid" },
+    ]);
+    expect(handle.sqlite.prepare(`SELECT attempt_number AS attemptNumber,
+        deadline_at AS deadlineAt, retry_consumed_at AS retryConsumedAt
+      FROM campaign_play_actor_replan_attempts
+      WHERE campaign_id = ? AND job_id = ? ORDER BY attempt_number`).all(
+      CAMPAIGN_ID,
+      jobId,
+    )).toEqual([{
+      attemptNumber: 1,
+      deadlineAt: 1_650,
+      retryConsumedAt: null,
+    }]);
+    expect(createCampaignPlayActorScheduler(handle).listTurnJobs("turn-player")[0])
+      .toMatchObject({ stage: "deferred", deferReason: "control_budget" });
   });
 
   it("derives the directed route from the actor-authored destination", async () => {

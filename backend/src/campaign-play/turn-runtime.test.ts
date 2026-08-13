@@ -5501,6 +5501,113 @@ describe("Campaign Play player-action turn runtime", () => {
     await advanceUntilStage(runtime, time, admission.turnId, "actors_settled");
   });
 
+  it("defers a contract-invalid replan when its fresh recovery window misses the control deadline", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening();
+    const submittedAt = 3_800;
+    const time = fixedClock(submittedAt);
+    let providerCalls = 0;
+    const actorReplanner = createCampaignPlayActorReplanner(handle, {
+      now: time.clock.now,
+      generateObject: (async () => {
+        providerCalls += 1;
+        return {
+          object: { unexpected: true },
+          trace: actorReplanTrace(),
+        };
+      }) as unknown as typeof safeGenerateObject,
+    });
+    const runtime = turnRuntime(
+      handle,
+      time,
+      judgeFixture("deterministic"),
+      gameMasterFixture(),
+      {
+        actorReplanner,
+        actorReplannerModel: {
+          languageModel: {} as LanguageModel,
+          reasoningModel: {} as LanguageModel,
+          requested: {
+            providerId: "test",
+            model: "test-actor-replanner",
+            strategy: "strict_object",
+            pricing: TEST_MODEL_PRICING,
+          },
+          temperature: 0.2,
+          maximumInputTokens: 1_000,
+          maximumOutputTokens: 1_000,
+          maximumTotalTokens: 2_000,
+          maximumCostMicros: 10_000,
+        },
+      },
+    );
+    const admission = runtime.admitAction({
+      request: admissionRequest(state, "actor-replanner-control-budget-invalid"),
+      submittedAt,
+    });
+    await advanceToPrimarySettlement(runtime, time, admission.turnId);
+    time.advance();
+    await runtime.runNextStage(admission.turnId);
+    const jobId = forceFirstActorReplan(handle, time, admission.turnId);
+
+    time.advance();
+    await runtime.runNextStage(admission.turnId);
+
+    expect(providerCalls).toBe(1);
+    expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
+      .find((job) => job.jobId === jobId)).toMatchObject({
+        stage: "deferred",
+        deferReason: "control_budget",
+        workerEpoch: 1,
+      });
+    expect(handle.sqlite.prepare(`SELECT attempt, status, schema_outcome AS schemaOutcome,
+        error_code AS errorCode
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'actor_replanner'
+      ORDER BY attempt`).all(CAMPAIGN_ID, admission.turnId)).toEqual([
+      {
+        attempt: 1,
+        status: "interrupted",
+        schemaOutcome: "invalid",
+        errorCode: "model_contract_invalid",
+      },
+    ]);
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_actor_replan_attempts
+      WHERE campaign_id = ? AND job_id = ? AND attempt_number = 2`).get(
+      CAMPAIGN_ID,
+      jobId,
+    )).toEqual({ count: 0 });
+    expect(handle.sqlite.prepare(`SELECT retry_consumed_at AS retryConsumedAt
+      FROM campaign_play_actor_replan_attempts
+      WHERE campaign_id = ? AND job_id = ? AND attempt_number = 1`).get(
+      CAMPAIGN_ID,
+      jobId,
+    )).toEqual({ retryConsumedAt: null });
+    expect(runtime.loadTurn(admission.turnId)).toMatchObject({
+      stage: "primary_settled",
+      workerLeaseOwner: null,
+    });
+
+    const completed = await advanceUntilStage(runtime, time, admission.turnId, "completed");
+    expect(completed.terminalReason).toBe("action_resolved");
+    const narration = await runtime.runNarration(admission.turnId);
+    expect(narration).toMatchObject({ status: "complete" });
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_proper_scenes WHERE campaign_id = ? AND turn_id = ?`).get(
+      CAMPAIGN_ID,
+      admission.turnId,
+    )).toEqual({ count: 1 });
+    expect(createCampaignPlayReadModel(handle).loadState()).toMatchObject({
+      phase: "ready",
+      activeTurn: null,
+      narration: expect.objectContaining({ turnId: admission.turnId }),
+      narrationOperation: expect.objectContaining({
+        turnId: admission.turnId,
+        status: "complete",
+      }),
+    });
+  });
+
   it.each([
     ["budget", "stage_budget_exceeded"],
     ["persistence", "persistence_failed"],

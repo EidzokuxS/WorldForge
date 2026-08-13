@@ -1064,6 +1064,8 @@ export function createCampaignPlayActorReplanner(
         contractRejectionPhase: ActorReplanContractRejectionPhase;
         safeGenerationCode: SafeGenerateErrorCode | null;
         proposalGenerationStarted: boolean;
+        /** The authorized retry was skipped because its full window cannot fit. */
+        controlBudgetDeferral?: boolean;
       };
       type AttemptResult =
         | { kind: "replanned"; plan: CampaignPlayActorPlan; modelWorkerEpoch: number; attemptNumber: number }
@@ -1594,7 +1596,8 @@ export function createCampaignPlayActorReplanner(
         // and persistence faults that cannot be safely fenced as a plan
         // outcome.
         const controlBudgetFailure = request.deferOnControlBudgetExhaustion === true &&
-          (failure.errorCode === "provider_unavailable" ||
+          (failure.controlBudgetDeferral === true ||
+            failure.errorCode === "provider_unavailable" ||
             failure.errorCode === "stage_budget_exceeded" ||
             failure.errorCode === "stage_timeout" ||
             (failure.errorCode === "model_contract_invalid" && failure.attemptNumber >= 2));
@@ -1739,6 +1742,7 @@ export function createCampaignPlayActorReplanner(
               reason: deferReason,
               errorCode: controlBudgetFailure
                 ? (failure.errorCode as
+                    | "model_contract_invalid"
                     | "provider_unavailable"
                     | "stage_budget_exceeded"
                     | "stage_timeout")
@@ -1787,6 +1791,22 @@ export function createCampaignPlayActorReplanner(
       const contractRecovery = linkedCall !== undefined && firstResult.contractInvalid &&
         recoveryModel !== undefined &&
         dependencies.now() < request.token.expiresAt && dependencies.now() < deadlineAt;
+      const recoveryAuthorized = contractRecovery || stageTimeoutRecovery;
+      // Attempt 2 is authorized only when its complete external-operation
+      // window fits inside the player-action actor budget. A shortened retry
+      // would violate the fresh-deadline contract and be rejected by SQLite,
+      // so defer the optional job before opening that transaction instead.
+      const retryStartedAt = Math.max(dependencies.now(), providerStartedAt + 1);
+      const fullRetryDeadlineAt = retryStartedAt + request.externalOperationDeadlineMs;
+      if (recoveryAuthorized && request.deferOnControlBudgetExhaustion === true &&
+        request.controlDeadlineAt !== undefined &&
+        Number.isSafeInteger(fullRetryDeadlineAt) &&
+        fullRetryDeadlineAt > request.controlDeadlineAt) {
+        return finalizeFailure({
+          ...firstResult,
+          controlBudgetDeferral: true,
+        });
+      }
       const mayEscalate = (contractRecovery || stageTimeoutRecovery) &&
         !request.signal?.aborted && dependencies.now() < request.token.expiresAt &&
         dependencies.now() < (request.controlDeadlineAt ?? Number.MAX_SAFE_INTEGER);
@@ -1795,11 +1815,7 @@ export function createCampaignPlayActorReplanner(
         // SQLite rejects a shared numeric deadline for new attempt-2 rows.  A
         // same-millisecond clock sample is still a new operation, so advance
         // the retry start by the smallest representable unit in that case.
-        const retryStartedAt = Math.max(dependencies.now(), providerStartedAt + 1);
-        const retryDeadlineAt = Math.min(
-          retryStartedAt + request.externalOperationDeadlineMs,
-          request.controlDeadlineAt ?? Number.MAX_SAFE_INTEGER,
-        );
+        const retryDeadlineAt = fullRetryDeadlineAt;
         if (!Number.isSafeInteger(retryDeadlineAt) || retryDeadlineAt <= retryStartedAt) {
           return finalizeFailure({
             ...firstResult,
