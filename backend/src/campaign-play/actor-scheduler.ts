@@ -1140,19 +1140,27 @@ export function createCampaignPlayActorScheduler(
             baseWorldVersion: number;
           }>;
         if (job.stage === "deferred") {
+          const directControlBudget = latestReplanAttempt === undefined
+            && job.deferReason === "control_budget";
           const invalidReplan = latestReplanAttempt?.status === "interrupted"
             && latestReplanAttempt.errorCode === "model_contract_invalid";
           const controlBudget = latestReplanAttempt?.status === "interrupted"
             && (latestReplanAttempt.errorCode === "provider_unavailable"
               || latestReplanAttempt.errorCode === "stage_timeout"
               || latestReplanAttempt.errorCode === "stage_budget_exceeded");
-          const compatibleDeferReason = decision.disposition === "defer"
-            ? job.deferReason === decision.reason
-            : controlBudget
-              ? job.deferReason === "control_budget"
-              : invalidReplan
-                ? job.deferReason === "replan_invalid" || job.deferReason === "control_budget"
-                : job.deferReason === "replan_capacity";
+          let compatibleDeferReason: boolean;
+          if (decision.disposition === "defer") {
+            compatibleDeferReason = job.deferReason === decision.reason;
+          } else if (directControlBudget) {
+            compatibleDeferReason = true;
+          } else if (controlBudget) {
+            compatibleDeferReason = job.deferReason === "control_budget";
+          } else if (invalidReplan) {
+            compatibleDeferReason = job.deferReason === "replan_invalid"
+              || job.deferReason === "control_budget";
+          } else {
+            compatibleDeferReason = job.deferReason === "replan_capacity";
+          }
           if (
             proposalRows.length !== 0 || job.proposalId !== null ||
             !compatibleDeferReason || replanned !== null ||

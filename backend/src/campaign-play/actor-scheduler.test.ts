@@ -782,6 +782,59 @@ describe("Campaign Play actor scheduler", () => {
       .toThrow("scheduler_job_invalid");
   });
 
+  it("accepts three direct control-budget deferrals without an actor model outcome", () => {
+    const { handle, states } = createReadyFixture();
+    const scheduler = createCampaignPlayActorScheduler(handle);
+    const dueSet = freezeCurrent(handle);
+    let jobs = scheduler.listTurnJobs("turn-player");
+    states.commitRuntime({
+      event: {
+        eventId: "scheduler-direct-control-budget-jobs",
+        turnId: "turn-player",
+        kind: "actor_job_transitioned",
+        workerEpoch: 3,
+        protectedPayloadHash: hashCampaignPlayProjection(dueSet),
+        createdAt: 1_600,
+      },
+      mutate(context) {
+        jobs = scheduler.admitDueSet({ dueSet, context, createdAt: 1_600 });
+      },
+    });
+    expect(jobs).toHaveLength(3);
+    for (const job of jobs) {
+      handle.sqlite.prepare(`UPDATE campaign_play_actor_jobs SET
+          stage = 'deferred', defer_reason = 'control_budget', completed_at = 1_620
+        WHERE job_id = ? AND stage = 'queued'`).run(job.jobId);
+    }
+
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'actor_replanner'`).get(
+      CAMPAIGN_ID,
+      dueSet.turnId,
+    )).toEqual({ count: 0 });
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_actor_replan_attempts
+      WHERE campaign_id = ? AND turn_id = ?`).get(
+      CAMPAIGN_ID,
+      dueSet.turnId,
+    )).toEqual({ count: 0 });
+    expect(jobs.every((job) => job.proposalId === null)).toBe(true);
+    expect(() => scheduler.validateTurnSettlement(
+      dueSet.turnId,
+      {
+        sqlite: handle.sqlite,
+        campaignId: handle.campaignId,
+        priorWorldVersion: dueSet.baseWorldVersion,
+        targetWorldVersion: dueSet.baseWorldVersion,
+        priorRuntimeRevision: dueSet.baseRuntimeRevision,
+        targetRuntimeRevision: dueSet.baseRuntimeRevision,
+        runtimeEventSequence: null,
+        mechanicalHash: () => "",
+      },
+    )).not.toThrow();
+  });
+
   it("rejects a deferred actor job while its latest model stage is still started", () => {
     const fixture = createDeferredModelValidationFixture(null, "replan_capacity");
     const scheduler = fixture.scheduler;

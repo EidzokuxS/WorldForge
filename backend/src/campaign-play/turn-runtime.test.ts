@@ -5399,6 +5399,69 @@ describe("Campaign Play player-action turn runtime", () => {
     )).toEqual(settledSnapshot);
   });
 
+  it("settles three direct control-budget actor deferrals without an actor model stage", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening();
+    const submittedAt = 3_800;
+    const time = fixedClock(submittedAt);
+    let providerCalls = 0;
+    const actorReplanner = createCampaignPlayActorReplanner(handle, {
+      now: time.clock.now,
+      generateObject: (async () => {
+        providerCalls += 1;
+        throw new Error("direct control-budget deferral must not invoke the Actor Replanner");
+      }) as unknown as typeof safeGenerateObject,
+    });
+    const runtime = turnRuntime(
+      handle,
+      time,
+      judgeFixture("deterministic"),
+      gameMasterFixture(),
+      { actorReplanner },
+    );
+    const admission = runtime.admitAction({
+      request: admissionRequest(state, "actor-direct-control-budget"),
+      submittedAt,
+    });
+
+    await advanceToPrimarySettlement(runtime, time, admission.turnId);
+    // Leave no room for the optional Actor stage while keeping the shared
+    // player-action deadline available for settlement and narration.
+    time.advanceBy(85_000);
+    const actorsSettled = await advanceUntilStage(runtime, time, admission.turnId, "actors_settled");
+    expect(actorsSettled.stage).toBe("actors_settled");
+    expect(providerCalls).toBe(0);
+
+    const jobs = createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId);
+    expect(jobs.length).toBeGreaterThan(0);
+    expect(jobs.every((job) => job.stage === "deferred" && job.deferReason === "control_budget"))
+      .toBe(true);
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'actor_replanner'`).get(
+      CAMPAIGN_ID,
+      admission.turnId,
+    )).toEqual({ count: 0 });
+
+    const completed = await advanceUntilStage(runtime, time, admission.turnId, "completed");
+    expect(completed.terminalReason).toBe("action_resolved");
+    const narration = await runtime.runNarration(admission.turnId);
+    expect(narration).toMatchObject({ status: "complete" });
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_proper_scenes WHERE campaign_id = ? AND turn_id = ?`).get(
+      CAMPAIGN_ID,
+      admission.turnId,
+    )).toEqual({ count: 1 });
+    expect(createCampaignPlayReadModel(handle).loadState()).toMatchObject({
+      phase: "ready",
+      activeTurn: null,
+      narration: expect.objectContaining({ turnId: admission.turnId }),
+      narrationOperation: expect.objectContaining({
+        turnId: admission.turnId,
+        status: "complete",
+      }),
+    });
+  });
+
   it("defers a provider interruption without a second actor epoch", async () => {
     const { handle, state } = await createReadyCampaignWithOpening();
     const time = fixedClock(3_800);
