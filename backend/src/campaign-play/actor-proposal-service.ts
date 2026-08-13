@@ -58,7 +58,7 @@ const ACTOR_AFTERMATH_VISIBILITY_MINUTES = 1_440;
 export type CampaignPlayActorProposalOutcome =
   | { kind: "settled"; jobId: string; proposalId: string; receiptIds: string[]; resultWorldVersion: number }
   | { kind: "rejected"; jobId: string; proposalId: string | null; reason: CampaignPlayActorProposalRejectionReason }
-  | { kind: "deferred"; jobId: string; reason: "replan_capacity" }
+  | { kind: "deferred"; jobId: string; reason: "replan_capacity" | "control_budget" }
   | { kind: "replan_required"; jobId: string; reason: "plan_missing" | "plan_inactive" | "plan_exhausted" | "precondition_failed" | "world_advanced"; failedPreconditionIndexes: number[] };
 
 type CampaignPlayActorProposalRejectionReason =
@@ -90,6 +90,7 @@ export interface CampaignPlayActorProposalService {
     jobId: string;
     token: CampaignPlayWorkerLeaseToken;
     createdAt: number;
+    reason?: "replan_capacity" | "control_budget";
   }): Extract<CampaignPlayActorProposalOutcome, { kind: "deferred" }>;
 }
 
@@ -1064,6 +1065,7 @@ export function createCampaignPlayActorProposalService(
       requireTurnLease(handle, input.token, input.createdAt);
       const job = scheduler.listTurnJobs(input.token.turnId).find((candidate) =>
         candidate.jobId === input.jobId);
+      const reason = input.reason ?? "replan_capacity";
       if (!job || job.stage !== "queued" ||
         scheduler.buildActorFrame(job.jobId).selection.kind !== "replan_required") {
         throw new CampaignPlayActorProposalServiceError("proposal_state_invalid");
@@ -1080,19 +1082,20 @@ export function createCampaignPlayActorProposalService(
         mutationId: stableId("actor-job-event", {
           jobId: job.jobId,
           stage: "deferred",
-          reason: "replan_capacity",
+          reason,
         }),
         protectedPayloadHash: hashCampaignPlayProjection({
           jobId: job.jobId,
-          reason: "replan_capacity",
+          reason,
         }),
         committedAt: input.createdAt,
         mutate(context) {
           requireTurnLeaseInContext(context, input.token, input.createdAt);
           const updated = context.sqlite.prepare(`UPDATE campaign_play_actor_jobs
-            SET stage = 'deferred', defer_reason = 'replan_capacity', completed_at = ?
+            SET stage = 'deferred', defer_reason = ?, completed_at = ?
             WHERE job_id = ? AND campaign_id = ? AND stage = 'queued'
               AND worker_epoch = 0 AND claim_turn_worker_epoch IS NULL`).run(
+                reason,
                 input.createdAt,
                 job.jobId,
                 context.campaignId,
@@ -1110,7 +1113,7 @@ export function createCampaignPlayActorProposalService(
           );
         },
       });
-      return { kind: "deferred", jobId: job.jobId, reason: "replan_capacity" };
+      return { kind: "deferred", jobId: job.jobId, reason };
     },
   };
 }

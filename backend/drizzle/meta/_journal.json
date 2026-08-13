@@ -379,6 +379,13 @@
       "when": 1786161600000,
       "tag": "0053_campaign_play_actor_replan_contract_recovery_deadline",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "6",
+      "when": 1786248000000,
+      "tag": "0054_campaign_play_control_budget_continuity",
+      "breakpoints": true
     }
   ]
 }

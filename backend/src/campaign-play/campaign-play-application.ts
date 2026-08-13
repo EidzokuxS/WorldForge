@@ -728,7 +728,11 @@ export function createCampaignPlayApplication(
         const repository = createCampaignPlayTurnRepository(handle);
         const before = repository.loadTurn(turnId);
         if (!before || before.stage === "completed" || before.stage === "failed") return;
-        if (before.stage === "interrupted" && pendingResume === null) return;
+        const controlTargetAt = before.submittedAt + 115_000;
+        if (
+          before.stage === "interrupted" && pendingResume === null &&
+          (before.turnKind !== "player_action" || dependencies.now() < controlTargetAt)
+        ) return;
         let recoveredJudgeFeedback: CampaignPlayJudgeRecoveryFeedback | undefined;
         let recoveredGameMasterFeedback: CampaignPlayGameMasterRecoveryFeedback | undefined;
         const runtime = runtimeForTurn(
@@ -739,6 +743,17 @@ export function createCampaignPlayApplication(
           pendingGameMasterRecoveryFeedback,
           (feedback) => { recoveredGameMasterFeedback = feedback; },
         );
+        const turnRuntime = before.turnKind === "player_action"
+          ? runtime as CampaignPlayTurnRuntime
+          : null;
+        if (
+          before.turnKind === "player_action" &&
+          dependencies.now() >= controlTargetAt &&
+          turnRuntime?.commitControlBudgetContinuity
+        ) {
+          await turnRuntime.commitControlBudgetContinuity(turnId, "control_deadline");
+          return;
+        }
         const wasResume = pendingResume !== null;
         const result = pendingResume
           ? await runtime.resumeInterruptedStage({
@@ -752,6 +767,16 @@ export function createCampaignPlayApplication(
         const nextGameMasterRecoveryFeedback = recoveredGameMasterFeedback;
         pendingJudgeRecoveryFeedback = undefined;
         pendingGameMasterRecoveryFeedback = undefined;
+        if (
+          before.turnKind === "player_action" &&
+          turnRuntime?.commitControlBudgetContinuity &&
+          result.recovery.kind === "explicit_resume_required" &&
+          (result.recovery.errorCode === "stage_budget_exceeded" ||
+            dependencies.now() >= controlTargetAt)
+        ) {
+          await turnRuntime.commitControlBudgetContinuity(turnId, "authority_budget");
+          return;
+        }
         if (result.recovery.kind === "explicit_resume_required" &&
           campaignPlayMayAutomaticallyResumeExternalStage({
             turnKind: before.turnKind,
@@ -801,14 +826,40 @@ export function createCampaignPlayApplication(
   ): Promise<void> => {
     const handle = dependencies.openDatabase(campaignId);
     try {
-      const turn = createCampaignPlayTurnRepository(handle).loadTurn(turnId);
+      const repository = createCampaignPlayTurnRepository(handle);
+      const turn = repository.loadTurn(turnId);
       if (!turn || turn.turnKind !== "player_action" || turn.stage !== "completed") return;
       const runtime = runtimeFactory.createTurn(handle, turn.modelSelection);
-      const operation = await runtime.runNarration(turnId, token ?? undefined);
-      if (
-        token !== null || operation === null || operation.status !== "failed" ||
-        operation.attempt !== 1
-      ) return;
+      const commitContinuity = (fallbackReason: "narration_budget" | "control_deadline"): boolean => {
+        const latest = repository.loadTurn(turnId);
+        if (
+          !latest || latest.turnKind !== "player_action" || latest.stage !== "completed" ||
+          !runtime.commitNarrationContinuity
+        ) return false;
+        const committedAt = dependencies.now();
+        if (committedAt >= latest.submittedAt + 120_000) return false;
+        runtime.commitNarrationContinuity(
+          turnId,
+          committedAt >= latest.submittedAt + 115_000 ? "control_deadline" : fallbackReason,
+        );
+        return true;
+      };
+      let operation: Awaited<ReturnType<CampaignPlayTurnRuntime["runNarration"]>>;
+      try {
+        operation = await runtime.runNarration(turnId, token ?? undefined);
+      } catch (error) {
+        if (commitContinuity("narration_budget")) return;
+        throw error;
+      }
+      if (operation === null) {
+        if (commitContinuity("narration_budget")) return;
+        return;
+      }
+      if (operation.status === "complete") return;
+      if (token !== null || operation.status !== "failed" || operation.attempt !== 1) {
+        if (operation.status === "failed" && token === null && commitContinuity("narration_budget")) return;
+        return;
+      }
       const failedOperation = handle.sqlite.prepare(`SELECT status,
           current_attempt AS currentAttempt, current_attempt_id AS currentAttemptId,
           error_code AS errorCode
@@ -829,7 +880,14 @@ export function createCampaignPlayApplication(
         (failedOperation.errorCode !== "narration_invalid" &&
           failedOperation.errorCode !== "provider_unavailable" &&
           failedOperation.errorCode !== "stage_timeout")
-      ) return;
+      ) {
+        if (commitContinuity("narration_budget")) return;
+        return;
+      }
+      if (dependencies.now() >= turn.submittedAt + 115_000) {
+        if (commitContinuity("control_deadline")) return;
+        return;
+      }
       const actorObservationMismatch = operation.recoveryFeedback?.diagnostic ===
           "narrator_packet_validation_mismatch" &&
         operation.recoveryFeedback.failedChecks.some((check) =>
@@ -868,19 +926,26 @@ export function createCampaignPlayApplication(
           dependencies.createModel = originalCreateModel;
         }
       }
-      const recoveryToken = recoveryRuntime.prepareNarrationRecovery({
-        operationId: operation.operationId,
-        resultId: operation.resultId,
-        narrationId: operation.narrationId,
-        packetHash: operation.packetHash,
-        receiptIds: operation.receiptIds,
-      }, "automatic");
-      await recoveryRuntime.runNarration(
-        turnId,
-        recoveryToken,
-        operation.recoveryFeedback,
-        "auto",
-      );
+      try {
+        const recoveryToken = recoveryRuntime.prepareNarrationRecovery({
+          operationId: operation.operationId,
+          resultId: operation.resultId,
+          narrationId: operation.narrationId,
+          packetHash: operation.packetHash,
+          receiptIds: operation.receiptIds,
+        }, "automatic");
+        const recovery = await recoveryRuntime.runNarration(
+          turnId,
+          recoveryToken,
+          operation.recoveryFeedback,
+          "auto",
+        );
+        if (recovery?.status === "complete") return;
+      } catch (error) {
+        if (commitContinuity("narration_budget")) return;
+        throw error;
+      }
+      if (commitContinuity("narration_budget")) return;
     } finally {
       handle.close();
     }
@@ -968,6 +1033,16 @@ export function createCampaignPlayApplication(
           return;
         }
         const runtime = runtimeForTurn(handle, active);
+        if (
+          active.turnKind === "player_action" &&
+          active.workerLeaseOwner === null &&
+          dependencies.now() >= active.submittedAt + 115_000 &&
+          "commitControlBudgetContinuity" in runtime &&
+          typeof runtime.commitControlBudgetContinuity === "function"
+        ) {
+          await runtime.commitControlBudgetContinuity(active.turnId, "control_deadline");
+          return;
+        }
         const result = await runtime.recoverActiveTurn();
         if (!result) return;
         if (result.recovery.kind === "external_in_flight") {

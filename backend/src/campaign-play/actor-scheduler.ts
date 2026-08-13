@@ -57,7 +57,8 @@ export type CampaignPlayActorDeferReason =
   | "incapacitated"
   | "actor_capacity"
   | "replan_capacity"
-  | "replan_invalid";
+  | "replan_invalid"
+  | "control_budget";
 
 interface CampaignPlayActorDueDecisionBase {
   dueOrder: number;
@@ -1141,8 +1142,13 @@ export function createCampaignPlayActorScheduler(
         if (job.stage === "deferred") {
           const invalidReplan = latestReplanAttempt?.status === "interrupted"
             && latestReplanAttempt.errorCode === "model_contract_invalid";
+          const controlBudget = latestReplanAttempt?.status === "interrupted"
+            && (latestReplanAttempt.errorCode === "provider_unavailable"
+              || latestReplanAttempt.errorCode === "stage_timeout"
+              || latestReplanAttempt.errorCode === "stage_budget_exceeded");
           const expectedDeferReason = decision.disposition === "defer"
             ? decision.reason
+            : controlBudget ? "control_budget"
             : invalidReplan ? "replan_invalid" : "replan_capacity";
           if (
             proposalRows.length !== 0 || job.proposalId !== null ||

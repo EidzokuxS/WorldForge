@@ -392,6 +392,8 @@ export interface CampaignPlayNarrationOperation {
   attemptId: string | null;
   attempt: number;
   conciseResult: CampaignPlayConciseResult;
+  /** Whether the visible scene came from a reviewed model or immutable continuity evidence. */
+  sourceKind?: "model_accepted" | "deterministic_continuity";
   createdAt: number;
   completedAt: number | null;
 }

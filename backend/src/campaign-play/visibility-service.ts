@@ -1271,6 +1271,21 @@ function actionContextForTurn(
   }
   const acceptedJudge = turnRepository.loadAcceptedModelArtifact(turn.turnId, "judge");
   if (!acceptedJudge) {
+    if (turn.mutationAudit.kind === "control_budget_continuity") {
+      const choiceBindings = Array.isArray(frame.choiceBindings)
+        ? frame.choiceBindings as CampaignPlayAvailableIntent[]
+        : [];
+      const binding = choiceHandle === null
+        ? null
+        : choiceBindings.find((choice) => choice.handle === choiceHandle);
+      return campaignPlayActionContextSchema.parse({
+        submittedText,
+        intentKind: binding?.kind ?? "attempt",
+        disposition: "uncertain",
+        result: "no_effect",
+        clarificationQuestion: null,
+      });
+    }
     throw new CampaignPlayVisibilityError(
       "visibility_turn_invalid",
       "Player-action visibility requires its accepted Judge artifact.",

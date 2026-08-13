@@ -15,6 +15,7 @@ import {
   campaignPlayOpeningAdmissionRequestSchema,
   campaignPlayModelStageSchema,
   campaignPlayNarrationSchema,
+  campaignPlayNarratorPacketSchema,
   campaignPlaySseEventSchema,
   campaignPlayTurnAdmissionRequestSchema,
   CAMPAIGN_PLAY_INTERNAL_ERROR_CODE_VALUES,
@@ -191,6 +192,14 @@ export interface CommitCampaignPlayDeterministicInput {
   worldVersionAdvance: number;
   publicPacketHash?: string;
   mutate?: (context: CampaignPlayMutationContext) => void;
+  committedAt: number;
+  mutationId: string;
+}
+
+export interface CommitCampaignPlayControlBudgetContinuityInput {
+  turnId: string;
+  packet: unknown;
+  reason: "authority_budget" | "narration_budget" | "control_deadline";
   committedAt: number;
   mutationId: string;
 }
@@ -412,6 +421,7 @@ export interface CampaignPlayTurnRepository {
   renewLease(input: RenewCampaignPlayLeaseInput): CampaignPlayWorkerLeaseToken;
   acceptModelArtifact(input: AcceptCampaignPlayModelArtifactInput): LoadedCampaignPlayTurn;
   commitDeterministic(input: CommitCampaignPlayDeterministicInput): LoadedCampaignPlayTurn;
+  commitControlBudgetContinuity(input: CommitCampaignPlayControlBudgetContinuityInput): LoadedCampaignPlayTurn;
   commitActorTransition(input: CommitCampaignPlayActorTransitionInput): LoadedCampaignPlayTurn;
   interruptExternal(input: InterruptCampaignPlayExternalInput): LoadedCampaignPlayTurn;
   interruptExpiredExternal(input: InterruptExpiredCampaignPlayExternalInput): LoadedCampaignPlayTurn;
@@ -1647,6 +1657,7 @@ function validateAcceptedStageProgress(
   stages: ModelStageRow[],
   document: CampaignPlayTurnAdmissionDocument,
   selection: CampaignPlayTurnModelSelection,
+  controlBudgetContinuity = false,
 ): void {
   if (row.turnKind === "opening" && row.stage === "judged") {
     throw corrupt("Campaign Play opening turn cannot enter the judged stage.");
@@ -1663,6 +1674,15 @@ function validateAcceptedStageProgress(
   const effectiveStage = row.stage === "interrupted" ? row.interruptedStage : row.stage;
   if (effectiveStage === null) {
     throw corrupt("Campaign Play turn has no valid effective stage for model evidence.");
+  }
+  if (controlBudgetContinuity) {
+    if (row.turnKind !== "player_action" || effectiveStage !== "visibility_projected") {
+      throw corrupt("Campaign Play continuity turn has an invalid visible boundary.");
+    }
+    if (stages.some((stage) => stage.status === "accepted" && stage.kind === "narrator")) {
+      throw corrupt("Campaign Play continuity turn cannot retain an accepted narrator result.");
+    }
+    return;
   }
   const rank = stageProgressRank(effectiveStage);
   const acceptedJudge = stages.find((stage) =>
@@ -1882,6 +1902,13 @@ function loadEvents(handle: CampaignPlayDatabaseHandle, row: TurnRow): CampaignP
   let replayStage: Exclude<CampaignPlayTurnStage, "interrupted" | "completed" | "failed"> = "admitted";
   let replayInterrupted = false;
   let replayTerminal: "completed" | "failed" | null = null;
+  let continuityMarker = false;
+  try {
+    const audit = JSON.parse(row.mutationAuditJson) as { kind?: unknown };
+    continuityMarker = row.turnKind === "player_action" && audit.kind === "control_budget_continuity";
+  } catch {
+    continuityMarker = false;
+  }
   const progressByEpoch = new Map<number, ReturnType<typeof publicProgressForStage>>();
   const events = eventRows.map((eventRow, index) => {
     const expectedSequence = index + 1;
@@ -2030,12 +2057,14 @@ function loadEvents(handle: CampaignPlayDatabaseHandle, row: TurnRow): CampaignP
         }
       } else if (runtimeEvent.kind === "visibility_projected") {
         if (
-          event.type !== "turn.progressed" || replayInterrupted ||
-          replayStage !== "actors_settled" || observedWorkerEpoch === 0 ||
+          event.type !== "turn.progressed" ||
+          (!continuityMarker && replayInterrupted) ||
+          (!continuityMarker && replayStage !== "actors_settled") || observedWorkerEpoch === 0 ||
           runtimeEvent.workerEpoch !== observedWorkerEpoch
         ) {
           throw corrupt("Campaign Play visibility projection is illegal at its replayed stage.");
         }
+        if (continuityMarker) replayInterrupted = false;
         replayStage = "visibility_projected";
         if (event.progress !== publicProgressForStage(replayStage)) {
           throw corrupt("Campaign Play visibility projection exposes false public progress.");
@@ -2146,8 +2175,21 @@ function loadRow(handle: CampaignPlayDatabaseHandle, row: TurnRow): LoadedCampai
   ) {
     throw corrupt("Campaign Play worker lease expiry is invalid.");
   }
+  const mutationAudit = parseRecord(row.mutationAuditJson, "Campaign Play mutation audit");
+  if (canonicalizeCampaignPlayProjection(mutationAudit) !== row.mutationAuditJson) {
+    throw corrupt("Campaign Play mutation audit is not stored in canonical form.");
+  }
+  const controlBudgetContinuity = row.turnKind === "player_action" &&
+    mutationAudit.kind === "control_budget_continuity";
   const modelStages = validateModelStages(handle, row, modelSelection);
-  validateAcceptedStageProgress(handle, row, modelStages, document, modelSelection);
+  validateAcceptedStageProgress(
+    handle,
+    row,
+    modelStages,
+    document,
+    modelSelection,
+    controlBudgetContinuity,
+  );
   validateAcceptedStageEvents(handle, row, modelStages);
   const startedAttempts = modelStages.filter((attempt) => attempt.status === "started");
   if (row.stage === "interrupted") {
@@ -2256,10 +2298,6 @@ function loadRow(handle: CampaignPlayDatabaseHandle, row: TurnRow): LoadedCampai
     validateNarratorPacket(handle, row, "pending");
   }
   const events = loadEvents(handle, row);
-  const mutationAudit = parseRecord(row.mutationAuditJson, "Campaign Play mutation audit");
-  if (canonicalizeCampaignPlayProjection(mutationAudit) !== row.mutationAuditJson) {
-    throw corrupt("Campaign Play mutation audit is not stored in canonical form.");
-  }
   const resultRows = handle.sqlite.prepare(`
     SELECT campaign_id AS campaignId, terminal_reason AS terminalReason,
       created_at AS createdAt
@@ -2296,6 +2334,8 @@ function loadRow(handle: CampaignPlayDatabaseHandle, row: TurnRow): LoadedCampai
       expectedTerminalReason = "terminal_failure";
     } else if (row.turnKind === "opening") {
       expectedTerminalReason = "opening_completed";
+    } else if (controlBudgetContinuity) {
+      expectedTerminalReason = "action_resolved";
     } else {
       const routeKind = resolveActionExecutionRoute(document, modelSelection);
       if (routeKind !== "full_authority") {
@@ -3364,6 +3404,134 @@ export function createCampaignPlayTurnRepository(
       if (!committed) throw corrupt("Campaign Play deterministic turn disappeared.");
       return committed;
     },
+    commitControlBudgetContinuity(input) {
+      if (
+        !isNonemptyText(input.turnId) || !isNonnegativeInteger(input.committedAt) ||
+        !isNonemptyText(input.mutationId) ||
+        !["authority_budget", "narration_budget", "control_deadline"].includes(input.reason)
+      ) {
+        throw stageInvalid("Campaign Play continuity transition has invalid fencing fields.");
+      }
+      const packet = campaignPlayNarratorPacketSchema.parse(input.packet);
+      if (packet.turnKind !== "player_action" || packet.turnId !== input.turnId ||
+          packet.campaignId !== handle.campaignId || packet.sourceMoment === null) {
+        throw stageInvalid("Campaign Play continuity packet does not belong to its player action.");
+      }
+      const packetJson = canonicalizeCampaignPlayProjection(packet);
+      const packetHash = hashCampaignPlayNarratorPacket(
+        input.turnId,
+        packet as unknown as CampaignPlayProjectionRecord,
+      );
+      const preflight = loadTurn(input.turnId);
+      if (!preflight) {
+        throw new CampaignPlayTurnRepositoryError("turn_not_found", "Campaign Play turn was not found.");
+      }
+      if (
+        preflight.turnKind !== "player_action" ||
+        preflight.stage === "completed" || preflight.stage === "failed" ||
+        preflight.publicPacketHash !== null ||
+        preflight.workerLeaseOwner !== null || preflight.workerLeaseExpiresAt !== null ||
+        input.committedAt < preflight.updatedAt ||
+        input.committedAt >= preflight.submittedAt + 120_000
+      ) {
+        throw fenceLost("Campaign Play continuity transition missed its durable control boundary.");
+      }
+      if (handle.sqlite.prepare(`SELECT 1 FROM campaign_play_narrations
+        WHERE campaign_id = ? AND turn_id = ?`).get(handle.campaignId, input.turnId)) {
+        throw fenceLost("Campaign Play continuity transition already has a visible packet.");
+      }
+      assertMutationIdUnused(handle, input.mutationId);
+      const mutationAudit = {
+        kind: "control_budget_continuity",
+        reason: input.reason,
+        sourceMomentHash: hashCampaignPlayProjection({
+          domain: "campaign_play_continuity_source_moment",
+          turnId: input.turnId,
+          sourceMoment: packet.sourceMoment,
+        }),
+      } satisfies CampaignPlayProjectionRecord;
+      const protectedPayloadHash = hashCampaignPlayProjection({
+        domain: "campaign_play_control_budget_continuity",
+        turnId: input.turnId,
+        packetHash,
+        mutationAudit,
+        workerEpoch: preflight.workerEpoch,
+        mutationId: input.mutationId,
+      });
+      stateRepository.commitRuntime({
+        event: {
+          eventId: input.mutationId,
+          turnId: input.turnId,
+          kind: "visibility_projected",
+          workerEpoch: preflight.workerEpoch,
+          protectedPayloadHash,
+          createdAt: input.committedAt,
+        },
+        mutate(context) {
+          const current = selectTurn(handle, "id", input.turnId);
+          if (!current) {
+            throw new CampaignPlayTurnRepositoryError("turn_not_found", "Campaign Play turn was not found.");
+          }
+          const loaded = loadRow(handle, current);
+          if (
+            loaded.turnKind !== "player_action" ||
+            loaded.stage === "completed" || loaded.stage === "failed" ||
+            loaded.publicPacketHash !== null || loaded.workerLeaseOwner !== null ||
+            loaded.workerLeaseExpiresAt !== null || input.committedAt < loaded.updatedAt
+          ) {
+            throw fenceLost("Campaign Play continuity transition lost its exact turn boundary.");
+          }
+          const updated = handle.sqlite.prepare(`UPDATE campaign_play_turns
+            SET stage = 'visibility_projected', public_packet_hash = ?,
+              interrupted_stage = NULL, error_code = NULL, resume_eligible = 0,
+              mutation_audit_json = ?, worker_lease_owner = NULL,
+              worker_lease_expires_at = NULL, next_event_sequence = ?, updated_at = ?
+            WHERE id = ? AND campaign_id = ? AND stage = ?
+              AND public_packet_hash IS NULL AND worker_lease_owner IS NULL
+              AND worker_lease_expires_at IS NULL AND next_event_sequence = ?
+              AND updated_at = ?`).run(
+                packetHash,
+                canonicalizeCampaignPlayProjection(mutationAudit),
+                loaded.nextEventSequence + 1,
+                input.committedAt,
+                input.turnId,
+                handle.campaignId,
+                loaded.stage === "interrupted" ? "interrupted" : loaded.stage,
+                loaded.nextEventSequence,
+                loaded.updatedAt,
+              );
+          if (updated.changes !== 1) {
+            throw fenceLost("Campaign Play continuity transition lost its compare-and-swap.");
+          }
+          handle.sqlite.prepare(`INSERT INTO campaign_play_narrations (
+            narration_id, campaign_id, turn_id, status, packet_hash, packet_json, created_at
+          ) VALUES (?, ?, ?, 'pending', ?, ?, ?)`).run(
+            `narration:${hashCampaignPlayProjection({
+              domain: "campaign_play_continuity_narration",
+              turnId: input.turnId,
+              packetHash,
+            }).slice(0, 40)}`,
+            handle.campaignId,
+            input.turnId,
+            packetHash,
+            packetJson,
+            input.committedAt,
+          );
+          insertTurnEvent(handle, input.mutationId, createWorkerProgressEvent({
+            turnId: input.turnId,
+            sequence: loaded.nextEventSequence,
+            acceptedWorldVersion: readAcceptedWorldVersion(handle),
+            worldVersion: context.targetWorldVersion,
+            runtimeRevision: context.targetRuntimeRevision,
+            createdAt: input.committedAt,
+            progress: "narrating",
+          }));
+        },
+      });
+      const committed = loadTurn(input.turnId);
+      if (!committed) throw corrupt("Campaign Play continuity turn disappeared.");
+      return committed;
+    },
     interruptExternal(input) {
       validateLeaseToken(input.token);
       return interruptExternalAttempt({
@@ -4130,6 +4298,13 @@ export function createCampaignPlayTurnRepository(
       return executeTurnWrite(
         input.token.turnId,
         () => operations.commitDeterministic(input),
+        (turn) => turn,
+      );
+    },
+    commitControlBudgetContinuity(input) {
+      return executeTurnWrite(
+        input.turnId,
+        () => operations.commitControlBudgetContinuity(input),
         (turn) => turn,
       );
     },

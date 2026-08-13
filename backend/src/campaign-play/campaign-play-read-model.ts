@@ -173,6 +173,7 @@ function narrationOperation(handle: CampaignPlayDatabaseHandle, turnId: string) 
       current_attempt AS attempt, current_attempt_id AS attemptId,
       concise_display_text AS conciseDisplayText,
       concise_suggested_actions_json AS conciseSuggestedActionsJson,
+      source_kind AS sourceKind,
       created_at AS createdAt, completed_at AS completedAt
     FROM campaign_play_narration_operations
     WHERE campaign_id = ? AND turn_id = ?`).get(handle.campaignId, turnId) as {
@@ -187,6 +188,7 @@ function narrationOperation(handle: CampaignPlayDatabaseHandle, turnId: string) 
       attemptId: string | null;
       conciseDisplayText: string;
       conciseSuggestedActionsJson: string;
+      sourceKind: "model_accepted" | "deterministic_continuity";
       createdAt: number;
       completedAt: number | null;
     } | undefined;
@@ -207,6 +209,7 @@ function narrationOperation(handle: CampaignPlayDatabaseHandle, turnId: string) 
         "narration operation concise actions",
       ),
     },
+    sourceKind: row.sourceKind,
     createdAt: row.createdAt,
     completedAt: row.completedAt,
   }) : null;

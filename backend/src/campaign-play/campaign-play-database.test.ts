@@ -1132,7 +1132,7 @@ describe("Campaign Play core and Rulebook storage", () => {
       .get() as { sql: string };
     expect(after.sql).toContain("job.defer_reason = 'actor_capacity'");
     expect(opened.sqlite.prepare(`SELECT max(created_at) AS latest
-      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_786_161_600_000 });
+      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_786_248_000_000 });
     expect((opened.sqlite.prepare(`SELECT sql FROM sqlite_master
       WHERE type = 'trigger' AND name = 'campaign_play_turn_terminal_result'`)
       .get() as { sql: string }).sql).toContain("'certified_observe'");
@@ -2767,6 +2767,59 @@ describe("Campaign Play core and Rulebook storage", () => {
     })).toThrow(/campaign_play_actor_replan_attempt_identity_invalid|campaign_play_actor_replan_retry_not_authorized/);
     expect(historical.handle.sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
     expect(historical.handle.sqlite.pragma("foreign_key_check")).toEqual([]);
+  });
+
+  it("guards deterministic narration source markers without allowing forged inserts", () => {
+    createAcceptedCampaign(CAMPAIGN_A);
+    const handle = openPlay(CAMPAIGN_A);
+    insertPlayState(handle);
+    insertTurn(handle, { stage: "visibility_projected", publicPacketHash: HASH_A });
+    handle.sqlite.prepare(`INSERT INTO campaign_play_narrations (
+      narration_id, campaign_id, turn_id, status, packet_hash, packet_json, created_at
+    ) VALUES ('narration-source-marker', ?, 'turn-one', 'pending', ?, '{}', 1500)`).run(
+      CAMPAIGN_A,
+      HASH_A,
+    );
+    handle.sqlite.prepare(`INSERT INTO campaign_play_narration_operations (
+      operation_id, campaign_id, turn_id, result_id, narration_id, packet_hash,
+      receipt_ids_json, concise_display_text, concise_suggested_actions_json,
+      status, current_attempt, lease_epoch, created_at, updated_at
+    ) VALUES ('operation-source-marker', ?, 'turn-one', 'result-source-marker',
+      'narration-source-marker', ?, '[]', 'A concise result.', '[]',
+      'pending', 0, 0, 1501, 1501)`).run(CAMPAIGN_A, HASH_A);
+    expect(handle.sqlite.prepare(`SELECT source_kind AS sourceKind
+      FROM campaign_play_narration_operations WHERE operation_id = 'operation-source-marker'`).get())
+      .toEqual({ sourceKind: "model_accepted" });
+    expect(() => handle.sqlite.prepare(`INSERT INTO campaign_play_narration_operations (
+      operation_id, campaign_id, turn_id, result_id, narration_id, packet_hash,
+      receipt_ids_json, concise_display_text, concise_suggested_actions_json,
+      source_kind, status, current_attempt, lease_epoch, created_at, updated_at
+    ) VALUES ('operation-source-marker-invalid', ?, 'turn-two', 'result-source-marker-invalid',
+      'narration-source-marker-invalid', ?, '[]', 'A concise result.', '[]',
+      'deterministic_continuity', 'pending', 0, 0, 1502, 1502)`).run(CAMPAIGN_A, HASH_A))
+      .toThrow(/campaign_play_narration_operation_source_kind_invalid/);
+    expect(() => handle.sqlite.prepare(`UPDATE campaign_play_narration_operations
+      SET source_kind = 'deterministic_continuity' WHERE operation_id = 'operation-source-marker'`).run())
+      .toThrow(/campaign_play_narration_operation_continuity_state_invalid/);
+    handle.sqlite.prepare(`UPDATE campaign_play_narration_operations
+      SET status = 'complete', source_kind = 'deterministic_continuity',
+        current_attempt = 1, current_attempt_id = 'attempt-source-marker',
+        completed_at = 1503, updated_at = 1503
+      WHERE operation_id = 'operation-source-marker'`).run();
+    expect(handle.sqlite.prepare(`SELECT status, source_kind AS sourceKind,
+        current_attempt AS currentAttempt, current_attempt_id AS currentAttemptId
+      FROM campaign_play_narration_operations WHERE operation_id = 'operation-source-marker'`).get())
+      .toEqual({
+        status: "complete",
+        sourceKind: "deterministic_continuity",
+        currentAttempt: 1,
+        currentAttemptId: "attempt-source-marker",
+      });
+    expect(() => handle.sqlite.prepare(`UPDATE campaign_play_narration_operations
+      SET source_kind = 'model_accepted' WHERE operation_id = 'operation-source-marker'`).run())
+      .toThrow(/campaign_play_narration_operation_source_kind_immutable/);
+    expect(handle.sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
+    expect(handle.sqlite.pragma("foreign_key_check")).toEqual([]);
   });
 
   it("persists one actor job and idempotent visibility evidence", () => {

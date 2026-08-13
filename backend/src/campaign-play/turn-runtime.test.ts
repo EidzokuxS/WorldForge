@@ -596,20 +596,21 @@ function judgeFixture(
         fact.kind === "location" && fact.handle !== request.frame.locationHandle && (
           compoundDestinationName === null || fact.summary === compoundDestinationName
         ));
-      const useChoice = choice !== null && choice !== undefined;
+      const selected = selectedChoice;
+      const useChoice = choice !== null && choice !== undefined && selected !== null;
       const useCompoundMovement = !useChoice && compoundDestinationName !== null
         && route !== undefined && destination !== undefined;
       const noEffect = disposition === "impossible" || disposition === "clarification_required";
-      const movementRouteHandle = useChoice && selectedChoice!.kind === "move"
-        ? selectedChoice!.targets.find((candidate) => candidate.kind === "route")?.handle ?? null
+      const movementRouteHandle = useChoice && selected!.kind === "move"
+        ? selected!.targets.find((candidate) => candidate.kind === "route")?.handle ?? null
         : useCompoundMovement ? route.handle : null;
       const movementRoute = movementRouteHandle === null
         ? null
         : request.frame.visibleRoutes.find((candidate) => candidate.handle === movementRouteHandle) ?? null;
       const ruling = compiler.compile(request.frame, request.input, {
-        kind: useChoice ? selectedChoice!.kind : useCompoundMovement || target ? "contact" : "wait",
+        kind: useChoice ? selected!.kind : useCompoundMovement || target ? "contact" : "wait",
         targets: useChoice
-          ? selectedChoice!.targets
+          ? selected!.targets
           : useCompoundMovement
             ? [
                 { handle: route.handle, kind: "route" },
@@ -3960,7 +3961,7 @@ describe("Campaign Play player-action turn runtime", () => {
     const operation = handle.sqlite.prepare(`SELECT operation_id AS operationId,
         result_id AS resultId, turn_id AS turnId, narration_id AS narrationId,
         packet_hash AS packetHash, receipt_ids_json AS receiptIdsJson,
-        status, current_attempt AS currentAttempt, error_code AS errorCode
+        status, source_kind AS sourceKind, current_attempt AS currentAttempt, error_code AS errorCode
       FROM campaign_play_narration_operations
       WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, prepared.turnId) as {
         operationId: string;
@@ -3970,6 +3971,7 @@ describe("Campaign Play player-action turn runtime", () => {
         packetHash: string;
         receiptIdsJson: string;
         status: string;
+        sourceKind: string;
         currentAttempt: number;
         errorCode: string | null;
       };
@@ -3979,9 +3981,10 @@ describe("Campaign Play player-action turn runtime", () => {
       turnId: prepared.pending.turnId,
       narrationId: prepared.pending.narrationId,
       packetHash: prepared.pending.packetHash,
-      status: recoveryFails ? "failed" : "complete",
+      status: "complete",
+      sourceKind: recoveryFails ? "deterministic_continuity" : "model_accepted",
       currentAttempt: 2,
-      errorCode: recoveryFails ? "provider_unavailable" : null,
+      errorCode: null,
     });
     expect(JSON.parse((operation as { receiptIdsJson: string }).receiptIdsJson))
       .toEqual(prepared.pending.receiptIds);
@@ -4031,27 +4034,23 @@ describe("Campaign Play player-action turn runtime", () => {
       CAMPAIGN_ID,
       prepared.pending.operationId,
     );
-    if (recoveryFails) {
-      expect(properScene).toBeUndefined();
-    } else {
-      expect(properScene).toMatchObject({
-        operationId: prepared.pending.operationId,
-        narrationId: prepared.pending.narrationId,
-        turnId: prepared.turnId,
-        packetHash: prepared.pending.packetHash,
-        attemptId: attempts[1]!.attemptId,
-      });
-    }
+    expect(properScene).toMatchObject({
+      operationId: prepared.pending.operationId,
+      narrationId: prepared.pending.narrationId,
+      turnId: prepared.turnId,
+      packetHash: prepared.pending.packetHash,
+      attemptId: attempts[1]!.attemptId,
+    });
     expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
       FROM campaign_play_proper_scenes WHERE campaign_id = ?`).get(CAMPAIGN_ID))
-      .toEqual({ count: recoveryFails ? 0 : 1 });
+      .toEqual({ count: 1 });
     expect(playerActionMechanicsSnapshot(handle, prepared.turnId)).toEqual(prepared.mechanics);
     expect(handle.sqlite.prepare("PRAGMA integrity_check").get())
       .toEqual({ integrity_check: "ok" });
     expect(handle.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 
-  it("stops after one automatic retry when both narration attempts are invalid", async () => {
+  it("publishes deterministic continuity after one automatic retry when both narration attempts are invalid", async () => {
     const fixtureNarrator = playerNarratorFixture();
     const requests: Parameters<typeof fixtureNarrator.narrate>[0][] = [];
     const narrator: TestNarrator = {
@@ -4063,11 +4062,12 @@ describe("Campaign Play player-action turn runtime", () => {
     };
     const result = await runPendingNarrationThroughApplication(narrator);
     const operation = result.handle.sqlite.prepare(`SELECT operation_id AS operationId,
-        status, current_attempt AS currentAttempt, error_code AS errorCode
+        status, source_kind AS sourceKind, current_attempt AS currentAttempt, error_code AS errorCode
       FROM campaign_play_narration_operations
       WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, result.turnId) as {
         operationId: string;
         status: string;
+        sourceKind: string;
         currentAttempt: number;
         errorCode: string | null;
       };
@@ -4093,17 +4093,18 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(attempts[0]).toMatchObject({ status: "failed", errorCode: "narration_invalid" });
     expect(attempts[1]).toMatchObject({ status: "failed", errorCode: "narration_invalid" });
     expect(operation).toMatchObject({
-      status: "failed",
+      status: "complete",
+      sourceKind: "deterministic_continuity",
       currentAttempt: 2,
-      errorCode: "narration_invalid",
+      errorCode: null,
     });
     expect(result.handle.sqlite.prepare(`SELECT COUNT(*) AS count
       FROM campaign_play_proper_scenes WHERE campaign_id = ?`).get(CAMPAIGN_ID))
-      .toEqual({ count: 0 });
+      .toEqual({ count: 1 });
     expect(playerActionMechanicsSnapshot(result.handle, result.turnId)).toEqual(result.mechanics);
     expect(createCampaignPlayReadModel(result.handle).loadState()).toMatchObject({
-      narration: null,
-      narrationOperation: { status: "failed", attempt: 2 },
+      narration: expect.objectContaining({ turnId: result.turnId }),
+      narrationOperation: { status: "complete", attempt: 2, sourceKind: "deterministic_continuity" },
     });
     const failedState = createCampaignPlayReadModel(result.handle).loadState();
     expect(failedState.narrationOperation?.conciseResult).toMatchObject({
@@ -4117,7 +4118,7 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(result.handle.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 
-  it("stops automatic recovery when attempt 2 times out and leaves concise result/actions", async () => {
+  it("publishes deterministic continuity when attempt 2 times out", async () => {
     const successful = playerNarratorFixture();
     let calls = 0;
     const narrator: TestNarrator = {
@@ -4130,11 +4131,12 @@ describe("Campaign Play player-action turn runtime", () => {
     };
     const result = await runPendingNarrationThroughApplication(narrator);
     const operation = result.handle.sqlite.prepare(`SELECT operation_id AS operationId,
-        status, current_attempt AS currentAttempt, error_code AS errorCode
+        status, source_kind AS sourceKind, current_attempt AS currentAttempt, error_code AS errorCode
       FROM campaign_play_narration_operations
       WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, result.turnId) as {
         operationId: string;
         status: string;
+        sourceKind: string;
         currentAttempt: number;
         errorCode: string | null;
       };
@@ -4150,13 +4152,18 @@ describe("Campaign Play player-action turn runtime", () => {
       { attempt: 2, status: "failed", errorCode: "stage_timeout" },
     ]);
     expect(operation).toMatchObject({
-      status: "failed",
+      status: "complete",
+      sourceKind: "deterministic_continuity",
       currentAttempt: 2,
-      errorCode: "stage_timeout",
+      errorCode: null,
     });
     const state = createCampaignPlayReadModel(result.handle).loadState();
-    expect(state.narration).toBeNull();
-    expect(state.narrationOperation).toMatchObject({ status: "failed", attempt: 2 });
+    expect(state.narration).toEqual(expect.objectContaining({ turnId: result.turnId }));
+    expect(state.narrationOperation).toMatchObject({
+      status: "complete",
+      attempt: 2,
+      sourceKind: "deterministic_continuity",
+    });
     expect(state.narrationOperation?.conciseResult).toMatchObject({
       displayText: expect.any(String),
       suggestedActions: expect.arrayContaining([
@@ -4165,7 +4172,7 @@ describe("Campaign Play player-action turn runtime", () => {
     });
     expect(result.handle.sqlite.prepare(`SELECT COUNT(*) AS count
       FROM campaign_play_proper_scenes WHERE campaign_id = ?`).get(CAMPAIGN_ID))
-      .toEqual({ count: 0 });
+      .toEqual({ count: 1 });
     expect(playerActionMechanicsSnapshot(result.handle, result.turnId)).toEqual(result.mechanics);
     expect(result.handle.sqlite.prepare("PRAGMA integrity_check").get())
       .toEqual({ integrity_check: "ok" });
@@ -4200,6 +4207,7 @@ describe("Campaign Play player-action turn runtime", () => {
         packetHash: string;
         receiptIdsJson: string;
         status: string;
+        sourceKind: string;
         currentAttempt: number;
         currentAttemptId: string;
         errorCode: string | null;
@@ -4276,11 +4284,12 @@ describe("Campaign Play player-action turn runtime", () => {
     };
     const result = await runPendingNarrationThroughApplication(narrator);
     const operation = result.handle.sqlite.prepare(`SELECT operation_id AS operationId,
-        status, current_attempt AS currentAttempt, error_code AS errorCode
+        status, source_kind AS sourceKind, current_attempt AS currentAttempt, error_code AS errorCode
       FROM campaign_play_narration_operations
       WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, result.turnId) as {
         operationId: string;
         status: string;
+        sourceKind: string;
         currentAttempt: number;
         errorCode: string | null;
       };
@@ -4298,17 +4307,18 @@ describe("Campaign Play player-action turn runtime", () => {
       { attempt: 2, status: "failed", errorCode: "stage_timeout" },
     ]);
     expect(operation).toMatchObject({
-      status: "failed",
+      status: "complete",
+      sourceKind: "deterministic_continuity",
       currentAttempt: 2,
-      errorCode: "stage_timeout",
+      errorCode: null,
     });
     expect(result.handle.sqlite.prepare(`SELECT COUNT(*) AS count
       FROM campaign_play_proper_scenes WHERE campaign_id = ?`).get(CAMPAIGN_ID))
-      .toEqual({ count: 0 });
+      .toEqual({ count: 1 });
     expect(playerActionMechanicsSnapshot(result.handle, result.turnId)).toEqual(result.mechanics);
     expect(createCampaignPlayReadModel(result.handle).loadState()).toMatchObject({
-      narration: null,
-      narrationOperation: { status: "failed", attempt: 2 },
+      narration: expect.objectContaining({ turnId: result.turnId }),
+      narrationOperation: { status: "complete", attempt: 2, sourceKind: "deterministic_continuity" },
     });
     expect(result.handle.sqlite.prepare("PRAGMA integrity_check").get())
       .toEqual({ integrity_check: "ok" });
@@ -4323,7 +4333,7 @@ describe("Campaign Play player-action turn runtime", () => {
     "gives a %s automatic recovery a fresh deadline without changing operation identity",
     async (_label, firstErrorCode) => {
       const time = fixedClock(100_000);
-      const prepared = await createCompletedPlayerActionForApplication(time, 1);
+      const prepared = await createCompletedPlayerActionForApplication(time);
       const successful = playerNarratorFixture();
       let calls = 0;
       const narrator: TestNarrator = {
@@ -4362,6 +4372,12 @@ describe("Campaign Play player-action turn runtime", () => {
         receiptIdsJson: string;
         errorCode: string | null;
       };
+      const submittedAt = (prepared.handle.sqlite.prepare(`SELECT submitted_at AS submittedAt
+        FROM campaign_play_turns WHERE campaign_id = ? AND id = ?`).get(
+        CAMPAIGN_ID,
+        prepared.turnId,
+      ) as { submittedAt: number }).submittedAt;
+      const controlTargetAt = submittedAt + 115_000;
       expect(persistedBefore.errorCode).toBe(firstErrorCode === "transport_interrupted"
         ? "provider_unavailable"
         : firstErrorCode);
@@ -4383,7 +4399,10 @@ describe("Campaign Play player-action turn runtime", () => {
         packetHash: persistedBefore.packetHash,
         receiptIds: JSON.parse(persistedBefore.receiptIdsJson),
         attempt: 2,
-        deadlineAt: recoveryPreparedAt + CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS,
+        deadlineAt: Math.min(
+          recoveryPreparedAt + CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS,
+          controlTargetAt,
+        ),
       });
       const persistedRecovery = prepared.handle.sqlite.prepare(`SELECT
         automatic_deadline_at AS automaticDeadlineAt,
@@ -4394,7 +4413,10 @@ describe("Campaign Play player-action turn runtime", () => {
       ) as { automaticDeadlineAt: number; activeDeadlineAt: number };
       expect(persistedRecovery).toEqual({
         automaticDeadlineAt: persistedBefore.automaticDeadlineAt,
-        activeDeadlineAt: recoveryPreparedAt + CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS,
+        activeDeadlineAt: Math.min(
+          recoveryPreparedAt + CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS,
+          controlTargetAt,
+        ),
       });
       const completed = await runtime.runNarration(prepared.turnId, token);
       expect(completed).toMatchObject({
@@ -4424,7 +4446,7 @@ describe("Campaign Play player-action turn runtime", () => {
 
   it("enforces one persisted automatic deadline when a late provider ignores abort", async () => {
     const time = deadlineClock(100_000);
-    const prepared = await createCompletedPlayerActionForApplication(time, 1);
+    const prepared = await createCompletedPlayerActionForApplication(time);
     const successful = playerNarratorFixture();
     let calls = 0;
     let releaseLate: (() => Promise<void>) | null = null;
@@ -4473,13 +4495,20 @@ describe("Campaign Play player-action turn runtime", () => {
       CAMPAIGN_ID,
       prepared.turnId,
     ) as { completedAt: number }).completedAt;
+    const submittedAt = (prepared.handle.sqlite.prepare(`SELECT submitted_at AS submittedAt
+      FROM campaign_play_turns WHERE campaign_id = ? AND id = ?`).get(
+      CAMPAIGN_ID,
+      prepared.turnId,
+    ) as { submittedAt: number }).submittedAt;
+    const controlTargetAt = submittedAt + 115_000;
     expect(completedAt).toBeGreaterThan(25_000);
     expect(persistedDeadline.automaticDeadlineAt).toBe(
       completedAt + CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS,
     );
-    expect(persistedDeadline.activeDeadlineAt).toBe(
+    expect(persistedDeadline.activeDeadlineAt).toBe(Math.min(
       recoveryPreparedAt + CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS,
-    );
+      controlTargetAt,
+    ));
     const inFlight = runtime.runNarration(prepared.turnId, secondToken);
     expect(narrator.narrate).toHaveBeenCalledTimes(2);
     time.advanceBy(persistedDeadline.activeDeadlineAt - time.clock.now());
@@ -4540,7 +4569,7 @@ describe("Campaign Play player-action turn runtime", () => {
       packetHash: first!.packetHash,
       receiptIds: first!.receiptIds,
       attempt: 3,
-      deadlineAt: time.clock.now() + 90_000,
+      deadlineAt: Math.min(time.clock.now() + 90_000, controlTargetAt),
     });
     const manualDeadlines = reloaded.sqlite.prepare(`SELECT
         automatic_deadline_at AS automaticDeadlineAt,
@@ -4560,7 +4589,7 @@ describe("Campaign Play player-action turn runtime", () => {
     };
     expect(manualDeadlines).toEqual({
       automaticDeadlineAt: automaticDeadline,
-      activeDeadlineAt: time.clock.now() + 90_000,
+      activeDeadlineAt: Math.min(time.clock.now() + 90_000, controlTargetAt),
       resultId: first!.resultId,
       narrationId: first!.narrationId,
       packetHash: first!.packetHash,
@@ -4701,7 +4730,7 @@ describe("Campaign Play player-action turn runtime", () => {
     },
   );
 
-  it("stops after one automatic provider-unavailable narration recovery", async () => {
+  it("publishes deterministic continuity after one automatic provider-unavailable recovery", async () => {
     const fixtureNarrator = playerNarratorFixture();
     const requests: Parameters<typeof fixtureNarrator.narrate>[0][] = [];
     const narrator: TestNarrator = {
@@ -4724,16 +4753,17 @@ describe("Campaign Play player-action turn runtime", () => {
         { attempt: 1, status: "failed", errorCode: "provider_unavailable" },
         { attempt: 2, status: "failed", errorCode: "provider_unavailable" },
       ]);
-    expect(result.handle.sqlite.prepare(`SELECT status, current_attempt AS currentAttempt,
-        error_code AS errorCode FROM campaign_play_narration_operations
+    expect(result.handle.sqlite.prepare(`SELECT status, source_kind AS sourceKind,
+        current_attempt AS currentAttempt, error_code AS errorCode FROM campaign_play_narration_operations
       WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, result.turnId)).toEqual({
-        status: "failed",
-        currentAttempt: 2,
-        errorCode: "provider_unavailable",
+      status: "complete",
+      sourceKind: "deterministic_continuity",
+      currentAttempt: 2,
+      errorCode: null,
       });
     expect(result.handle.sqlite.prepare(`SELECT COUNT(*) AS count
       FROM campaign_play_proper_scenes WHERE campaign_id = ?`).get(CAMPAIGN_ID))
-      .toEqual({ count: 0 });
+      .toEqual({ count: 1 });
     expect(playerActionMechanicsSnapshot(result.handle, result.turnId)).toEqual(result.mechanics);
   });
 
@@ -4742,7 +4772,7 @@ describe("Campaign Play player-action turn runtime", () => {
   ] as const;
 
   it.each(nonRetryableNarrationFailures)(
-    "does not automatically retry a $label narration failure",
+    "publishes deterministic continuity after a $label narration failure",
     async ({ createError, expectedErrorCode }) => {
       const fixtureNarrator = playerNarratorFixture();
       const narrator: TestNarrator = {
@@ -4752,26 +4782,28 @@ describe("Campaign Play player-action turn runtime", () => {
         }),
       };
       const result = await runPendingNarrationThroughApplication(narrator);
-      const operation = result.handle.sqlite.prepare(`SELECT status,
+      const operation = result.handle.sqlite.prepare(`SELECT status, source_kind AS sourceKind,
           current_attempt AS currentAttempt, error_code AS errorCode
         FROM campaign_play_narration_operations
         WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, result.turnId) as {
           status: string;
+          sourceKind: string;
           currentAttempt: number;
           errorCode: string | null;
         };
       expect(narrator.narrate).toHaveBeenCalledTimes(1);
       expect(operation).toEqual({
-        status: "failed",
+        status: "complete",
+        sourceKind: "deterministic_continuity",
         currentAttempt: 1,
-        errorCode: expectedErrorCode,
+        errorCode: null,
       });
       expect(result.handle.sqlite.prepare(`SELECT COUNT(*) AS count
         FROM campaign_play_narration_attempts WHERE campaign_id = ?`).get(CAMPAIGN_ID))
         .toEqual({ count: 1 });
       expect(result.handle.sqlite.prepare(`SELECT COUNT(*) AS count
         FROM campaign_play_proper_scenes WHERE campaign_id = ?`).get(CAMPAIGN_ID))
-        .toEqual({ count: 0 });
+        .toEqual({ count: 1 });
       expect(playerActionMechanicsSnapshot(result.handle, result.turnId)).toEqual(result.mechanics);
     },
   );
@@ -5182,7 +5214,7 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(snapshot()).toEqual(before);
   });
 
-  it("keeps failed actor replanning interrupted until explicit fresh-epoch resume", async () => {
+  it("defers failed player-action replanning without explicit resume", async () => {
     const { handle, state } = await createReadyCampaignWithOpening();
     const time = fixedClock(3_500);
     let providerCalls = 0;
@@ -5219,7 +5251,8 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(interruptedTurn.stage).toBe("primary_settled");
     expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
       .find((job) => job.jobId === jobId)).toMatchObject({
-        stage: "interrupted",
+        stage: "deferred",
+        deferReason: "control_budget",
         workerEpoch: 1,
       });
     expect(providerCalls).toBe(1);
@@ -5244,65 +5277,137 @@ describe("Campaign Play player-action turn runtime", () => {
       ]),
     });
 
+    expect(runtime.loadTurn(admission.turnId)).toMatchObject({
+      stage: "primary_settled",
+      workerEpoch: interruptedTurn.workerEpoch,
+      workerLeaseOwner: null,
+    });
+    await advanceUntilStage(runtime, time, admission.turnId, "actors_settled");
+    expect(providerCalls).toBe(1);
+  });
+
+  it("keeps the r174 authority-to-actor path inside the shared control budget", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening();
+    const submittedAt = 100_000;
+    const controlTargetAt = submittedAt + 115_000;
+    const publicDeadlineAt = submittedAt + 120_000;
+    const time = fixedClock(submittedAt);
+    let providerCalls = 0;
+    let actorStartedAt: number | null = null;
+    const actorReplanner = createCampaignPlayActorReplanner(handle, {
+      now: time.clock.now,
+      generateObject: (async (request: { prompt: string }) => {
+        providerCalls += 1;
+        actorStartedAt = time.clock.now();
+        // The old path could start a fresh 90+90 second chain here.  Advance
+        // only to the reserved actor boundary and let the replanner's own
+        // deadline fence the result before any reviewer work can run.
+        time.advanceBy(submittedAt + 85_000 - time.clock.now());
+        return {
+          object: actorReplanModelObjectFromPrompt(request.prompt),
+          trace: actorReplanTrace(),
+        };
+      }) as unknown as typeof safeGenerateObject,
+    });
+    const runtime = turnRuntime(
+      handle,
+      time,
+      judgeFixture("deterministic"),
+      gameMasterFixture(),
+      {
+        actorReplanner,
+        // Keep the fixture lease alive while the fake clock crosses the
+        // provider boundary; the player-action budget remains authoritative.
+        leaseDurationMs: 200_000,
+      },
+    );
+    const admission = runtime.admitAction({
+      request: admissionRequest(state, "r174-control-budget-boundary"),
+      submittedAt,
+    });
+
+    await advanceToPrimarySettlement(runtime, time, admission.turnId);
     time.advance();
     await runtime.runNextStage(admission.turnId);
-    expect(providerCalls).toBe(1);
-    expect(runtime.loadTurn(admission.turnId)!.workerEpoch).toBe(interruptedTurn.workerEpoch);
-
+    // Make the Actor Replanner begin exactly 68 seconds after admission.
+    time.advanceBy(submittedAt + 67_980 - time.clock.now());
+    const jobId = forceFirstActorReplan(handle, time, admission.turnId);
     time.advance();
-    await runtime.resumeInterruptedStage({
-      turnId: admission.turnId,
-      interruptedStage: "primary_settled",
-      observedEpoch: interruptedTurn.workerEpoch,
-    });
-    expect(providerCalls).toBe(3);
+    await runtime.runNextStage(admission.turnId);
+
+    expect(actorStartedAt).toBe(submittedAt + 68_000);
+    expect(time.clock.now()).toBe(submittedAt + 85_000);
+    expect(providerCalls).toBe(1);
     expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
       .find((job) => job.jobId === jobId)).toMatchObject({
-        stage: "claimed",
-        workerEpoch: 2,
+        stage: "deferred",
+        deferReason: "control_budget",
+        workerEpoch: 1,
       });
-    expect(handle.sqlite.prepare(`SELECT status, worker_epoch AS workerEpoch
+    expect(handle.sqlite.prepare(`SELECT attempt, status, error_code AS errorCode
       FROM campaign_play_model_stages
       WHERE campaign_id = ? AND turn_id = ? AND kind = 'actor_replanner'
       ORDER BY attempt`).all(CAMPAIGN_ID, admission.turnId)).toEqual([
-      { status: "interrupted", workerEpoch: 1 },
-      { status: "accepted", workerEpoch: 2 },
+      { attempt: 1, status: "interrupted", errorCode: "stage_timeout" },
     ]);
-    expect(runtime.loadTurn(admission.turnId)).toMatchObject({
-      stage: "primary_settled",
-      workerEpoch: interruptedTurn.workerEpoch + 1,
-      workerLeaseOwner: null,
+
+    const completed = await advanceUntilStage(runtime, time, admission.turnId, "completed");
+    expect(completed.completedAt).toBeLessThanOrEqual(controlTargetAt);
+    const commitNarrationContinuity = runtime.commitNarrationContinuity;
+    expect(commitNarrationContinuity).toBeDefined();
+    const continuity = commitNarrationContinuity!(admission.turnId, "narration_budget");
+    expect(continuity).toMatchObject({
+      status: "complete",
+      sourceKind: "deterministic_continuity",
     });
-    expect(runtime.loadTelemetry(admission.turnId).modelAttempts
-      .filter((attempt) => attempt.kind === "actor_replanner"))
-      .toEqual([
-        expect.objectContaining({ status: "interrupted", costComplete: false }),
-        expect.objectContaining({ status: "accepted", costComplete: true }),
-      ]);
+    expect(createCampaignPlayReadModel(handle).loadState()).toMatchObject({
+      narration: expect.objectContaining({ turnId: admission.turnId }),
+      narrationOperation: expect.objectContaining({
+        turnId: admission.turnId,
+        status: "complete",
+        sourceKind: "deterministic_continuity",
+      }),
+    });
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_proper_scenes WHERE campaign_id = ? AND turn_id = ?`).get(
+      CAMPAIGN_ID,
+      admission.turnId,
+    )).toEqual({ count: 1 });
+
+    const settledSnapshot = handle.sqlite.prepare(`SELECT
+        (SELECT COUNT(*) FROM campaign_play_proper_scenes WHERE campaign_id = ?) AS scenes,
+        (SELECT COUNT(*) FROM campaign_play_turn_results WHERE campaign_id = ? AND turn_id = ?) AS results,
+        (SELECT COUNT(*) FROM campaign_play_narration_attempts WHERE campaign_id = ? AND turn_id = ?) AS attempts`).get(
+      CAMPAIGN_ID,
+      CAMPAIGN_ID,
+      admission.turnId,
+      CAMPAIGN_ID,
+      admission.turnId,
+    );
+    time.advanceBy(publicDeadlineAt - time.clock.now() + 1);
+    expect(() => commitNarrationContinuity!(admission.turnId, "control_deadline"))
+      .toThrow("Campaign Play narration continuity reached its durable boundary");
+    expect(handle.sqlite.prepare(`SELECT
+        (SELECT COUNT(*) FROM campaign_play_proper_scenes WHERE campaign_id = ?) AS scenes,
+        (SELECT COUNT(*) FROM campaign_play_turn_results WHERE campaign_id = ? AND turn_id = ?) AS results,
+        (SELECT COUNT(*) FROM campaign_play_narration_attempts WHERE campaign_id = ? AND turn_id = ?) AS attempts`).get(
+      CAMPAIGN_ID,
+      CAMPAIGN_ID,
+      admission.turnId,
+      CAMPAIGN_ID,
+      admission.turnId,
+    )).toEqual(settledSnapshot);
   });
 
-  it("renews the same worker epoch while an explicit actor resume waits on the model", async () => {
+  it("defers a provider interruption without a second actor epoch", async () => {
     const { handle, state } = await createReadyCampaignWithOpening();
     const time = fixedClock(3_800);
-    const originalWait = time.clock.wait;
-    let heartbeatArmed = false;
-    let resolveHeartbeat!: () => void;
-    const heartbeatObserved = new Promise<void>((resolve) => {
-      resolveHeartbeat = resolve;
-    });
-    time.clock.wait = async (delayMs, signal) => {
-      if (!heartbeatArmed) return originalWait(delayMs, signal);
-      heartbeatArmed = false;
-      time.advanceBy(delayMs);
-      resolveHeartbeat();
-    };
     let providerCalls = 0;
     const actorReplanner = createCampaignPlayActorReplanner(handle, {
       now: time.clock.now,
       generateObject: (async (request: { prompt: string }) => {
         providerCalls += 1;
         if (providerCalls === 1) throw new Error("provider transport interrupted");
-        if (providerCalls === 2) await heartbeatObserved;
         return {
           object: actorReplanModelObjectFromPrompt(request.prompt),
           trace: actorReplanTrace(),
@@ -5328,41 +5433,18 @@ describe("Campaign Play player-action turn runtime", () => {
     time.advance();
     await runtime.runNextStage(admission.turnId);
     const interruptedTurn = runtime.loadTurn(admission.turnId)!;
+    expect(providerCalls).toBe(1);
     expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
       .find((job) => job.jobId === jobId)).toMatchObject({
-        stage: "interrupted",
+        stage: "deferred",
+        deferReason: "control_budget",
         workerEpoch: 1,
       });
-
-    heartbeatArmed = true;
-    time.advance();
-    await runtime.resumeInterruptedStage({
-      turnId: admission.turnId,
-      interruptedStage: "primary_settled",
-      observedEpoch: interruptedTurn.workerEpoch,
+    expect(runtime.loadTurn(admission.turnId)).toMatchObject({
+      stage: "primary_settled",
+      workerLeaseOwner: null,
     });
-
-    expect(providerCalls).toBe(3);
-    expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
-      .find((job) => job.jobId === jobId)).toMatchObject({
-        stage: "claimed",
-        workerEpoch: 2,
-      });
-    expect(handle.sqlite.prepare(`SELECT count(*) AS value
-      FROM campaign_play_runtime_events
-      WHERE campaign_id = ? AND turn_id = ? AND kind = 'worker_lease_renewed'
-        AND worker_epoch = ?`).get(
-          CAMPAIGN_ID,
-          admission.turnId,
-          interruptedTurn.workerEpoch + 1,
-        )).toEqual({ value: 1 });
-    expect(handle.sqlite.prepare(`SELECT status, worker_epoch AS workerEpoch
-      FROM campaign_play_model_stages
-      WHERE campaign_id = ? AND turn_id = ? AND kind = 'actor_replanner'
-      ORDER BY attempt`).all(CAMPAIGN_ID, admission.turnId)).toEqual([
-      { status: "interrupted", workerEpoch: 1 },
-      { status: "accepted", workerEpoch: 2 },
-    ]);
+    await advanceUntilStage(runtime, time, admission.turnId, "actors_settled");
   });
 
   it("defers an invalid background replan and continues the committed player turn", async () => {
@@ -5423,7 +5505,7 @@ describe("Campaign Play player-action turn runtime", () => {
     ["budget", "stage_budget_exceeded"],
     ["persistence", "persistence_failed"],
   ] as const)(
-    "persists actor replanner %s failure as an explicit interruption",
+    "keeps actor replanner %s failure inside the control contract",
     async (failure, expectedErrorCode) => {
       const { handle, state } = await createReadyCampaignWithOpening();
       const time = fixedClock(3_800);
@@ -5469,12 +5551,16 @@ describe("Campaign Play player-action turn runtime", () => {
       time.advance();
       await runtime.runNextStage(admission.turnId);
       expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
-        .find((job) => job.jobId === jobId)).toMatchObject({
-          stage: "interrupted",
-          workerEpoch: 1,
-        });
-      expect(() => createCampaignPlayActorScheduler(handle).validateTurnSettlement(admission.turnId))
-        .toThrow("scheduler_job_invalid");
+        .find((job) => job.jobId === jobId)).toMatchObject(failure === "budget"
+          ? { stage: "deferred", deferReason: "control_budget", workerEpoch: 1 }
+          : { stage: "interrupted", workerEpoch: 1 });
+      if (failure === "budget") {
+        expect(() => createCampaignPlayActorScheduler(handle).validateTurnSettlement(admission.turnId))
+          .not.toThrow();
+      } else {
+        expect(() => createCampaignPlayActorScheduler(handle).validateTurnSettlement(admission.turnId))
+          .toThrow("scheduler_job_invalid");
+      }
       expect(handle.sqlite.prepare(`SELECT status, error_code AS errorCode
         FROM campaign_play_model_stages
         WHERE campaign_id = ? AND turn_id = ? AND kind = 'actor_replanner'`).get(
@@ -5489,6 +5575,16 @@ describe("Campaign Play player-action turn runtime", () => {
       expect(providerCalls).toBe(firstAttemptCalls);
       expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
         .filter((job) => job.workerEpoch > 0).map((job) => job.jobId)).toEqual([jobId]);
+
+      if (failure === "budget") {
+        expect(runtime.loadTurn(admission.turnId)).toMatchObject({
+          stage: "primary_settled",
+          workerLeaseOwner: null,
+        });
+        expect(providerCalls).toBe(1);
+        await advanceUntilStage(runtime, time, admission.turnId, "actors_settled");
+        return;
+      }
 
       if (failure === "persistence") {
         handle.sqlite.exec("DROP TRIGGER test_actor_replanner_acceptance_failure");

@@ -1319,6 +1319,67 @@ describe("CampaignPlayApplication", () => {
     expect(recoveredRun).toHaveBeenCalledTimes(1);
   });
 
+  it("closes an unclaimed player action at the shared control target during restart recovery", async () => {
+    createAcceptedCampaign();
+    let now = 1_300;
+    const firstApplication = createCampaignPlayApplication({
+      now: () => now,
+      runtimeFactory: {
+        createOpening: (handle) => fakeOpeningRuntime(handle, { runNextStage: vi.fn() }),
+        createTurn: (handle) => {
+          const runtime = fakePlayerRuntime(handle, {});
+          const repository = createCampaignPlayTurnRepository(handle);
+          runtime.runNextStage = async (turnId) => {
+            const turn = repository.loadTurn(turnId)!;
+            return {
+              turn,
+              recovery: repository.loadRecoveryState(turnId, now),
+              telemetry: null,
+            };
+          };
+          return runtime;
+        },
+      },
+    });
+    firstApplication.loadState(CAMPAIGN_ID);
+    bootstrapPlayer(firstApplication);
+    markPlayerPhaseReady();
+    const state = firstApplication.loadState(CAMPAIGN_ID);
+    const admission = firstApplication.admitTurn(CAMPAIGN_ID, {
+      source: "freeform",
+      idempotencyKey: "player-restart-control-target",
+      text: "Ask about the current signal.",
+      expectedWorldVersion: state.worldVersion,
+      expectedRuntimeRevision: state.runtimeRevision,
+    });
+    await firstApplication.waitForIdle(CAMPAIGN_ID);
+
+    now = 116_301;
+    const continuity = vi.fn((turnId: string) => {
+      const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
+      try {
+        return createCampaignPlayTurnRepository(handle).loadTurn(turnId)!;
+      } finally {
+        handle.close();
+      }
+    });
+    const restarted = createCampaignPlayApplication({
+      now: () => now,
+      runtimeFactory: {
+        createOpening: (handle) => fakeOpeningRuntime(handle, { runNextStage: vi.fn() }),
+        createTurn: (handle) => {
+          const runtime = fakePlayerRuntime(handle, {});
+          runtime.commitControlBudgetContinuity = continuity;
+          return runtime;
+        },
+      },
+    });
+
+    await restarted.recoverCampaign(CAMPAIGN_ID);
+
+    expect(continuity).toHaveBeenCalledWith(admission.turnId, "control_deadline");
+  });
+
   it("wakes startup recovery when a foreign deterministic lease reaches its durable expiry", async () => {
     createAcceptedCampaign();
     const firstApplication = createCampaignPlayApplication({

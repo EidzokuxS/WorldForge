@@ -59,6 +59,10 @@ export interface CampaignPlayActorReplanRequest {
   maximumTotalTokens: number;
   maximumCostMicros: number;
   externalOperationDeadlineMs: number;
+  /** Absolute internal completion target for this optional stage. */
+  controlDeadlineAt?: number;
+  /** When the optional stage exhausts its control budget, defer it silently. */
+  deferOnControlBudgetExhaustion?: boolean;
   signal?: AbortSignal;
   createdAt: number;
   injectFault?: (
@@ -80,8 +84,8 @@ export type CampaignPlayActorReplanOutcome =
   | {
       kind: "deferred";
       jobId: string;
-      reason: "replan_invalid";
-      errorCode: "model_contract_invalid";
+      reason: "replan_invalid" | "control_budget";
+      errorCode: "model_contract_invalid" | "provider_unavailable" | "stage_budget_exceeded" | "stage_timeout";
       workerEpoch: number;
     }
   | {
@@ -781,7 +785,9 @@ export function createCampaignPlayActorReplanner(
         || !Number.isSafeInteger(request.maximumTotalTokens) || request.maximumTotalTokens < 1
         || !Number.isSafeInteger(request.maximumCostMicros) || request.maximumCostMicros < 0
         || !Number.isSafeInteger(request.externalOperationDeadlineMs)
-        || request.externalOperationDeadlineMs <= 0) {
+        || request.externalOperationDeadlineMs <= 0
+        || (request.controlDeadlineAt !== undefined &&
+          (!Number.isSafeInteger(request.controlDeadlineAt) || request.controlDeadlineAt <= request.createdAt))) {
         throw new CampaignPlayActorReplannerError("replan_input_invalid");
       }
       const frame = scheduler.buildActorFrame(request.jobId);
@@ -855,7 +861,10 @@ export function createCampaignPlayActorReplanner(
         modelWorkerEpoch: firstModelWorkerEpoch,
       });
       const providerStartedAt = dependencies.now();
-      const deadlineAt = providerStartedAt + request.externalOperationDeadlineMs;
+      const deadlineAt = Math.min(
+        providerStartedAt + request.externalOperationDeadlineMs,
+        request.controlDeadlineAt ?? Number.MAX_SAFE_INTEGER,
+      );
       if (!Number.isSafeInteger(deadlineAt) || deadlineAt <= providerStartedAt) {
         throw new CampaignPlayActorReplannerError("replan_input_invalid");
       }
@@ -1579,7 +1588,17 @@ export function createCampaignPlayActorReplanner(
           dependencies.now(),
           activeAttemptOperation?.startedAt ?? providerStartedAt,
         );
-        const rejectedSchedule = failure.errorCode === "model_contract_invalid"
+        // Player-action replanning is optional.  Once the authorized chain has
+        // no accepted plan left, keep the turn moving by deferring the actor
+        // job, while preserving the existing interrupted behavior for lease
+        // and persistence faults that cannot be safely fenced as a plan
+        // outcome.
+        const controlBudgetFailure = request.deferOnControlBudgetExhaustion === true &&
+          (failure.errorCode === "provider_unavailable" ||
+            failure.errorCode === "stage_budget_exceeded" ||
+            failure.errorCode === "stage_timeout" ||
+            (failure.errorCode === "model_contract_invalid" && failure.attemptNumber >= 2));
+        const rejectedSchedule = (failure.errorCode === "model_contract_invalid" || controlBudgetFailure)
           ? (() => {
               const row = handle.sqlite.prepare(`SELECT s.schedule_id AS scheduleId,
                 s.plan_id AS planId,
@@ -1608,6 +1627,7 @@ export function createCampaignPlayActorReplanner(
             })()
           : null;
         const deferInvalidReplan = rejectedSchedule !== null;
+        const deferReason = controlBudgetFailure ? "control_budget" : "replan_invalid";
         emitContractRejectionDiagnostic(failure);
         emitRejectionDiagnostic(failure);
         try {
@@ -1638,7 +1658,7 @@ export function createCampaignPlayActorReplanner(
             actorWorkerEpoch: workerEpoch,
             modelWorkerEpoch: failure.modelWorkerEpoch,
             attemptNumber: failure.attemptNumber,
-            outcome: deferInvalidReplan ? "deferred" : "interrupted",
+            outcome: deferInvalidReplan ? deferReason : "interrupted",
           }),
           committedAt: interruptedAt,
           mutate(context) {
@@ -1668,10 +1688,11 @@ export function createCampaignPlayActorReplanner(
             let terminalChanges: number;
             if (deferInvalidReplan) {
               const terminal = context.sqlite.prepare(`UPDATE campaign_play_actor_jobs
-                SET stage = 'deferred', defer_reason = 'replan_invalid', completed_at = ?
+                SET stage = 'deferred', defer_reason = ?, completed_at = ?
                 WHERE job_id = ? AND campaign_id = ? AND stage = 'claimed'
                   AND proposal_id IS NULL AND worker_epoch = ?
                   AND claim_turn_worker_epoch = ?`).run(
+                deferReason,
                 interruptedAt,
                 request.jobId,
                 context.campaignId,
@@ -1715,8 +1736,13 @@ export function createCampaignPlayActorReplanner(
           ? {
               kind: "deferred",
               jobId: request.jobId,
-              reason: "replan_invalid",
-              errorCode: "model_contract_invalid",
+              reason: deferReason,
+              errorCode: controlBudgetFailure
+                ? (failure.errorCode as
+                    | "provider_unavailable"
+                    | "stage_budget_exceeded"
+                    | "stage_timeout")
+                : "model_contract_invalid",
               workerEpoch,
             }
           : { kind: "interrupted", jobId: request.jobId, errorCode: failure.errorCode, workerEpoch };
@@ -1762,14 +1788,18 @@ export function createCampaignPlayActorReplanner(
         recoveryModel !== undefined &&
         dependencies.now() < request.token.expiresAt && dependencies.now() < deadlineAt;
       const mayEscalate = (contractRecovery || stageTimeoutRecovery) &&
-        !request.signal?.aborted && dependencies.now() < request.token.expiresAt;
+        !request.signal?.aborted && dependencies.now() < request.token.expiresAt &&
+        dependencies.now() < (request.controlDeadlineAt ?? Number.MAX_SAFE_INTEGER);
       if (mayEscalate) {
         emitContractRejectionDiagnostic(firstResult);
         // SQLite rejects a shared numeric deadline for new attempt-2 rows.  A
         // same-millisecond clock sample is still a new operation, so advance
         // the retry start by the smallest representable unit in that case.
         const retryStartedAt = Math.max(dependencies.now(), providerStartedAt + 1);
-        const retryDeadlineAt = retryStartedAt + request.externalOperationDeadlineMs;
+        const retryDeadlineAt = Math.min(
+          retryStartedAt + request.externalOperationDeadlineMs,
+          request.controlDeadlineAt ?? Number.MAX_SAFE_INTEGER,
+        );
         if (!Number.isSafeInteger(retryDeadlineAt) || retryDeadlineAt <= retryStartedAt) {
           return finalizeFailure({
             ...firstResult,

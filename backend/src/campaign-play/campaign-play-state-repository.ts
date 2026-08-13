@@ -862,6 +862,7 @@ function selectPublicState(
       operation.packet_hash AS packetHash, operation.receipt_ids_json AS receiptIdsJson,
       operation.concise_display_text AS conciseDisplayText,
       operation.concise_suggested_actions_json AS conciseSuggestedActionsJson,
+      operation.source_kind AS sourceKind,
       operation.status, operation.current_attempt AS currentAttempt,
       operation.current_attempt_id AS currentAttemptId,
       operation.created_at AS createdAt, operation.completed_at AS completedAt
@@ -928,6 +929,7 @@ function selectPublicState(
           "Narration operation concise actions",
         ),
       },
+      sourceKind: narrationOperation.sourceKind,
       createdAt: narrationOperation.createdAt,
       completedAt: narrationOperation.completedAt,
     })

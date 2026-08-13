@@ -817,6 +817,7 @@ export const campaignPlayNarrationOperationSchema:
       suggestedActions: z.array(campaignPlaySuggestedActionSchema)
         .max(CAMPAIGN_PLAY_LIMITS.suggestedActions),
     }).strict(),
+    sourceKind: z.enum(["model_accepted", "deterministic_continuity"]).optional(),
     createdAt: timestampSchema,
     completedAt: timestampSchema.nullable(),
   }).strict().superRefine((operation, context) => {
@@ -3632,6 +3633,7 @@ export const campaignPlayActorJobSchema = z.object({
     "actor_capacity",
     "replan_capacity",
     "replan_invalid",
+    "control_budget",
   ]).nullable(),
   createdAt: timestampSchema,
   completedAt: timestampSchema.nullable(),

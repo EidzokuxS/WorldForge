@@ -402,15 +402,40 @@ export function createCampaignPlayTurnService(
         outcome: "stale",
       });
     };
-    const externalOperationDeadlineMs = handler.externalOperationDeadlineMs
+    const configuredExternalOperationDeadlineMs = handler.externalOperationDeadlineMs
       ?? input.externalOperationDeadlineMs;
+    const controlTargetAt = turn.turnKind === "player_action"
+      ? turn.submittedAt + 115_000
+      : null;
+    const remainingControlBudgetMs = controlTargetAt === null
+      ? null
+      : controlTargetAt - attemptStartedAt;
+    const externalOperationDeadlineMs = remainingControlBudgetMs === null
+      ? configuredExternalOperationDeadlineMs
+      : configuredExternalOperationDeadlineMs === undefined
+        ? remainingControlBudgetMs
+        : Math.min(configuredExternalOperationDeadlineMs, remainingControlBudgetMs);
+    const deadlineLimitedByControl = controlTargetAt !== null &&
+      (configuredExternalOperationDeadlineMs === undefined ||
+        (externalOperationDeadlineMs !== undefined &&
+          externalOperationDeadlineMs < configuredExternalOperationDeadlineMs));
     if (
-      externalOperationDeadlineMs !== undefined &&
-      !isSafePositiveInteger(externalOperationDeadlineMs)
+      configuredExternalOperationDeadlineMs !== undefined &&
+      !isSafePositiveInteger(configuredExternalOperationDeadlineMs)
     ) {
       throw new CampaignPlayTurnServiceError(
         "turn_service_invalid",
         "Campaign Play external stage handler requires a positive deadline when configured.",
+      );
+    }
+    if (externalOperationDeadlineMs !== undefined && externalOperationDeadlineMs <= 0) {
+      return interrupt(
+        token,
+        attemptStartedAt,
+        interruptionEvidence("stage_budget_exceeded", Math.max(0, now() - attemptStartedAt)),
+        queueTimeMs,
+        renewalCount,
+        attempt,
       );
     }
     const controller = new AbortController();
@@ -505,7 +530,10 @@ export function createCampaignPlayTurnService(
       return interrupt(
         token,
         attemptStartedAt,
-        interruptionEvidence("stage_timeout", now() - attemptStartedAt),
+        interruptionEvidence(
+          deadlineLimitedByControl ? "stage_budget_exceeded" : "stage_timeout",
+          now() - attemptStartedAt,
+        ),
         queueTimeMs,
         renewalCount,
         attempt,
