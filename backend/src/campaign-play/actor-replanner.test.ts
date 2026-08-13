@@ -1139,7 +1139,7 @@ describe("Campaign Play actor replanner", () => {
       modelWorkerEpoch: 1,
       actorJobWorkerEpoch: 1,
       claimTurnWorkerEpoch: token.epoch,
-      retryConsumedAt: 1_600,
+      retryConsumedAt: 1_601,
     });
     expect(attempts[1]).toMatchObject({
       attemptNumber: 2,
@@ -1150,7 +1150,8 @@ describe("Campaign Play actor replanner", () => {
     });
     expect(attempts[1]!.frameHash).toBe(attempts[0]!.frameHash);
     expect(attempts[1]!.frozenBaseWorldVersion).toBe(attempts[0]!.frozenBaseWorldVersion);
-    expect(attempts[1]!.deadlineAt).toBe(attempts[0]!.deadlineAt);
+    expect(attempts[1]!.deadlineAt).toBe(91_601);
+    expect(attempts[1]!.deadlineAt as number).toBeGreaterThan(attempts[0]!.deadlineAt as number);
     expect(createCampaignPlayActorScheduler(handle).listTurnJobs("turn-player")[0])
       .toMatchObject({ stage: "claimed", workerEpoch: 1, planId: outcome.kind === "replanned" ? outcome.plan.planId : null });
     expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_plans
@@ -1287,7 +1288,7 @@ describe("Campaign Play actor replanner", () => {
       .toEqual({ status: "completed", nextActAt: 15, lastActAt: null, agencyDebt: 1 });
   });
 
-  it("recovers one grounding-review contract failure with the same linked job identity", async () => {
+  it("recovers one grounding-review contract failure with the same linked job and a fresh deadline", async () => {
     const { handle, token, jobId } = createReplanFixture();
     const logCapture = captureActorReplanLogs();
     const bypassModel = {} as LanguageModel;
@@ -1383,7 +1384,7 @@ describe("Campaign Play actor replanner", () => {
       .toEqual({ count: 1 });
   });
 
-  it("recovers one other-actor grounding failure with the same job and deadline", async () => {
+  it("recovers one other-actor grounding failure with the same job and a fresh deadline", async () => {
     const { handle, token, jobId } = createReplanFixture();
     const bypassModel = {} as LanguageModel;
     const recoveryModel = {} as LanguageModel;
@@ -1462,9 +1463,10 @@ describe("Campaign Play actor replanner", () => {
       claimTurnWorkerEpoch: token.epoch,
       frameHash: attempts[0]!.frameHash,
       frozenBaseWorldVersion: attempts[0]!.frozenBaseWorldVersion,
-      deadlineAt: attempts[0]!.deadlineAt,
+      deadlineAt: 91_601,
       retryConsumedAt: null,
     });
+    expect(attempts[1]!.deadlineAt as number).toBeGreaterThan(attempts[0]!.deadlineAt as number);
     expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_replan_attempts
       WHERE campaign_id = ? AND job_id = ?`).get(CAMPAIGN_ID, jobId)).toEqual({ count: 2 });
     expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_plans
@@ -1692,7 +1694,7 @@ describe("Campaign Play actor replanner", () => {
       attemptNumber: 2,
       frameHash: attempts[0]!.frameHash,
       frozenBaseWorldVersion: attempts[0]!.frozenBaseWorldVersion,
-      deadlineAt: attempts[0]!.deadlineAt,
+      deadlineAt: 91_601,
     });
     expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_plans
       WHERE campaign_id = ? AND actor_id = 'actor-b' AND status = 'active'`).get(CAMPAIGN_ID))
@@ -1921,7 +1923,7 @@ describe("Campaign Play actor replanner", () => {
         retry_consumed_at AS retryConsumedAt FROM campaign_play_actor_replan_attempts
       WHERE campaign_id = ? AND job_id = ? ORDER BY attempt_number`).all(CAMPAIGN_ID, jobId))
       .toEqual([
-        { attemptNumber: 1, retryConsumedAt: 1_600 },
+        { attemptNumber: 1, retryConsumedAt: 1_601 },
         { attemptNumber: 2, retryConsumedAt: null },
       ]);
     expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_plans
@@ -2023,7 +2025,7 @@ describe("Campaign Play actor replanner", () => {
     });
     await vi.waitFor(() => expect(resolveRecovery).toBeTypeOf("function"));
     expect(generateObject.mock.calls[1]![0].abortSignal)
-      .toBe(generateObject.mock.calls[0]![0].abortSignal);
+      .not.toBe(generateObject.mock.calls[0]![0].abortSignal);
     expect(generateObject.mock.calls[1]![0].abortSignal).not.toBe(controller.signal);
     controller.abort();
     expect(generateObject.mock.calls[1]![0].abortSignal?.aborted).toBe(true);
@@ -2235,6 +2237,7 @@ describe("Campaign Play actor replanner", () => {
     let fireDeadline: (() => void) | undefined;
     let callNumber = 0;
     let clearCount = 0;
+    let timerCallNumber = 0;
     const bypassModel = {} as LanguageModel;
     const recoveryModel = {} as LanguageModel;
     const generateObject = vi.fn((request: { prompt: string; model: LanguageModel; abortSignal?: AbortSignal }) => {
@@ -2262,7 +2265,8 @@ describe("Campaign Play actor replanner", () => {
       now: () => 1_600,
       generateObject: generateObject as unknown as typeof safeGenerateObject,
       setTimer: (callback, delayMs) => {
-        expect(delayMs).toBe(100);
+        timerCallNumber += 1;
+        expect(delayMs).toBe(timerCallNumber === 1 ? 100 : 101);
         fireDeadline = callback;
         return 1 as unknown as ReturnType<typeof setTimeout>;
       },
@@ -2317,7 +2321,7 @@ describe("Campaign Play actor replanner", () => {
     });
     expect(generateObject).toHaveBeenCalledTimes(3);
     expect(generateObject.mock.calls[2]![0].abortSignal?.aborted).toBe(true);
-    expect(clearCount).toBe(1);
+    expect(clearCount).toBe(2);
     expect(handle.sqlite.prepare(`SELECT attempt, status, schema_outcome AS schemaOutcome,
         error_code AS errorCode FROM campaign_play_model_stages
       WHERE campaign_id = ? AND turn_id = 'turn-player' AND kind = 'actor_replanner'
@@ -2338,7 +2342,7 @@ describe("Campaign Play actor replanner", () => {
       modelWorkerEpoch: 1,
       actorJobWorkerEpoch: 1,
       claimTurnWorkerEpoch: token.epoch,
-      retryConsumedAt: 1_600,
+      retryConsumedAt: 1_601,
     });
     expect(attempts[1]).toMatchObject({
       attemptNumber: 2,
@@ -2347,7 +2351,8 @@ describe("Campaign Play actor replanner", () => {
       claimTurnWorkerEpoch: token.epoch,
       retryConsumedAt: null,
     });
-    expect(attempts[1]!.deadlineAt).toBe(attempts[0]!.deadlineAt);
+    expect(attempts[1]!.deadlineAt).toBe(1_701);
+    expect(attempts[1]!.deadlineAt as number).toBeGreaterThan(attempts[0]!.deadlineAt as number);
     expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_plans
       WHERE campaign_id = ? AND actor_id = 'actor-b' AND status = 'active'`).get(CAMPAIGN_ID))
       .toEqual({ count: 0 });

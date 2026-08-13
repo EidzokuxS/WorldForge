@@ -1155,6 +1155,11 @@ export function createCampaignPlayActorReplanner(
       ): Promise<AttemptResult> => {
         const startedAt = operation.startedAt;
         const attemptDeadlineAt = operation.deadlineAt;
+        // A recovery may advance its logical start by one millisecond when the
+        // wall clock samples the same value as attempt 1. Keep every durable
+        // timestamp in that attempt at or after the operation start so the
+        // turn boundary cannot move backwards in that case.
+        const operationNow = (): number => Math.max(dependencies.now(), startedAt);
         const assertOperationLive = operation.assertLive;
         const runProvider = operation.runProvider;
         let observedTrace: Readonly<SafeGenerateTrace> | undefined;
@@ -1198,7 +1203,7 @@ export function createCampaignPlayActorReplanner(
             processStoppedAfterProviderReturn = true;
             throw cause;
           }
-          const proposerCompletedAt = dependencies.now();
+          const proposerCompletedAt = operationNow();
           assertOperationLive();
           if (proposerCompletedAt >= request.token.expiresAt) {
             throw new CampaignPlayActorReplannerError("replan_epoch_lost");
@@ -1280,7 +1285,7 @@ export function createCampaignPlayActorReplanner(
           }
           observedTrace = reviewed.trace;
           assertOperationLive();
-          const reviewerCompletedAt = dependencies.now();
+          const reviewerCompletedAt = operationNow();
           assertOperationLive();
           if (reviewerCompletedAt >= request.token.expiresAt) {
             throw new CampaignPlayActorReplannerError("replan_epoch_lost");
@@ -1331,7 +1336,7 @@ export function createCampaignPlayActorReplanner(
             throw new CampaignPlayActorReplannerError("replan_persistence_failed", { cause });
           }
           assertOperationLive();
-          const acceptedAt = dependencies.now();
+          const acceptedAt = operationNow();
           assertOperationLive();
           requireTurnLease(handle, request.token, acceptedAt);
           const stillOwned = handle.sqlite.prepare(`SELECT 1 AS found FROM campaign_play_actor_jobs
@@ -1396,14 +1401,15 @@ export function createCampaignPlayActorReplanner(
                            AND prior_attempt.requested_provider_id = attempt.requested_provider_id
                            AND prior_attempt.requested_model = attempt.requested_model
                            AND ((prior_model.schema_outcome = 'invalid'
-                             AND prior_model.error_code = 'model_contract_invalid'
-                             AND attempt.created_at < prior_attempt.deadline_at
-                             AND attempt.deadline_at = prior_attempt.deadline_at)
-                             OR (prior_model.schema_outcome = 'transport_error'
-                             AND prior_model.error_code = 'stage_timeout'
-                             AND attempt.created_at >= prior_attempt.deadline_at
-                             AND attempt.deadline_at > attempt.created_at
-                             AND attempt.deadline_at > prior_attempt.deadline_at))
+                                 AND prior_model.error_code = 'model_contract_invalid'
+                                 AND attempt.created_at < prior_attempt.deadline_at
+                                 AND attempt.deadline_at > attempt.created_at
+                                 AND attempt.deadline_at > prior_attempt.deadline_at)
+                                 OR (prior_model.schema_outcome = 'transport_error'
+                                 AND prior_model.error_code = 'stage_timeout'
+                                 AND attempt.created_at >= prior_attempt.deadline_at
+                                 AND attempt.deadline_at > attempt.created_at
+                                 AND attempt.deadline_at > prior_attempt.deadline_at))
                        ))
                       AND model.status = 'started' AND model.id = attempt.model_stage_row_id
                       AND model.stage_id = attempt.stage_id
@@ -1527,7 +1533,7 @@ export function createCampaignPlayActorReplanner(
           return { kind: "replanned", plan, modelWorkerEpoch, attemptNumber };
         } catch (error) {
           if (processStoppedAfterProviderReturn) throw error;
-          const interruptedAt = dependencies.now();
+          const interruptedAt = operationNow();
           const durationMs = Math.max(0, interruptedAt - startedAt);
           const trace = getSafeGenerateObjectTrace(error) ?? observedTrace ?? undefined;
           const epochLost = (error instanceof CampaignPlayActorReplannerError
@@ -1569,7 +1575,10 @@ export function createCampaignPlayActorReplanner(
       };
 
       const finalizeFailure = (failure: AttemptFailure): CampaignPlayActorReplanOutcome => {
-        const interruptedAt = dependencies.now();
+        const interruptedAt = Math.max(
+          dependencies.now(),
+          activeAttemptOperation?.startedAt ?? providerStartedAt,
+        );
         const rejectedSchedule = failure.errorCode === "model_contract_invalid"
           ? (() => {
               const row = handle.sqlite.prepare(`SELECT s.schedule_id AS scheduleId,
@@ -1756,10 +1765,11 @@ export function createCampaignPlayActorReplanner(
         !request.signal?.aborted && dependencies.now() < request.token.expiresAt;
       if (mayEscalate) {
         emitContractRejectionDiagnostic(firstResult);
-        const retryStartedAt = dependencies.now();
-        const retryDeadlineAt = stageTimeoutRecovery
-          ? retryStartedAt + request.externalOperationDeadlineMs
-          : deadlineAt;
+        // SQLite rejects a shared numeric deadline for new attempt-2 rows.  A
+        // same-millisecond clock sample is still a new operation, so advance
+        // the retry start by the smallest representable unit in that case.
+        const retryStartedAt = Math.max(dependencies.now(), providerStartedAt + 1);
+        const retryDeadlineAt = retryStartedAt + request.externalOperationDeadlineMs;
         if (!Number.isSafeInteger(retryDeadlineAt) || retryDeadlineAt <= retryStartedAt) {
           return finalizeFailure({
             ...firstResult,
@@ -1971,12 +1981,8 @@ export function createCampaignPlayActorReplanner(
             contractInvalid: false,
           });
         }
-        const secondAttemptOperation = stageTimeoutRecovery
-          ? (() => {
-              firstAttemptOperation.dispose();
-              return createAttemptOperation(retryStartedAt, retryDeadlineAt);
-            })()
-          : firstAttemptOperation;
+        firstAttemptOperation.dispose();
+        const secondAttemptOperation = createAttemptOperation(retryStartedAt, retryDeadlineAt);
         const useGenerationRecoverySchema = firstResult.rejectionArtifact === undefined
           || (
             firstResult.rejectionArtifact.phase === "compilation"

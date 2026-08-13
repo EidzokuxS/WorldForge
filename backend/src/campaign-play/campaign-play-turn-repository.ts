@@ -1295,7 +1295,14 @@ function validateModelStages(
     const modelContractInvalid = firstStage.schemaOutcome === "invalid"
       && firstStage.errorCode === "model_contract_invalid"
       && laterAttempt.createdAt < firstAttempt.deadlineAt
-      && laterAttempt.deadlineAt === firstAttempt.deadlineAt;
+      && (
+        // Keep immutable Task 213 chains readable after the guard migration.
+        laterAttempt.deadlineAt === firstAttempt.deadlineAt
+        || (
+          laterAttempt.deadlineAt > laterAttempt.createdAt
+          && laterAttempt.deadlineAt > firstAttempt.deadlineAt
+        )
+      );
     const stageTimeout = firstStage.schemaOutcome === "transport_error"
       && firstStage.errorCode === "stage_timeout"
       && laterAttempt.createdAt >= firstAttempt.deadlineAt
