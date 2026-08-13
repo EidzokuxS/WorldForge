@@ -40,16 +40,20 @@ interface AuthoritySnapshot {
   state: CampaignPlayState;
   turn: CampaignPlayTurnReadResponse | null;
   applied: boolean;
+  consistent: boolean;
 }
 
 interface AuthorityRefreshOptions {
   clearRequestError?: boolean;
+  signal?: AbortSignal;
 }
 
 interface AuthorityApplication {
   campaignId: string;
+  turnId: string | null;
   generation: number;
   runtimeRevision: number;
+  projectionRank: number;
 }
 
 interface PendingOperation {
@@ -69,6 +73,8 @@ export interface CampaignPlayPageProps {
   campaignId: string;
   reconnectDelayMilliseconds?: number;
 }
+
+const AUTHORITY_READ_DEADLINE_MS = 5_000;
 
 const ERROR_COPY: Record<CampaignPlayPublicErrorCode, string> = {
   campaign_not_found: "Campaign unavailable.",
@@ -167,7 +173,61 @@ function readNavigationSequence(campaignId: string): number {
 }
 
 function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
+  return error instanceof Error && error.name === "AbortError";
+}
+
+class AuthorityReadTimeoutError extends Error {
+  constructor() {
+    super("Campaign Play authority read timed out.");
+    this.name = "AuthorityReadTimeoutError";
+  }
+}
+
+function authorityAbortError(): Error {
+  const error = new Error("Campaign Play authority read aborted.");
+  error.name = "AbortError";
+  return error;
+}
+
+function withAuthorityReadDeadline<T>(
+  parentSignal: AbortSignal | undefined,
+  read: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const controller = new AbortController();
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const cleanup = () => {
+      if (timer !== null) clearTimeout(timer);
+      parentSignal?.removeEventListener("abort", abortFromParent);
+    };
+    const settle = (kind: "resolve" | "reject", value: T | Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (kind === "resolve") resolve(value as T);
+      else reject(value);
+    };
+    const abortFromParent = () => {
+      controller.abort();
+      settle("reject", authorityAbortError());
+    };
+
+    if (parentSignal?.aborted) {
+      abortFromParent();
+      return;
+    }
+    parentSignal?.addEventListener("abort", abortFromParent, { once: true });
+    timer = setTimeout(() => {
+      controller.abort();
+      settle("reject", new AuthorityReadTimeoutError());
+    }, AUTHORITY_READ_DEADLINE_MS);
+    void read(controller.signal).then(
+      (value) => settle("resolve", value),
+      (error: unknown) => settle("reject", error instanceof Error ? error : new Error(String(error))),
+    );
+  });
 }
 
 function errorCode(error: unknown): CampaignPlayPublicErrorCode {
@@ -209,6 +269,24 @@ function isTurnProjectionReady(
     return turn.result.narration?.turnId === turnId;
   }
   return false;
+}
+
+function authorityProjectionRank(
+  state: CampaignPlayState,
+  turn: CampaignPlayTurnReadResponse | null,
+  turnId: string | null,
+): number {
+  if (turnId === null) return state.phase === "ready" ? 2 : 0;
+  if (isTurnProjectionReady(state, turn, turnId)) return 2;
+  const operation = state.narrationOperation;
+  if (operation?.turnId === turnId && (operation.status === "pending" || operation.status === "running")) {
+    return 1;
+  }
+  if (turn?.result.status === "completed") {
+    const resultOperation = turn.result.narrationOperation;
+    if (resultOperation?.status === "pending" || resultOperation?.status === "running") return 1;
+  }
+  return 0;
 }
 
 function initialOpeningSelection(option: CampaignPlayOpeningLocationOption): OpeningSelection {
@@ -397,7 +475,11 @@ export function CampaignPlayPage({
   ): Promise<AuthoritySnapshot> => {
     const generation = authorityGenerationRef.current + 1;
     authorityGenerationRef.current = generation;
-    const nextState = await loadCampaignPlayState(campaignId);
+    const nextState = await withAuthorityReadDeadline(
+      options.signal,
+      (signal) => loadCampaignPlayState(campaignId, { signal }),
+    );
+    if (options.signal?.aborted) throw authorityAbortError();
     const followedId = followedTurnRef.current?.campaignId === campaignId
       ? followedTurnRef.current.turnId
       : null;
@@ -405,23 +487,37 @@ export function CampaignPlayPage({
       nextState.narrationOperation?.turnId ?? null;
     const nextTurn = turnId === null
       ? null
-      : await loadCampaignPlayTurn(campaignId, turnId);
+      : await withAuthorityReadDeadline(
+        options.signal,
+        (signal) => loadCampaignPlayTurn(campaignId, turnId, { signal }),
+      );
+    if (options.signal?.aborted) throw authorityAbortError();
 
-    const snapshotRevision = Math.min(
-      nextState.runtimeRevision,
-      nextTurn?.runtimeRevision ?? nextState.runtimeRevision,
-    );
+    const consistent = nextTurn === null || nextTurn.runtimeRevision === nextState.runtimeRevision;
+    if (!consistent) {
+      return { state: nextState, turn: nextTurn, applied: false, consistent: false };
+    }
+
+    const snapshotRevision = nextState.runtimeRevision;
+    const projectionRank = authorityProjectionRank(nextState, nextTurn, turnId);
     const previous = authorityAppliedRef.current;
     const stale = previous !== null && previous.campaignId === campaignId && (
-      generation < previous.generation || snapshotRevision < previous.runtimeRevision
+      generation < previous.generation ||
+      snapshotRevision < previous.runtimeRevision ||
+      (
+        turnId === previous.turnId &&
+        snapshotRevision === previous.runtimeRevision &&
+        projectionRank < previous.projectionRank
+      )
     );
     const applied = !stale && mountedRef.current && campaignIdRef.current === campaignId;
-
     if (applied) {
       authorityAppliedRef.current = {
         campaignId,
+        turnId,
         generation,
         runtimeRevision: snapshotRevision,
+        projectionRank,
       };
       setState(nextState);
       setTurnRead(nextTurn);
@@ -462,7 +558,7 @@ export function CampaignPlayPage({
         recordSequence(campaignId, retainedSequence);
       }
     }
-    return { state: nextState, turn: nextTurn, applied };
+    return { state: nextState, turn: nextTurn, applied, consistent: true };
   }, [campaignId, recordSequence, setFollowedTurn]);
 
   const retryAuthority = useCallback(() => {
@@ -478,7 +574,18 @@ export function CampaignPlayPage({
     const controller = new AbortController();
     void (async () => {
       try {
-        await refreshAuthority(undefined, { clearRequestError: true });
+        let authority = await refreshAuthority(undefined, {
+          clearRequestError: true,
+          signal: controller.signal,
+        });
+        while (!controller.signal.aborted && !authority.consistent) {
+          await waitForReconnect(reconnectDelayMilliseconds, controller.signal);
+          if (controller.signal.aborted) return;
+          authority = await refreshAuthority(undefined, {
+            clearRequestError: true,
+            signal: controller.signal,
+          });
+        }
       } catch (error) {
         if (!controller.signal.aborted && mountedRef.current) {
           setState(null);
@@ -494,7 +601,7 @@ export function CampaignPlayPage({
       controller.abort();
       mountedRef.current = false;
     };
-  }, [campaignId, refreshAuthority, setFollowedTurn]);
+  }, [campaignId, reconnectDelayMilliseconds, refreshAuthority, setFollowedTurn]);
 
   useEffect(() => {
     if (followedTurn === null || followedTurn.campaignId !== campaignId) return;
@@ -503,9 +610,13 @@ export function CampaignPlayPage({
 
     void (async () => {
       while (!controller.signal.aborted) {
+        const recordedSequence = lastSequenceRef.current.campaignId === campaignId
+          ? lastSequenceRef.current.sequence
+          : 0;
+        if (recordedSequence > cursor) cursor = recordedSequence;
         setConnection("connecting");
         try {
-          await streamCampaignPlayTurnEvents(campaignId, followedTurn.turnId, {
+          const stream = await streamCampaignPlayTurnEvents(campaignId, followedTurn.turnId, {
             afterSequence: cursor,
             signal: controller.signal,
             onEvent: (event: CampaignPlaySseEvent) => {
@@ -524,28 +635,49 @@ export function CampaignPlayPage({
               if (event.type === "turn.progressed") setEventProgress(event.progress);
             },
           });
+          if (stream.lastSequence > cursor) {
+            cursor = stream.lastSequence;
+            recordSequence(campaignId, cursor);
+          }
+          if (!controller.signal.aborted) setConnection("connected");
         } catch (error) {
           if (controller.signal.aborted) return;
           if (!isAbortError(error) && mountedRef.current) setConnection("disconnected");
         }
 
         if (!mountedRef.current || campaignIdRef.current !== campaignId) return;
+        await waitForReconnect(Math.max(reconnectDelayMilliseconds, 1), controller.signal);
+      }
+    })();
+
+    return () => controller.abort();
+  }, [campaignId, followedTurn, reconnectDelayMilliseconds, recordSequence]);
+
+  useEffect(() => {
+    if (followedTurn === null || followedTurn.campaignId !== campaignId) return;
+    const controller = new AbortController();
+    let cursor = followedTurn.sequence;
+
+    void (async () => {
+      while (!controller.signal.aborted) {
+        setConnection("connecting");
         let authority: AuthoritySnapshot;
         try {
-          authority = await refreshAuthority(followedTurn.turnId);
-        } catch {
+          authority = await refreshAuthority(followedTurn.turnId, { signal: controller.signal });
+        } catch (error) {
           if (controller.signal.aborted || campaignIdRef.current !== campaignId) return;
-          setConnection("disconnected");
+          if (!isAbortError(error) && mountedRef.current) setConnection("disconnected");
           await waitForReconnect(reconnectDelayMilliseconds, controller.signal);
           continue;
         }
 
         if (controller.signal.aborted || campaignIdRef.current !== campaignId) return;
-        if (!authority.applied) {
+        if (!authority.applied || !authority.consistent) {
           setConnection("disconnected");
           await waitForReconnect(reconnectDelayMilliseconds, controller.signal);
           continue;
         }
+
         const authorityTurn = authority.turn;
         const terminalStatus = authorityTurn?.turn.status;
         const projectionReady = isTurnProjectionReady(
@@ -566,39 +698,15 @@ export function CampaignPlayPage({
           }, 0);
           return;
         }
+
         cursor = authorityTurn?.turn.lastEventSequence ?? cursor;
         recordSequence(campaignId, cursor);
-        setConnection("disconnected");
+        setConnection("connected");
         await waitForReconnect(reconnectDelayMilliseconds, controller.signal);
-      }
-    })();
-
-    return () => controller.abort();
-  }, [campaignId, followedTurn, reconnectDelayMilliseconds, recordSequence, refreshAuthority]);
-
-  useEffect(() => {
-    const operation = campaignState?.narrationOperation;
-    if (!operation || (operation.status !== "pending" && operation.status !== "running")) return;
-    const controller = new AbortController();
-    void (async () => {
-      while (!controller.signal.aborted) {
-        await waitForReconnect(reconnectDelayMilliseconds, controller.signal);
-        if (controller.signal.aborted) return;
-        try {
-          const authority = await refreshAuthority(operation.turnId);
-          if (!authority.applied) continue;
-          const status = authority.state.narrationOperation?.status;
-          if (
-            status !== "pending" && status !== "running" &&
-            isTurnProjectionReady(authority.state, authority.turn, operation.turnId)
-          ) return;
-        } catch {
-          // The committed result remains playable while narration status is temporarily unavailable.
-        }
       }
     })();
     return () => controller.abort();
-  }, [campaignState?.narrationOperation, reconnectDelayMilliseconds, refreshAuthority]);
+  }, [campaignId, followedTurn, reconnectDelayMilliseconds, recordSequence, refreshAuthority]);
 
   const beginFollowing = useCallback((turnId: string, sequence: number) => {
     setTurnRead(null);

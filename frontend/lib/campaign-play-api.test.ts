@@ -354,7 +354,11 @@ describe("Campaign Play API", () => {
     await loadCampaignPlayJournal(addressedCampaignId, { cursor: 0, limit: 20 });
 
     const base = "http://localhost:3001/api/campaigns/campaign%3Aone/play";
-    expect(fetchMock).toHaveBeenNthCalledWith(1, `${base}/state`, { method: "GET" });
+    expect(fetchMock).toHaveBeenNthCalledWith(1, `${base}/state`, {
+      method: "GET",
+      cache: "no-store",
+      signal: undefined,
+    });
     expect(fetchMock).toHaveBeenNthCalledWith(2, `${base}/player/cards/parse`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cardRequest),
     });
@@ -373,7 +377,11 @@ describe("Campaign Play API", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(7, `${base}/turns`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(turnRequest),
     });
-    expect(fetchMock).toHaveBeenNthCalledWith(8, `${base}/turns/turn-one`, { method: "GET" });
+    expect(fetchMock).toHaveBeenNthCalledWith(8, `${base}/turns/turn-one`, {
+      method: "GET",
+      cache: "no-store",
+      signal: undefined,
+    });
     expect(fetchMock).toHaveBeenNthCalledWith(9, `${base}/turns/turn-one/resume`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(resumeRequest),
     });
@@ -383,6 +391,42 @@ describe("Campaign Play API", () => {
       body: JSON.stringify(narrationRecoveryRequest),
     });
     expect(fetchMock).toHaveBeenNthCalledWith(11, `${base}/journal?cursor=0&limit=20`, { method: "GET" });
+  });
+
+  it("marks authority reads no-store and forwards their caller signal", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(state))
+      .mockResolvedValueOnce(jsonResponse({
+        ...versions,
+        campaignId: "campaign-one",
+        turn: {
+          turnId: "turn-one",
+          turnKind: "player_action",
+          status: "processing",
+          progress: "interpreting",
+          lastEventSequence: 1,
+          retryEligible: false,
+          submittedAt: 1,
+          completedAt: null,
+        },
+        result: { status: "processing" },
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadCampaignPlayState("campaign-one", { signal: controller.signal });
+    await loadCampaignPlayTurn("campaign-one", "turn-one", { signal: controller.signal });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://localhost:3001/api/campaigns/campaign-one/play/state",
+      { method: "GET", cache: "no-store", signal: controller.signal },
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://localhost:3001/api/campaigns/campaign-one/play/turns/turn-one",
+      { method: "GET", cache: "no-store", signal: controller.signal },
+    );
   });
 
   it("requires strict public errors and exact 202 admission responses", async () => {

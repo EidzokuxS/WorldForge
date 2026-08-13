@@ -106,6 +106,10 @@ export interface CampaignPlayTurnEventStreamOptions {
   onEvent: (event: CampaignPlaySseEvent) => void;
 }
 
+export interface CampaignPlayAuthorityReadOptions {
+  signal?: AbortSignal;
+}
+
 export interface CampaignPlayTurnEventStreamResult {
   lastSequence: number;
   terminalEvent: TerminalTurnEvent | null;
@@ -1260,10 +1264,13 @@ async function requestJson<T>(
   return result;
 }
 
-export function loadCampaignPlayState(campaignId: string): Promise<CampaignPlayState> {
+export function loadCampaignPlayState(
+  campaignId: string,
+  options: CampaignPlayAuthorityReadOptions = {},
+): Promise<CampaignPlayState> {
   return requestJson(
     campaignPath(campaignId, "/state"),
-    { method: "GET" },
+    { method: "GET", cache: "no-store", signal: options.signal },
     200,
     (value) => {
       const parsed = parseState(value);
@@ -1371,10 +1378,11 @@ export function admitCampaignPlayTurn(
 export function loadCampaignPlayTurn(
   campaignId: string,
   turnId: string,
+  options: CampaignPlayAuthorityReadOptions = {},
 ): Promise<CampaignPlayTurnReadResponse> {
   return requestJson(
     campaignPath(campaignId, `/turns/${encodeURIComponent(turnId)}`),
-    { method: "GET" },
+    { method: "GET", cache: "no-store", signal: options.signal },
     200,
     (value) => {
       const parsed = parseTurnReadResponse(value);

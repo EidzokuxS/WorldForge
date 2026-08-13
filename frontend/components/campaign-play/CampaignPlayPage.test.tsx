@@ -710,8 +710,12 @@ describe("CampaignPlayPage durable state", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("already in progress");
     expect(input).toBeDisabled();
-    expect(api.loadState).toHaveBeenCalledTimes(2);
-    expect(api.loadTurn).toHaveBeenCalledWith("campaign-1", "turn-1");
+    expect(api.loadState).toHaveBeenCalledTimes(3);
+    expect(api.loadTurn).toHaveBeenCalledWith(
+      "campaign-1",
+      "turn-1",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it("shows a durable failed-turn error after authoritative terminal refetch", async () => {
@@ -783,54 +787,106 @@ describe("CampaignPlayPage durable state", () => {
     expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
   });
 
-  it("does not let a slower processing snapshot overwrite a newer ready projection", async () => {
+  it("aborts a hung authority read and continues the same accepted turn", async () => {
     const initial = state("ready");
-    const slowProcessing = state("turn_active", publicTurn("processing", "settling", 2));
-    const newerReady = state("ready");
-    newerReady.runtimeRevision = 5;
-    newerReady.narration!.turnId = "turn-1";
-    newerReady.narration!.displayText = "The newer authority snapshot is ready.";
+    const settled = state("ready");
+    settled.narration!.turnId = "turn-1";
+    settled.narration!.displayText = "The late read returns the waiting scene.";
+    settled.narration!.beats[0]!.text = settled.narration!.displayText;
     let stateCalls = 0;
-    let releaseSlow!: () => void;
-    const slowRead = new Promise<void>((resolve) => { releaseSlow = resolve; });
-    api.loadState.mockImplementation(async () => {
+    let hungSignal: AbortSignal | undefined;
+    api.loadState.mockImplementation(async (_campaignId, options) => {
       stateCalls += 1;
       if (stateCalls === 1) return initial;
       if (stateCalls === 2) {
-        await slowRead;
-        return slowProcessing;
+        hungSignal = options?.signal;
+        return new Promise<CampaignPlayState>(() => {});
       }
-      return newerReady;
+      return settled;
     });
-    let turnCalls = 0;
-    api.loadTurn.mockImplementation(async () => {
-      turnCalls += 1;
-      if (turnCalls === 1) {
-        const completedRead = turnRead("completed", 3);
-        completedRead.runtimeRevision = 5;
-        return completedRead;
-      }
-      const processingRead = turnRead("processing", 2);
-      processingRead.runtimeRevision = 4;
-      return processingRead;
-    });
+    api.loadTurn.mockResolvedValue(turnRead("completed", 4));
+    api.admitTurn.mockResolvedValue({ turnId: "turn-1", sequence: 1 });
+
+    render(<CampaignPlayPage campaignId="campaign-1" reconnectDelayMilliseconds={0} />);
+    const input = await screen.findByLabelText("Your action");
+    fireEvent.change(input, { target: { value: "I wait for the delayed scene." } });
+    fireEvent.click(screen.getByRole("button", { name: "Act" }));
+
+    await waitFor(() => expect(hungSignal?.aborted).toBe(true), { timeout: 6_000 });
+    await waitFor(() => expect(screen.getByText(settled.narration!.displayText)).toBeInTheDocument());
+    expect(input).toBeEnabled();
+    expect(api.admitTurn).toHaveBeenCalledTimes(1);
+    expect(api.resumeTurn).not.toHaveBeenCalled();
+    expect(screen.queryByText("The game service is temporarily unavailable.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  }, 15_000);
+
+  it("discards a mismatched authority pair before applying the ready scene", async () => {
+    const initial = state("ready");
+    const mismatched = state("turn_active", publicTurn("processing", "settling", 1));
+    mismatched.runtimeRevision = 5;
+    const mismatchedTurn = turnRead("processing", 1);
+    mismatchedTurn.runtimeRevision = 4;
+    const settled = state("ready");
+    settled.runtimeRevision = 6;
+    settled.narration!.turnId = "turn-1";
+    settled.narration!.displayText = "The matched authority scene is ready.";
+    settled.narration!.beats[0]!.text = settled.narration!.displayText;
+    api.loadState
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce(mismatched)
+      .mockResolvedValueOnce(settled);
+    const settledTurn = turnRead("completed", 4);
+    settledTurn.runtimeRevision = 6;
+    api.loadTurn
+      .mockResolvedValueOnce(mismatchedTurn)
+      .mockResolvedValueOnce(settledTurn);
+    api.admitTurn.mockResolvedValue({ turnId: "turn-1", sequence: 1 });
+
+    render(<CampaignPlayPage campaignId="campaign-1" reconnectDelayMilliseconds={0} />);
+    const input = await screen.findByLabelText("Your action");
+    fireEvent.change(input, { target: { value: "I wait for matching authority." } });
+    fireEvent.click(screen.getByRole("button", { name: "Act" }));
+
+    await waitFor(() => expect(screen.getByText(settled.narration!.displayText)).toBeInTheDocument());
+    expect(input).toBeEnabled();
+    expect(api.loadState).toHaveBeenCalledTimes(3);
+    expect(api.loadTurn).toHaveBeenCalledTimes(2);
+    expect(api.admitTurn).toHaveBeenCalledTimes(1);
+    expect(api.resumeTurn).not.toHaveBeenCalled();
+  });
+
+  it("promotes an equal-revision ready projection over pending authority", async () => {
+    const initial = state("ready");
+    const pending = state("ready");
+    pending.narrationOperation = narrationOperation("pending");
+    const newerReady = state("ready");
+    newerReady.runtimeRevision = 4;
+    newerReady.narration!.turnId = "turn-1";
+    newerReady.narration!.displayText = "The newer authority snapshot is ready.";
+    newerReady.narration!.beats[0]!.text = newerReady.narration!.displayText;
+    api.loadState
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce(pending)
+      .mockResolvedValueOnce(newerReady);
+    const pendingTurn = completedTurnReadWithOperation(narrationOperation("pending"), 3);
+    pendingTurn.runtimeRevision = 4;
+    const settledTurn = turnRead("completed", 4);
+    settledTurn.runtimeRevision = 4;
+    api.loadTurn.mockResolvedValueOnce(pendingTurn).mockResolvedValueOnce(settledTurn);
     api.admitTurn.mockResolvedValue({ turnId: "turn-1", sequence: 1 });
     api.streamEvents.mockRejectedValue(new Error("stream closed"));
 
-    const page = render(
-      <CampaignPlayPage campaignId="campaign-1" reconnectDelayMilliseconds={0} />,
-    );
+    render(<CampaignPlayPage campaignId="campaign-1" reconnectDelayMilliseconds={0} />);
     const input = await screen.findByLabelText("Your action");
-    fireEvent.change(input, { target: { value: "I wait for the newer read." } });
+    fireEvent.change(input, { target: { value: "I wait for the newer scene." } });
     fireEvent.click(screen.getByRole("button", { name: "Act" }));
-    await waitFor(() => expect(stateCalls).toBe(2));
 
-    page.rerender(<CampaignPlayPage campaignId="campaign-1" reconnectDelayMilliseconds={1} />);
-    await waitFor(() => expect(input).toBeEnabled());
-    releaseSlow();
-    await waitFor(() => expect(turnCalls).toBeGreaterThanOrEqual(2));
-
+    await waitFor(() => expect(api.loadState).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(screen.getByText(newerReady.narration!.displayText)).toBeInTheDocument());
     expect(input).toBeEnabled();
+    expect(api.loadState).toHaveBeenCalledTimes(3);
+    expect(api.loadTurn).toHaveBeenCalledTimes(2);
     expect(screen.queryByText("The game service is temporarily unavailable.")).not.toBeInTheDocument();
     expect(api.admitTurn).toHaveBeenCalledTimes(1);
   });
