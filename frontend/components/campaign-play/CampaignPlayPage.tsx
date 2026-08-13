@@ -51,7 +51,6 @@ interface AuthorityRefreshOptions {
 interface AuthorityApplication {
   campaignId: string;
   turnId: string | null;
-  generation: number;
   runtimeRevision: number;
   projectionRank: number;
 }
@@ -271,13 +270,23 @@ function isTurnProjectionReady(
   return false;
 }
 
+function isStateProjectionReady(state: CampaignPlayState, turnId: string): boolean {
+  if (state.phase !== "ready" || state.activeTurn !== null) return false;
+  const operation = state.narrationOperation;
+  if (operation?.turnId === turnId && (operation.status === "pending" || operation.status === "running")) {
+    return false;
+  }
+  if (state.narration?.turnId === turnId) return true;
+  return operation?.turnId === turnId && operation.status === "failed";
+}
+
 function authorityProjectionRank(
   state: CampaignPlayState,
   turn: CampaignPlayTurnReadResponse | null,
   turnId: string | null,
 ): number {
   if (turnId === null) return state.phase === "ready" ? 2 : 0;
-  if (isTurnProjectionReady(state, turn, turnId)) return 2;
+  if (isStateProjectionReady(state, turnId) || isTurnProjectionReady(state, turn, turnId)) return 2;
   const operation = state.narrationOperation;
   if (operation?.turnId === turnId && (operation.status === "pending" || operation.status === "running")) {
     return 1;
@@ -435,7 +444,6 @@ export function CampaignPlayPage({
   const campaignIdRef = useRef(campaignId);
   const lastSequenceRef = useRef({ campaignId, sequence: 0 });
   const followedTurnRef = useRef<FollowedTurn | null>(null);
-  const authorityGenerationRef = useRef(0);
   const authorityAppliedRef = useRef<AuthorityApplication | null>(null);
   campaignIdRef.current = campaignId;
 
@@ -465,101 +473,145 @@ export function CampaignPlayPage({
 
   const recordSequence = useCallback((targetCampaignId: string, sequence: number) => {
     if (!mountedRef.current || campaignIdRef.current !== targetCampaignId) return;
-    lastSequenceRef.current = { campaignId: targetCampaignId, sequence };
-    writeNavigationState(targetCampaignId, sequence);
+    const current = lastSequenceRef.current.campaignId === targetCampaignId
+      ? lastSequenceRef.current.sequence
+      : readNavigationSequence(targetCampaignId);
+    const nextSequence = Math.max(current, sequence);
+    lastSequenceRef.current = { campaignId: targetCampaignId, sequence: nextSequence };
+    writeNavigationState(targetCampaignId, nextSequence);
   }, []);
 
-  const refreshAuthority = useCallback(async (
+  const applyAuthorityState = useCallback((
+    nextState: CampaignPlayState,
     preferredTurnId?: string,
-    options: AuthorityRefreshOptions = {},
-  ): Promise<AuthoritySnapshot> => {
-    const generation = authorityGenerationRef.current + 1;
-    authorityGenerationRef.current = generation;
-    const nextState = await withAuthorityReadDeadline(
-      options.signal,
-      (signal) => loadCampaignPlayState(campaignId, { signal }),
-    );
-    if (options.signal?.aborted) throw authorityAbortError();
+    options: Pick<AuthorityRefreshOptions, "clearRequestError"> = {},
+  ) => {
     const followedId = followedTurnRef.current?.campaignId === campaignId
       ? followedTurnRef.current.turnId
       : null;
-    const turnId = preferredTurnId ?? followedId ?? nextState.activeTurn?.turnId ??
+    const trackedTurnId = preferredTurnId ?? followedId ?? nextState.activeTurn?.turnId ??
       nextState.narrationOperation?.turnId ?? null;
-    const nextTurn = turnId === null
-      ? null
-      : await withAuthorityReadDeadline(
-        options.signal,
-        (signal) => loadCampaignPlayTurn(campaignId, turnId, { signal }),
-      );
-    if (options.signal?.aborted) throw authorityAbortError();
-
-    const consistent = nextTurn === null || nextTurn.runtimeRevision === nextState.runtimeRevision;
-    if (!consistent) {
-      return { state: nextState, turn: nextTurn, applied: false, consistent: false };
-    }
-
     const snapshotRevision = nextState.runtimeRevision;
-    const projectionRank = authorityProjectionRank(nextState, nextTurn, turnId);
+    const projectionRank = authorityProjectionRank(nextState, null, trackedTurnId);
     const previous = authorityAppliedRef.current;
     const stale = previous !== null && previous.campaignId === campaignId && (
-      generation < previous.generation ||
       snapshotRevision < previous.runtimeRevision ||
       (
-        turnId === previous.turnId &&
+        trackedTurnId === previous.turnId &&
         snapshotRevision === previous.runtimeRevision &&
         projectionRank < previous.projectionRank
       )
     );
     const applied = !stale && mountedRef.current && campaignIdRef.current === campaignId;
-    if (applied) {
-      authorityAppliedRef.current = {
-        campaignId,
-        turnId,
-        generation,
-        runtimeRevision: snapshotRevision,
-        projectionRank,
-      };
-      setState(nextState);
-      setTurnRead(nextTurn);
-      if (options.clearRequestError) setRequestError(null);
-      setEventProgress(nextState.activeTurn?.progress ?? null);
-      const processingTurn = nextTurn?.turn.status === "processing"
-        ? nextTurn.turn
-        : nextState.activeTurn?.status === "processing"
-          ? nextState.activeTurn
-          : null;
-      const trackedTurnId = preferredTurnId ?? followedId ?? processingTurn?.turnId ?? turnId;
-      const projectionReady = trackedTurnId === null || isTurnProjectionReady(
-        nextState,
-        nextTurn,
+    if (!applied) {
+      return {
+        applied: false,
         trackedTurnId,
+        projectionReady: false,
+        nextSequence: followedTurnRef.current?.sequence ?? readNavigationSequence(campaignId),
+      };
+    }
+
+    authorityAppliedRef.current = {
+      campaignId,
+      turnId: trackedTurnId,
+      runtimeRevision: snapshotRevision,
+      projectionRank,
+    };
+    setState(nextState);
+    if (options.clearRequestError) setRequestError(null);
+    setEventProgress(nextState.activeTurn?.progress ?? null);
+
+    const projectionReady = trackedTurnId !== null && isStateProjectionReady(nextState, trackedTurnId);
+    const processingTurn = nextState.activeTurn?.status === "processing"
+      ? nextState.activeTurn
+      : null;
+    const terminalTurn = nextState.activeTurn?.status === "interrupted" ||
+      nextState.activeTurn?.status === "failed";
+    const shouldFollow = processingTurn !== null || (
+      trackedTurnId !== null && !projectionReady && !terminalTurn
+    );
+    const nextSequence = processingTurn?.lastEventSequence ?? nextState.activeTurn?.lastEventSequence ??
+      followedTurnRef.current?.sequence ?? readNavigationSequence(campaignId);
+    const currentFollowed = followedTurnRef.current;
+    if (shouldFollow && trackedTurnId !== null) {
+      if (currentFollowed?.campaignId !== campaignId || currentFollowed.turnId !== trackedTurnId) {
+        setFollowedTurn({ campaignId, turnId: trackedTurnId, sequence: nextSequence });
+      }
+      recordSequence(campaignId, nextSequence);
+    } else {
+      setFollowedTurn(null);
+      setTurnRead((current) => nextState.phase === "ready" && nextState.activeTurn === null ? null : current);
+      setConnection("idle");
+      const retainedSequence = Math.max(
+        lastSequenceRef.current.campaignId === campaignId
+          ? lastSequenceRef.current.sequence
+          : readNavigationSequence(campaignId),
+        nextState.activeTurn?.lastEventSequence ?? 0,
       );
-      const shouldFollow = processingTurn !== null || (
-        trackedTurnId !== null && !projectionReady
-      );
-      const nextSequence = processingTurn?.lastEventSequence ?? nextTurn?.turn.lastEventSequence ??
-        nextState.activeTurn?.lastEventSequence ?? followedTurnRef.current?.sequence ??
-        readNavigationSequence(campaignId);
-      const currentFollowed = followedTurnRef.current;
-      if (shouldFollow && trackedTurnId !== null) {
-        if (currentFollowed?.campaignId !== campaignId || currentFollowed.turnId !== trackedTurnId) {
-          setFollowedTurn({ campaignId, turnId: trackedTurnId, sequence: nextSequence });
-        }
-        recordSequence(campaignId, nextSequence);
-      } else {
-        setFollowedTurn(null);
-        setConnection("idle");
-        const retainedSequence = Math.max(
-          lastSequenceRef.current.campaignId === campaignId
-            ? lastSequenceRef.current.sequence
-            : readNavigationSequence(campaignId),
-          nextTurn?.turn.lastEventSequence ?? 0,
-        );
-        recordSequence(campaignId, retainedSequence);
+      recordSequence(campaignId, retainedSequence);
+      if (terminalTurn) {
+        window.setTimeout(() => {
+          if (campaignIdRef.current !== campaignId) return;
+          if (nextState.activeTurn?.status === "interrupted") {
+            progressRef.current?.focus();
+          } else if (nextState.activeTurn?.status === "failed") {
+            errorActionRef.current?.focus();
+          }
+        }, 0);
       }
     }
-    return { state: nextState, turn: nextTurn, applied, consistent: true };
+    return { applied: true, trackedTurnId, projectionReady, nextSequence };
   }, [campaignId, recordSequence, setFollowedTurn]);
+
+  const refreshAuthority = useCallback(async (
+    preferredTurnId?: string,
+    options: AuthorityRefreshOptions = {},
+  ): Promise<AuthoritySnapshot> => {
+    const nextState = await withAuthorityReadDeadline(
+      options.signal,
+      (signal) => loadCampaignPlayState(campaignId, { signal }),
+    );
+    if (options.signal?.aborted) throw authorityAbortError();
+
+    const followedId = followedTurnRef.current?.campaignId === campaignId
+      ? followedTurnRef.current.turnId
+      : null;
+    const turnId = preferredTurnId ?? followedId ?? nextState.activeTurn?.turnId ??
+      nextState.narrationOperation?.turnId ?? null;
+    const stateApplication = applyAuthorityState(nextState, preferredTurnId, options);
+    if (!stateApplication.applied) {
+      return { state: nextState, turn: null, applied: false, consistent: true };
+    }
+
+    // A ready state owns the rendered scene. Do not let a stale or unavailable
+    // turn-detail read delay the scene or re-lock the controls.
+    if (turnId !== null && stateApplication.projectionReady) {
+      return { state: nextState, turn: null, applied: true, consistent: true };
+    }
+
+    let nextTurn: CampaignPlayTurnReadResponse | null = null;
+    try {
+      nextTurn = turnId === null
+        ? null
+        : await withAuthorityReadDeadline(
+          options.signal,
+          (signal) => loadCampaignPlayTurn(campaignId, turnId, { signal }),
+        );
+    } catch (error) {
+      if (options.signal?.aborted || isAbortError(error)) throw error;
+      return { state: nextState, turn: null, applied: true, consistent: true };
+    }
+    if (options.signal?.aborted) throw authorityAbortError();
+
+    const consistent = nextTurn === null || nextTurn.runtimeRevision === nextState.runtimeRevision;
+    if (consistent && nextTurn !== null && mountedRef.current && campaignIdRef.current === campaignId &&
+      (followedTurnRef.current?.turnId === turnId || nextState.activeTurn?.turnId === turnId)) {
+      setTurnRead(nextTurn);
+      recordSequence(campaignId, nextTurn.turn.lastEventSequence);
+    }
+    return { state: nextState, turn: nextTurn, applied: true, consistent };
+  }, [applyAuthorityState, campaignId, recordSequence]);
 
   const retryAuthority = useCallback(() => {
     void refreshAuthority(undefined, { clearRequestError: true }).catch((error) => {
@@ -604,7 +656,7 @@ export function CampaignPlayPage({
   }, [campaignId, reconnectDelayMilliseconds, refreshAuthority, setFollowedTurn]);
 
   useEffect(() => {
-    if (followedTurn === null || followedTurn.campaignId !== campaignId) return;
+    if (loading || followedTurn === null || followedTurn.campaignId !== campaignId) return;
     const controller = new AbortController();
     let cursor = followedTurn.sequence;
 
@@ -641,29 +693,37 @@ export function CampaignPlayPage({
           }
           if (!controller.signal.aborted) setConnection("connected");
         } catch (error) {
-          if (controller.signal.aborted) return;
+          if (controller.signal.aborted || followedTurnRef.current?.turnId !== followedTurn.turnId) return;
           if (!isAbortError(error) && mountedRef.current) setConnection("disconnected");
         }
 
-        if (!mountedRef.current || campaignIdRef.current !== campaignId) return;
+        if (
+          !mountedRef.current ||
+          campaignIdRef.current !== campaignId ||
+          followedTurnRef.current?.turnId !== followedTurn.turnId
+        ) return;
         await waitForReconnect(Math.max(reconnectDelayMilliseconds, 1), controller.signal);
       }
     })();
 
     return () => controller.abort();
-  }, [campaignId, followedTurn, reconnectDelayMilliseconds, recordSequence]);
+  }, [campaignId, followedTurn, loading, reconnectDelayMilliseconds, recordSequence]);
 
   useEffect(() => {
-    if (followedTurn === null || followedTurn.campaignId !== campaignId) return;
+    if (loading || followedTurn === null || followedTurn.campaignId !== campaignId) return;
     const controller = new AbortController();
-    let cursor = followedTurn.sequence;
+    const followed = followedTurn;
+    let cursor = followed.sequence;
 
     void (async () => {
       while (!controller.signal.aborted) {
         setConnection("connecting");
-        let authority: AuthoritySnapshot;
+        let nextState: CampaignPlayState;
         try {
-          authority = await refreshAuthority(followedTurn.turnId, { signal: controller.signal });
+          nextState = await withAuthorityReadDeadline(
+            controller.signal,
+            (signal) => loadCampaignPlayState(campaignId, { signal }),
+          );
         } catch (error) {
           if (controller.signal.aborted || campaignIdRef.current !== campaignId) return;
           if (!isAbortError(error) && mountedRef.current) setConnection("disconnected");
@@ -672,20 +732,65 @@ export function CampaignPlayPage({
         }
 
         if (controller.signal.aborted || campaignIdRef.current !== campaignId) return;
-        if (!authority.applied || !authority.consistent) {
+        const stateApplication = applyAuthorityState(nextState, followed.turnId);
+        if (!stateApplication.applied) {
           setConnection("disconnected");
           await waitForReconnect(reconnectDelayMilliseconds, controller.signal);
           continue;
         }
+        setRequestError((current) => (
+          current?.campaignId === campaignId && current.code === "service_unavailable"
+            ? null
+            : current
+        ));
 
-        const authorityTurn = authority.turn;
+        // CampaignPlayState owns the current scene. A ready state releases the
+        // followed turn without waiting for the secondary turn-detail read.
+        if (followedTurnRef.current?.turnId !== followed.turnId) {
+          const terminalStatus = nextState.activeTurn?.status;
+          window.setTimeout(() => {
+            if (campaignIdRef.current !== campaignId) return;
+            if (terminalStatus === "interrupted") {
+              progressRef.current?.focus();
+            } else if (terminalStatus === "failed") {
+              errorActionRef.current?.focus();
+            } else {
+              (suggestionsHeadingRef.current ?? narrationFocusRef.current)?.focus();
+            }
+          }, 0);
+          return;
+        }
+
+        let authorityTurn: CampaignPlayTurnReadResponse;
+        try {
+          authorityTurn = await withAuthorityReadDeadline(
+            controller.signal,
+            (signal) => loadCampaignPlayTurn(campaignId, followed.turnId, { signal }),
+          );
+        } catch (error) {
+          if (controller.signal.aborted || campaignIdRef.current !== campaignId) return;
+          if (!isAbortError(error) && mountedRef.current) setConnection("disconnected");
+          await waitForReconnect(reconnectDelayMilliseconds, controller.signal);
+          continue;
+        }
+        if (controller.signal.aborted || campaignIdRef.current !== campaignId) return;
+        if (authorityTurn.runtimeRevision !== nextState.runtimeRevision) {
+          setConnection("disconnected");
+          await waitForReconnect(reconnectDelayMilliseconds, controller.signal);
+          continue;
+        }
+        if (followedTurnRef.current?.turnId !== followed.turnId) return;
+        setTurnRead(authorityTurn);
         const terminalStatus = authorityTurn?.turn.status;
         const projectionReady = isTurnProjectionReady(
-          authority.state,
+          nextState,
           authorityTurn,
-          followedTurn.turnId,
+          followed.turnId,
         );
         if (terminalStatus !== "processing" && projectionReady) {
+          recordSequence(campaignId, authorityTurn.turn.lastEventSequence);
+          setFollowedTurn(null);
+          setConnection("idle");
           window.setTimeout(() => {
             if (campaignIdRef.current !== campaignId) return;
             if (terminalStatus === "interrupted") {
@@ -699,14 +804,14 @@ export function CampaignPlayPage({
           return;
         }
 
-        cursor = authorityTurn?.turn.lastEventSequence ?? cursor;
+        cursor = authorityTurn.turn.lastEventSequence ?? cursor;
         recordSequence(campaignId, cursor);
         setConnection("connected");
         await waitForReconnect(reconnectDelayMilliseconds, controller.signal);
       }
     })();
     return () => controller.abort();
-  }, [campaignId, followedTurn, reconnectDelayMilliseconds, recordSequence, refreshAuthority]);
+  }, [applyAuthorityState, campaignId, followedTurn, loading, reconnectDelayMilliseconds, recordSequence, setFollowedTurn]);
 
   const beginFollowing = useCallback((turnId: string, sequence: number) => {
     setTurnRead(null);

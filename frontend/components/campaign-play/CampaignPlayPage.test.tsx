@@ -224,7 +224,7 @@ function interrupted(sequence: number): CampaignPlaySseEvent {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   window.localStorage.clear();
   window.history.replaceState({}, "");
   vi.stubGlobal("crypto", { randomUUID: vi.fn(() => "request-1") });
@@ -851,7 +851,7 @@ describe("CampaignPlayPage durable state", () => {
     await waitFor(() => expect(screen.getByText(settled.narration!.displayText)).toBeInTheDocument());
     expect(input).toBeEnabled();
     expect(api.loadState).toHaveBeenCalledTimes(3);
-    expect(api.loadTurn).toHaveBeenCalledTimes(2);
+    expect(api.loadTurn).toHaveBeenCalledTimes(1);
     expect(api.admitTurn).toHaveBeenCalledTimes(1);
     expect(api.resumeTurn).not.toHaveBeenCalled();
   });
@@ -886,7 +886,7 @@ describe("CampaignPlayPage durable state", () => {
     await waitFor(() => expect(screen.getByText(newerReady.narration!.displayText)).toBeInTheDocument());
     expect(input).toBeEnabled();
     expect(api.loadState).toHaveBeenCalledTimes(3);
-    expect(api.loadTurn).toHaveBeenCalledTimes(2);
+    expect(api.loadTurn).toHaveBeenCalledTimes(1);
     expect(screen.queryByText("The game service is temporarily unavailable.")).not.toBeInTheDocument();
     expect(api.admitTurn).toHaveBeenCalledTimes(1);
   });
