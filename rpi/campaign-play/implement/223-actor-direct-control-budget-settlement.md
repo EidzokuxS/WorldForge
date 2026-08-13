@@ -65,8 +65,41 @@
   no mapped execution-flow changes (the registered index is stale); the
   staged four-file diff was reviewed and `git diff --cached --check` passes.
 
-## Live acceptance
+## Live acceptance boundary
 
-No r183 lane has been materialized. The required lane remains pending the
-committed/pushed implementation, one prepare phase, and the real rendered
-GLM-5-turbo 60-action journey plus same-page reload.
+- The implementation commit `279610743a7df92b725416834cf5826859874ddc` was
+  pushed before the single authorized lane. Local `HEAD` matched
+  `origin/feat/revamp`; only the protected pre-existing `AGENTS.md` and
+  `CLAUDE.md` remained unstaged.
+- Lane `pristine-60-glm5-turbo-lowwater-ledger-93a09e46-r183` was materialized
+  exactly once for campaign `6b85a49e-fef5-4359-95e2-051383f6fb66` with
+  `zai-coding-plan/glm-5-turbo`, using the isolated campaigns root and one
+  `--live-phase prepare`. The canonical state/config/Brina inputs matched the
+  required hashes before prepare. Backend/frontend ran on task ports 4680/4681
+  with the configured API/CORS pair.
+- Rendered setup completed once: Brina import, Save/Continue, `lower-wards`,
+  `Local`, `Already here`, `Looking for work`, Begin, and a ready Opening with
+  enabled choices. No operator reload, Resume, replay, or duplicate click was
+  used.
+- The first signed rendered action was action 1, choice
+  `Talk to Dren Vask: ask about the seizures`, signed at `1786658032787` and
+  clicked once at `1786658037625`. Exactly one durable player turn was admitted:
+  `turn-player-action:a18ab9c3f8877134fcb9777372c4b1f7c5defbca`.
+- The first genuine boundary occurred when that turn did not return to ready
+  control within the 120,000 ms contract. Authority reported runtime revision
+  `23`, world version `11`, active turn status `interrupted`, error
+  `provider_unavailable`, `retryEligible=true`, and no completion. The rendered
+  page remained on the Opening scene with disabled controls and exposed the
+  existing `Resume` surface.
+- Read-only persistence at the boundary was internally clean (`integrity_check`
+  `ok`, zero foreign-key violations) and exactly-once for the attempted action:
+  one player-action turn, two interrupted model stages (attempts 1 and 2), no
+  Actor replan stages/attempts/proposals, no Narrator operation/attempt, no
+  proper scene, and no bound `browser-actions.jsonl` record because binding
+  requires a completed turn. Backend diagnostics recorded the Z.AI connection
+  timeout and the resulting `provider_unavailable` attempts. The pending signed
+  decision, rendered state, exact IDs, and full lane logs were preserved; no
+  Resume or retry was issued after the boundary.
+
+Result: `Needs attention`. The 60-action journey and final same-page reload
+were not attempted after this first genuine stopped turn.
