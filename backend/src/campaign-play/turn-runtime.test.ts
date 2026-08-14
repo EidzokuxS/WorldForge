@@ -1054,6 +1054,24 @@ function renderedWaitSuggestion(handle: CampaignPlayDatabaseHandle): {
   return suggestion;
 }
 
+function dropCampaignPlayGuards(handle: CampaignPlayDatabaseHandle): void {
+  for (const row of handle.sqlite.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'trigger'",
+  ).all() as Array<{ name: string }>) {
+    if (row.name.startsWith("campaign_play_")) {
+      handle.sqlite.exec(`DROP TRIGGER ${row.name}`);
+    }
+  }
+}
+
+function controlBudgetContinuityAudit(): string {
+  return canonicalizeCampaignPlayProjection({
+    kind: "control_budget_continuity",
+    reason: "authority_budget",
+    sourceMomentHash: "a".repeat(64),
+  });
+}
+
 function renderedContactSuggestion(
   handle: CampaignPlayDatabaseHandle,
   requireQuestion = true,
@@ -4102,6 +4120,45 @@ describe("Campaign Play player-action turn runtime", () => {
       FROM campaign_play_proper_scenes WHERE campaign_id = ?`).get(CAMPAIGN_ID))
       .toEqual({ count: 1 });
     expect(playerActionMechanicsSnapshot(result.handle, result.turnId)).toEqual(result.mechanics);
+    const continuityState = createCampaignPlayReadModel(result.handle).loadState();
+    const continuityScene = result.handle.sqlite.prepare(`SELECT suggested_actions_json AS suggestedActionsJson
+      FROM campaign_play_proper_scenes WHERE campaign_id = ? AND turn_id = ?`).get(
+        result.handle.campaignId,
+        result.turnId,
+      ) as { suggestedActionsJson: string } | undefined;
+    const publishedChoice = (continuityScene
+      ? JSON.parse(continuityScene.suggestedActionsJson) as Array<{ choiceHandle: string; label: string }>
+      : [])[0];
+    if (!continuityState || !publishedChoice) {
+      throw new Error("Deterministic continuity did not publish a next action.");
+    }
+    const nextRuntime = turnRuntime(
+      result.handle,
+      result.time,
+      judgeFixture("deterministic"),
+      gameMasterFixture(),
+      { narrator: playerNarratorFixture() },
+    );
+    const nextAdmission = nextRuntime.admitAction({
+      request: {
+        idempotencyKey: "continuity-next-action",
+        expectedWorldVersion: continuityState.worldVersion,
+        expectedRuntimeRevision: continuityState.runtimeRevision,
+        source: "suggested",
+        choiceHandle: publishedChoice.choiceHandle,
+      },
+      submittedAt: result.time.clock.now(),
+    });
+    expect(nextAdmission.turnId).not.toBe(result.turnId);
+    expect(nextRuntime.loadTurn(nextAdmission.turnId)).toMatchObject({
+      turnId: nextAdmission.turnId,
+      stage: "admitted",
+      document: {
+        request: {
+          choiceHandle: publishedChoice.choiceHandle,
+        },
+      },
+    });
     expect(createCampaignPlayReadModel(result.handle).loadState()).toMatchObject({
       narration: expect.objectContaining({ turnId: result.turnId }),
       narrationOperation: { status: "complete", attempt: 2, sourceKind: "deterministic_continuity" },
@@ -4116,6 +4173,211 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(result.handle.sqlite.prepare("PRAGMA integrity_check").get())
       .toEqual({ integrity_check: "ok" });
     expect(result.handle.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
+  it("reads an exact historical deterministic-continuity fade without rewriting it", async () => {
+    const fixtureNarrator = playerNarratorFixture();
+    const narrator: TestNarrator = {
+      compile: fixtureNarrator.compile,
+      narrate: vi.fn(async () => {
+        throw new CampaignPlayNarratorError("narration_invalid", null);
+      }),
+    };
+    const result = await runPendingNarrationThroughApplication(narrator);
+    const scene = result.handle.sqlite.prepare(`SELECT effects_json AS effectsJson,
+        suggested_actions_json AS suggestedActionsJson
+      FROM campaign_play_proper_scenes WHERE campaign_id = ? AND turn_id = ?`).get(
+      CAMPAIGN_ID,
+      result.turnId,
+    ) as { effectsJson: string; suggestedActionsJson: string };
+    const effects = JSON.parse(scene.effectsJson) as Array<{ kind: string; beatId: string }>;
+    expect(effects).toHaveLength(1);
+    expect(effects[0]).toMatchObject({ kind: "flash" });
+    const historicalEffects = JSON.stringify([{ ...effects[0], kind: "fade" }]);
+    dropCampaignPlayGuards(result.handle);
+    result.handle.sqlite.prepare(`UPDATE campaign_play_proper_scenes
+      SET effects_json = ? WHERE campaign_id = ? AND turn_id = ?`).run(
+      historicalEffects,
+      CAMPAIGN_ID,
+      result.turnId,
+    );
+    const state = createCampaignPlayReadModel(result.handle).loadState();
+    const choice = (JSON.parse(scene.suggestedActionsJson) as Array<{ choiceHandle: string }>)[0];
+    if (!state || !choice) throw new Error("Historical continuity fixture is incomplete.");
+    const runtime = turnRuntime(
+      result.handle,
+      result.time,
+      judgeFixture("deterministic"),
+      gameMasterFixture(),
+      { narrator: playerNarratorFixture() },
+    );
+    const admission = runtime.admitAction({
+      request: {
+        idempotencyKey: "historical-continuity-next-action",
+        expectedWorldVersion: state.worldVersion,
+        expectedRuntimeRevision: state.runtimeRevision,
+        source: "suggested",
+        choiceHandle: choice.choiceHandle,
+      },
+      submittedAt: result.time.clock.now(),
+    });
+    expect(admission.turnId).not.toBe(result.turnId);
+    expect(result.handle.sqlite.prepare(`SELECT effects_json AS effectsJson
+      FROM campaign_play_proper_scenes WHERE campaign_id = ? AND turn_id = ?`).get(
+      CAMPAIGN_ID,
+      result.turnId,
+    )).toEqual({ effectsJson: historicalEffects });
+  });
+
+  it("rejects fade on a model-accepted player-action scene", async () => {
+    const prepared = await runPendingNarrationThroughApplication(playerNarratorFixture());
+    const scene = prepared.handle.sqlite.prepare(`SELECT effects_json AS effectsJson,
+        suggested_actions_json AS suggestedActionsJson
+      FROM campaign_play_proper_scenes WHERE campaign_id = ? AND turn_id = ?`).get(
+      CAMPAIGN_ID,
+      prepared.turnId,
+    ) as { effectsJson: string; suggestedActionsJson: string };
+    const effects = JSON.parse(scene.effectsJson) as Array<{ kind: string; beatId: string }>;
+    const persistedFade = JSON.stringify([{ ...effects[0]!, kind: "fade" }]);
+    dropCampaignPlayGuards(prepared.handle);
+    prepared.handle.sqlite.prepare(`UPDATE campaign_play_proper_scenes
+      SET effects_json = ? WHERE campaign_id = ? AND turn_id = ?`).run(
+      persistedFade,
+      CAMPAIGN_ID,
+      prepared.turnId,
+    );
+    const state = createCampaignPlayReadModel(prepared.handle).loadState();
+    const choice = (JSON.parse(scene.suggestedActionsJson) as Array<{ choiceHandle: string }>)[0];
+    if (!state || !choice) throw new Error("Model narration fixture is incomplete.");
+    const runtime = turnRuntime(
+      prepared.handle,
+      prepared.time,
+      judgeFixture("deterministic"),
+      gameMasterFixture(),
+      { narrator: playerNarratorFixture() },
+    );
+    expect(() => runtime.admitAction({
+      request: {
+        idempotencyKey: "model-fade-next-action",
+        expectedWorldVersion: state.worldVersion,
+        expectedRuntimeRevision: state.runtimeRevision,
+        source: "suggested",
+        choiceHandle: choice.choiceHandle,
+      },
+      submittedAt: prepared.time.clock.now(),
+    })).toThrowError(expect.objectContaining({ code: "turn_public_context_invalid" }));
+    expect(prepared.handle.sqlite.prepare(`SELECT effects_json AS effectsJson
+      FROM campaign_play_proper_scenes WHERE campaign_id = ? AND turn_id = ?`).get(
+      CAMPAIGN_ID,
+      prepared.turnId,
+    )).toEqual({ effectsJson: persistedFade });
+  });
+
+  it.each([
+    ["active stage", "admitted"],
+    ["failed stage", "failed"],
+  ])("rejects a control-budget marker on an illegal %s", async (_label, stage) => {
+    const prepared = await createCompletedPlayerActionForApplication();
+    dropCampaignPlayGuards(prepared.handle);
+    if (stage === "admitted") {
+      prepared.handle.sqlite.prepare(`UPDATE campaign_play_turns
+        SET stage = 'admitted', final_world_version = NULL, public_packet_hash = NULL,
+          interrupted_stage = NULL, error_code = NULL, resume_eligible = 0,
+          completed_at = NULL, mutation_audit_json = ?
+        WHERE campaign_id = ? AND id = ?`).run(
+        controlBudgetContinuityAudit(),
+        CAMPAIGN_ID,
+        prepared.turnId,
+      );
+    } else {
+      prepared.handle.sqlite.prepare(`UPDATE campaign_play_turns
+        SET stage = 'failed', public_packet_hash = NULL, interrupted_stage = NULL,
+          error_code = 'persistence_failed', resume_eligible = 0,
+          mutation_audit_json = ? WHERE campaign_id = ? AND id = ?`).run(
+        controlBudgetContinuityAudit(),
+        CAMPAIGN_ID,
+        prepared.turnId,
+      );
+    }
+    const runtime = turnRuntime(
+      prepared.handle,
+      prepared.time,
+      judgeFixture("deterministic"),
+      gameMasterFixture(),
+      { narrator: playerNarratorFixture() },
+    );
+    expect(() => runtime.loadTurn(prepared.turnId)).toThrowError(
+      expect.objectContaining({ code: "turn_corrupt" }),
+    );
+  });
+
+  it("rejects a control-budget marker on an accepted narrator turn", async () => {
+    const prepared = await runPendingNarrationThroughApplication(playerNarratorFixture());
+    dropCampaignPlayGuards(prepared.handle);
+    prepared.handle.sqlite.prepare(`UPDATE campaign_play_turns
+      SET mutation_audit_json = ? WHERE campaign_id = ? AND id = ?`).run(
+      controlBudgetContinuityAudit(),
+      CAMPAIGN_ID,
+      prepared.turnId,
+    );
+    const runtime = turnRuntime(
+      prepared.handle,
+      prepared.time,
+      judgeFixture("deterministic"),
+      gameMasterFixture(),
+      { narrator: playerNarratorFixture() },
+    );
+    expect(() => runtime.loadTurn(prepared.turnId)).toThrowError(
+      expect.objectContaining({ code: "turn_corrupt" }),
+    );
+  });
+
+  it("rejects a control-budget marker on an opening turn", async () => {
+    const prepared = await createReadyCampaignWithOpening();
+    dropCampaignPlayGuards(prepared.handle);
+    prepared.handle.sqlite.prepare(`UPDATE campaign_play_turns
+      SET mutation_audit_json = ? WHERE campaign_id = ? AND id = ?`).run(
+      controlBudgetContinuityAudit(),
+      CAMPAIGN_ID,
+      prepared.openingTurnId,
+    );
+    const runtime = turnRuntime(
+      prepared.handle,
+      fixedClock(7_500),
+      judgeFixture("deterministic"),
+      gameMasterFixture(),
+      { narrator: playerNarratorFixture() },
+    );
+    expect(() => runtime.loadTurn(prepared.openingTurnId)).toThrowError(
+      expect.objectContaining({ code: "turn_corrupt" }),
+    );
+  });
+
+  it("rejects a completed continuity marker without terminal proof", async () => {
+    const fixtureNarrator = playerNarratorFixture();
+    const narrator: TestNarrator = {
+      compile: fixtureNarrator.compile,
+      narrate: vi.fn(async () => {
+        throw new CampaignPlayNarratorError("narration_invalid", null);
+      }),
+    };
+    const result = await runPendingNarrationThroughApplication(narrator);
+    dropCampaignPlayGuards(result.handle);
+    result.handle.sqlite.prepare(`DELETE FROM campaign_play_runtime_events
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'turn_completed'`).run(
+      CAMPAIGN_ID,
+      result.turnId,
+    );
+    const runtime = turnRuntime(
+      result.handle,
+      result.time,
+      judgeFixture("deterministic"),
+      gameMasterFixture(),
+      { narrator: playerNarratorFixture() },
+    );
+    expect(() => runtime.loadTurn(result.turnId)).toThrowError(
+      expect.objectContaining({ code: "turn_corrupt" }),
+    );
   });
 
   it("publishes deterministic continuity when attempt 2 times out", async () => {

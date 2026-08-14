@@ -6,6 +6,7 @@ import type {
 } from "@worldforge/shared";
 import type { CampaignPlayDatabaseHandle } from "./campaign-play-database.js";
 import {
+  buildCampaignPlaySuggestedActionLabel,
   campaignPlayNarrationSchema,
   campaignPlayNarratorPacketSchema,
   campaignPlaySseEventSchema,
@@ -654,9 +655,11 @@ export function createCampaignPlayNarrationOperationRepository(
       displayText,
       suggestedActions: parsedPacket.availableIntents.slice(0, 4).map((intent) => ({
         choiceHandle: intent.handle,
-        label: intent.label,
+        label: intent.kind === "move" || intent.kind === "wait"
+          ? buildCampaignPlaySuggestedActionLabel(parsedPacket, intent, null)
+          : buildCampaignPlaySuggestedActionLabel(parsedPacket, intent, intent.label),
       })),
-      effects: [{ kind: "fade", beatId }],
+      effects: [{ kind: "flash", beatId }],
       createdAt: completedAt,
     });
     const turnSelection = handle.sqlite.prepare(`SELECT model_selection_json AS modelSelectionJson

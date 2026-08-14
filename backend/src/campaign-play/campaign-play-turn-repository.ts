@@ -1601,10 +1601,12 @@ function validateCompletedNarration(
 function validateSeparateNarrationOperation(
   handle: CampaignPlayDatabaseHandle,
   row: TurnRow,
+  controlBudgetContinuity = false,
 ): void {
   const packet = validateNarratorPacket(handle, row, "pending");
   const operations = handle.sqlite.prepare(`SELECT operation_id AS operationId,
-      result_id AS resultId, narration_id AS narrationId, packet_hash AS packetHash, status
+      result_id AS resultId, narration_id AS narrationId, packet_hash AS packetHash,
+      source_kind AS sourceKind, status
     FROM campaign_play_narration_operations
     WHERE campaign_id = ? AND turn_id = ?`).all(
       handle.campaignId,
@@ -1614,6 +1616,7 @@ function validateSeparateNarrationOperation(
       resultId: string;
       narrationId: string;
       packetHash: string;
+      sourceKind: string;
       status: string;
     }>;
   if (
@@ -1624,6 +1627,9 @@ function validateSeparateNarrationOperation(
     !["pending", "running", "failed", "complete"].includes(operations[0]!.status)
   ) {
     throw corrupt("Campaign Play completed result lacks one exact narration operation.");
+  }
+  if (controlBudgetContinuity && operations[0]!.sourceKind !== "deterministic_continuity") {
+    throw corrupt("Campaign Play continuity turn lacks its deterministic narration operation.");
   }
   const sceneCount = handle.sqlite.prepare(`SELECT COUNT(*) AS count
     FROM campaign_play_proper_scenes
@@ -1666,6 +1672,9 @@ function validateAcceptedStageProgress(
     stages.filter((stage) => stage.status === "accepted").map((stage) => stage.kind),
   );
   if (row.stage === "failed") {
+    if (controlBudgetContinuity) {
+      throw corrupt("Campaign Play continuity turn has an invalid visible boundary.");
+    }
     if (acceptedKinds.has("narrator")) {
       throw corrupt("Campaign Play failed turn cannot retain an accepted narrator result.");
     }
@@ -1676,7 +1685,11 @@ function validateAcceptedStageProgress(
     throw corrupt("Campaign Play turn has no valid effective stage for model evidence.");
   }
   if (controlBudgetContinuity) {
-    if (row.turnKind !== "player_action" || effectiveStage !== "visibility_projected") {
+    if (
+      row.turnKind !== "player_action" ||
+      (row.stage !== "visibility_projected" && row.stage !== "completed") ||
+      effectiveStage !== row.stage
+    ) {
       throw corrupt("Campaign Play continuity turn has an invalid visible boundary.");
     }
     if (stages.some((stage) => stage.status === "accepted" && stage.kind === "narrator")) {
@@ -2179,8 +2192,11 @@ function loadRow(handle: CampaignPlayDatabaseHandle, row: TurnRow): LoadedCampai
   if (canonicalizeCampaignPlayProjection(mutationAudit) !== row.mutationAuditJson) {
     throw corrupt("Campaign Play mutation audit is not stored in canonical form.");
   }
-  const controlBudgetContinuity = row.turnKind === "player_action" &&
-    mutationAudit.kind === "control_budget_continuity";
+  const hasControlBudgetContinuityMarker = mutationAudit.kind === "control_budget_continuity";
+  if (hasControlBudgetContinuityMarker && row.turnKind !== "player_action") {
+    throw corrupt("Campaign Play control-budget continuity marker belongs only to player actions.");
+  }
+  const controlBudgetContinuity = hasControlBudgetContinuityMarker;
   const modelStages = validateModelStages(handle, row, modelSelection);
   validateAcceptedStageProgress(
     handle,
@@ -2384,7 +2400,7 @@ function loadRow(handle: CampaignPlayDatabaseHandle, row: TurnRow): LoadedCampai
           row.turnId,
         ) !== undefined;
       if (hasSeparateNarrationOperation) {
-        validateSeparateNarrationOperation(handle, row);
+        validateSeparateNarrationOperation(handle, row, controlBudgetContinuity);
       } else {
         validateCompletedNarration(handle, row, modelStages);
       }

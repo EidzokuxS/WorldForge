@@ -7,6 +7,7 @@ import {
   CAMPAIGN_PLAY_LIMITS,
   type CampaignPlayActionContext,
   type CampaignPlayJournalEntry,
+  type CampaignPlayNarration,
   type CampaignPlayNarrationOperation,
   type CampaignPlayNarrationRecoveryRequest,
   type CampaignPlayNarratorPacket,
@@ -30,6 +31,7 @@ import {
   campaignPlayNarratorPacketSchema,
   campaignPlayPlayerProfileAuthoritySchema,
   campaignPlaySuggestedActionSchema,
+  buildCampaignPlaySuggestedActionLabel,
   campaignPlaySuggestedActionLabelPrefix,
   campaignPlayTurnAdmissionRequestSchema,
   rulebookCommandBatchSchema,
@@ -425,6 +427,7 @@ interface CompletedPublicMomentRow {
   packetHash: string;
   packetJson: string;
   narrationCreatedAt: number;
+  narrationSourceKind: string | null;
 }
 
 interface PendingNarrationRow {
@@ -433,6 +436,47 @@ interface PendingNarrationRow {
   packetJson: string;
   status: string;
   createdAt: number;
+}
+
+function validateCompletedPublicNarration(
+  narration: CampaignPlayNarration,
+  packet: CampaignPlayNarratorPacket,
+  sourceKind: string | null,
+): void {
+  const effect = narration.effects[0];
+  if (
+    sourceKind !== "deterministic_continuity" || narration.effects.length !== 1 ||
+    effect === undefined || effect.kind !== "fade"
+  ) {
+    validateNarrationAgainstPacket(narration, packet);
+    return;
+  }
+
+  const beat = narration.beats.length === 1 ? narration.beats[0] : undefined;
+  const expectedSuggestedActions = packet.availableIntents.slice(0, 4).map((intent) => ({
+    choiceHandle: intent.handle,
+    label: intent.kind === "move" || intent.kind === "wait"
+      ? buildCampaignPlaySuggestedActionLabel(packet, intent, null)
+      : buildCampaignPlaySuggestedActionLabel(packet, intent, intent.label),
+  }));
+  if (
+    packet.turnKind !== "player_action" || packet.sourceMoment === null ||
+    beat === undefined || beat.text !== packet.sourceMoment ||
+    narration.displayText !== packet.sourceMoment ||
+    canonicalizeCampaignPlayProjection(narration.suggestedActions) !==
+      canonicalizeCampaignPlayProjection(expectedSuggestedActions) ||
+    effect.beatId !== beat.beatId
+  ) {
+    throw new Error("historical deterministic continuity scene shape");
+  }
+
+  // Older continuity rows used the pre-contract fade effect. Validate the
+  // exact historical shape through the current generic contract in memory;
+  // the persisted artifact is never rewritten.
+  validateNarrationAgainstPacket({
+    ...narration,
+    effects: [{ ...effect, kind: "flash" }],
+  }, packet);
 }
 
 interface HumanRow {
@@ -590,7 +634,15 @@ function loadCompletedPublicMoment(
       result.terminal_reason AS terminalReason,
       narration.narration_id AS narrationId,
       narration.packet_hash AS packetHash, narration.packet_json AS packetJson,
-      narration.created_at AS narrationCreatedAt
+      narration.created_at AS narrationCreatedAt,
+      (SELECT operation.source_kind
+       FROM campaign_play_narration_operations operation
+       WHERE operation.campaign_id = turn.campaign_id
+         AND operation.turn_id = turn.id
+         AND operation.packet_hash = narration.packet_hash
+         AND operation.narration_id = narration.narration_id
+         AND operation.status = 'complete'
+       LIMIT 1) AS narrationSourceKind
     FROM campaign_play_turns turn
     JOIN campaign_play_turn_results result
       ON result.campaign_id = turn.campaign_id AND result.turn_id = turn.id
@@ -709,7 +761,7 @@ function loadCompletedPublicMoment(
           moment.momentId,
         ) as { beatsJson: string; effectsJson: string } | undefined;
       if (!narration) throw new Error("missing proper scene artifact");
-      validateNarrationAgainstPacket(campaignPlayNarrationSchema.parse({
+      const completedNarration: CampaignPlayNarration = campaignPlayNarrationSchema.parse({
         narrationId: moment.momentId,
         turnId: row.sourceTurnId,
         beats: JSON.parse(narration.beatsJson) as unknown,
@@ -717,7 +769,8 @@ function loadCompletedPublicMoment(
         suggestedActions: moment.suggestedActions,
         effects: JSON.parse(narration.effectsJson) as unknown,
         createdAt: moment.createdAt,
-      }), packet);
+      });
+      validateCompletedPublicNarration(completedNarration, packet, row.narrationSourceKind);
     }
   } catch (cause) {
     throw new CampaignPlayTurnRuntimeError(
