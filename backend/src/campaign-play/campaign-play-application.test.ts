@@ -493,6 +493,12 @@ function fakePlayerRuntime(
     gameMasterRecoveryFeedback?: CampaignPlayGameMasterRecoveryFeedback;
     onGameMasterRecoveryFeedback?: (feedback: CampaignPlayGameMasterRecoveryFeedback) => void;
     onRun?: (turnId: string) => void;
+    initialErrorCode?: CampaignPlayExternalInterruptionEvidence["errorCode"];
+    resumeErrorCode?: CampaignPlayExternalInterruptionEvidence["errorCode"];
+    onContinuity?: (
+      turnId: string,
+      reason: "authority_budget" | "narration_budget" | "control_deadline",
+    ) => void;
     onResume?: (input: {
       turnId: string;
       gameMasterRecoveryFeedback?: CampaignPlayGameMasterRecoveryFeedback;
@@ -505,7 +511,7 @@ function fakePlayerRuntime(
     recovery: repository.loadRecoveryState(turnId, observedAt),
     telemetry: null,
   });
-  return {
+  const runtime: CampaignPlayTurnRuntime = {
     admitAction({ request, submittedAt }) {
       const turnId = `turn:${request.idempotencyKey}`;
       return repository.admitTurn({
@@ -543,9 +549,11 @@ function fakePlayerRuntime(
           inputTokens: 3,
           outputTokens: 0,
           durationMs: 2,
-          finishReason: "invalid_output",
-          schemaOutcome: "invalid",
-          errorCode: "model_contract_invalid",
+          finishReason: options.initialErrorCode === "model_contract_invalid"
+            ? "invalid_output" : "transport_error",
+          schemaOutcome: options.initialErrorCode === "model_contract_invalid"
+            ? "invalid" : "transport_error",
+          errorCode: options.initialErrorCode ?? "model_contract_invalid",
         },
         interruptedAt: claimedAt + 2,
         mutationId: `interrupt:${token.epoch}`,
@@ -572,6 +580,27 @@ function fakePlayerRuntime(
         leaseExpiresAt: resumedAt + 1_000,
         mutationId: `resume:${input.observedEpoch + 1}`,
       });
+      if (options.resumeErrorCode) {
+        repository.interruptExternal({
+          token,
+          evidence: {
+            actualProviderId: "provider-frozen",
+            actualModel: "game-master-frozen",
+            actualStrategy: "strict_object",
+            inputTokens: 4,
+            outputTokens: 0,
+            durationMs: 2,
+            finishReason: options.resumeErrorCode === "model_contract_invalid"
+              ? "invalid_output" : "transport_error",
+            schemaOutcome: options.resumeErrorCode === "model_contract_invalid"
+              ? "invalid" : "transport_error",
+            errorCode: options.resumeErrorCode,
+          },
+          interruptedAt: resumedAt + 2,
+          mutationId: `resume-interrupt:${token.epoch}`,
+        });
+        return snapshot(input.turnId, resumedAt + 2);
+      }
       const resumed = repository.loadTurn(input.turnId)!;
       return {
         turn: resumed,
@@ -589,6 +618,13 @@ function fakePlayerRuntime(
     loadTurn: (turnId) => repository.loadTurn(turnId),
     loadTelemetry: (turnId) => repository.loadTurnTelemetry(turnId),
   };
+  if (options.onContinuity) {
+    runtime.commitControlBudgetContinuity = (turnId, reason) => {
+      options.onContinuity?.(turnId, reason);
+      return repository.loadTurn(turnId)!;
+    };
+  }
+  return runtime;
 }
 
 function openingRequest(
@@ -1161,6 +1197,166 @@ describe("CampaignPlayApplication", () => {
       expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
         FROM campaign_play_model_stages WHERE turn_id = ?`).get(admission.turnId))
         .toEqual({ count: 2 });
+    } finally {
+      handle.close();
+    }
+  });
+
+  it.each([
+    "model_contract_invalid",
+    "stage_timeout",
+    "provider_unavailable",
+  ] as const)("commits one authority continuity after automatic attempt-2 %s", async (resumeErrorCode) => {
+    createAcceptedCampaign();
+    const runNextStage = vi.fn();
+    const resumeStage = vi.fn();
+    const continuity: Array<[string, "authority_budget" | "narration_budget" | "control_deadline"]> = [];
+    const application = createCampaignPlayApplication({
+      now: () => 1_300,
+      runtimeFactory: {
+        createOpening: (handle) => fakeOpeningRuntime(handle, { runNextStage: vi.fn() }),
+        createTurn: (handle) => fakePlayerRuntime(handle, {
+          onRun: runNextStage,
+          onResume: ({ turnId }) => resumeStage(turnId),
+          initialErrorCode: "model_contract_invalid",
+          resumeErrorCode,
+          onContinuity: (turnId, reason) => continuity.push([turnId, reason]),
+        }),
+      },
+    });
+    application.loadState(CAMPAIGN_ID);
+    bootstrapPlayer(application);
+    markPlayerPhaseReady();
+    const state = application.loadState(CAMPAIGN_ID);
+    const admission = application.admitTurn(CAMPAIGN_ID, {
+      source: "freeform",
+      idempotencyKey: `player-authority-budget-${resumeErrorCode}`,
+      text: "Ask about the current signal.",
+      expectedWorldVersion: state.worldVersion,
+      expectedRuntimeRevision: state.runtimeRevision,
+    });
+    await application.waitForIdle(CAMPAIGN_ID);
+
+    expect(runNextStage).toHaveBeenCalledTimes(1);
+    expect(resumeStage).toHaveBeenCalledTimes(1);
+    expect(continuity).toEqual([[admission.turnId, "authority_budget"]]);
+    const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
+    try {
+      expect(handle.sqlite.prepare(`SELECT attempt, status, error_code AS errorCode
+        FROM campaign_play_model_stages WHERE turn_id = ? ORDER BY attempt`).all(
+        admission.turnId,
+      )).toEqual([
+        { attempt: 1, status: "interrupted", errorCode: "model_contract_invalid" },
+        { attempt: 2, status: "interrupted", errorCode: resumeErrorCode },
+      ]);
+      expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count FROM campaign_play_model_stages
+        WHERE turn_id = ? AND attempt = 3`).get(admission.turnId)).toEqual({ count: 0 });
+      expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count FROM campaign_play_turn_results
+        WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, admission.turnId))
+        .toEqual({ count: 0 });
+      expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count FROM campaign_play_receipts
+        WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, admission.turnId))
+        .toEqual({ count: 0 });
+      expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count FROM campaign_play_narrations
+        WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, admission.turnId))
+        .toEqual({ count: 0 });
+    } finally {
+      handle.close();
+    }
+  });
+
+  it("does not auto-commit continuity for an unallowlisted automatic attempt-2 error", async () => {
+    createAcceptedCampaign();
+    const resumeStage = vi.fn();
+    const continuity = vi.fn();
+    const application = createCampaignPlayApplication({
+      now: () => 1_300,
+      runtimeFactory: {
+        createOpening: (handle) => fakeOpeningRuntime(handle, { runNextStage: vi.fn() }),
+        createTurn: (handle) => fakePlayerRuntime(handle, {
+          resumeErrorCode: "persistence_failed",
+          onResume: ({ turnId }) => resumeStage(turnId),
+          onContinuity: continuity,
+        }),
+      },
+    });
+    application.loadState(CAMPAIGN_ID);
+    bootstrapPlayer(application);
+    markPlayerPhaseReady();
+    const state = application.loadState(CAMPAIGN_ID);
+    const admission = application.admitTurn(CAMPAIGN_ID, {
+      source: "freeform",
+      idempotencyKey: "player-authority-budget-unallowlisted",
+      text: "Ask about the current signal.",
+      expectedWorldVersion: state.worldVersion,
+      expectedRuntimeRevision: state.runtimeRevision,
+    });
+    await application.waitForIdle(CAMPAIGN_ID);
+
+    expect(resumeStage).toHaveBeenCalledTimes(1);
+    expect(continuity).not.toHaveBeenCalled();
+    const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
+    try {
+      expect(handle.sqlite.prepare(`SELECT attempt, status, error_code AS errorCode
+        FROM campaign_play_model_stages WHERE turn_id = ? ORDER BY attempt`).all(
+        admission.turnId,
+      )).toEqual([
+        { attempt: 1, status: "interrupted", errorCode: "model_contract_invalid" },
+        { attempt: 2, status: "interrupted", errorCode: "persistence_failed" },
+      ]);
+    } finally {
+      handle.close();
+    }
+  });
+
+  it("does not auto-commit continuity after a manual Resume failure", async () => {
+    createAcceptedCampaign();
+    const resumeStage = vi.fn();
+    const continuity = vi.fn();
+    const application = createCampaignPlayApplication({
+      now: () => 1_300,
+      runtimeFactory: {
+        createOpening: (handle) => fakeOpeningRuntime(handle, { runNextStage: vi.fn() }),
+        createTurn: (handle) => fakePlayerRuntime(handle, {
+          initialErrorCode: "persistence_failed",
+          resumeErrorCode: "stage_timeout",
+          onResume: ({ turnId }) => resumeStage(turnId),
+          onContinuity: continuity,
+        }),
+      },
+    });
+    application.loadState(CAMPAIGN_ID);
+    bootstrapPlayer(application);
+    markPlayerPhaseReady();
+    const state = application.loadState(CAMPAIGN_ID);
+    const admission = application.admitTurn(CAMPAIGN_ID, {
+      source: "freeform",
+      idempotencyKey: "player-manual-resume-no-continuity",
+      text: "Ask about the current signal.",
+      expectedWorldVersion: state.worldVersion,
+      expectedRuntimeRevision: state.runtimeRevision,
+    });
+    await application.waitForIdle(CAMPAIGN_ID);
+    expect(resumeStage).not.toHaveBeenCalled();
+
+    const interrupted = application.loadState(CAMPAIGN_ID);
+    application.resumeTurn(CAMPAIGN_ID, admission.turnId, {
+      expectedWorldVersion: interrupted.worldVersion,
+      expectedRuntimeRevision: interrupted.runtimeRevision,
+    });
+    await application.waitForIdle(CAMPAIGN_ID);
+
+    expect(resumeStage).toHaveBeenCalledTimes(1);
+    expect(continuity).not.toHaveBeenCalled();
+    const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
+    try {
+      expect(handle.sqlite.prepare(`SELECT attempt, status, error_code AS errorCode
+        FROM campaign_play_model_stages WHERE turn_id = ? ORDER BY attempt`).all(
+        admission.turnId,
+      )).toEqual([
+        { attempt: 1, status: "interrupted", errorCode: "persistence_failed" },
+        { attempt: 2, status: "interrupted", errorCode: "stage_timeout" },
+      ]);
     } finally {
       handle.close();
     }

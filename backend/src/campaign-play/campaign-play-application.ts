@@ -777,6 +777,20 @@ export function createCampaignPlayApplication(
           await turnRuntime.commitControlBudgetContinuity(turnId, "authority_budget");
           return;
         }
+        if (
+          before.turnKind === "player_action" &&
+          turnRuntime?.commitControlBudgetContinuity &&
+          automaticResumeAttempted &&
+          wasResume &&
+          result.recovery.kind === "explicit_resume_required" &&
+          result.recovery.attempt === 2 &&
+          (result.recovery.errorCode === "model_contract_invalid" ||
+            result.recovery.errorCode === "stage_timeout" ||
+            result.recovery.errorCode === "provider_unavailable")
+        ) {
+          await turnRuntime.commitControlBudgetContinuity(turnId, "authority_budget");
+          return;
+        }
         if (result.recovery.kind === "explicit_resume_required" &&
           campaignPlayMayAutomaticallyResumeExternalStage({
             turnKind: before.turnKind,
