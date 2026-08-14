@@ -1193,6 +1193,83 @@ describe("Campaign Play external artifact and recovery fencing", () => {
     expect(runtimeSnapshot(handle)).toEqual(after);
   });
 
+  it("accepts the allowlisted Z.AI response model and reloads its truthful identity", () => {
+    const { handle, state } = createOpeningReadyCampaign();
+    const repository = createCampaignPlayTurnRepository(handle);
+    const input = openingInput(state, "opening-zai-response-model");
+    if (input.modelSelection.turnKind !== "opening") {
+      throw new Error("Opening fixture lost its model selection contract.");
+    }
+    input.modelSelection.openingPlanner = {
+      ...input.modelSelection.openingPlanner,
+      providerId: "zai-coding-plan",
+      model: "glm-5.2",
+    };
+    repository.admitTurn(input);
+    const token = repository.claimStage(claimInput());
+    const evidence = {
+      ...acceptedEvidence,
+      actualProviderId: "zai-coding-plan",
+      actualModel: "glm-5.3",
+    };
+    const artifact = { plan: { summary: "Begin locally", steps: ["observe"] } };
+
+    const accepted = repository.acceptModelArtifact({
+      token,
+      artifact,
+      evidence,
+      mutationDomain: "runtime",
+      acceptedAt: 1_700,
+      mutationId: "opening-zai-plan-accepted",
+    });
+
+    expect(accepted.stage).toBe("planned");
+    expect(repository.loadAcceptedModelArtifact("turn-opening", "opening_planner"))
+      .toMatchObject({
+        requested: expect.objectContaining({ providerId: "zai-coding-plan", model: "glm-5.2" }),
+        evidence,
+      });
+    expect(handle.sqlite.prepare(`SELECT actual_provider_id AS actualProviderId,
+        actual_model AS actualModel, status
+      FROM campaign_play_model_stages WHERE turn_id = 'turn-opening' AND kind = 'opening_planner'`).get())
+      .toEqual({ actualProviderId: "zai-coding-plan", actualModel: "glm-5.3", status: "accepted" });
+  });
+
+  it.each([
+    ["other-provider-upgrade", "other-provider", "glm-5.2", "glm-5.3"],
+    ["zai-turbo-upgrade", "zai-coding-plan", "glm-5-turbo", "glm-5.3"],
+    ["reverse-upgrade", "zai-coding-plan", "glm-5.3", "glm-5.2"],
+    ["prefixed-model", "zai-coding-plan", "glm-5.2-preview", "glm-5.3"],
+    ["future-model", "zai-coding-plan", "glm-5.2", "glm-6.0"],
+    ["missing-response-model", "zai-coding-plan", "glm-5.2", null],
+  ] as const)("rejects the non-allowlisted response model: %s", (_caseName, providerId, requestedModel, actualModel) => {
+    const { handle, state } = createOpeningReadyCampaign();
+    const repository = createCampaignPlayTurnRepository(handle);
+    const input = openingInput(state, `opening-reject-${_caseName}`);
+    if (input.modelSelection.turnKind !== "opening") {
+      throw new Error("Opening fixture lost its model selection contract.");
+    }
+    input.modelSelection.openingPlanner = {
+      ...input.modelSelection.openingPlanner,
+      providerId,
+      model: requestedModel,
+    };
+    repository.admitTurn(input);
+    const token = repository.claimStage(claimInput());
+    expectTurnError(() => repository.acceptModelArtifact({
+      token,
+      artifact: { plan: { summary: "Begin locally", steps: ["observe"] } },
+      evidence: {
+        ...acceptedEvidence,
+        actualProviderId: providerId,
+        actualModel: actualModel as string,
+      },
+      mutationDomain: "runtime",
+      acceptedAt: 1_700,
+      mutationId: `opening-reject-${_caseName}`,
+    }), "turn_stage_invalid");
+  });
+
   it("keeps token telemetry while marking unknown frozen pricing incomplete", () => {
     const { handle, state } = createOpeningReadyCampaign();
     const repository = createCampaignPlayTurnRepository(handle);

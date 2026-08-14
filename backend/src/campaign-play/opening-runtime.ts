@@ -76,6 +76,7 @@ import {
   type CampaignPlayTurnServiceResult,
   type ResumeCampaignPlayTurnInput,
 } from "./turn-service.js";
+import { campaignPlayResponseModelMatches } from "./model-identity.js";
 import {
   createCampaignPlayVisibilityService,
   type CampaignPlayVisibilityService,
@@ -409,16 +410,21 @@ function acceptedPlannerExecutionEvidence(
   evidence: CampaignPlayOpeningModelEvidence,
   durationMs: number,
 ): CampaignPlayModelExecutionEvidence {
+  const responseModel = evidence.responseModel;
   if (
-    evidence.actualStrategy === null || evidence.responseModel === null ||
-    evidence.responseModel !== requested.model || evidence.totalAttempts !== 1 ||
+    evidence.actualStrategy === null || responseModel === null ||
+    !campaignPlayResponseModelMatches({
+      providerId: requested.providerId,
+      requestedModel: requested.model,
+      responseModel,
+    }) || evidence.totalAttempts !== 1 ||
     evidence.inputTokens === null || evidence.outputTokens === null ||
     evidence.finishReason === null || evidence.repairUsed || evidence.retryUsed ||
     evidence.textFallbackUsed || evidence.errorCode !== null
   ) {
     throw new CampaignPlayExternalStageInterruption({
       actualProviderId: requested.providerId,
-      actualModel: evidence.responseModel ?? requested.model,
+      actualModel: responseModel ?? requested.model,
       actualStrategy: "strict_object",
       inputTokens: evidence.inputTokens,
       outputTokens: evidence.outputTokens,
@@ -430,7 +436,7 @@ function acceptedPlannerExecutionEvidence(
   }
   return {
     actualProviderId: requested.providerId,
-    actualModel: evidence.responseModel,
+    actualModel: responseModel,
     actualStrategy: "strict_object",
     inputTokens: evidence.inputTokens,
     outputTokens: evidence.outputTokens,
@@ -443,19 +449,25 @@ function acceptedNarratorExecutionEvidence(
   requested: CampaignPlayRequestedModel,
   evidence: CampaignPlayNarratorModelEvidence,
 ): CampaignPlayModelExecutionEvidence {
+  const actualProviderId = evidence.actualProviderId;
+  const responseModel = evidence.responseModel;
   if (
-    evidence.actualProviderId !== requested.providerId ||
-    evidence.responseModel !== requested.model || evidence.totalAttempts !== 1 ||
+    actualProviderId !== requested.providerId ||
+    responseModel === null ||
+    !campaignPlayResponseModelMatches({
+      providerId: requested.providerId,
+      requestedModel: requested.model,
+      responseModel,
+    }) || evidence.totalAttempts !== 1 ||
     evidence.actualStrategy === null || evidence.inputTokens === null ||
     evidence.outputTokens === null || evidence.finishReason === null ||
     evidence.repairUsed || evidence.retryUsed || evidence.textFallbackUsed ||
     evidence.errorCode !== null
   ) {
-    const hasActualIdentity = evidence.actualProviderId !== null &&
-      evidence.responseModel !== null;
+    const hasActualIdentity = actualProviderId !== null && responseModel !== null;
     throw new CampaignPlayExternalStageInterruption({
-      actualProviderId: hasActualIdentity ? evidence.actualProviderId : null,
-      actualModel: hasActualIdentity ? evidence.responseModel : null,
+      actualProviderId: hasActualIdentity ? actualProviderId : null,
+      actualModel: hasActualIdentity ? responseModel : null,
       actualStrategy: hasActualIdentity ? "strict_object" : null,
       inputTokens: evidence.inputTokens,
       outputTokens: evidence.outputTokens,
@@ -466,8 +478,8 @@ function acceptedNarratorExecutionEvidence(
     });
   }
   return {
-    actualProviderId: evidence.actualProviderId,
-    actualModel: evidence.responseModel,
+    actualProviderId,
+    actualModel: responseModel,
     actualStrategy: "strict_object",
     inputTokens: evidence.inputTokens,
     outputTokens: evidence.outputTokens,

@@ -29,6 +29,7 @@ import {
 } from "./campaign-play-projection.js";
 import { createCampaignPlayStateRepository } from "./campaign-play-state-repository.js";
 import type { CampaignPlayMutationContext } from "./campaign-play-state-repository.js";
+import { campaignPlayResponseModelMatches } from "./model-identity.js";
 
 export type CampaignPlayTurnRepositoryErrorCode =
   | "turn_not_found"
@@ -2981,7 +2982,11 @@ export function createCampaignPlayTurnRepository(
       const modelKind = route.model.kind;
       if (
         input.evidence.actualProviderId !== route.model.requested.providerId ||
-        input.evidence.actualModel !== route.model.requested.model
+        !campaignPlayResponseModelMatches({
+          providerId: route.model.requested.providerId,
+          requestedModel: route.model.requested.model,
+          responseModel: input.evidence.actualModel,
+        })
       ) {
         throw stageInvalid("Campaign Play accepted model evidence must match the frozen provider and model.");
       }

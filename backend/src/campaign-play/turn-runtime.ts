@@ -137,6 +137,7 @@ import {
   type CampaignPlayNarrationRecoveryKind,
   type CampaignPlayNarrationAttemptToken,
 } from "./narration-operation-repository.js";
+import { campaignPlayResponseModelMatches } from "./model-identity.js";
 
 const log = createLogger("campaign-play-turn-runtime");
 
@@ -2039,11 +2040,18 @@ function acceptedEvidence(
   requested: CampaignPlayRequestedModel,
   evidence: CampaignPlayModelEvidence,
 ): CampaignPlayModelExecutionEvidence {
+  const actualProviderId = evidence.actualProviderId;
+  const responseModel = evidence.responseModel;
   if (
-    evidence.actualProviderId !== requested.providerId ||
+    actualProviderId !== requested.providerId ||
     evidence.actualStrategy === null || evidence.totalAttempts !== 1 ||
     evidence.repairUsed || evidence.retryUsed || evidence.textFallbackUsed ||
-    evidence.responseModel !== requested.model || evidence.finishReason === null ||
+    responseModel === null ||
+    !campaignPlayResponseModelMatches({
+      providerId: requested.providerId,
+      requestedModel: requested.model,
+      responseModel,
+    }) || evidence.finishReason === null ||
     evidence.inputTokens === null || evidence.outputTokens === null ||
     evidence.errorCode !== null
   ) {
@@ -2056,8 +2064,8 @@ function acceptedEvidence(
     }));
   }
   return {
-    actualProviderId: evidence.actualProviderId,
-    actualModel: evidence.responseModel,
+    actualProviderId,
+    actualModel: responseModel,
     actualStrategy: "strict_object",
     inputTokens: evidence.inputTokens,
     outputTokens: evidence.outputTokens,
@@ -2338,11 +2346,18 @@ function acceptedNarratorEvidence(
   requested: CampaignPlayRequestedModel,
   evidence: CampaignPlayNarratorModelEvidence,
 ): CampaignPlayModelExecutionEvidence {
+  const actualProviderId = evidence.actualProviderId;
+  const responseModel = evidence.responseModel;
   if (
-    evidence.actualProviderId !== requested.providerId ||
+    actualProviderId !== requested.providerId ||
     evidence.actualStrategy === null || evidence.totalAttempts !== 1 ||
     evidence.repairUsed || evidence.retryUsed || evidence.textFallbackUsed ||
-    evidence.responseModel !== requested.model || evidence.finishReason === null ||
+    responseModel === null ||
+    !campaignPlayResponseModelMatches({
+      providerId: requested.providerId,
+      requestedModel: requested.model,
+      responseModel,
+    }) || evidence.finishReason === null ||
     evidence.inputTokens === null || evidence.outputTokens === null ||
     evidence.errorCode !== null
   ) {
@@ -2358,8 +2373,8 @@ function acceptedNarratorEvidence(
     );
   }
   return {
-    actualProviderId: evidence.actualProviderId,
-    actualModel: evidence.responseModel,
+    actualProviderId,
+    actualModel: responseModel,
     actualStrategy: "strict_object",
     inputTokens: evidence.inputTokens,
     outputTokens: evidence.outputTokens,

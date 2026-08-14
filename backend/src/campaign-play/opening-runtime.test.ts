@@ -273,7 +273,7 @@ async function runOpeningUntil(
   throw new Error("Opening runtime did not reach the expected durable state.");
 }
 
-function plannerFixture() {
+function plannerFixture(modelEvidence: CampaignPlayOpeningModelEvidence = plannerEvidence) {
   const compiler = createCampaignPlayOpeningPlanner();
   return {
     compile: compiler.compile,
@@ -301,7 +301,7 @@ function plannerFixture() {
         request.frame,
         request.startingConditions,
         proposal,
-        plannerEvidence,
+        modelEvidence,
       );
     }),
   };
@@ -647,6 +647,63 @@ describe("Campaign Play opening runtime", () => {
     expect(count(handle, "campaign_play_runtime_events")).toBe(runtimeEventsBefore);
     expect(createCampaignPlayStateRepository(handle).loadState()!.authority)
       .toEqual(before.authority);
+  });
+
+  it("accepts the allowlisted Z.AI response model and persists the truthful actual model", async () => {
+    const { handle, state } = createPlayableCampaign();
+    const models = runtimeModels();
+    const time = fixedClock(2_000);
+    const runtime = createCampaignPlayOpeningRuntime({
+      handle,
+      owner: "opening-zai-model-worker",
+      leaseDurationMs: 1_000,
+      heartbeatIntervalMs: 100,
+      clock: time.clock,
+      openingPlannerModel: {
+        ...models.openingPlannerModel,
+        requested: {
+          ...models.openingPlannerModel.requested,
+          providerId: "zai-coding-plan",
+          model: "glm-5.2",
+        },
+      },
+      narratorModel: {
+        ...models.narratorModel,
+        requested: {
+          ...models.narratorModel.requested,
+          providerId: "zai-coding-plan",
+          model: "glm-5.2",
+        },
+      },
+      openingPlanner: plannerFixture({ ...plannerEvidence, responseModel: "glm-5.3" }),
+      narrator: narratorFixture({
+        ...narratorEvidence,
+        actualProviderId: "zai-coding-plan",
+        responseModel: "glm-5.3",
+      }),
+    });
+    const admission = runtime.admitOpening({
+      submittedAt: 2_000,
+      request: {
+        idempotencyKey: "opening-zai-response-model",
+        expectedWorldVersion: state.authority.worldVersion,
+        expectedRuntimeRevision: state.authority.runtimeRevision,
+        startingConditions: { mode: "delegate" },
+      },
+    });
+    await runOpeningUntil(runtime, time, admission.turnId, (turn) => turn.stage === "completed");
+
+    expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "completed" });
+    expect(handle.sqlite.prepare(`SELECT kind, actual_provider_id AS actualProviderId,
+        actual_model AS actualModel, status
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? ORDER BY kind`).all(
+        CAMPAIGN_ID,
+        admission.turnId,
+      )).toEqual([
+        { kind: "narrator", actualProviderId: "zai-coding-plan", actualModel: "glm-5.3", status: "accepted" },
+        { kind: "opening_planner", actualProviderId: "zai-coding-plan", actualModel: "glm-5.3", status: "accepted" },
+      ]);
   });
 
   it.each([

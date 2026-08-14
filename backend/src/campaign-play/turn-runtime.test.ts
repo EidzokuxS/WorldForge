@@ -261,15 +261,19 @@ const openingNarratorEvidence: CampaignPlayNarratorModelEvidence = {
   estimatedCostMicros: 1,
 };
 
-const acceptedEvidence = (model: "test-judge" | "test-game-master"): CampaignPlayModelEvidence => ({
+const acceptedEvidence = (
+  model: "test-judge" | "test-game-master",
+  providerId = "test",
+  responseModel: string = model,
+): CampaignPlayModelEvidence => ({
   requestedStrategy: "strict_object",
-  actualProviderId: "test",
+  actualProviderId: providerId,
   actualStrategy: "native_schema",
   totalAttempts: 1,
   repairUsed: false,
   retryUsed: false,
   textFallbackUsed: false,
-  responseModel: model,
+  responseModel,
   finishReason: "stop",
   errorCode: null,
   inputTokens: 20,
@@ -441,12 +445,16 @@ function openingNarratorFixture(includeWait = false, contactDetail = "the immedi
   };
 }
 
-function playerNarratorFixture(contactDetail = "the immediate situation") {
+function playerNarratorFixture(
+  contactDetail = "the immediate situation",
+  modelEvidence?: CampaignPlayNarratorModelEvidence,
+) {
   const compiler = createCampaignPlayNarrator();
   const evidence: CampaignPlayNarratorModelEvidence = {
     ...openingNarratorEvidence,
-    actualProviderId: "test",
-    responseModel: "test-narrator",
+    actualProviderId: modelEvidence?.actualProviderId ?? "test",
+    responseModel: modelEvidence?.responseModel ?? "test-narrator",
+    ...(modelEvidence ?? {}),
   };
   return {
     compile: compiler.compile,
@@ -570,6 +578,7 @@ function judgeFixture(
   disposition: Disposition,
   compoundDestinationName: string | null = null,
   failFirstFinalValidation = false,
+  modelEvidence: CampaignPlayModelEvidence = acceptedEvidence("test-judge"),
 ) {
   const compiler = createCampaignPlayJudge();
   let calls = 0;
@@ -655,7 +664,7 @@ function judgeFixture(
           ? "Which signal do you mean?"
           : null,
       });
-      return { ruling, rulingHash: "f".repeat(64), modelEvidence: acceptedEvidence("test-judge") };
+      return { ruling, rulingHash: "f".repeat(64), modelEvidence };
     }),
   };
 }
@@ -664,6 +673,7 @@ function gameMasterFixture(
   worldEventCount = 1,
   includeSubmittedText = false,
   actorlessResult = false,
+  modelEvidence: CampaignPlayModelEvidence = acceptedEvidence("test-game-master"),
 ) {
   const compiler = createCampaignPlayGameMaster();
   return {
@@ -709,7 +719,7 @@ function gameMasterFixture(
           },
         ),
         semanticReview: { kind: "not_required" as const },
-        modelEvidence: acceptedEvidence("test-game-master"),
+        modelEvidence,
       };
     }),
   };
@@ -840,7 +850,14 @@ function turnRuntime(
   judge: NonNullable<Parameters<typeof createCampaignPlayTurnRuntime>[0]["judge"]>,
   gameMaster: NonNullable<Parameters<typeof createCampaignPlayTurnRuntime>[0]["gameMaster"]>,
   overrides: Partial<Parameters<typeof createCampaignPlayTurnRuntime>[0]> = {},
+  modelIdentity?: { providerId: string; requestedModel: string },
 ) {
+  const requested = (fallbackModel: string) => ({
+    providerId: modelIdentity?.providerId ?? "test",
+    model: modelIdentity?.requestedModel ?? fallbackModel,
+    strategy: "strict_object" as const,
+    pricing: TEST_MODEL_PRICING,
+  });
   const actorReplanner = createCampaignPlayActorReplanner(handle, {
     now: time.clock.now,
     generateObject: (async (request: { prompt: string }) => ({
@@ -857,12 +874,7 @@ function turnRuntime(
     clock: time.clock,
     judgeModel: {
       languageModel: {} as LanguageModel,
-      requested: {
-        providerId: "test",
-        model: "test-judge",
-        strategy: "strict_object",
-        pricing: TEST_MODEL_PRICING,
-      },
+      requested: requested("test-judge"),
       temperature: 0.2,
       maximumInputTokens: 1_000,
       maximumOutputTokens: 1_000,
@@ -871,12 +883,7 @@ function turnRuntime(
     },
     gameMasterModel: {
       languageModel: {} as LanguageModel,
-      requested: {
-        providerId: "test",
-        model: "test-game-master",
-        strategy: "strict_object",
-        pricing: TEST_MODEL_PRICING,
-      },
+      requested: requested("test-game-master"),
       temperature: 0.2,
       maximumInputTokens: 1_000,
       maximumOutputTokens: 1_000,
@@ -885,12 +892,7 @@ function turnRuntime(
     },
     actorReplannerModel: {
       languageModel: {} as LanguageModel,
-      requested: {
-        providerId: "test",
-        model: "test-actor-replanner",
-        strategy: "strict_object",
-        pricing: TEST_MODEL_PRICING,
-      },
+      requested: requested("test-actor-replanner"),
       temperature: 0.2,
       maximumInputTokens: 1_000,
       maximumOutputTokens: 1_000,
@@ -899,12 +901,7 @@ function turnRuntime(
     },
     narratorModel: {
       languageModel: {} as LanguageModel,
-      requested: {
-        providerId: "test",
-        model: "test-narrator",
-        strategy: "strict_object",
-        pricing: TEST_MODEL_PRICING,
-      },
+      requested: requested("test-narrator"),
       temperature: 0.3,
       maximumInputTokens: 1_000,
       maximumOutputTokens: 2_048,
@@ -3384,6 +3381,71 @@ describe("Campaign Play player-action turn runtime", () => {
       result: "success",
     })]);
     expect(narrator.narrate).toHaveBeenCalledTimes(2);
+  });
+
+  it("accepts the allowlisted Z.AI response model for player stages and persists the truthful model", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening();
+    const time = fixedClock(7_500);
+    const modelIdentity = {
+      providerId: "zai-coding-plan",
+      requestedModel: "glm-5.2",
+    };
+    const judge = judgeFixture(
+      "deterministic",
+      null,
+      false,
+      acceptedEvidence("test-judge", "zai-coding-plan", "glm-5.3"),
+    );
+    const gameMaster = gameMasterFixture(
+      1,
+      false,
+      false,
+      acceptedEvidence("test-game-master", "zai-coding-plan", "glm-5.3"),
+    );
+    const narrator = playerNarratorFixture("the immediate situation", {
+      ...openingNarratorEvidence,
+      actualProviderId: "zai-coding-plan",
+      responseModel: "glm-5.3",
+    });
+    const runtime = turnRuntime(
+      handle,
+      time,
+      judge,
+      gameMaster,
+      { narrator },
+      modelIdentity,
+    );
+    const admission = runtime.admitAction({
+      request: admissionRequest(state, "zai-player-response-model"),
+      submittedAt: time.clock.now(),
+    });
+
+    await advanceUntilStage(runtime, time, admission.turnId, "completed");
+    await runtime.runNarration(admission.turnId);
+
+    expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "completed" });
+    const stages = handle.sqlite.prepare(`SELECT kind, actual_provider_id AS actualProviderId,
+        actual_model AS actualModel, status
+      FROM campaign_play_model_stages WHERE campaign_id = ? AND turn_id = ? ORDER BY kind`).all(
+      CAMPAIGN_ID,
+      admission.turnId,
+    ) as Array<{ kind: string; actualProviderId: string; actualModel: string; status: string }>;
+    expect(stages).toEqual(expect.arrayContaining([
+      { kind: "judge", actualProviderId: "zai-coding-plan", actualModel: "glm-5.3", status: "accepted" },
+      { kind: "game_master", actualProviderId: "zai-coding-plan", actualModel: "glm-5.3", status: "accepted" },
+    ]));
+    expect(stages
+      .filter((stage) => stage.kind === "judge" || stage.kind === "game_master")
+      .every((stage) => stage.status === "accepted")).toBe(true);
+    expect(handle.sqlite.prepare(`SELECT actual_provider_id AS actualProviderId,
+        actual_model AS actualModel, schema_outcome AS schemaOutcome, status
+      FROM campaign_play_narration_attempts WHERE campaign_id = ? AND turn_id = ?
+      ORDER BY attempt DESC LIMIT 1`).get(CAMPAIGN_ID, admission.turnId)).toEqual({
+      actualProviderId: "zai-coding-plan",
+      actualModel: "glm-5.3",
+      schemaOutcome: "valid",
+      status: "accepted",
+    });
   });
 
   it("admits the next action when a known observation is outside both packet windows", async () => {
