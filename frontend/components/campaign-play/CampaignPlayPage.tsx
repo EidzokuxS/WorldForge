@@ -1054,13 +1054,14 @@ export function CampaignPlayPage({
     operationRef.current = operation;
     setPendingOperation(operation);
     setRequestError(null);
+    const admissionRequest: CampaignPlayTurnAdmissionRequest = {
+      ...request,
+      idempotencyKey: crypto.randomUUID(),
+      expectedWorldVersion: campaignState.worldVersion,
+      expectedRuntimeRevision: campaignState.runtimeRevision,
+    };
     try {
-      const admission = await admitCampaignPlayTurn(campaignId, {
-        ...request,
-        idempotencyKey: crypto.randomUUID(),
-        expectedWorldVersion: campaignState.worldVersion,
-        expectedRuntimeRevision: campaignState.runtimeRevision,
-      });
+      const admission = await admitCampaignPlayTurn(campaignId, admissionRequest);
       if (
         !mountedRef.current || campaignIdRef.current !== campaignId ||
         operationRef.current !== operation
@@ -1068,14 +1069,41 @@ export function CampaignPlayPage({
       beginFollowing(admission.turnId, admission.sequence);
       if (request.source === "freeform") setDraft("");
     } catch (error) {
-      await reconcileRequestFailure(operation, error);
+      const ambiguous = !(error instanceof CampaignPlayApiError) || error.code === "service_unavailable";
+      if (!ambiguous) {
+        await reconcileRequestFailure(operation, error);
+      } else if (
+        mountedRef.current && campaignIdRef.current === campaignId &&
+        operationRef.current === operation
+      ) {
+        try {
+          await refreshAuthority(undefined, { clearRequestError: true });
+        } catch {
+          // The replay remains safe because it reuses the canonical idempotency key.
+        }
+        if (
+          !mountedRef.current || campaignIdRef.current !== campaignId ||
+          operationRef.current !== operation
+        ) return;
+        try {
+          const admission = await admitCampaignPlayTurn(campaignId, admissionRequest);
+          if (
+            !mountedRef.current || campaignIdRef.current !== campaignId ||
+            operationRef.current !== operation
+          ) return;
+          beginFollowing(admission.turnId, admission.sequence);
+          if (request.source === "freeform") setDraft("");
+        } catch (replayError) {
+          await reconcileRequestFailure(operation, replayError);
+        }
+      }
     } finally {
       if (operationRef.current === operation) {
         operationRef.current = null;
         if (mountedRef.current && campaignIdRef.current === campaignId) setPendingOperation(null);
       }
     }
-  }, [beginFollowing, campaignId, campaignState, reconcileRequestFailure, setDraft]);
+  }, [beginFollowing, campaignId, campaignState, reconcileRequestFailure, refreshAuthority, setDraft]);
 
   const submitOpening = useCallback(async (startingConditions: CampaignPlayStartingConditions) => {
     if (

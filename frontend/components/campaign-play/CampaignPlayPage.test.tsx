@@ -452,6 +452,143 @@ describe("CampaignPlayPage durable state", () => {
     expect(input).toHaveValue("I wait under the awning.");
   });
 
+  it.each([
+    ["raw transport failure", () => new Error("offline")],
+    ["service unavailable response", () => new CampaignPlayApiError(
+      "service_unavailable",
+      "Campaign Play is temporarily unavailable.",
+      503,
+      null,
+    )],
+  ])("replays one ambiguous admission with the same request after %s", async (_label, makeError) => {
+    const settled = state("ready");
+    settled.narration!.turnId = "turn-1";
+    settled.narration!.displayText = "The replayed scene is ready.";
+    settled.narration!.beats[0]!.text = settled.narration!.displayText;
+    api.loadState
+      .mockResolvedValueOnce(state("ready"))
+      .mockResolvedValueOnce(state("ready"))
+      .mockResolvedValueOnce(settled);
+    api.admitTurn
+      .mockRejectedValueOnce(makeError())
+      .mockResolvedValueOnce({ turnId: "turn-1", sequence: 1 });
+
+    render(<CampaignPlayPage campaignId="campaign-1" />);
+    const input = await screen.findByLabelText("Your action");
+    fireEvent.change(input, { target: { value: "I follow the signal." } });
+    fireEvent.click(screen.getByRole("button", { name: "Act" }));
+
+    await waitFor(() => expect(screen.getByText(settled.narration!.displayText)).toBeInTheDocument());
+    expect(api.admitTurn).toHaveBeenCalledTimes(2);
+    expect(api.admitTurn.mock.calls[0]![0]).toBe("campaign-1");
+    expect(api.admitTurn.mock.calls[1]![0]).toBe("campaign-1");
+    expect(api.admitTurn.mock.calls[1]![1]).toBe(api.admitTurn.mock.calls[0]![1]);
+    expect(api.admitTurn.mock.calls[1]![1]).toEqual({
+      source: "freeform",
+      idempotencyKey: "request-1",
+      text: "I follow the signal.",
+      expectedWorldVersion: 3,
+      expectedRuntimeRevision: 4,
+    });
+    expect(crypto.randomUUID).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("keeps the existing service-unavailable surface after one replay failure", async () => {
+    api.loadState.mockResolvedValue(state("ready"));
+    api.admitTurn.mockRejectedValue(new Error("offline"));
+    render(<CampaignPlayPage campaignId="campaign-1" />);
+    const input = await screen.findByLabelText("Your action");
+    fireEvent.change(input, { target: { value: "I wait under the awning." } });
+    fireEvent.click(screen.getByRole("button", { name: "Act" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("temporarily unavailable");
+    expect(screen.getByRole("button", { name: "Try again" })).toBeEnabled();
+    expect(input).toHaveValue("I wait under the awning.");
+    expect(api.admitTurn).toHaveBeenCalledTimes(2);
+    expect(api.admitTurn.mock.calls[1]![1]).toBe(api.admitTurn.mock.calls[0]![1]);
+    expect(crypto.randomUUID).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not replay an explicit domain admission error", async () => {
+    api.loadState.mockResolvedValue(state("ready"));
+    api.admitTurn.mockRejectedValue(new CampaignPlayApiError(
+      "invalid_choice",
+      "That option is no longer available.",
+      422,
+      null,
+    ));
+    render(<CampaignPlayPage campaignId="campaign-1" />);
+    const input = await screen.findByLabelText("Your action");
+    fireEvent.change(input, { target: { value: "I choose the unavailable route." } });
+    fireEvent.click(screen.getByRole("button", { name: "Act" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("no longer available");
+    expect(api.admitTurn).toHaveBeenCalledTimes(1);
+    expect(crypto.randomUUID).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not replay after unmount during ambiguous admission reconciliation", async () => {
+    let resolveRefresh!: (value: CampaignPlayState) => void;
+    api.loadState
+      .mockResolvedValueOnce(state("ready"))
+      .mockReturnValueOnce(new Promise<CampaignPlayState>((resolve) => {
+        resolveRefresh = resolve;
+      }));
+    api.admitTurn.mockRejectedValueOnce(new Error("offline"));
+    const page = render(<CampaignPlayPage campaignId="campaign-1" />);
+    const input = await screen.findByLabelText("Your action");
+    fireEvent.change(input, { target: { value: "I leave before the reply." } });
+    fireEvent.click(screen.getByRole("button", { name: "Act" }));
+
+    await waitFor(() => expect(api.loadState).toHaveBeenCalledTimes(2));
+    page.unmount();
+    await act(async () => resolveRefresh(state("ready")));
+
+    expect(api.admitTurn).toHaveBeenCalledTimes(1);
+    expect(window.history.state.campaignPlay).toEqual({
+      campaignId: "campaign-1",
+      lastSeenSequence: 0,
+    });
+  });
+
+  it("does not replay an older operation after navigation starts a newer one", async () => {
+    let campaignOneReads = 0;
+    let resolveRefresh!: (value: CampaignPlayState) => void;
+    api.loadState.mockImplementation((targetCampaignId: string) => {
+      if (targetCampaignId === "campaign-1") {
+        campaignOneReads += 1;
+        if (campaignOneReads === 1) return Promise.resolve(state("ready"));
+        return new Promise<CampaignPlayState>((resolve) => {
+          resolveRefresh = resolve;
+        });
+      }
+      const next = state("ready");
+      next.campaignId = "campaign-2";
+      return Promise.resolve(next);
+    });
+    api.admitTurn
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({ turnId: "turn-2", sequence: 1 });
+    const page = render(<CampaignPlayPage campaignId="campaign-1" />);
+    const firstInput = await screen.findByLabelText("Your action");
+    fireEvent.change(firstInput, { target: { value: "I leave the first campaign." } });
+    fireEvent.click(screen.getByRole("button", { name: "Act" }));
+    await waitFor(() => expect(api.loadState).toHaveBeenCalledTimes(2));
+
+    page.rerender(<CampaignPlayPage campaignId="campaign-2" />);
+    const secondInput = await page.findByLabelText("Your action");
+    fireEvent.change(secondInput, { target: { value: "I enter the second campaign." } });
+    fireEvent.click(screen.getByRole("button", { name: "Act" }));
+    await waitFor(() => expect(api.admitTurn).toHaveBeenCalledTimes(2));
+
+    await act(async () => resolveRefresh(state("ready")));
+
+    expect(api.admitTurn).toHaveBeenCalledTimes(2);
+    expect(api.admitTurn.mock.calls[0]![0]).toBe("campaign-1");
+    expect(api.admitTurn.mock.calls[1]![0]).toBe("campaign-2");
+  });
+
   it("restores the campaign draft after remount", async () => {
     api.loadState.mockResolvedValue(state("ready"));
     const first = render(<CampaignPlayPage campaignId="campaign-1" />);
