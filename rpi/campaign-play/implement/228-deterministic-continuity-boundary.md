@@ -1,6 +1,6 @@
 # Task 228: deterministic-continuity boundary
 
-Status: implementation and bounded built-surface proof complete; 60-action acceptance is intentionally out of scope for this packet.
+Status: implementation and bounded built-surface proof complete; r191 acceptance stopped at action 1 on a runner boundary and did not achieve the 60-action contract.
 
 ## Identity
 
@@ -47,3 +47,11 @@ Using the rebuilt backend on task port `4740` and isolated root `R:\Temp\WorldFo
 ## Cleanup
 
 The exact task-owned backend process and port were stopped. The scratch root, read-only DB copy, and temporary seeding helper were removed after capturing the bounded scalar evidence. No settings were changed. `AGENTS.md` and `CLAUDE.md` remained unstaged and untouched.
+
+## r191 acceptance evidence
+
+- Run `pristine-60-glm52-lowwater-ledger-93a09e46-r191`, campaign `6b85a49e-fef5-4359-95e2-051383f6fb66`, executable commit `a70952adc13843967b5d341cf8271486e96233ab`, provider/model `zai-coding-plan/glm-5.2`, ports `4760/4761/4762`. Materialization occurred once and the single `--live-phase prepare` succeeded. Canonical state/config/Brina hashes matched `6cb291d11ce6578e3395a10d2c5d590070e3ccdd8b2b67451410869ce97897d2`, `d8362b1af976c00cb8f14c564c8196a2d1ab137743ff368ea83d762a4ad2e065`, and `4b48de7a32df6a6be5a91ab12f09bb87926b40d5940348c7581e298eaa12b60a`.
+- The first setup helper waited only 30 seconds for the imported identity and exited `1` with `TimeoutError` at the card-parse wait. Read-only state remained `character_required`; browser performance contained the card-parse POST but no save PUT. A task-owned resume helper then completed the already-rendered import without another file-input assignment, performed one Continue, lower-wards/Local/Already here/Looking for work, and one Begin. Ready Opening rendered with `worldVersion=12`, `runtimeRevision=17`, projection `63a65984aa15f6d03248dfd3bfb3125dd6c2c68ac40963979e6b0250ce55767b`, scene `narration:083f4ef1fb7e3e598c4ba504b3cfeedf9353004c`, and four enabled choices.
+- Action 1 signed one pending decision for `choice_c46fa397f07f4656c6da79ef` at `1786690748746` (`2026-08-14T06:59:08.746Z` / `2026-08-14T09:59:08.746+03:00`). The deterministic runner then exited `1` with `TimeoutError` before producing action output. Reconciliation found the page still ready at the exact pre-action projection/world/runtime (`63a65984aa15f6d03248dfd3bfb3125dd6c2c68ac40963979e6b0250ce55767b` / `12` / `17`), no rendered service-error surface, no `/play/turns` browser resource, an empty `browser-actions.jsonl`, and the unbound pending decision. Click ownership is therefore not provable; no retry or second click was made.
+- The read-only `state.db`/WAL/SHM copy used `mode=ro`, `query_only=1`, and `foreign_keys=1`; `integrity_check` was `ok` and `foreign_key_check` was empty. Persistence contained one completed opening turn and zero player-action turns, commands, receipts, events, results, narration operations, narrations, proper scenes, model stages, or narration attempts for action 1; the sole idempotency key belonged to the opening. Source and copy hashes matched after task-owned services stopped: DB `A98BEA4116B123167E0A76F241BEDADD43E6864667C7EF8D2B5906DEEF9472C7`, WAL `8939F032945978E5503148FB6859DD616087275F0082DB88E6065E813FC27E7B`, SHM `5B1B3A025838F12863FBA4C275CC550C738EBFED7B01C3F0C0BA27E35972201B`.
+- No action checkpoint or final reload was run after the first genuine boundary. Task-owned backend/frontend/Chromium processes and ports were stopped; settings were restored byte-for-byte to SHA-256 `577c39d0a04b5b086d6a4f34f2fd3fa6878a91f6a4fcc82978c17b0c791e0b3d`. Generated r191 session evidence and bounded logs remain under the output/temp task roots; no product source or test file changed.
