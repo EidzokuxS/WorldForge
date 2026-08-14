@@ -410,7 +410,7 @@ describe("CampaignPlayPage durable state", () => {
       choiceHandle: "choice-hidden",
       expectedWorldVersion: 3,
       expectedRuntimeRevision: 4,
-    }));
+    }, { signal: expect.any(AbortSignal) }));
     expect(document.body).not.toHaveTextContent("choice-hidden");
   });
 
@@ -445,10 +445,12 @@ describe("CampaignPlayPage durable state", () => {
     api.admitTurn.mockRejectedValue(new Error("offline"));
     render(<CampaignPlayPage campaignId="campaign-1" />);
     const input = await screen.findByLabelText("Your action");
+    vi.useFakeTimers();
     fireEvent.change(input, { target: { value: "I wait under the awning." } });
     fireEvent.click(screen.getByRole("button", { name: "Act" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("temporarily unavailable");
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+    expect(screen.getByRole("alert")).toHaveTextContent("temporarily unavailable");
     expect(input).toHaveValue("I wait under the awning.");
   });
 
@@ -475,10 +477,12 @@ describe("CampaignPlayPage durable state", () => {
 
     render(<CampaignPlayPage campaignId="campaign-1" />);
     const input = await screen.findByLabelText("Your action");
+    vi.useFakeTimers();
     fireEvent.change(input, { target: { value: "I follow the signal." } });
     fireEvent.click(screen.getByRole("button", { name: "Act" }));
 
-    await waitFor(() => expect(screen.getByText(settled.narration!.displayText)).toBeInTheDocument());
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    expect(screen.getByText(settled.narration!.displayText)).toBeInTheDocument();
     expect(api.admitTurn).toHaveBeenCalledTimes(2);
     expect(api.admitTurn.mock.calls[0]![0]).toBe("campaign-1");
     expect(api.admitTurn.mock.calls[1]![0]).toBe("campaign-1");
@@ -490,6 +494,8 @@ describe("CampaignPlayPage durable state", () => {
       expectedWorldVersion: 3,
       expectedRuntimeRevision: 4,
     });
+    expect(api.admitTurn.mock.calls[0]![2]).toEqual({ signal: expect.any(AbortSignal) });
+    expect(api.admitTurn.mock.calls[1]![2]).toEqual({ signal: expect.any(AbortSignal) });
     expect(crypto.randomUUID).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
@@ -499,33 +505,126 @@ describe("CampaignPlayPage durable state", () => {
     api.admitTurn.mockRejectedValue(new Error("offline"));
     render(<CampaignPlayPage campaignId="campaign-1" />);
     const input = await screen.findByLabelText("Your action");
+    vi.useFakeTimers();
     fireEvent.change(input, { target: { value: "I wait under the awning." } });
     fireEvent.click(screen.getByRole("button", { name: "Act" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("temporarily unavailable");
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+    expect(screen.getByRole("alert")).toHaveTextContent("temporarily unavailable");
     expect(screen.getByRole("button", { name: "Try again" })).toBeEnabled();
     expect(input).toHaveValue("I wait under the awning.");
+    expect(api.admitTurn).toHaveBeenCalledTimes(3);
+    expect(api.admitTurn.mock.calls[1]![1]).toBe(api.admitTurn.mock.calls[0]![1]);
+    expect(api.admitTurn.mock.calls[2]![1]).toBe(api.admitTurn.mock.calls[0]![1]);
+    expect(crypto.randomUUID).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a second ambiguous failure after the fixed backoff and succeeds on attempt three", async () => {
+    const settled = state("ready");
+    settled.narration!.turnId = "turn-1";
+    settled.narration!.displayText = "The third attempt scene is ready.";
+    settled.narration!.beats[0]!.text = settled.narration!.displayText;
+    api.loadState
+      .mockResolvedValueOnce(state("ready"))
+      .mockResolvedValueOnce(state("ready"))
+      .mockResolvedValueOnce(settled);
+    api.admitTurn
+      .mockRejectedValueOnce(new Error("first transport failure"))
+      .mockRejectedValueOnce(new CampaignPlayApiError(
+        "service_unavailable",
+        "Campaign Play is temporarily unavailable.",
+        503,
+        null,
+      ))
+      .mockResolvedValueOnce({ turnId: "turn-1", sequence: 1 });
+    render(<CampaignPlayPage campaignId="campaign-1" />);
+    const input = await screen.findByLabelText("Your action");
+    vi.useFakeTimers();
+    fireEvent.change(input, { target: { value: "I wait for the third attempt." } });
+    fireEvent.click(screen.getByRole("button", { name: "Act" }));
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    expect(api.admitTurn).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_499); });
+    expect(api.admitTurn).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(api.admitTurn).toHaveBeenCalledTimes(3);
+    expect(api.admitTurn.mock.calls[1]![1]).toBe(api.admitTurn.mock.calls[0]![1]);
+    expect(api.admitTurn.mock.calls[2]![1]).toBe(api.admitTurn.mock.calls[0]![1]);
+    expect(api.admitTurn.mock.calls[0]![2]).toEqual({ signal: expect.any(AbortSignal) });
+    expect(api.admitTurn.mock.calls[1]![2]).toEqual({ signal: expect.any(AbortSignal) });
+    expect(api.admitTurn.mock.calls[2]![2]).toEqual({ signal: expect.any(AbortSignal) });
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(crypto.randomUUID).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["invalid_choice", 422],
+    ["stale_world_version", 409],
+    ["stale_runtime_revision", 409],
+    ["turn_in_progress", 409],
+    ["idempotency_conflict", 409],
+  ] as const)("does not replay the explicit %s admission error", async (code, status) => {
+    api.loadState.mockResolvedValue(state("ready"));
+    api.admitTurn.mockRejectedValue(new CampaignPlayApiError(
+      code,
+      code,
+      status,
+      null,
+    ));
+    render(<CampaignPlayPage campaignId="campaign-1" />);
+    const input = await screen.findByLabelText("Your action");
+    fireEvent.change(input, { target: { value: "I choose the route." } });
+    fireEvent.click(screen.getByRole("button", { name: "Act" }));
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(api.admitTurn).toHaveBeenCalledTimes(1);
+    expect(crypto.randomUUID).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborts a hung attempt at its deadline and recovers with the same request", async () => {
+    let firstSignal: AbortSignal | undefined;
+    api.loadState
+      .mockResolvedValueOnce(state("ready"))
+      .mockResolvedValueOnce(state("ready"));
+    api.admitTurn
+      .mockImplementationOnce((_campaignId: string, _request: unknown, options?: { signal?: AbortSignal }) => {
+        firstSignal = options?.signal;
+        return new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        });
+      })
+      .mockResolvedValueOnce({ turnId: "turn-1", sequence: 1 });
+    render(<CampaignPlayPage campaignId="campaign-1" />);
+    const input = await screen.findByLabelText("Your action");
+    vi.useFakeTimers();
+    fireEvent.change(input, { target: { value: "I wait through the deadline." } });
+    fireEvent.click(screen.getByRole("button", { name: "Act" }));
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_499); });
+    expect(api.admitTurn).toHaveBeenCalledTimes(1);
+    expect(firstSignal?.aborted).toBe(false);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(firstSignal?.aborted).toBe(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
     expect(api.admitTurn).toHaveBeenCalledTimes(2);
     expect(api.admitTurn.mock.calls[1]![1]).toBe(api.admitTurn.mock.calls[0]![1]);
     expect(crypto.randomUUID).toHaveBeenCalledTimes(1);
   });
 
-  it("does not replay an explicit domain admission error", async () => {
+  it("cancels the pending backoff when the page unmounts", async () => {
     api.loadState.mockResolvedValue(state("ready"));
-    api.admitTurn.mockRejectedValue(new CampaignPlayApiError(
-      "invalid_choice",
-      "That option is no longer available.",
-      422,
-      null,
-    ));
-    render(<CampaignPlayPage campaignId="campaign-1" />);
+    api.admitTurn.mockRejectedValueOnce(new Error("offline"));
+    const page = render(<CampaignPlayPage campaignId="campaign-1" />);
     const input = await screen.findByLabelText("Your action");
-    fireEvent.change(input, { target: { value: "I choose the unavailable route." } });
+    vi.useFakeTimers();
+    fireEvent.change(input, { target: { value: "I leave during recovery." } });
     fireEvent.click(screen.getByRole("button", { name: "Act" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("no longer available");
+    await act(async () => { await Promise.resolve(); });
+    page.unmount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
     expect(api.admitTurn).toHaveBeenCalledTimes(1);
-    expect(crypto.randomUUID).toHaveBeenCalledTimes(1);
   });
 
   it("does not replay after unmount during ambiguous admission reconciliation", async () => {
@@ -795,7 +894,7 @@ describe("CampaignPlayPage durable state", () => {
       text: "I test the second campaign.",
       expectedWorldVersion: 13,
       expectedRuntimeRevision: 14,
-    }));
+    }, { signal: expect.any(AbortSignal) }));
   });
 
   it("closes the journal when campaign navigation resets its cache", async () => {

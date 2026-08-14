@@ -523,6 +523,31 @@ describe("Campaign Play API", () => {
     );
   });
 
+  it("forwards an optional admission signal without changing the request", async () => {
+    const controller = new AbortController();
+    const request = {
+      source: "suggested" as const,
+      idempotencyKey: "turn-one",
+      choiceHandle: "wait",
+      expectedWorldVersion: 2,
+      expectedRuntimeRevision: 2,
+    };
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ turnId: "turn-one", sequence: 1 }, 202));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await admitCampaignPlayTurn("campaign-one", request, { signal: controller.signal });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3001/api/campaigns/campaign-one/play/turns",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+        signal: controller.signal,
+      },
+    );
+  });
+
   it("requires strict public errors and exact 202 admission responses", async () => {
     const error = publicError("stale_world_version");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse(error, 409)));

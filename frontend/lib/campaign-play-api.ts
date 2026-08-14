@@ -1365,6 +1365,7 @@ export function admitCampaignPlayOpening(
 export function admitCampaignPlayTurn(
   campaignId: string,
   request: CampaignPlayTurnAdmissionRequest,
+  options: CampaignPlayAuthorityReadOptions = {},
 ): Promise<CampaignPlayTurnAdmissionResponse> {
   return requestJson(
     campaignPath(campaignId, "/turns"),
@@ -1372,6 +1373,7 @@ export function admitCampaignPlayTurn(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
     },
     202,
     parseTurnAdmissionResponse,

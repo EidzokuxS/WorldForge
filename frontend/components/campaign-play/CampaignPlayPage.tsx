@@ -74,6 +74,8 @@ export interface CampaignPlayPageProps {
 }
 
 const AUTHORITY_READ_DEADLINE_MS = 5_000;
+const PLAYER_ACTION_ADMISSION_ATTEMPT_DEADLINE_MS = 2_500;
+const PLAYER_ACTION_ADMISSION_RETRY_DELAYS_MS = [500, 1_500] as const;
 const AUTHORITY_RECOVERY_RELOAD_DELAY_MS = 15_000;
 const AUTHORITY_RECOVERY_RELOAD_KEY_PREFIX = "worldforge:campaign-play:authority-recovery-reload:";
 
@@ -502,6 +504,7 @@ export function CampaignPlayPage({
     timer: number;
   } | null>(null);
   const authorityRecoveryControllerRef = useRef<AbortController | null>(null);
+  const activeAdmissionRecoveryRef = useRef<(() => void) | null>(null);
   const automaticReloadRequestRef = useRef<{ campaignId: string; turnId: string } | null>(null);
   campaignIdRef.current = campaignId;
 
@@ -744,6 +747,8 @@ export function CampaignPlayPage({
       setLoading(false);
       return () => {
         controller.abort();
+        activeAdmissionRecoveryRef.current?.();
+        activeAdmissionRecoveryRef.current = null;
         mountedRef.current = false;
         clearAuthorityRecoveryFailure();
         if (automaticReloadRequestRef.current?.campaignId === campaignId) {
@@ -783,6 +788,8 @@ export function CampaignPlayPage({
     })();
     return () => {
       controller.abort();
+      activeAdmissionRecoveryRef.current?.();
+      activeAdmissionRecoveryRef.current = null;
       mountedRef.current = false;
       clearAuthorityRecoveryFailure();
       if (automaticReloadRequestRef.current?.campaignId === campaignId) {
@@ -1050,6 +1057,8 @@ export function CampaignPlayPage({
       campaignState?.phase !== "ready" ||
       (request.source === "freeform" ? request.text.trim().length === 0 : request.choiceHandle.length === 0)
     ) return;
+    activeAdmissionRecoveryRef.current?.();
+    activeAdmissionRecoveryRef.current = null;
     const operation: PendingOperation = { campaignId, kind: "admission", token: Symbol() };
     operationRef.current = operation;
     setPendingOperation(operation);
@@ -1060,44 +1069,85 @@ export function CampaignPlayPage({
       expectedWorldVersion: campaignState.worldVersion,
       expectedRuntimeRevision: campaignState.runtimeRevision,
     };
+    const recoveryController = new AbortController();
+    const cancelRecovery = () => recoveryController.abort();
+    activeAdmissionRecoveryRef.current = cancelRecovery;
+    const isCurrent = () => mountedRef.current && campaignIdRef.current === campaignId &&
+      operationRef.current === operation && !recoveryController.signal.aborted;
+    const admitWithDeadline = () => new Promise<Awaited<ReturnType<typeof admitCampaignPlayTurn>>>((resolve, reject) => {
+      const attemptController = new AbortController();
+      let settled = false;
+      let timer: number | null = null;
+      const cleanup = () => {
+        if (timer !== null) clearTimeout(timer);
+        recoveryController.signal.removeEventListener("abort", abortFromRecovery);
+      };
+      const settle = (kind: "resolve" | "reject", value: Awaited<ReturnType<typeof admitCampaignPlayTurn>> | Error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (kind === "resolve") resolve(value as Awaited<ReturnType<typeof admitCampaignPlayTurn>>);
+        else reject(value);
+      };
+      const abortFromRecovery = () => {
+        attemptController.abort();
+        settle("reject", authorityAbortError());
+      };
+      if (recoveryController.signal.aborted) {
+        abortFromRecovery();
+        return;
+      }
+      recoveryController.signal.addEventListener("abort", abortFromRecovery, { once: true });
+      timer = window.setTimeout(() => {
+        attemptController.abort();
+        const timeout = new Error("Campaign Play player-action admission timed out.");
+        timeout.name = "PlayerActionAdmissionTimeoutError";
+        settle("reject", timeout);
+      }, PLAYER_ACTION_ADMISSION_ATTEMPT_DEADLINE_MS);
+      void admitCampaignPlayTurn(campaignId, admissionRequest, {
+        signal: attemptController.signal,
+      }).then(
+        (admission) => settle("resolve", admission),
+        (error: unknown) => settle("reject", error instanceof Error ? error : new Error(String(error))),
+      );
+    });
     try {
-      const admission = await admitCampaignPlayTurn(campaignId, admissionRequest);
-      if (
-        !mountedRef.current || campaignIdRef.current !== campaignId ||
-        operationRef.current !== operation
-      ) return;
-      beginFollowing(admission.turnId, admission.sequence);
-      if (request.source === "freeform") setDraft("");
-    } catch (error) {
-      const ambiguous = !(error instanceof CampaignPlayApiError) || error.code === "service_unavailable";
-      if (!ambiguous) {
-        await reconcileRequestFailure(operation, error);
-      } else if (
-        mountedRef.current && campaignIdRef.current === campaignId &&
-        operationRef.current === operation
-      ) {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        let admission: Awaited<ReturnType<typeof admitCampaignPlayTurn>>;
         try {
-          await refreshAuthority(undefined, { clearRequestError: true });
-        } catch {
-          // The replay remains safe because it reuses the canonical idempotency key.
+          admission = await admitWithDeadline();
+        } catch (error) {
+          if (!isCurrent()) return;
+          const ambiguous = !(error instanceof CampaignPlayApiError) || error.code === "service_unavailable";
+          if (!ambiguous || attempt === 2) {
+            await reconcileRequestFailure(operation, error);
+            return;
+          }
+          if (attempt === 0) {
+            try {
+              await refreshAuthority(undefined, {
+                clearRequestError: true,
+                signal: recoveryController.signal,
+              });
+            } catch {
+              // A transport failure leaves the canonical request safe to replay.
+            }
+            if (!isCurrent()) return;
+          }
+          await waitForReconnect(PLAYER_ACTION_ADMISSION_RETRY_DELAYS_MS[attempt], recoveryController.signal);
+          if (!isCurrent()) return;
+          continue;
         }
-        if (
-          !mountedRef.current || campaignIdRef.current !== campaignId ||
-          operationRef.current !== operation
-        ) return;
-        try {
-          const admission = await admitCampaignPlayTurn(campaignId, admissionRequest);
-          if (
-            !mountedRef.current || campaignIdRef.current !== campaignId ||
-            operationRef.current !== operation
-          ) return;
-          beginFollowing(admission.turnId, admission.sequence);
-          if (request.source === "freeform") setDraft("");
-        } catch (replayError) {
-          await reconcileRequestFailure(operation, replayError);
-        }
+        if (!isCurrent()) return;
+        beginFollowing(admission.turnId, admission.sequence);
+        if (request.source === "freeform") setDraft("");
+        return;
       }
     } finally {
+      recoveryController.abort();
+      if (activeAdmissionRecoveryRef.current === cancelRecovery) {
+        activeAdmissionRecoveryRef.current = null;
+      }
       if (operationRef.current === operation) {
         operationRef.current = null;
         if (mountedRef.current && campaignIdRef.current === campaignId) setPendingOperation(null);
