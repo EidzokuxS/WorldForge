@@ -126,7 +126,7 @@ function publicCharacter(handle: CampaignPlayDatabaseHandle) {
   return campaignPlayPublicCharacterSchema.parse({
     name: row.name,
     monogram,
-    descriptor: [...row.summary].slice(0, 240).join(""),
+    descriptor: [...row.summary].slice(0, 240).join("").trimEnd(),
     accent: PLAYER_ACCENTS[accentIndex],
   });
 }

@@ -19,6 +19,8 @@ import { CampaignPlayTurnRepositoryError } from "./campaign-play-turn-repository
 import { campaignPlayJournalPageSchema, campaignPlayStateSchema } from "./contracts.js";
 
 const CAMPAIGN_ID = "11111111-1111-4111-8111-111111111111";
+const HASH_A = "a".repeat(64);
+const HASH_B = "b".repeat(64);
 let root = "";
 let previousCampaignsRoot: string | undefined;
 
@@ -67,6 +69,42 @@ function createAcceptedCampaign(): void {
   }
 }
 
+function createCampaignWithPlayerSummary(summary: string): void {
+  createAcceptedCampaign();
+  const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
+  try {
+    const states = createCampaignPlayStateRepository(handle);
+    states.createState({ eventId: "read-model-state", createdAt: 1_300 });
+    states.commitMechanicalAndRuntime({
+      worldVersionAdvance: 1,
+      event: {
+        eventId: "character-created",
+        turnId: null,
+        kind: "character_created",
+        workerEpoch: null,
+        protectedPayloadHash: HASH_A,
+        createdAt: 1_400,
+      },
+      mutate(context) {
+        context.sqlite.prepare(`
+          INSERT INTO actors (id, campaign_id, kind, controller, role, name, summary, traits, tags)
+          VALUES ('actor-player', ?, 'person', 'human', 'player', 'Player', ?, '[]', '[]')
+        `).run(context.campaignId, summary);
+        context.sqlite.prepare(`
+          INSERT INTO campaign_play_characters (
+            actor_id, campaign_id, record_json, record_hash, source_kind, source_digest, created_at
+          ) VALUES ('actor-player', ?, '{"name":"Player"}', ?, 'created', ?, 1400)
+        `).run(context.campaignId, HASH_A, HASH_B);
+        context.sqlite.prepare(
+          "UPDATE campaign_play_states SET setup_phase = 'opening_required' WHERE campaign_id = ?",
+        ).run(context.campaignId);
+      },
+    });
+  } finally {
+    handle.close();
+  }
+}
+
 describe("CampaignPlayReadModel", () => {
   it("returns byte-stable strict public state and journal pages after reopening", () => {
     createAcceptedCampaign();
@@ -91,6 +129,46 @@ describe("CampaignPlayReadModel", () => {
       expect(JSON.stringify(createCampaignPlayReadModel(reopened).loadState())).toBe(JSON.stringify(before));
     } finally {
       reopened.close();
+    }
+  });
+
+  it("clips the public descriptor without changing the stored source summary", () => {
+    const summary = `${"O".repeat(239)} ${"f"}${".".repeat(3)}`;
+    expect([...summary]).toHaveLength(244);
+    expect([...summary][239]).toBe(" ");
+    expect([...summary][240]).toBe("f");
+    createCampaignWithPlayerSummary(summary);
+
+    const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
+    try {
+      const before = handle.sqlite.prepare(
+        "SELECT summary FROM actors WHERE campaign_id = ? AND id = 'actor-player'",
+      ).get(CAMPAIGN_ID) as { summary: string };
+      const state = createCampaignPlayReadModel(handle).loadState();
+      const after = handle.sqlite.prepare(
+        "SELECT summary FROM actors WHERE campaign_id = ? AND id = 'actor-player'",
+      ).get(CAMPAIGN_ID) as { summary: string };
+
+      expect(state.character?.descriptor).toBe("O".repeat(239));
+      expect(state.character?.descriptor.length).toBeLessThanOrEqual(240);
+      expect(state.character?.descriptor.trim()).toBe(state.character?.descriptor);
+      expect(after.summary).toBe(before.summary);
+      expect(after.summary).toBe(summary);
+    } finally {
+      handle.close();
+    }
+  });
+
+  it.each([
+    ["short summary", "A concise visitor."],
+    ["exact boundary", "N".repeat(240)],
+  ])("keeps %s descriptors unchanged", (_label, summary) => {
+    createCampaignWithPlayerSummary(summary);
+    const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
+    try {
+      expect(createCampaignPlayReadModel(handle).loadState().character?.descriptor).toBe(summary);
+    } finally {
+      handle.close();
     }
   });
 });
