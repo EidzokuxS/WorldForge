@@ -486,10 +486,49 @@ describe("Campaign Play character intake", () => {
     expect(result.draft.biography).not.toContain("trailing biography");
   });
 
+  it("projects required public descriptors from existing character truth", async () => {
+    const { service, ingest } = makeService();
+    const donor = makeDonorDraft();
+    ingest.mockResolvedValueOnce(makeDonorDraft({
+      identity: {
+        ...donor.identity,
+        baseFacts: {
+          ...donor.identity.baseFacts!,
+          biography: "",
+        },
+      },
+      profile: {
+        ...donor.profile,
+        backgroundSummary: "",
+        personaSummary: "",
+      },
+    }));
+
+    const result = await service.parsePlayerCard(
+      CAMPAIGN_ID,
+      { cardJson: JSON.stringify(makeV2Card()), importMode: "outsider" },
+      context(),
+    );
+
+    expect(result.draft.summary).toBe(donor.identity.personality!.summary);
+    expect(result.draft.biography).toBe(donor.identity.personality!.summary);
+  });
+
   it("rejects a donor profile with missing required character fields", async () => {
     const { service, ingest } = makeService();
+    const donor = makeDonorDraft();
     ingest.mockResolvedValueOnce(makeDonorDraft({
-      profile: { ...makeDonorDraft().profile, personaSummary: "" },
+      identity: {
+        ...donor.identity,
+        baseFacts: { ...donor.identity.baseFacts!, biography: "" },
+        behavioralCore: { ...donor.identity.behavioralCore!, selfImage: "" },
+        personality: { ...donor.identity.personality!, summary: "" },
+      },
+      profile: {
+        ...donor.profile,
+        backgroundSummary: "",
+        personaSummary: "",
+      },
     }));
     await expect(service.generatePlayerDraft(
       CAMPAIGN_ID,

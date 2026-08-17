@@ -204,6 +204,14 @@ function clipCharacterName(value: string): string {
   return clipCharacterText(value.replace(/\s+/g, " "), CAMPAIGN_PLAY_LIMITS.name);
 }
 
+function projectRequiredCharacterText(...values: readonly string[]): string {
+  for (const value of values) {
+    const projected = clipCharacterText(value, CAMPAIGN_PLAY_LIMITS.text);
+    if (projected.length > 0) return projected;
+  }
+  return "";
+}
+
 function buildAcceptedWorldContext(
   campaignId: string,
   context: CampaignPlayCharacterContext,
@@ -247,17 +255,28 @@ function normalizeDraft(
   source: CampaignPlayCharacterDraft["source"],
 ): CampaignPlayCharacterDraft {
   const personality = draft.identity.personality;
+  const summary = projectRequiredCharacterText(
+    draft.profile.personaSummary,
+    personality?.summary ?? "",
+    draft.identity.behavioralCore?.selfImage ?? "",
+    draft.profile.backgroundSummary,
+    draft.identity.baseFacts?.biography ?? "",
+  );
+  const biography = projectRequiredCharacterText(
+    draft.identity.baseFacts?.biography ?? "",
+    draft.profile.backgroundSummary,
+    draft.profile.personaSummary,
+    personality?.summary ?? "",
+    draft.identity.behavioralCore?.selfImage ?? "",
+  );
   const candidate: CampaignPlayCharacterDraft = {
     name: clipCharacterName(draft.identity.displayName),
-    summary: clipCharacterText(draft.profile.personaSummary, CAMPAIGN_PLAY_LIMITS.text),
+    summary,
     species: draft.profile.species,
     gender: draft.profile.gender,
     ageText: draft.profile.ageText,
     appearance: draft.profile.appearance,
-    biography: clipCharacterText(
-      draft.identity.baseFacts?.biography ?? draft.profile.backgroundSummary,
-      CAMPAIGN_PLAY_LIMITS.text,
-    ),
+    biography,
     personality: {
       summary: personality?.summary ?? "",
       voice: personality?.voice ?? "",
