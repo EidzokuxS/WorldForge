@@ -16,6 +16,7 @@ import {
   getCampaignPlayJudgeRecoveryFeedback,
   resolveCampaignPlayUncertainty,
   type CampaignPlayJudgeFrame,
+  type CampaignPlayJudgeInput,
   type CampaignPlayModelBudget,
 } from "./judge.js";
 
@@ -135,6 +136,84 @@ function proposal(overrides: Record<string, unknown> = {}) {
     clarificationQuestion: null,
     ...overrides,
   };
+}
+
+function toolProposal(overrides: Record<string, unknown> = {}): Record<string, any> {
+  const value = proposal(overrides) as Record<string, any>;
+  const {
+    kind,
+    movementRouteHandle,
+    ...transportValue
+  } = value;
+  return {
+    ...transportValue,
+    intentKind: kind,
+    method: value.method === null ? "" : value.method,
+    stakes: value.stakes === null ? "" : value.stakes,
+    travelRouteHandle: movementRouteHandle === null ? "" : movementRouteHandle,
+    clarificationQuestion: value.clarificationQuestion === null ? "" : value.clarificationQuestion,
+    visibleActorReactions: (value.visibleActorReactions as Array<Record<string, any>>).map((entry) => ({
+      ...entry,
+      supportingVisibleFactHandle: entry.supportingVisibleFactHandle === null
+        ? ""
+        : entry.supportingVisibleFactHandle,
+    })),
+    possessionEffectAuthority: (() => {
+      const effect = value.possessionEffectAuthority as Record<string, any>;
+      return effect.kind === "adjust_actor_possession"
+        ? {
+            ...effect,
+            possessionHandle: effect.possessionHandle === null ? "" : effect.possessionHandle,
+          }
+        : {
+            kind: "none",
+            enforcement: "",
+            operation: "",
+            possessionHandle: "",
+            quantity: 0,
+            minimumResult: "",
+          };
+    })(),
+    requiredObligationEffect: (() => {
+      const effect = value.requiredObligationEffect as Record<string, any>;
+      if (effect.kind === "incur_actor_obligation") {
+        return {
+          ...effect,
+          obligationHandle: "",
+          paymentPossessionHandle: "",
+        };
+      }
+      if (effect.kind === "pay_actor_obligation") return effect;
+      return {
+        kind: "none",
+        debtorHandle: "",
+        creditorHandle: "",
+        obligationHandle: "",
+        paymentPossessionHandle: "",
+        unitKey: "",
+        amount: 0,
+        minimumResult: "",
+      };
+    })(),
+    uncertainty: (() => {
+      const uncertainty = value.uncertainty as Record<string, any>;
+      return uncertainty.kind === "check"
+        ? uncertainty
+        : {
+            kind: "none",
+            dieSides: 0,
+            difficulty: 0,
+            modifierMinimum: 0,
+            modifierMaximum: 0,
+          };
+    })(),
+  };
+}
+
+function suggestedToolProposal(overrides: Record<string, unknown> = {}): Record<string, any> {
+  const value = toolProposal(overrides);
+  const { intentKind: _intentKind, travelRouteHandle: _travelRouteHandle, ...suggested } = value;
+  return suggested;
 }
 
 class JudgeLogCapture extends Writable {
@@ -449,6 +528,20 @@ describe("Campaign Play Judge", () => {
     expect(options.schema.safeParse(proposal({
       movementRouteHandle: "route-hidden",
     })).success).toBe(false);
+    const omittedQuantity = options.schema.safeParse(proposal({
+      possessionEffectAuthority: {
+        kind: "adjust_actor_possession",
+        enforcement: "required",
+        operation: "acquire",
+        possessionHandle: "notebook",
+        minimumResult: "limited",
+      } as ReturnType<typeof proposal>["possessionEffectAuthority"],
+    }));
+    expect(omittedQuantity.success).toBe(true);
+    if (!omittedQuantity.success) throw omittedQuantity.error;
+    expect(omittedQuantity.data).toMatchObject({
+      possessionEffectAuthority: { quantity: 1 },
+    });
   });
 
   it("enforces the disposition clarification-question relation in generation only", async () => {
@@ -633,7 +726,7 @@ describe("Campaign Play Judge", () => {
 
   it("accepts a strict tool-mode ruling against the requested capability", async () => {
     const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
-      object: proposal(),
+      object: toolProposal({ method: null, stakes: null }),
       trace: trace("tool_mode", "tool"),
     }));
     const judge = createCampaignPlayJudge({
@@ -653,6 +746,628 @@ describe("Campaign Play Judge", () => {
     });
     expect(generateObject).toHaveBeenCalledOnce();
     expect(generateObject.mock.calls[0]![0].mode).toBe("tool");
+  });
+
+  it("uses a flat required Judge tool contract and keeps the packet schema local", async () => {
+    const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
+      object: toolProposal(),
+      trace: trace("tool_mode", "tool"),
+    }));
+    const judge = createCampaignPlayJudge({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    await judge.judge({
+      frame: frame(),
+      input: { originalText: "I ask.", source: "freeform", choiceHandle: null },
+      model: model(),
+      temperature: 0.2,
+      budget,
+      structuredOutputMode: "tool",
+    });
+
+    const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    const schema = z.toJSONSchema(options.schema) as {
+      type?: string;
+      oneOf?: unknown;
+      properties?: Record<string, unknown>;
+      required?: string[];
+    };
+    const assertProviderSafe = (value: unknown): void => {
+      if (Array.isArray(value)) {
+        for (const child of value) assertProviderSafe(child);
+        return;
+      }
+      if (value === null || typeof value !== "object") return;
+      const record = value as Record<string, unknown>;
+      expect(record).not.toHaveProperty("anyOf");
+      expect(record).not.toHaveProperty("oneOf");
+      expect(record).not.toHaveProperty("prefixItems");
+      expect(record).not.toHaveProperty("const");
+      expect(record.type).not.toBe("null");
+      for (const child of Object.values(record)) assertProviderSafe(child);
+    };
+    assertProviderSafe(schema);
+    expect(schema.type).toBe("object");
+    expect(schema.oneOf).toBeUndefined();
+    expect(schema.properties?.disposition).toMatchObject({
+      type: "string",
+      enum: ["deterministic", "uncertain", "impossible", "clarification_required"],
+    });
+    expect(schema.required).toEqual(expect.arrayContaining([
+      "intentKind",
+      "targets",
+      "visibleActorReactions",
+      "method",
+      "stakes",
+      "travelRouteHandle",
+      "possessionEffectAuthority",
+      "requiredObligationEffect",
+      "disposition",
+      "citedVisibleFactHandles",
+      "resultBounds",
+      "elapsedBounds",
+      "uncertainty",
+      "reason",
+      "clarificationQuestion",
+    ]));
+    const properties = schema.properties as Record<string, any>;
+    expect(properties.method).toMatchObject({ type: "string" });
+    expect(properties.stakes).toMatchObject({ type: "string" });
+    expect(properties.intentKind).toMatchObject({
+      type: "string",
+      enum: ["observe", "move", "contact", "wait", "attempt"],
+    });
+    expect(properties.travelRouteHandle).toMatchObject({ type: "string" });
+    expect(properties.kind).toBeUndefined();
+    expect(properties.movementRouteHandle).toBeUndefined();
+    expect(properties.clarificationQuestion).toMatchObject({ type: "string" });
+    expect(properties.visibleActorReactions?.items?.properties?.supportingVisibleFactHandle)
+      .toMatchObject({ type: "string" });
+    expect(properties.possessionEffectAuthority?.properties?.possessionHandle)
+      .toMatchObject({ type: "string" });
+    expect(properties.possessionEffectAuthority?.required).toEqual(expect.arrayContaining([
+      "kind",
+      "enforcement",
+      "operation",
+      "possessionHandle",
+      "quantity",
+      "minimumResult",
+    ]));
+    expect(properties.possessionEffectAuthority?.additionalProperties).toBe(false);
+    expect(properties.requiredObligationEffect?.required).toEqual(expect.arrayContaining([
+      "kind",
+      "debtorHandle",
+      "creditorHandle",
+      "obligationHandle",
+      "paymentPossessionHandle",
+      "unitKey",
+      "amount",
+      "minimumResult",
+    ]));
+    expect(properties.requiredObligationEffect?.additionalProperties).toBe(false);
+    expect(properties.uncertainty?.required).toEqual(expect.arrayContaining([
+      "kind",
+      "dieSides",
+      "difficulty",
+      "modifierMinimum",
+      "modifierMaximum",
+    ]));
+    expect(properties.uncertainty?.additionalProperties).toBe(false);
+    expect(options.schema.safeParse({ ...toolProposal(), kind: "contact" }).success).toBe(false);
+    expect(options.schema.safeParse({ ...toolProposal(), movementRouteHandle: "" }).success).toBe(false);
+    const { disposition: _disposition, ...missingDisposition } = toolProposal();
+    expect(options.schema.safeParse(missingDisposition).success).toBe(false);
+    const { clarificationQuestion: _clarificationQuestion, ...missingClarificationQuestion } = toolProposal();
+    expect(options.schema.safeParse(missingClarificationQuestion).success).toBe(false);
+    const missingPossessionField = toolProposal();
+    delete (missingPossessionField.possessionEffectAuthority as Record<string, unknown>).minimumResult;
+    expect(options.schema.safeParse(missingPossessionField).success).toBe(false);
+    const missingObligationField = toolProposal();
+    delete (missingObligationField.requiredObligationEffect as Record<string, unknown>).amount;
+    expect(options.schema.safeParse(missingObligationField).success).toBe(false);
+    const missingUncertaintyField = toolProposal();
+    delete (missingUncertaintyField.uncertainty as Record<string, unknown>).difficulty;
+    expect(options.schema.safeParse(missingUncertaintyField).success).toBe(false);
+    const sentPrompt = String(options.prompt);
+    expect(sentPrompt).toContain("TOOL_NULL_SENTINEL");
+    expect(sentPrompt).toContain("TOOL_REQUIRED_SENTINEL_CONTRACT=");
+    expect(sentPrompt.match(/TOOL_REQUIRED_SENTINEL_CONTRACT=/g)).toHaveLength(1);
+    expect(sentPrompt).toContain('TOOL_NULL_SENTINEL=In tool mode only, encode exact null as the required empty string ""');
+    expect(sentPrompt).toContain("classify the player's primary action in required intentKind");
+    expect(sentPrompt).toContain("Classify any travel separately in required travelRouteHandle");
+    expect(sentPrompt).toContain("Omit domain aliases kind and movementRouteHandle entirely");
+    expect(sentPrompt).not.toContain("For suggested input, copy FROZEN_CHOICE kind");
+    expect(sentPrompt).toContain("visibleActorReactions[].supportingVisibleFactHandle");
+    expect(sentPrompt).toContain("possessionEffectAuthority.possessionHandle when kind is adjust_actor_possession");
+    expect(sentPrompt).toContain('clarificationQuestion must be a non-empty question only when disposition is clarification_required; otherwise it must be "".');
+  });
+
+  it("decodes every tool null sentinel back to the exact null ruling fields", async () => {
+    const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
+      object: toolProposal({ method: null, stakes: null }),
+      trace: trace("tool_mode", "tool"),
+    }));
+    const judge = createCampaignPlayJudge({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    const result = await judge.judge({
+      frame: frame(),
+      input: { originalText: "I ask.", source: "freeform", choiceHandle: null },
+      model: model(),
+      temperature: 0.2,
+      budget,
+      structuredOutputMode: "tool",
+    });
+
+    expect(result.ruling.normalizedIntent).toMatchObject({
+      method: null,
+      stakes: null,
+    });
+    expect(result.ruling).toMatchObject({
+      movementRouteHandle: null,
+      clarificationQuestion: null,
+    });
+  });
+
+  it("decodes an empty possession handle sentinel only for an adjust branch", async () => {
+    const object = toolProposal({
+      kind: "contact",
+      method: "Ask the guard for a tool",
+      stakes: "Receive a tool if the guard agrees",
+      possessionEffectAuthority: {
+        kind: "adjust_actor_possession",
+        enforcement: "permitted",
+        operation: "acquire",
+        possessionHandle: "",
+        quantity: 1,
+        minimumResult: "success",
+      },
+      citedVisibleFactHandles: ["actor-guard"],
+    });
+    const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
+      object,
+      trace: trace("tool_mode", "tool"),
+    }));
+    const judge = createCampaignPlayJudge({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    const result = await judge.judge({
+      frame: frame(),
+      input: { originalText: "Ask the guard for a tool.", source: "freeform", choiceHandle: null },
+      model: model(),
+      temperature: 0.2,
+      budget,
+      structuredOutputMode: "tool",
+    });
+
+    expect(result.ruling.possessionEffectAuthority).toEqual({
+      kind: "adjust_actor_possession",
+      enforcement: "permitted",
+      operation: "acquire",
+      possessionHandle: null,
+      quantity: 1,
+      minimumResult: "success",
+    });
+    expect(generateObject).toHaveBeenCalledOnce();
+  });
+
+  it("decodes required obligation branches and bounded uncertainty without changing exact values", async () => {
+    const cases = [
+      {
+        input: "I carry the glass through the arch and accept the eight-copper breakage charge.",
+        object: toolProposal({
+          kind: "attempt",
+          method: "Carry the glass through the arch",
+          stakes: "A breakage creates an eight-copper debt to the guard",
+          requiredObligationEffect: {
+            kind: "incur_actor_obligation",
+            debtorHandle: "actor-you",
+            creditorHandle: "actor-guard",
+            obligationHandle: "",
+            paymentPossessionHandle: "",
+            unitKey: "copper",
+            amount: 8,
+            minimumResult: "setback",
+          },
+          citedVisibleFactHandles: ["actor-you", "actor-guard"],
+          disposition: "uncertain",
+          resultBounds: { minimum: "setback", maximum: "success" },
+          uncertainty: {
+            kind: "check",
+            dieSides: 20,
+            difficulty: 12,
+            modifierMinimum: -2,
+            modifierMaximum: 2,
+          },
+        }),
+        expected: {
+          kind: "incur_actor_obligation",
+          debtorHandle: "actor-you",
+          creditorHandle: "actor-guard",
+          unitKey: "copper",
+          amount: 8,
+          minimumResult: "setback",
+        },
+      },
+      {
+        input: "I hand the guard two of my five copper coins and ask him to mark two paid against my seven-copper debt.",
+        object: toolProposal({
+          method: "Transfer two copper coins as partial settlement",
+          stakes: "Reduce the existing debt from seven copper to five",
+          requiredObligationEffect: {
+            kind: "pay_actor_obligation",
+            debtorHandle: "actor-you",
+            creditorHandle: "actor-guard",
+            obligationHandle: "guard-debt",
+            paymentPossessionHandle: "copper-coins",
+            unitKey: "copper",
+            amount: 2,
+            minimumResult: "success",
+          },
+          citedVisibleFactHandles: ["actor-you", "actor-guard", "guard-debt", "copper-coins"],
+          disposition: "uncertain",
+          resultBounds: { minimum: "setback", maximum: "success" },
+          uncertainty: {
+            kind: "check",
+            dieSides: 20,
+            difficulty: 10,
+            modifierMinimum: -1,
+            modifierMaximum: 1,
+          },
+        }),
+        expected: {
+          kind: "pay_actor_obligation",
+          debtorHandle: "actor-you",
+          creditorHandle: "actor-guard",
+          obligationHandle: "guard-debt",
+          paymentPossessionHandle: "copper-coins",
+          unitKey: "copper",
+          amount: 2,
+          minimumResult: "success",
+        },
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
+        object: testCase.object,
+        trace: trace("tool_mode", "tool"),
+      }));
+      const judge = createCampaignPlayJudge({
+        generateObject: generateObject as unknown as typeof safeGenerateObject,
+      });
+      const result = await judge.judge({
+        frame: frame(),
+        input: { originalText: testCase.input, source: "freeform", choiceHandle: null },
+        model: model(),
+        temperature: 0.2,
+        budget,
+        structuredOutputMode: "tool",
+      });
+      expect(result.ruling.requiredObligationEffect).toEqual(testCase.expected);
+      expect(result.ruling.uncertainty).toMatchObject({
+        kind: "check",
+        dieSides: 20,
+      });
+      expect(generateObject).toHaveBeenCalledOnce();
+    }
+  });
+
+  it("rejects illegal sentinel mixtures before compile", async () => {
+    const possessionMixed = toolProposal();
+    possessionMixed.possessionEffectAuthority.enforcement = "required";
+    const obligationMixed = toolProposal();
+    obligationMixed.requiredObligationEffect.amount = 1;
+    const uncertaintyMixed = toolProposal();
+    uncertaintyMixed.uncertainty.difficulty = 1;
+    const cases = [
+      ["possessionEffectAuthority", possessionMixed],
+      ["requiredObligationEffect", obligationMixed],
+      ["uncertainty", uncertaintyMixed],
+    ] as const;
+
+    for (const [expectedPath, object] of cases) {
+      const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
+        object,
+        trace: trace("tool_mode", "tool"),
+      }));
+      const judge = createCampaignPlayJudge({
+        generateObject: generateObject as unknown as typeof safeGenerateObject,
+      });
+      let error: unknown;
+      try {
+        await judge.judge({
+          frame: frame(),
+          input: { originalText: "I ask.", source: "freeform", choiceHandle: null },
+          model: model(),
+          temperature: 0.2,
+          budget,
+          structuredOutputMode: "tool",
+        });
+      } catch (cause) {
+        error = cause;
+      }
+      expect(error).toMatchObject({ code: "model_contract_failed" });
+      const feedback = getCampaignPlayJudgeRecoveryFeedback(error);
+      expect(feedback?.issues[0]?.path).toEqual([expectedPath]);
+      expect(generateObject).toHaveBeenCalledOnce();
+    }
+  });
+
+  it("omits code-owned kind and route for a suggested contact and injects them after decoding", async () => {
+    const suggestedInput: CampaignPlayJudgeInput = {
+      originalText: "Ask the guard.",
+      source: "suggested",
+      choiceHandle: "choice-ask",
+      frozenChoice: {
+        kind: "contact",
+        targets: [{ handle: "actor-guard", kind: "actor" }],
+      },
+    };
+    const validProposal = suggestedToolProposal();
+    const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
+      object: validProposal,
+      trace: trace("tool_mode", "tool"),
+    }));
+    const judge = createCampaignPlayJudge({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    const result = await judge.judge({
+      frame: frame(),
+      input: suggestedInput,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      structuredOutputMode: "tool",
+    });
+
+    const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    const schema = z.toJSONSchema(options.schema) as {
+      properties: Record<string, { enum?: unknown[]; type?: string }>;
+    };
+    expect(schema.properties.kind).toBeUndefined();
+    expect(schema.properties.movementRouteHandle).toBeUndefined();
+    expect(options.schema.safeParse(validProposal).success).toBe(true);
+    expect(options.schema.safeParse({ ...validProposal, kind: "move" }).success).toBe(false);
+    expect(options.schema.safeParse({ ...validProposal, movementRouteHandle: "route-reef" }).success).toBe(false);
+    expect(String(options.prompt)).toContain("code-owned by FROZEN_CHOICE");
+    expect(String(options.prompt)).toContain("Omit code-owned kind and movementRouteHandle entirely");
+    expect(result.ruling.normalizedIntent.kind).toBe("contact");
+    expect(result.ruling.movementRouteHandle).toBeNull();
+  });
+
+  it("omits code-owned kind and injects the frozen route for a suggested movement", async () => {
+    const suggestedInput: CampaignPlayJudgeInput = {
+      originalText: "Cross the reef road.",
+      source: "suggested",
+      choiceHandle: "choice-cross",
+      frozenChoice: {
+        kind: "move",
+        targets: [{ handle: "route-reef", kind: "route" }],
+      },
+    };
+    const validProposal = suggestedToolProposal({
+      kind: "move",
+      targets: [{ handle: "route-reef", kind: "route" }],
+      method: "Cross the reef road",
+      stakes: "Reach the reef road destination",
+      movementRouteHandle: "route-reef",
+      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 5 },
+    });
+    const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
+      object: validProposal,
+      trace: trace("tool_mode", "tool"),
+    }));
+    const judge = createCampaignPlayJudge({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    const result = await judge.judge({
+      frame: frame(),
+      input: suggestedInput,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      structuredOutputMode: "tool",
+    });
+
+    const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    const schema = z.toJSONSchema(options.schema) as {
+      properties: Record<string, { enum?: unknown[]; type?: string }>;
+    };
+    expect(schema.properties.kind).toBeUndefined();
+    expect(schema.properties.movementRouteHandle).toBeUndefined();
+    expect(options.schema.safeParse(validProposal).success).toBe(true);
+    expect(options.schema.safeParse({ ...validProposal, kind: "move" }).success).toBe(false);
+    expect(options.schema.safeParse({ ...validProposal, movementRouteHandle: "route-reef" }).success).toBe(false);
+    expect(result.ruling.normalizedIntent.kind).toBe("move");
+    expect(result.ruling.movementRouteHandle).toBe("route-reef");
+  });
+
+  it("omits and injects code-owned fields for suggested observation", async () => {
+    const suggestedInput: CampaignPlayJudgeInput = {
+      originalText: "Inspect the harbor gate.",
+      source: "suggested",
+      choiceHandle: "choice-ask",
+      frozenChoice: {
+        kind: "observe",
+        targets: [{ handle: "location-harbor", kind: "location" }],
+      },
+    };
+    const validProposal = suggestedToolProposal({
+      kind: "observe",
+      targets: [{ handle: "location-harbor", kind: "location" }],
+      method: "Inspect the harbor gate",
+      stakes: "Learn the gate's current condition",
+    });
+    const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
+      object: validProposal,
+      trace: trace("tool_mode", "tool"),
+    }));
+    const result = await createCampaignPlayJudge({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).judge({
+      frame: frame(),
+      input: suggestedInput,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      structuredOutputMode: "tool",
+    });
+    const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    const schema = z.toJSONSchema(options.schema) as { properties: Record<string, unknown> };
+    expect(schema.properties.kind).toBeUndefined();
+    expect(schema.properties.movementRouteHandle).toBeUndefined();
+    expect(options.schema.safeParse(validProposal).success).toBe(true);
+    expect(result.ruling.normalizedIntent.kind).toBe("observe");
+    expect(result.ruling.movementRouteHandle).toBeNull();
+  });
+
+  it("omits and injects code-owned fields for a suggested wait", async () => {
+    const suggestedInput: CampaignPlayJudgeInput = {
+      originalText: "Wait for the signal.",
+      source: "suggested",
+      choiceHandle: "choice-ask",
+      frozenChoice: { kind: "wait", targets: [] },
+    };
+    const validProposal = suggestedToolProposal({
+      kind: "wait",
+      targets: [],
+      method: "Wait for the signal",
+      stakes: "Give the signal time to arrive",
+      disposition: "deterministic",
+      resultBounds: { minimum: "success", maximum: "success" },
+      elapsedBounds: { minimumMinutes: 10, maximumMinutes: 10 },
+      citedVisibleFactHandles: ["route-reef"],
+    });
+    const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
+      object: validProposal,
+      trace: trace("tool_mode", "tool"),
+    }));
+    const result = await createCampaignPlayJudge({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).judge({
+      frame: frame(),
+      input: suggestedInput,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      structuredOutputMode: "tool",
+    });
+    const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    const schema = z.toJSONSchema(options.schema) as { properties: Record<string, unknown> };
+    expect(schema.properties.kind).toBeUndefined();
+    expect(schema.properties.movementRouteHandle).toBeUndefined();
+    expect(options.schema.safeParse(validProposal).success).toBe(true);
+    expect(result.ruling.normalizedIntent.kind).toBe("wait");
+    expect(result.ruling.movementRouteHandle).toBeNull();
+    expect(result.ruling.elapsedBounds).toEqual({ minimumMinutes: 10, maximumMinutes: 10 });
+  });
+
+  it("omits and injects the frozen route for a suggested attempt", async () => {
+    const suggestedInput: CampaignPlayJudgeInput = {
+      originalText: "Try to cross the reef road.",
+      source: "suggested",
+      choiceHandle: "choice-ask",
+      frozenChoice: {
+        kind: "attempt",
+        targets: [{ handle: "route-reef", kind: "route" }],
+      },
+    };
+    const validProposal = suggestedToolProposal({
+      kind: "attempt",
+      targets: [
+        { handle: "route-reef", kind: "route" },
+        { handle: "actor-guard", kind: "actor" },
+      ],
+      method: "Try to cross the reef road",
+      stakes: "Reach the far side of the road",
+      disposition: "uncertain",
+      resultBounds: { minimum: "setback", maximum: "success" },
+      uncertainty: {
+        kind: "check",
+        dieSides: 20,
+        difficulty: 12,
+        modifierMinimum: -1,
+        modifierMaximum: 1,
+      },
+      movementRouteHandle: "route-reef",
+      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 6 },
+      citedVisibleFactHandles: ["route-reef", "actor-guard"],
+    });
+    const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
+      object: validProposal,
+      trace: trace("tool_mode", "tool"),
+    }));
+    const result = await createCampaignPlayJudge({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).judge({
+      frame: frame(),
+      input: suggestedInput,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      structuredOutputMode: "tool",
+    });
+    const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    const schema = z.toJSONSchema(options.schema) as { properties: Record<string, unknown> };
+    expect(schema.properties.kind).toBeUndefined();
+    expect(schema.properties.movementRouteHandle).toBeUndefined();
+    expect(options.schema.safeParse(validProposal).success).toBe(true);
+    expect(result.ruling.normalizedIntent.kind).toBe("attempt");
+    expect(result.ruling.movementRouteHandle).toBe("route-reef");
+  });
+
+  it.each([
+    ["deterministic clarification", toolProposal({
+      disposition: "deterministic",
+      clarificationQuestion: "Which gate should I inspect?",
+    }), { originalText: "I ask.", source: "freeform", choiceHandle: null }],
+    ["clarification missing question", toolProposal({
+      disposition: "clarification_required",
+      clarificationQuestion: null,
+    }), { originalText: "I ask.", source: "freeform", choiceHandle: null }],
+    ["deterministic result bounds", toolProposal({
+      disposition: "deterministic",
+      resultBounds: { minimum: "no_effect", maximum: "no_effect" },
+    }), { originalText: "I ask.", source: "freeform", choiceHandle: null }],
+    ["suggested wait duration", suggestedToolProposal({
+      kind: "wait",
+      targets: [],
+      elapsedBounds: { minimumMinutes: 1, maximumMinutes: 2 },
+    }), {
+      originalText: "I wait.",
+      source: "suggested",
+      choiceHandle: "choice-ask",
+      frozenChoice: { kind: "wait", targets: [] },
+    }],
+  ] as const)("rejects %s after a flat tool result reaches the packet schema", async (_name, object, input) => {
+    const generateObject = vi.fn(async () => ({
+      object,
+      trace: trace("tool_mode", "tool"),
+    }));
+    const judge = createCampaignPlayJudge({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    let error: unknown;
+    try {
+      await judge.judge({
+        frame: frame(),
+        input: input as unknown as CampaignPlayJudgeInput,
+        model: model(),
+        temperature: 0.2,
+        budget,
+        structuredOutputMode: "tool",
+        attempt: 2,
+        workerEpoch: 18,
+      });
+    } catch (cause) {
+      error = cause;
+    }
+    expect(error).toMatchObject({ code: "model_contract_failed" });
+    expect(generateObject).toHaveBeenCalledOnce();
+    expect(getCampaignPlayJudgeRecoveryFeedback(error)).toEqual(expect.objectContaining({
+      issues: expect.arrayContaining([expect.objectContaining({ code: expect.any(String) })]),
+    }));
   });
 
   it("normalizes a model-authored immediate actor reaction into targets even for no effect", () => {
@@ -901,23 +1616,24 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("target the exact current location from TARGET_CATALOG");
     expect(sentPrompt).toContain("A plain question claims only that the question is delivered");
     expect(sentPrompt).toContain("targets must always be a JSON array");
-    expect(sentPrompt).toContain("copy FROZEN_CHOICE kind and every frozen target");
-    expect(sentPrompt).toContain("visible nonplayer actors whose participation, consent, or reaction is material");
+    expect(sentPrompt).toContain("For freeform input, classify the player's primary action in kind");
+    expect(sentPrompt).not.toContain("copy FROZEN_CHOICE kind and every frozen target");
+    expect(sentPrompt).toContain("When a visible nonplayer actor explicitly participates in PLAYER_INPUT");
     expect(sentPrompt).toContain("Evaluate every visible nonplayer actor exactly once in visibleActorReactions");
     expect(sentPrompt).toContain("visibleActorReactions length must be exactly 1");
     expect(sentPrompt).toContain("Every entry requires a non-empty reason string");
     expect(sentPrompt).toContain('VISIBLE_ACTOR_REACTION_HANDLES=["actor-guard"]');
     expect(sentPrompt).toContain("even when its mechanical disposition is impossible or its result is no_effect");
     expect(sentPrompt).toContain("Code will add every immediate actor to normalized targets");
-    expect(sentPrompt).toContain(
+    expect(sentPrompt).not.toContain(
       "Never add a destination location or another route, location, pressure, possession, or the player actor",
     );
     expect(sentPrompt).toContain("ACTOR_CONTINUITY outranks any conflicting earlier dialogue");
     expect(sentPrompt).toContain("movementRouteHandle is a separate mechanical decision");
     expect(sentPrompt).toContain("compound requests such as travel then contact");
     expect(sentPrompt).toContain("never reduce it to pure move");
-    expect(sentPrompt).toContain("including a route-bound attempt");
-    expect(sentPrompt).toContain("Never add, remove, or change travel");
+    expect(sentPrompt).not.toContain("including a route-bound attempt");
+    expect(sentPrompt).not.toContain("Never add, remove, or change travel");
     expect(sentPrompt).toContain("A persistent location is the Rulebook placement boundary");
     expect(sentPrompt).toContain("may establish a room, corridor, threshold, floor, trail, or other local feature inside that same location");
     expect(sentPrompt).toContain("physically traverses an already established local feature");
@@ -1630,9 +2346,55 @@ describe("Campaign Play Judge", () => {
     const firstPrompt = String((generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0]).prompt);
     const secondPrompt = String((generateObject.mock.calls[1]![0] as Parameters<typeof safeGenerateObject>[0]).prompt);
     const recoverySection = secondPrompt.slice(secondPrompt.indexOf("RECOVERY_FINAL_VALIDATION_ISSUES"));
+    const requiredKeys = [
+      "kind",
+      "targets",
+      "visibleActorReactions",
+      "method",
+      "stakes",
+      "movementRouteHandle",
+      "possessionEffectAuthority",
+      "requiredObligationEffect",
+      "disposition",
+      "citedVisibleFactHandles",
+      "resultBounds",
+      "elapsedBounds",
+      "uncertainty",
+      "reason",
+      "clarificationQuestion",
+    ];
+    const dispositionRules = {
+      deterministic: {
+        resultBounds: "minimum and maximum are equal non_no_effect tiers",
+        uncertainty: { kind: "none" },
+        clarificationQuestion: "null",
+      },
+      uncertain: {
+        resultBounds: "minimum and maximum are different non_no_effect tiers",
+        uncertainty: "kind check with the existing integer/bounds contract",
+        clarificationQuestion: "null",
+      },
+      impossible: {
+        resultBounds: "minimum=no_effect and maximum=no_effect",
+        uncertainty: { kind: "none" },
+        clarificationQuestion: "null",
+      },
+      clarification_required: {
+        resultBounds: "minimum=no_effect and maximum=no_effect",
+        uncertainty: { kind: "none" },
+        clarificationQuestion: "a non-empty in-world question",
+      },
+    };
     expect(firstPrompt).not.toContain("RECOVERY_FINAL_VALIDATION_ISSUES");
+    expect(firstPrompt).toContain(`FINAL_OUTPUT_REQUIRED_KEYS=${JSON.stringify(requiredKeys)}`);
+    expect(secondPrompt).toContain(`FINAL_OUTPUT_REQUIRED_KEYS=${JSON.stringify(requiredKeys)}`);
+    expect(firstPrompt).toContain(`FINAL_OUTPUT_DISPOSITION_RULES=${JSON.stringify(dispositionRules)}`);
+    expect(secondPrompt).toContain(`FINAL_OUTPUT_DISPOSITION_RULES=${JSON.stringify(dispositionRules)}`);
+    expect(firstPrompt).toContain("FINAL_OUTPUT_VALIDATION_INSTRUCTION=Build a fresh complete ruling");
+    expect(secondPrompt).toContain("FINAL_OUTPUT_VALIDATION_INSTRUCTION=Build a fresh complete ruling");
     expect(secondPrompt).toContain(`RECOVERY_FINAL_VALIDATION_ISSUES=${JSON.stringify(feedback.issues)}`);
-    expect(secondPrompt).toContain("RECOVERY_FINAL_VALIDATION_INSTRUCTION=Produce a fresh ruling");
+    expect(secondPrompt).toContain("RECOVERY_FINAL_VALIDATION_INSTRUCTION=These issues describe the prior rejected object and are not exhaustive or permission to retain any unverified field.");
+    expect(secondPrompt).toContain("Rebuild the complete ruling from the current frame; validate every required key, every disposition rule, and every supplied authority rule");
     expect(recoverySection).not.toContain(unsafe);
     expect(recoverySection).not.toContain("actor-guard");
     expect(generateObject).toHaveBeenCalledTimes(2);

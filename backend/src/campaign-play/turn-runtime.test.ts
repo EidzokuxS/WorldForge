@@ -2652,7 +2652,7 @@ describe("Campaign Play player-action turn runtime", () => {
       expectedSecondModel: "language" as const,
     },
   ])(
-    "keeps Judge attempt 2 in tool mode after a no-feedback $label interruption",
+    "keeps Judge attempt 2 in native structured-output mode after a no-feedback $label interruption",
     async ({ error, persistedErrorCode, expectedSecondModel }) => {
       const { handle, state } = await createReadyCampaignWithOpening();
       const time = fixedClock(2_610);
@@ -2719,7 +2719,7 @@ describe("Campaign Play player-action turn runtime", () => {
       await runtime.runNextStage(admission.turnId);
 
       expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "primary_settled" });
-      expect(observedModes).toEqual(["auto", "tool"]);
+      expect(observedModes).toEqual(["auto", "auto"]);
       expect(observedModels).toEqual([
         languageModel,
         expectedSecondModel === "reasoning" ? reasoningModel : languageModel,

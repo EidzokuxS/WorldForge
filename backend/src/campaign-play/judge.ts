@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import type { LanguageModel } from "ai";
-import { z } from "zod";
+import { z, type ZodType } from "zod";
 import {
   CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES,
   CAMPAIGN_PLAY_LIMITS,
@@ -8,10 +8,12 @@ import {
 } from "@worldforge/shared";
 import {
   getSafeGenerateObjectErrorCode,
+  getSafeGenerateObjectSchemaDiagnostics,
   getSafeGenerateObjectTrace,
   isSafeGenerateObjectContractErrorCode,
   safeGenerateObject,
   type SafeGenerateErrorCode,
+  type SafeGenerateObjectSchemaDiagnostics,
   type SafeGenerateTrace,
 } from "../ai/generate-object-safe.js";
 import {
@@ -100,6 +102,7 @@ const JUDGE_SCHEMA_OWNED_MESSAGES = new Set([
 ]);
 
 type CampaignPlayJudgeContractIssue = {
+  readonly issueIndex?: number;
   readonly code: string;
   readonly path: readonly unknown[];
   readonly message?: string;
@@ -139,7 +142,7 @@ function sanitizeJudgeContractIssues(
       path?: readonly (string | number)[];
       message?: string;
     } = {
-      issueIndex,
+      issueIndex: issue.issueIndex ?? issueIndex,
       code: issue.code,
     };
     const path = sanitizeJudgeSchemaPath(issue.path);
@@ -156,6 +159,16 @@ function recoveryFeedbackFromIssues(
 ): CampaignPlayJudgeRecoveryFeedback | undefined {
   const sanitized = sanitizeJudgeContractIssues(issues);
   return sanitized.length === 0 ? undefined : { issues: sanitized };
+}
+
+function recoveryFeedbackFromSafeDiagnostics(
+  diagnostics: Readonly<SafeGenerateObjectSchemaDiagnostics>,
+): CampaignPlayJudgeRecoveryFeedback | undefined {
+  return recoveryFeedbackFromIssues(diagnostics.schemaIssues.map((issue) => ({
+    issueIndex: issue.issueIndex,
+    code: issue.code,
+    path: issue.path,
+  })));
 }
 
 export interface CampaignPlayJudgeRecoveryIssue {
@@ -256,7 +269,7 @@ const judgeProposalSchema = z.object({
       enforcement: z.enum(["required", "permitted"]),
       operation: z.enum(["acquire", "spend", "transform"]),
       possessionHandle: line(CAMPAIGN_PLAY_LIMITS.handle).nullable(),
-      quantity: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+      quantity: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity).default(1),
       minimumResult: z.enum(["setback", "limited", "success", "strong_success"]),
     }).strict(),
   ]),
@@ -444,6 +457,332 @@ function judgeProposalSchemaForFrame(
     : z.discriminatedUnion("disposition", branches);
 }
 
+/**
+ * Z.AI's strict tool transport does not accept the frame-specific disposition
+ * union (it serializes as a top-level oneOf with disposition const branches).
+ * Keep the provider contract flat and structural here; the exact frame
+ * schema above remains authoritative after generation.
+ */
+function judgeToolSchemaForFrame(
+  frame: CampaignPlayJudgeFrame,
+  input?: CampaignPlayJudgeInput,
+) {
+  const nullableTransportHandleSchema = (handles: readonly string[]) => handles.length === 0
+    ? z.string().max(0)
+    : z.enum(["", ...handles] as [string, ...string[]]);
+  const nullableTransportLine = (maximum: number) => z.string()
+    .max(maximum)
+    .refine((value) => value === "" || value.trim() === value)
+    .refine((value) => !value.includes("\n") && !value.includes("\r"));
+  const visibleHandles = frame.visibleFacts.map((fact) => fact.handle);
+  const targetHandles = frame.visibleFacts
+    .filter((fact) => fact.kind !== "observation" && fact.kind !== "choice")
+    .map((fact) => fact.handle);
+  const routeHandles = frame.visibleFacts
+    .filter((fact) => fact.kind === "route")
+    .map((fact) => fact.handle);
+  const visibleNonplayerActorHandles = frame.visibleFacts
+    .filter((fact) => fact.kind === "actor" && fact.handle !== frame.playerActorHandle)
+    .map((fact) => fact.handle);
+  const allowedSuggestedTargets = input?.source === "suggested" && input.frozenChoice
+    ? [
+        ...input.frozenChoice.targets,
+        ...frame.visibleFacts
+          .filter((fact) => fact.kind === "actor" && fact.handle !== frame.playerActorHandle)
+          .map((fact) => ({ handle: fact.handle, kind: "actor" as const })),
+      ].filter((target, index, targets) => targets.findIndex((candidate) =>
+        candidate.handle === target.handle && candidate.kind === target.kind) === index)
+    : null;
+  const allowedTargetHandles = allowedSuggestedTargets === null
+    ? targetHandles
+    : allowedSuggestedTargets.map((target) => target.handle);
+  const uniqueAllowedTargetHandles = [...new Set(allowedTargetHandles)];
+  const targetHandleSchema = uniqueAllowedTargetHandles.length === 0
+    ? line(CAMPAIGN_PLAY_LIMITS.handle)
+    : visibleHandleSchema(uniqueAllowedTargetHandles);
+  const targetSchema = z.object({
+    handle: targetHandleSchema,
+    kind: z.enum(["actor", "location", "route", "pressure", "possession", "obligation"]),
+  }).strict();
+  const visibleActorReactionSchema = visibleNonplayerActorHandles.length === 0
+    ? z.object({
+        actorHandle: line(CAMPAIGN_PLAY_LIMITS.handle),
+        reaction: z.enum(["none", "immediate"]),
+        supportingVisibleFactHandle: nullableTransportHandleSchema(visibleHandles),
+        reason: line(CAMPAIGN_PLAY_LIMITS.shortText),
+      }).strict()
+    : z.object({
+        actorHandle: visibleHandleSchema(visibleNonplayerActorHandles),
+        reaction: z.enum(["none", "immediate"]),
+        supportingVisibleFactHandle: nullableTransportHandleSchema(visibleHandles),
+        reason: line(CAMPAIGN_PLAY_LIMITS.shortText),
+      }).strict();
+  const visibleActorReactions = visibleNonplayerActorHandles.length === 0
+    ? z.array(visibleActorReactionSchema).length(0)
+    : z.array(visibleActorReactionSchema).length(visibleNonplayerActorHandles.length);
+  const targetCount = allowedSuggestedTargets === null
+    ? { minimum: 0, maximum: CAMPAIGN_PLAY_LIMITS.targets }
+    : {
+        minimum: input?.frozenChoice?.targets.length ?? 0,
+        maximum: Math.min(CAMPAIGN_PLAY_LIMITS.targets, allowedSuggestedTargets.length),
+      };
+  // Keep the provider contract structural for freeform choices. A frozen
+  // suggested choice already owns these two coordinates in code, so the
+  // provider must not echo them; the packet-specific schema below remains
+  // authoritative after generation.
+  const suggestedChoice = input?.source === "suggested" && input.frozenChoice
+    ? input.frozenChoice
+    : null;
+  const intentKind = z.enum(["observe", "move", "contact", "wait", "attempt"]);
+  const travelRouteHandle = routeHandles.length > 0
+    ? nullableTransportHandleSchema(routeHandles)
+    : nullableTransportHandleSchema([]);
+  const resultTier = z.enum(["no_effect", "setback", "limited", "success", "strong_success"]);
+  const possessionHandles = frame.visibleFacts
+    .filter((fact) => fact.kind === "possession")
+    .map((fact) => fact.handle);
+  const possessionEffectAuthority = z.object({
+    kind: z.enum(["none", "adjust_actor_possession"]),
+    enforcement: z.enum(["", "required", "permitted"]),
+    operation: z.enum(["", "acquire", "spend", "transform"]),
+    possessionHandle: nullableTransportHandleSchema(possessionHandles),
+    quantity: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+    minimumResult: z.enum(["", "setback", "limited", "success", "strong_success"]),
+  }).strict();
+  const requiredObligationEffect = z.object({
+    kind: z.enum(["none", "incur_actor_obligation", "pay_actor_obligation"]),
+    debtorHandle: nullableTransportLine(CAMPAIGN_PLAY_LIMITS.handle),
+    creditorHandle: nullableTransportLine(CAMPAIGN_PLAY_LIMITS.handle),
+    obligationHandle: nullableTransportLine(CAMPAIGN_PLAY_LIMITS.handle),
+    paymentPossessionHandle: nullableTransportLine(CAMPAIGN_PLAY_LIMITS.handle),
+    unitKey: z.enum(["", "copper"]),
+    amount: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+    minimumResult: z.enum(["", "setback", "limited", "success", "strong_success"]),
+  }).strict();
+  const uncertainty = z.object({
+    kind: z.enum(["none", "check"]),
+    dieSides: z.number().int().min(0).max(20),
+    difficulty: z.number().int().min(0).max(20),
+    modifierMinimum: z.number().int().min(-10).max(10),
+    modifierMaximum: z.number().int().min(-10).max(10),
+  }).strict();
+  const elapsedBounds = z.object({
+    minimumMinutes: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes),
+    maximumMinutes: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes),
+  }).strict();
+  const baseShape = {
+    ...(suggestedChoice === null ? { intentKind } : {}),
+    targets: z.array(targetSchema).min(targetCount.minimum).max(targetCount.maximum),
+    visibleActorReactions,
+    method: nullableTransportLine(CAMPAIGN_PLAY_LIMITS.shortText),
+    stakes: nullableTransportLine(CAMPAIGN_PLAY_LIMITS.shortText),
+    ...(suggestedChoice === null ? { travelRouteHandle } : {}),
+    possessionEffectAuthority,
+    requiredObligationEffect,
+    disposition: campaignPlayJudgmentDispositionSchema,
+    citedVisibleFactHandles: z.array(visibleHandleSchema(visibleHandles))
+      .max(CAMPAIGN_PLAY_LIMITS.citedFacts),
+    resultBounds: z.object({ minimum: resultTier, maximum: resultTier }).strict(),
+    elapsedBounds,
+    uncertainty,
+    reason: text(CAMPAIGN_PLAY_LIMITS.narrationText),
+    clarificationQuestion: nullableTransportLine(CAMPAIGN_PLAY_LIMITS.shortText),
+  };
+  const base = z.object(baseShape).strict();
+  if (input?.source === "suggested" && input.frozenChoice?.kind === "wait") {
+    return base.extend({
+      elapsedBounds: z.object({
+        minimumMinutes: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes),
+        maximumMinutes: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes),
+      }).strict(),
+    });
+  }
+  return base;
+}
+
+function toolDecodeError(path: readonly (string | number)[], message: string): z.ZodError {
+  return new z.ZodError([{ code: "custom", path: [...path], message }]);
+}
+
+function decodeJudgeToolResult(
+  frame: CampaignPlayJudgeFrame,
+  input: CampaignPlayJudgeInput,
+  raw: unknown,
+) {
+  const transportResult = judgeToolSchemaForFrame(frame, input).safeParse(raw);
+  if (!transportResult.success) return transportResult;
+  const value = transportResult.data as Record<string, unknown>;
+  const possession = value.possessionEffectAuthority as Record<string, unknown>;
+  const obligation = value.requiredObligationEffect as Record<string, unknown>;
+  const uncertainty = value.uncertainty as Record<string, unknown>;
+  const fail = (path: readonly (string | number)[], message: string) => ({
+    success: false as const,
+    error: toolDecodeError(path, message),
+  });
+  const isEmpty = (candidate: unknown): candidate is "" => candidate === "";
+  const isNonEmptyString = (candidate: unknown): candidate is string =>
+    typeof candidate === "string" && candidate.length > 0;
+  const isValidMinimumResult = (candidate: unknown): candidate is "setback" | "limited" | "success" | "strong_success" =>
+    candidate === "setback" || candidate === "limited" || candidate === "success" || candidate === "strong_success";
+
+  let decodedPossession: Record<string, unknown>;
+  if (possession.kind === "none") {
+    if (possession.enforcement !== ""
+      || possession.operation !== ""
+      || possession.possessionHandle !== ""
+      || possession.quantity !== 0
+      || possession.minimumResult !== "") {
+      return fail(
+        ["possessionEffectAuthority"],
+        "The none possession effect requires every branch field to use its empty sentinel.",
+      );
+    }
+    decodedPossession = { kind: "none" };
+  } else {
+    if (!isNonEmptyString(possession.enforcement)
+      || !isNonEmptyString(possession.operation)
+      || !isValidMinimumResult(possession.minimumResult)
+      || typeof possession.quantity !== "number"
+      || possession.quantity < 1
+      || (possession.operation === "acquire" && !isEmpty(possession.possessionHandle))
+      || ((possession.operation === "spend" || possession.operation === "transform")
+        && isEmpty(possession.possessionHandle))) {
+      return fail(
+        ["possessionEffectAuthority"],
+        "The adjust_actor_possession effect contains an illegal sentinel or branch combination.",
+      );
+    }
+    decodedPossession = {
+      ...possession,
+      possessionHandle: possession.possessionHandle === "" ? null : possession.possessionHandle,
+    };
+  }
+
+  let decodedObligation: Record<string, unknown>;
+  if (obligation.kind === "none") {
+    if (obligation.debtorHandle !== ""
+      || obligation.creditorHandle !== ""
+      || obligation.obligationHandle !== ""
+      || obligation.paymentPossessionHandle !== ""
+      || obligation.unitKey !== ""
+      || obligation.amount !== 0
+      || obligation.minimumResult !== "") {
+      return fail(
+        ["requiredObligationEffect"],
+        "The none obligation effect requires every branch field to use its empty sentinel.",
+      );
+    }
+    decodedObligation = { kind: "none" };
+  } else if (obligation.kind === "incur_actor_obligation") {
+    if (!isNonEmptyString(obligation.debtorHandle)
+      || !isNonEmptyString(obligation.creditorHandle)
+      || !isEmpty(obligation.obligationHandle)
+      || !isEmpty(obligation.paymentPossessionHandle)
+      || obligation.unitKey !== "copper"
+      || typeof obligation.amount !== "number"
+      || obligation.amount < 1
+      || !isValidMinimumResult(obligation.minimumResult)) {
+      return fail(
+        ["requiredObligationEffect"],
+        "The incur_actor_obligation effect contains an illegal sentinel or branch combination.",
+      );
+    }
+    decodedObligation = {
+      kind: obligation.kind,
+      debtorHandle: obligation.debtorHandle,
+      creditorHandle: obligation.creditorHandle,
+      unitKey: obligation.unitKey,
+      amount: obligation.amount,
+      minimumResult: obligation.minimumResult,
+    };
+  } else {
+    if (!isNonEmptyString(obligation.debtorHandle)
+      || !isNonEmptyString(obligation.creditorHandle)
+      || !isNonEmptyString(obligation.obligationHandle)
+      || !isNonEmptyString(obligation.paymentPossessionHandle)
+      || obligation.unitKey !== "copper"
+      || typeof obligation.amount !== "number"
+      || obligation.amount < 1
+      || !isValidMinimumResult(obligation.minimumResult)) {
+      return fail(
+        ["requiredObligationEffect"],
+        "The pay_actor_obligation effect contains an illegal sentinel or branch combination.",
+      );
+    }
+    decodedObligation = obligation;
+  }
+
+  let decodedUncertainty: Record<string, unknown>;
+  if (uncertainty.kind === "none") {
+    if (uncertainty.dieSides !== 0
+      || uncertainty.difficulty !== 0
+      || uncertainty.modifierMinimum !== 0
+      || uncertainty.modifierMaximum !== 0) {
+      return fail(
+        ["uncertainty"],
+        "The none uncertainty requires every check field to use the zero sentinel.",
+      );
+    }
+    decodedUncertainty = { kind: "none" };
+  } else if (uncertainty.dieSides !== 20
+    || typeof uncertainty.difficulty !== "number"
+    || uncertainty.difficulty < 1
+    || typeof uncertainty.modifierMinimum !== "number"
+    || typeof uncertainty.modifierMaximum !== "number"
+    || uncertainty.modifierMinimum > uncertainty.modifierMaximum
+    || uncertainty.modifierMinimum > 0
+    || uncertainty.modifierMaximum < 0) {
+    return {
+      success: false as const,
+      error: toolDecodeError(
+        ["uncertainty"],
+        "The check uncertainty contains an illegal sentinel or range.",
+      ),
+    };
+  }
+  else {
+    decodedUncertainty = uncertainty;
+  }
+  const suggestedChoice = input.source === "suggested" && input.frozenChoice
+    ? input.frozenChoice
+    : null;
+  const frozenRouteHandles = suggestedChoice
+    ? suggestedChoice.targets
+      .filter((target) => target.kind === "route")
+      .map((target) => target.handle)
+    : [];
+  const injectedMovementRouteHandle = suggestedChoice
+    && (suggestedChoice.kind === "move" || suggestedChoice.kind === "attempt")
+    && frozenRouteHandles.length === 1
+    ? frozenRouteHandles[0]!
+    : null;
+  const {
+    intentKind,
+    travelRouteHandle,
+    ...transportValue
+  } = value;
+  const decoded = {
+    ...transportValue,
+    kind: suggestedChoice === null ? intentKind : suggestedChoice.kind,
+    method: value.method === "" ? null : value.method,
+    stakes: value.stakes === "" ? null : value.stakes,
+    movementRouteHandle: suggestedChoice === null
+      ? travelRouteHandle === "" ? null : travelRouteHandle
+      : injectedMovementRouteHandle,
+    clarificationQuestion: value.clarificationQuestion === "" ? null : value.clarificationQuestion,
+    visibleActorReactions: (value.visibleActorReactions as Array<Record<string, unknown>>).map((entry) => ({
+      ...entry,
+      supportingVisibleFactHandle: entry.supportingVisibleFactHandle === ""
+        ? null
+        : entry.supportingVisibleFactHandle,
+    })),
+    possessionEffectAuthority: decodedPossession,
+    requiredObligationEffect: decodedObligation,
+    uncertainty: decodedUncertainty,
+  };
+  return { success: true as const, data: decoded };
+}
+
 export interface CampaignPlayJudgeFrame extends z.infer<typeof campaignPlayJudgeFrameSchema> {}
 export interface CampaignPlayJudgeInput {
   originalText: string;
@@ -606,7 +945,56 @@ function prompt(
   frame: CampaignPlayJudgeFrame,
   input: CampaignPlayJudgeInput,
   recoveryFeedback?: CampaignPlayJudgeRecoveryFeedback,
+  transportMode: "native" | "tool_mode" = "native",
 ): string {
+  const transportNull = transportMode === "tool_mode" ? '""' : "null";
+  const transportNonNull = transportMode === "tool_mode" ? "a non-empty value" : "a non-null value";
+  const suggestedToolMode = transportMode === "tool_mode"
+    && input.source === "suggested"
+    && input.frozenChoice !== null
+    && input.frozenChoice !== undefined;
+  const freeformToolMode = transportMode === "tool_mode" && input.source === "freeform";
+  const kindField = freeformToolMode ? "intentKind" : "kind";
+  const routeField = freeformToolMode ? "travelRouteHandle" : "movementRouteHandle";
+  const finalOutputRequiredKeys = [
+    ...(suggestedToolMode ? [] : [kindField]),
+    "targets",
+    "visibleActorReactions",
+    "method",
+    "stakes",
+    ...(suggestedToolMode ? [] : [routeField]),
+    "possessionEffectAuthority",
+    "requiredObligationEffect",
+    "disposition",
+    "citedVisibleFactHandles",
+    "resultBounds",
+    "elapsedBounds",
+    "uncertainty",
+    "reason",
+    "clarificationQuestion",
+  ] as const;
+  const finalOutputDispositionRules = {
+    deterministic: {
+      resultBounds: "minimum and maximum are equal non_no_effect tiers",
+      uncertainty: { kind: "none" },
+      clarificationQuestion: transportNull,
+    },
+    uncertain: {
+      resultBounds: "minimum and maximum are different non_no_effect tiers",
+      uncertainty: "kind check with the existing integer/bounds contract",
+      clarificationQuestion: transportNull,
+    },
+    impossible: {
+      resultBounds: "minimum=no_effect and maximum=no_effect",
+      uncertainty: { kind: "none" },
+      clarificationQuestion: transportNull,
+    },
+    clarification_required: {
+      resultBounds: "minimum=no_effect and maximum=no_effect",
+      uncertainty: { kind: "none" },
+      clarificationQuestion: "a non-empty in-world question",
+    },
+  } as const;
   const targetCatalog = frame.visibleFacts
     .filter((fact) => fact.kind !== "observation" && fact.kind !== "choice")
     .map((fact) => ({ handle: fact.handle, kind: fact.kind }));
@@ -630,35 +1018,55 @@ function prompt(
     "When a no-travel PLAYER_INPUT asks about the topology, direction, openness, restriction, toll, checkpoint, permission, credential, or access requirement of one visible route, copy that route's exact TARGET_CATALOG pair into targets. Keep a visible actor addressee as a separate actor target. Citing the route does not replace the route target.",
     "When a no-travel contact asks generally about passage, clearance, stamping, permits, tolls, or fees without identifying one visible route, keep only the spoken addressee or addressees in targets and copy every handle in VISIBLE_ROUTES to citedVisibleFactHandles. This supplies the complete local route authority for the answer; it does not authorize movement or establish any requirement.",
     `visibleActorReactions length must be exactly ${visibleActorReactionHandles.length}. Keep the same order as VISIBLE_ACTOR_REACTION_HANDLES and copy each listed handle once. Every entry requires a non-empty reason string, including reaction none; reason is never null or empty.`,
-    "Evaluate every visible nonplayer actor exactly once in visibleActorReactions. Use reaction immediate when the actor is an addressee, companion, performer, or when VISIBLE_FRAME, SOURCE_MOMENT, or ACTOR_CONTINUITY concretely establishes that the current action interferes with that actor's stated leverage, work, possession, safety, or immediate objective. This applies to the attempted interference itself even when its mechanical disposition is impossible or its result is no_effect. Copy the strongest supporting visible fact handle when one exists; otherwise use null. Use none with a null supporting handle for a mere witness or actor with no established stake, and explain that absence briefly in reason. Never infer a hidden stake or include a remote actor. Code will add every immediate actor to normalized targets without changing the player's action or deciding the actor's response.",
+    `Evaluate every visible nonplayer actor exactly once in visibleActorReactions. Use reaction immediate when the actor is an addressee, companion, performer, or when VISIBLE_FRAME, SOURCE_MOMENT, or ACTOR_CONTINUITY concretely establishes that the current action interferes with that actor's stated leverage, work, possession, safety, or immediate objective. This applies to the attempted interference itself even when its mechanical disposition is impossible or its result is no_effect. Copy the strongest supporting visible fact handle when one exists; otherwise use ${transportNull}. Use none with a ${transportNull} supporting handle for a mere witness or actor with no established stake, and explain that absence briefly in reason. Never infer a hidden stake or include a remote actor. Code will add every immediate actor to normalized targets without changing the player's action or deciding the actor's response.`,
     "Classify the action as deterministic, uncertain, impossible, or clarification_required.",
     "PLAYER_INPUT does not authorize the Judge or Game Master to choose for the player. When accepting, signing up, selecting, ordering, taking, or committing requires a choice between two or more visible mutually exclusive alternatives and PLAYER_INPUT does not name one, use clarification_required and ask which alternative. Never infer the choice from list order, convenience, equipment, goals, or likely benefit.",
     "PLAYER_INPUT is the entire authority for what the player does now. Accepting an offer authorizes only acceptance; it never authorizes unstated consideration or fulfillment. Do not add sharing information, revealing a secret, choosing what to disclose, giving an item, paying, promising terms, signing, or performing work unless PLAYER_INPUT states that exact action and content. When the other side requires a player-owned value or action that PLAYER_INPUT omits, use clarification_required and ask what the player provides before Game Master runs.",
     "A contact action that only speaks, asks, listens, greets, or offers an ordinary visible object to a present reachable actor is deterministic unless VISIBLE_FRAME shows a physical barrier to the exchange. Do not roll merely because the actor's knowledge, willingness, trust, privacy, or eventual reply is uncertain; the Game Master simulates that response. Use uncertain for attempts to change a decision, deceive, coerce, bargain for contested access, or force disclosure against resistance.",
-    "When the player addresses an unnamed or collective presence established by SOURCE_MOMENT or a cited observation, classify the action as contact. Without travel, target the exact current location from TARGET_CATALOG. When the action first travels through movementRouteHandle, target that exact route's destinationHandle from VISIBLE_ROUTES. Do not invent an actor handle or redirect the speech to a different visible actor. This only authorizes delivering the words into the established scene; it does not establish identity, trust, knowledge, compliance, or a reply.",
+    suggestedToolMode
+      ? "When the player addresses an unnamed or collective presence established by SOURCE_MOMENT or a cited observation, classify the action as contact. Without travel, target the exact current location from TARGET_CATALOG. When the action first travels through the frozen route authority, target that exact route's destinationHandle from VISIBLE_ROUTES. Do not invent an actor handle or redirect the speech to a different visible actor. This only authorizes delivering the words into the established scene; it does not establish identity, trust, knowledge, compliance, or a reply."
+      : "When the player addresses an unnamed or collective presence established by SOURCE_MOMENT or a cited observation, classify the action as contact. Without travel, target the exact current location from TARGET_CATALOG. When the action first travels through movementRouteHandle, target that exact route's destinationHandle from VISIBLE_ROUTES. Do not invent an actor handle or redirect the speech to a different visible actor. This only authorizes delivering the words into the established scene; it does not establish identity, trust, knowledge, compliance, or a reply.",
     "Deterministic judgments require resultBounds.minimum and resultBounds.maximum to be the same non-no_effect result tier. Uncertain judgments require different non-no_effect minimum and maximum tiers. Impossible and clarification_required use no_effect for both bounds.",
     "For deterministic, impossible, or clarification_required rulings, uncertainty must be exactly {\"kind\":\"none\"}.",
     "For deterministic or uncertain rulings, resultBounds must not contain no_effect. Impossible and clarification_required use no_effect for both bounds.",
     "For uncertain rulings, resultBounds.minimum and resultBounds.maximum must be different non-no_effect result tiers so the code-owned check can change the outcome. Never return a fixed result for an uncertain ruling.",
-    "clarificationQuestion must be a non-empty question only when disposition is clarification_required; otherwise it must be null.",
+    `clarificationQuestion must be a non-empty question only when disposition is clarification_required; otherwise it must be ${transportNull}.`,
     "Write clarificationQuestion as a concise in-world question the player character can understand. Refer only to perceivable details and in-world destination names. Never mention models, scenes, packets, handles, typed routes, schemas, code, or game mechanics.",
     "For uncertain rulings, uncertainty.kind must be check and must include dieSides=20, difficulty, modifierMinimum, and modifierMaximum. Every one of those four values must be an unquoted JSON integer. difficulty must be from 1 through 20; never return a difficulty word or quoted number. Example shape: {\"kind\":\"check\",\"dieSides\":20,\"difficulty\":12,\"modifierMinimum\":-2,\"modifierMaximum\":2}. The modifier range must contain zero. Code performs the roll; never claim a roll result.",
-    "For suggested input, copy FROZEN_CHOICE kind and every frozen target. targets must always be a JSON array. You may add only visible nonplayer actors whose participation, consent, or reaction is material to the rendered action. Add each such actor from TARGET_CATALOG. Never add a destination location or another route, location, pressure, possession, or the player actor. Judge feasibility and outcome without changing the selected action.",
-    "movementRouteHandle is a separate mechanical decision from the primary kind. Set it to the exact visible route when the action includes travel before or during its primary action, including compound requests such as travel then contact. For compound travel followed by contact, observation, or an attempt, kind names the action after travel and movementRouteHandle carries the route. A request to travel and then search for, look for, inspect, or examine a grounded feature at the destination is observe, or attempt when an obstacle makes it uncertain; never reduce it to pure move. Otherwise set movementRouteHandle to null. An actionable move requires a non-null movementRouteHandle; clarification_required may keep it null when the missing choice is which route to take. Never infer travel from a cited route alone. The route does not need to be repeated in targets; targets describe the action's semantic subjects or destination.",
-    "For suggested input, set movementRouteHandle to the exact route target in FROZEN_CHOICE when it has one, including a route-bound attempt. Set it to null when FROZEN_CHOICE has no route target. Never add, remove, or change travel that the frozen choice did not authorize.",
-    "A persistent location is the Rulebook placement boundary. SOURCE_MOMENT or a cited observation may establish a room, corridor, threshold, floor, trail, or other local feature inside that same location. A freeform action that physically traverses an already established local feature without entering another persistent location is an observe or attempt at the current location: target the current location, keep movementRouteHandle null, and judge the stated risk or obstacle normally. This may change the player's presented position within the local scene but never their Rulebook placement. PLAYER_INPUT alone cannot invent the feature. Entering another persistent location or a visible route destination still requires one exact VISIBLE_ROUTES route; without it, use clarification_required and ask which visible destination the player means.",
+    suggestedToolMode
+      ? "For suggested input in tool mode, copy every frozen target. kind and movementRouteHandle are code-owned by FROZEN_CHOICE and must be omitted entirely; never echo, supply, or change either field. targets must always be a JSON array. You may add only visible nonplayer actors whose participation, consent, or reaction is material to the rendered action. Add each such actor from TARGET_CATALOG. Never add a destination location or another route, location, pressure, possession, or the player actor. Judge feasibility and outcome without changing the selected action."
+      : input.source === "suggested"
+        ? "For suggested input, copy FROZEN_CHOICE kind and every frozen target. targets must always be a JSON array. You may add only visible nonplayer actors whose participation, consent, or reaction is material to the rendered action. Add each such actor from TARGET_CATALOG. Never add a destination location or another route, location, pressure, possession, or the player actor. Judge feasibility and outcome without changing the selected action."
+        : freeformToolMode
+          ? "For freeform input in tool mode, classify the player's primary action in required intentKind. Classify any travel separately in required travelRouteHandle. Do not return the domain aliases kind or movementRouteHandle; code decodes the provider transport only after this complete object passes its strict schema. targets must always be a JSON array."
+          : "For freeform input, classify the player's primary action in kind and any travel separately in movementRouteHandle. targets must always be a JSON array.",
+    ...(suggestedToolMode
+      ? []
+      : [
+          `${routeField} is a separate mechanical decision from the primary ${kindField}. Set it to the exact visible route when the action includes travel before or during its primary action, including compound requests such as travel then contact. For compound travel followed by contact, observation, or an attempt, ${kindField} names the action after travel and ${routeField} carries the route. A request to travel and then search for, look for, inspect, or examine a grounded feature at the destination is observe, or attempt when an obstacle makes it uncertain; never reduce it to pure move. Otherwise set ${routeField} to ${transportNull}. An actionable move requires ${transportNonNull} ${routeField}; clarification_required may keep it at ${transportNull} when the missing choice is which route to take. Never infer travel from a cited route alone. The route does not need to be repeated in targets; targets describe the action's semantic subjects or destination.`,
+          ...(input.source === "suggested"
+            ? [`For suggested input, set ${routeField} to the exact route target in FROZEN_CHOICE when it has one, including a route-bound attempt. Set it to ${transportNull} when FROZEN_CHOICE has no route target. Never add, remove, or change travel that the frozen choice did not authorize.`]
+            : []),
+        ]),
+    suggestedToolMode
+      ? "A persistent location is the Rulebook placement boundary. SOURCE_MOMENT or a cited observation may establish a room, corridor, threshold, floor, trail, or other local feature inside that same location. A freeform action that physically traverses an already established local feature without entering another persistent location is an observe or attempt at the current location; judge the stated risk or obstacle normally. This may change the player's presented position within the local scene but never their Rulebook placement. PLAYER_INPUT alone cannot invent the feature. Entering another persistent location or a visible route destination still requires one exact VISIBLE_ROUTES route; the frozen suggested choice already supplies any authorized travel."
+      : `A persistent location is the Rulebook placement boundary. SOURCE_MOMENT or a cited observation may establish a room, corridor, threshold, floor, trail, or other local feature inside that same location. A freeform action that physically traverses an already established local feature without entering another persistent location is an observe or attempt at the current location: target the current location, keep ${routeField} ${transportNull}, and judge the stated risk or obstacle normally. This may change the player's presented position within the local scene but never their Rulebook placement. PLAYER_INPUT alone cannot invent the feature. Entering another persistent location or a visible route destination still requires one exact VISIBLE_ROUTES route; without it, use clarification_required and ask which visible destination the player means.`,
     "VISIBLE_ROUTES.state is mechanical authority. An open route supports ordinary move. A restricted route never supports ordinary move: classify a request to pass it as attempt, then judge the stated way of satisfying or overcoming the restriction. Deterministic passage requires cited visible evidence of payment, permission, or another concrete access basis. Without such evidence, use uncertain when the player is trying to overcome the restriction, impossible when the stated method cannot work, or clarification_required when one necessary choice is missing.",
     `A suggested wait always means waiting exactly ${CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES} world minutes. Classify it as deterministic and set both elapsed bounds to ${CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES}. A freeform actionable wait must advance at least one world minute.`,
     `Every deterministic or uncertain action consumes at least ${CAMPAIGN_PLAY_MIN_ACTION_MINUTES} world minute, even when it only observes, speaks, or attempts a local task. Never return zero elapsed minutes for an actionable result. Impossible and clarification_required may use zero.`,
     "VISIBLE_ROUTES carries code-authoritative travelCost ticks. For a pure move, elapsedBounds.minimumMinutes and elapsedBounds.maximumMinutes must both equal the selected route's travelCost. For a compound action that includes travel, elapsedBounds.minimumMinutes must be at least that travelCost. Never estimate a different route duration.",
-    "possessionEffectAuthority is Judge-owned mechanical authority, not prose. Use kind adjust_actor_possession when an actionable result at or above minimumResult must or may acquire a countable possession, spend one, or durably transform an existing retained possession. enforcement is required when the accepted outcome itself entails the transition; it is permitted only when a targeted present actor may choose whether to transfer an item while responding. A plain request for an item uses permitted acquire so the Game Master can grant or refuse it without inventing inventory authority. Writing measurements or other usable records into a visible notebook, form, chart, ledger, or similar retained object is required transform with that exact possession handle and quantity 1. The exact notebook shape is {\"kind\":\"adjust_actor_possession\",\"enforcement\":\"required\",\"operation\":\"transform\",\"possessionHandle\":\"copied visible handle\",\"quantity\":1,\"minimumResult\":\"lowest applicable tier\"}. operation accepts only acquire, spend, or transform; there is no adjustment field. Set minimumResult to the lowest result tier that authorizes the retained change. Use acquire with null possessionHandle for a new item; spend or transform with an exact visible possession handle for an existing item. Cite every non-null possessionHandle in citedVisibleFactHandles. Use kind none when no durable possession change is inside the action's authority. Impossible and clarification rulings always use none.",
+    `possessionEffectAuthority is Judge-owned mechanical authority, not prose. Use kind adjust_actor_possession when an actionable result at or above minimumResult must or may acquire a countable possession, spend one, or durably transform an existing retained possession. enforcement is required when the accepted outcome itself entails the transition; it is permitted only when a targeted present actor may choose whether to transfer an item while responding. A plain request for an item uses permitted acquire so the Game Master can grant or refuse it without inventing inventory authority. Writing measurements or other usable records into a visible notebook, form, chart, ledger, or similar retained object is required transform with that exact possession handle and quantity 1. The exact notebook shape is {\"kind\":\"adjust_actor_possession\",\"enforcement\":\"required\",\"operation\":\"transform\",\"possessionHandle\":\"copied visible handle\",\"quantity\":1,\"minimumResult\":\"lowest applicable tier\"}. operation accepts only acquire, spend, or transform; there is no adjustment field. Set minimumResult to the lowest result tier that authorizes the retained change. Use acquire with ${transportNull} possessionHandle for a new item; spend or transform with an exact visible possession handle for an existing item. Cite every ${transportNonNull} possessionHandle in citedVisibleFactHandles. Use kind none when no durable possession change is inside the action's authority. Impossible and clarification rulings always use none.`,
     "A positive possession entry in VISIBLE_FRAME is the only authority that the player currently controls a tool or material. DEPLETED_PLAYER_POSSESSIONS names player-owned stacks whose exact quantity is zero; they are unavailable and have no usable handle. A general tool possession authorizes only the tools it names, never raw material, fasteners, ammunition, medicine, food, fuel, currency, or another consumable. A work assignment, posted supply list, visible stock, offer, request, dialogue, handling, transport, or narration does not issue supplies to the player. If PLAYER_INPUT directly uses a tool or consumable that is depleted or has no visible possession handle, classify it as impossible and identify the missing material basis in reason; do not add that material to method or stakes. A request to a targeted present actor for that item is contact, not direct use: authorize a permitted acquire instead of assuming either transfer or refusal. When a visible possession is consumed or materially changed, possessionEffectAuthority must use required spend or transform with that exact cited handle. Putting newly collected contents into a visible container possession, filling it, or sealing it materially changes that retained possession: require transform of the exact container handle, never acquire the contents as a separate possession while leaving the container stack unchanged. Quantity counts indivisible Rulebook stack units. A plural or kit-like possession at quantity 1 cannot become one used container, unspecified remaining containers, and a separate new possession. Transform the complete quantity-1 stack; the resulting possession may describe both the retained set and its contained sample.",
     "requiredObligationEffect is Judge-owned mechanical intent, not prose. Use incur_actor_obligation when an actionable result at or above minimumResult creates a definite copper debt between the player and one targeted visible nonplayer actor. Copy both exact actor handles into debtorHandle and creditorHandle, cite both, and preserve the direction: the actor who must pay is the debtor. Completed player work with a definite unpaid fee creates nonplayer-to-player debt; a definite charge accepted by the player creates player-to-nonplayer debt. Its exact shape is {\"kind\":\"incur_actor_obligation\",\"debtorHandle\":\"copied actor handle\",\"creditorHandle\":\"copied actor handle\",\"unitKey\":\"copper\",\"amount\":2,\"minimumResult\":\"success\"}. amount is the newly incurred amount, not the running total. Use pay_actor_obligation only when the player is the debtor and the resolved action physically transfers a positive amount from one cited visible player copper possession against one cited payable obligation. Copy debtorHandle, creditorHandle, obligationHandle, and paymentPossessionHandle exactly and cite all four. Its exact shape is {\"kind\":\"pay_actor_obligation\",\"debtorHandle\":\"copied player actor handle\",\"creditorHandle\":\"copied visible actor handle\",\"obligationHandle\":\"copied payable obligation handle\",\"paymentPossessionHandle\":\"copied visible possession handle\",\"unitKey\":\"copper\",\"amount\":2,\"minimumResult\":\"success\"}. A nonplayer cannot pay from an undisclosed or nonexistent possession during a player action; record the definite unpaid amount as debt and leave later payment to that actor's own sourced action. Accepting offered work, including work that quotes an upfront or completion fee, is not completed work and does not itself transfer money or create a debt; use kind none. A request, offer, promise, quote, cargo movement, or narration without an authoritative transfer neither incurs nor pays debt. Use none when no binding debt changes. Impossible and clarification rulings always use none.",
     "PLAYER_INPUT stakes ask what the player hopes to learn or accomplish; they are not evidence and do not authorize an answer. For observation, authorize only conclusions supported by SOURCE_MOMENT, VISIBLE_FRAME, or ACTOR_CONTINUITY. Preserve unknown authorship, motive, provenance, prior contents, and hidden causes. A clean, empty, missing, or disturbed surface proves only its currently observable state; it does not prove that something existed, was found, removed, stolen, concealed, or carried away.",
     "The reason field explains feasibility and result bounds. It must not add world facts beyond the supplied frames or resolve an uncertainty that the visible evidence leaves open.",
     "ACTOR_CONTINUITY outranks any conflicting earlier dialogue in VISIBLE_FRAME for authorship and actor knowledge of its own actions. Never cite a prior denial to erase an own action; Judge the current request from the accepted action truth and preserve any separate uncertainty, privacy, or willingness to disclose.",
     "Outcome tiers never create trust, permission, leverage, knowledge, or access absent from VISIBLE_FRAME or ACTOR_CONTINUITY. Absence of visible trust or leverage means none is established. A plain question claims only that the question is delivered; Judge that delivery deterministically and leave the response to the Game Master. For an attempt to persuade, coerce, or extract private information against resistance, cap resultBounds.maximum at limited unless supplied facts already justify fuller cooperation.",
-    "Return exactly these top-level keys: kind, targets, visibleActorReactions, method, stakes, movementRouteHandle, possessionEffectAuthority, requiredObligationEffect, disposition, citedVisibleFactHandles, resultBounds, elapsedBounds, uncertainty, reason, clarificationQuestion. Spell citedVisibleFactHandles and visibleActorReactions exactly; never use citedVisibleFacts or another alternate key.",
+    suggestedToolMode
+      ? "In tool-mode suggested input, return exactly these top-level keys: targets, visibleActorReactions, method, stakes, possessionEffectAuthority, requiredObligationEffect, disposition, citedVisibleFactHandles, resultBounds, elapsedBounds, uncertainty, reason, clarificationQuestion. Omit code-owned kind and movementRouteHandle entirely. Spell citedVisibleFactHandles and visibleActorReactions exactly; never use citedVisibleFacts or another alternate key."
+      : freeformToolMode
+        ? "In tool-mode freeform input, return exactly these top-level keys: intentKind, targets, visibleActorReactions, method, stakes, travelRouteHandle, possessionEffectAuthority, requiredObligationEffect, disposition, citedVisibleFactHandles, resultBounds, elapsedBounds, uncertainty, reason, clarificationQuestion. Omit domain aliases kind and movementRouteHandle entirely. Spell every key exactly."
+        : "Return exactly these top-level keys: kind, targets, visibleActorReactions, method, stakes, movementRouteHandle, possessionEffectAuthority, requiredObligationEffect, disposition, citedVisibleFactHandles, resultBounds, elapsedBounds, uncertainty, reason, clarificationQuestion. Spell citedVisibleFactHandles and visibleActorReactions exactly; never use citedVisibleFacts or another alternate key.",
     "Return one strict schema object and no prose.",
     `SOURCE_MOMENT=${JSON.stringify(frame.sourceMoment)}`,
     `PLAYER_PROFILE=${JSON.stringify(frame.playerProfile)}`,
@@ -673,11 +1081,22 @@ function prompt(
     `CHOICE_HANDLE=${JSON.stringify(input.choiceHandle)}`,
     `FROZEN_CHOICE=${JSON.stringify(input.frozenChoice ?? null)}`,
     `PLAYER_INPUT=${JSON.stringify(input.originalText)}`,
+    `FINAL_OUTPUT_REQUIRED_KEYS=${JSON.stringify(finalOutputRequiredKeys)}`,
+    `FINAL_OUTPUT_DISPOSITION_RULES=${JSON.stringify(finalOutputDispositionRules)}`,
+    "FINAL_OUTPUT_VALIDATION_INSTRUCTION=Build a fresh complete ruling, then verify every required key and every rule for the selected disposition before returning the object.",
   ];
+  if (transportMode === "tool_mode") {
+    sections.splice(
+      sections.length - 3,
+      0,
+      `TOOL_NULL_SENTINEL=In tool mode only, encode exact null as the required empty string "" at method, stakes, ${freeformToolMode ? "travelRouteHandle, clarificationQuestion" : "clarificationQuestion"}, visibleActorReactions[].supportingVisibleFactHandle, and possessionEffectAuthority.possessionHandle when kind is adjust_actor_possession. Do not omit these fields. Native JSON/native_schema keeps its existing null representation.`,
+      'TOOL_REQUIRED_SENTINEL_CONTRACT=In tool mode only, all fields inside possessionEffectAuthority, requiredObligationEffect, and uncertainty are required. possessionEffectAuthority kind none requires enforcement="", operation="", possessionHandle="", quantity=0, minimumResult=""; kind adjust_actor_possession requires non-empty enforcement, operation, quantity, and minimumResult, with possessionHandle="" only for acquire and an exact existing handle for spend or transform. requiredObligationEffect kind none requires debtorHandle="", creditorHandle="", obligationHandle="", paymentPossessionHandle="", unitKey="", amount=0, minimumResult=""; incur_actor_obligation requires debtorHandle, creditorHandle, unitKey="copper", positive amount, and minimumResult while obligationHandle and paymentPossessionHandle are ""; pay_actor_obligation requires every exact non-empty handle plus unitKey="copper", positive amount, and minimumResult. uncertainty kind none requires dieSides=0, difficulty=0, modifierMinimum=0, modifierMaximum=0; kind check requires dieSides=20, difficulty 1..20, and modifier bounds -10..10 containing zero. Never omit fields or mix sentinel and non-sentinel branch values. Native JSON/native_schema keeps its exact branch representation.',
+    );
+  }
   if (recoveryFeedback !== undefined) {
     sections.push(
       `RECOVERY_FINAL_VALIDATION_ISSUES=${JSON.stringify(recoveryFeedback.issues)}`,
-      "RECOVERY_FINAL_VALIDATION_INSTRUCTION=Produce a fresh ruling that corrects every listed invariant. Use only the supplied contract rules and current frame; never repeat the rejected ruling.",
+      "RECOVERY_FINAL_VALIDATION_INSTRUCTION=These issues describe the prior rejected object and are not exhaustive or permission to retain any unverified field. Rebuild the complete ruling from the current frame; validate every required key, every disposition rule, and every supplied authority rule before returning one strict object.",
     );
   }
   return sections.join("\n");
@@ -1027,13 +1446,17 @@ export function createCampaignPlayJudge(
       const started = Date.now();
       let generated;
       try {
+        const generationSchema = capability.primaryStrategy === "tool_mode"
+          ? judgeToolSchemaForFrame(parsedFrame.data, request.input)
+          : judgeProposalSchemaForFrame(parsedFrame.data, request.input);
         generated = await dependencies.generateObject({
           model: request.model,
-          schema: judgeProposalSchemaForFrame(parsedFrame.data, request.input),
+          schema: generationSchema as ZodType<unknown>,
           prompt: prompt(
             parsedFrame.data,
             request.input,
             request.attempt === 2 ? request.recoveryFeedback : undefined,
+            capability.primaryStrategy === "tool_mode" ? "tool_mode" : "native",
           ),
           temperature: request.temperature,
           maxOutputTokens: request.budget.maximumOutputTokens,
@@ -1053,7 +1476,18 @@ export function createCampaignPlayJudge(
           isSafeGenerateObjectContractErrorCode(safeCode)
             ? "model_contract_failed"
             : "transport_interrupted";
-        throw new CampaignPlayJudgeError(code, base ? { ...base, errorCode: safeCode ?? code } : null, { cause });
+        const error = new CampaignPlayJudgeError(
+          code,
+          base ? { ...base, errorCode: safeCode ?? code } : null,
+          { cause },
+        );
+        if (safeCode === "invalid_structured_tool_call") {
+          const diagnostics = getSafeGenerateObjectSchemaDiagnostics(cause);
+          if (diagnostics) {
+            rememberJudgeRecoveryFeedback(error, recoveryFeedbackFromSafeDiagnostics(diagnostics));
+          }
+        }
+        throw error;
       }
       const durationMs = Date.now() - started;
       const modelEvidence = evidenceFromTrace(generated.trace, request.budget, durationMs);
@@ -1092,9 +1526,38 @@ export function createCampaignPlayJudge(
             });
           }
         : undefined;
+      let proposalForCompile = generated.object;
+      if (capability.primaryStrategy === "tool_mode") {
+        const decodedResult = decodeJudgeToolResult(
+          parsedFrame.data,
+          request.input,
+          generated.object,
+        );
+        if (!decodedResult.success) {
+          emitContractDiagnostic?.(decodedResult.error.issues);
+          const error = new CampaignPlayJudgeError("model_contract_failed", {
+            ...modelEvidence,
+            errorCode: "model_contract_failed",
+          }, { cause: decodedResult.error });
+          rememberJudgeRecoveryFeedback(error, recoveryFeedbackFromIssues(decodedResult.error.issues));
+          throw error;
+        }
+        const packetResult = judgeProposalSchemaForFrame(parsedFrame.data, request.input)
+          .safeParse(decodedResult.data);
+        if (!packetResult.success) {
+          emitContractDiagnostic?.(packetResult.error.issues);
+          const error = new CampaignPlayJudgeError("model_contract_failed", {
+            ...modelEvidence,
+            errorCode: "model_contract_failed",
+          }, { cause: packetResult.error });
+          rememberJudgeRecoveryFeedback(error, recoveryFeedbackFromIssues(packetResult.error.issues));
+          throw error;
+        }
+        proposalForCompile = packetResult.data;
+      }
       let ruling: CampaignPlayJudgeRuling;
       try {
-        ruling = compile(parsedFrame.data, request.input, generated.object, emitContractDiagnostic);
+        ruling = compile(parsedFrame.data, request.input, proposalForCompile, emitContractDiagnostic);
       } catch (cause) {
         if (cause instanceof CampaignPlayJudgeError) {
           const recoveryFeedback = getCampaignPlayJudgeRecoveryFeedback(cause);
