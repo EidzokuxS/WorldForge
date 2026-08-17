@@ -192,9 +192,44 @@ describe("synthesizeDraftFromSources priority merge", () => {
     expect(operationSignal).toBeInstanceOf(AbortSignal);
     expect(operationSignal?.aborted).toBe(false);
     expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
     expect(mockGenerateObject.mock.calls[0]?.[0]).toMatchObject({
       timeout: { totalMs: 90_000 },
     });
+  });
+
+  it("rejects an imported synthesis at 90000 ms when the operation ignores abort", async () => {
+    vi.useFakeTimers();
+    let operationSignal: AbortSignal | undefined;
+    let lateResolve!: (value: { object: typeof richOutput }) => void;
+    mockGenerateObject.mockImplementationOnce(async (opts: { abortSignal?: AbortSignal }) => {
+      operationSignal = opts.abortSignal;
+      return await new Promise<{ object: typeof richOutput }>((resolve) => {
+        lateResolve = resolve;
+      });
+    });
+
+    const startedAt = Date.now();
+    const pending = synthesizeDraftFromSources(importedSynthesisInput());
+    let settledAt = -1;
+    void pending.catch(() => {
+      settledAt = Date.now() - startedAt;
+    });
+
+    await vi.advanceTimersByTimeAsync(89_999);
+    expect(settledAt).toBe(-1);
+    expect(operationSignal?.aborted).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(pending).rejects.toThrow(IngestionPipelineError);
+    expect(settledAt).toBe(90_000);
+    expect(operationSignal?.aborted).toBe(true);
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+
+    lateResolve({ object: richOutput });
+    await vi.runAllTicks();
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
   });
 
   it("lets an imported fallback finish inside the remaining shared budget", async () => {

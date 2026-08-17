@@ -73,6 +73,51 @@ const powerStatsLlmSchema = z.object({
   vulnerabilities: z.array(characterVulnerabilitySchema),
 });
 
+/**
+ * Strict, JSON-Schema-representable contract for imported-card PowerStats.
+ *
+ * Imported cards have one bounded generation attempt, so this contract must
+ * require the complete shape up front instead of relying on the loose first
+ * pass and repair loop used by non-imported character generation.  Keep the
+ * normalizer above separate: it intentionally accepts the legacy aliases and
+ * casing variants used by the non-imported path.
+ */
+const generationTierRankSchema = <T extends z.ZodTypeAny>(tierSchema: T) =>
+  z.object({
+    tier: tierSchema,
+    rank: z.number().int().min(1).max(10),
+  }).strict();
+
+const generationHaxAbilitySchema = z.object({
+  name: z.string().min(1),
+  type: z.string().min(1),
+  bypassTier: z.enum(AP_DURABILITY_TIERS as unknown as [string, ...string[]]).nullable(),
+  limitations: z.array(z.string()),
+}).strict();
+
+const generationVulnerabilitySchema = z.object({
+  description: z.string().min(1),
+  severity: z.enum(["minor", "major", "critical"]),
+}).strict();
+
+/** Exact imported Stage 4 tool contract; no aliases or unknown keys allowed. */
+export const powerStatsGenerationSchema = z.object({
+  attackPotency: generationTierRankSchema(
+    z.enum(AP_DURABILITY_TIERS as unknown as [string, ...string[]]),
+  ),
+  speed: generationTierRankSchema(
+    z.enum(SPEED_TIERS as unknown as [string, ...string[]]),
+  ),
+  durability: generationTierRankSchema(
+    z.enum(AP_DURABILITY_TIERS as unknown as [string, ...string[]]),
+  ),
+  intelligence: generationTierRankSchema(
+    z.enum(INTELLIGENCE_TIERS as unknown as [string, ...string[]]),
+  ),
+  hax: z.array(generationHaxAbilitySchema),
+  vulnerabilities: z.array(generationVulnerabilitySchema),
+}).strict();
+
 /** Loose passthrough schema for first-attempt LLM output before strict parse. */
 export const loosePowerStatsSchema = z.object({}).passthrough();
 

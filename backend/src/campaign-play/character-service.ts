@@ -433,7 +433,7 @@ export function createCampaignPlayCharacterService(
             description: data.description,
             personality: data.personality,
             scenario: data.scenario,
-            tags: [],
+            tags: data.tags,
             mesExample: data.mes_example,
             importMode: parsedRequest.data.importMode,
           },

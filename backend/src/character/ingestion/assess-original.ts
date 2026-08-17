@@ -3,6 +3,7 @@ import { safeGenerateObject as generateObject } from "../../ai/generate-object-s
 import { createModel } from "../../ai/index.js";
 import {
   loosePowerStatsSchema,
+  powerStatsGenerationSchema,
   normalizeLlmPowerStats,
   repairPowerStats,
   AP_DUR_TIER_LIST,
@@ -15,27 +16,14 @@ import { clampTokens } from "../../lib/clamp.js";
 import { createLogger } from "../../lib/index.js";
 import { withPipelineRetry } from "./retry.js";
 import { buildPowerStatsPromptContract } from "../prompt-contract.js";
+import {
+  IMPORT_GENERATION_OPERATION_BUDGET_MS,
+  withImportedGenerationBudget,
+} from "./import-generation-budget.js";
 import type { CharacterDraft, PowerStats } from "@worldforge/shared";
 import type { ResolvedRole } from "../../ai/resolve-role-model.js";
 
 const log = createLogger("assess-original-powerstats");
-const IMPORT_GENERATION_TIMEOUT_MS = 45_000;
-const IMPORT_GENERATION_OPERATION_BUDGET_MS = IMPORT_GENERATION_TIMEOUT_MS * 2;
-
-async function withImportedGenerationBudget<T>(
-  operation: (abortSignal: AbortSignal) => Promise<T>,
-): Promise<T> {
-  const controller = new AbortController();
-  const timer = setTimeout(
-    () => controller.abort(),
-    IMPORT_GENERATION_OPERATION_BUDGET_MS,
-  );
-  try {
-    return await operation(controller.signal);
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 /**
  * Stage 4 (original branch) — LLM-only PowerStats inference for ORIGINAL or
@@ -117,14 +105,21 @@ GROUNDING RULES:
       model: isImportedCharacter
         ? createModel(role.provider, { role: "generator", reasoningMode: "bypass" })
         : createModel(role.provider),
-      schema: loosePowerStatsSchema,
+      schema: isImportedCharacter ? powerStatsGenerationSchema : loosePowerStatsSchema,
       prompt,
       temperature: Math.min(role.temperature, 0.3),
       maxOutputTokens: clampTokens(role.maxTokens),
       retries: 1,
+      ...(isImportedCharacter
+        ? {
+            allowTextFallback: false,
+            allowRepair: false,
+            strictSchema: true,
+          }
+        : {}),
     };
     const { object: rawObject } = isImportedCharacter
-      ? await withImportedGenerationBudget((abortSignal) =>
+      ? await withImportedGenerationBudget("power_assess", (abortSignal) =>
           generateObject({
             ...generationOptions,
             timeout: { totalMs: IMPORT_GENERATION_OPERATION_BUDGET_MS },
@@ -136,12 +131,20 @@ GROUNDING RULES:
           timeout: undefined,
         });
 
+    const parsedObject = recordFromUnknown(rawObject);
+    if (isImportedCharacter) {
+      // The imported path is intentionally one-call and fail-closed.  The
+      // strict generation schema has already rejected malformed tool input;
+      // this final shared normalizer preserves the canonical PowerStats type.
+      return normalizeLlmPowerStats(parsedObject);
+    }
+
     try {
-      return normalizeLlmPowerStats(recordFromUnknown(rawObject));
+      return normalizeLlmPowerStats(parsedObject);
     } catch (error) {
       if (!(error instanceof z.ZodError)) throw error;
       return await repairPowerStats({
-        rawObject: recordFromUnknown(rawObject),
+        rawObject: parsedObject,
         failures: describeZodIssues(error),
         draft,
         franchise: "Original",

@@ -62,6 +62,8 @@ export interface BuildStructuredOutputModelMetadataInput {
 const metadataByModel = new WeakMap<object, StructuredOutputModelMetadata>();
 const jsonObjectModeBaseUrlFamilies = new Set([
   "opencode.ai",
+]);
+const toolModeBaseUrlFamilies = new Set([
   "api.z.ai",
 ]);
 
@@ -143,8 +145,17 @@ function resolvePrimaryStrategy(
     case "native_schema":
       return "native_schema";
     case "auto":
+      if (prefersToolMode(metadata)) return "tool_mode";
       return prefersJsonObjectMode(metadata) ? "native_json" : "native_schema";
   }
+}
+
+function prefersToolMode(metadata: StructuredOutputModelMetadata): boolean {
+  return (
+    metadata.protocol === "openai-compatible" &&
+    metadata.transport === "chat-completions" &&
+    toolModeBaseUrlFamilies.has(metadata.baseUrlFamily)
+  );
 }
 
 function prefersJsonObjectMode(metadata: StructuredOutputModelMetadata): boolean {

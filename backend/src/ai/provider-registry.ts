@@ -120,6 +120,7 @@ function minimumOutputBudgetMiddleware(): LanguageModelMiddleware {
 const zaiFetchDiagnosticLog = createLogger("zai-fetch-diagnostic");
 const ZAI_FETCH_SETTLEMENT_EVENT = "ai.zai_fetch.settlement";
 const MAX_ZAI_FETCH_SETTLEMENT_ELAPSED_MS = 10_000_000;
+export const ZAI_CLAUDE_CODE_USER_AGENT = "claude-cli/2.1.218 (external, cli)";
 
 function zaiFetchSettlementElapsedMs(startedAt: number): number {
   return Math.max(
@@ -327,10 +328,14 @@ export function createModel(
   }
 
   const bypassReasoning = shouldBypassReasoning(config, options);
+  const zaiApiFamily = isZaiApiFamily(config);
   const provider = createOpenAI({
     baseURL,
     apiKey: config.apiKey || "ollama",
-    ...(bypassReasoning && isZaiApiFamily(config)
+    ...(zaiApiFamily
+      ? { headers: { "User-Agent": ZAI_CLAUDE_CODE_USER_AGENT } }
+      : {}),
+    ...(bypassReasoning && zaiApiFamily
       ? { fetch: createZaiThinkingDisabledFetch() }
       : {}),
   });

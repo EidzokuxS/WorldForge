@@ -12,9 +12,18 @@ const humanStats = {
   vulnerabilities: [{ description: "No combat training for duels", severity: "minor" }],
 };
 
-const { mockGenerateObject, mockCreateModel } = vi.hoisted(() => ({
+const {
+  mockGenerateObject,
+  mockCreateModel,
+  mockNormalizeLlmPowerStats,
+  mockRepairPowerStats,
+  mockPowerStatsGenerationSchema,
+} = vi.hoisted(() => ({
   mockGenerateObject: vi.fn(),
   mockCreateModel: vi.fn(() => ({ modelId: "mock" })),
+  mockNormalizeLlmPowerStats: vi.fn((raw: any) => raw),
+  mockRepairPowerStats: vi.fn(async () => humanStats),
+  mockPowerStatsGenerationSchema: { name: "strict-power-stats-generation-schema" },
 }));
 
 vi.mock("../../../ai/generate-object-safe.js", () => ({
@@ -27,8 +36,9 @@ vi.mock("../../../lib/index.js", () => ({
 }));
 vi.mock("../../known-ip-worldgen-research.js", () => ({
   loosePowerStatsSchema: {},
-  normalizeLlmPowerStats: (raw: any) => raw,
-  repairPowerStats: vi.fn(async () => humanStats),
+  powerStatsGenerationSchema: mockPowerStatsGenerationSchema,
+  normalizeLlmPowerStats: mockNormalizeLlmPowerStats,
+  repairPowerStats: mockRepairPowerStats,
   AP_DUR_TIER_LIST: "Human, Street, …",
   SPEED_TIER_LIST: "Human, Superhuman, …",
   INTELLIGENCE_TIER_LIST: "Average, Above Average, …",
@@ -43,6 +53,10 @@ beforeEach(() => {
   captured.prompt = undefined;
   mockGenerateObject.mockReset();
   mockCreateModel.mockClear();
+  mockNormalizeLlmPowerStats.mockReset();
+  mockNormalizeLlmPowerStats.mockImplementation((raw: any) => raw);
+  mockRepairPowerStats.mockReset();
+  mockRepairPowerStats.mockResolvedValue(humanStats);
   mockGenerateObject.mockImplementation(async (opts: any) => {
     captured.prompt = opts.prompt;
     return { object: humanStats };
@@ -83,8 +97,35 @@ describe("assessOriginalCharacterPowerStats", () => {
     expect(mockGenerateObject.mock.calls[0]?.[0]).toMatchObject({
       retries: 1,
       timeout: { totalMs: 90_000 },
+      allowTextFallback: false,
+      allowRepair: false,
+      strictSchema: true,
     });
+    expect(mockGenerateObject.mock.calls[0]?.[0].schema).toBe(mockPowerStatsGenerationSchema);
     expect(mockGenerateObject.mock.calls[0]?.[0].abortSignal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("uses one strict imported generation result without entering repair", async () => {
+    mockGenerateObject.mockResolvedValueOnce({ object: humanStats });
+
+    const assessed = await assessOriginalCharacterPowerStats(importedAssessmentInput());
+
+    expect(assessed.powerStats).toEqual(humanStats);
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+    expect(mockRepairPowerStats).not.toHaveBeenCalled();
+  });
+
+  it("fails malformed imported output without a repair or fallback call", async () => {
+    mockGenerateObject.mockResolvedValueOnce({ object: {} });
+    mockNormalizeLlmPowerStats.mockImplementationOnce(() => {
+      throw new Error("strict PowerStats validation failed");
+    });
+
+    await expect(assessOriginalCharacterPowerStats(importedAssessmentInput()))
+      .rejects.toThrow(IngestionPipelineError);
+
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+    expect(mockRepairPowerStats).not.toHaveBeenCalled();
   });
 
   it("accepts an imported power response after 45 seconds within the shared budget", async () => {
@@ -104,9 +145,44 @@ describe("assessOriginalCharacterPowerStats", () => {
     expect(operationSignal).toBeInstanceOf(AbortSignal);
     expect(operationSignal?.aborted).toBe(false);
     expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
     expect(mockGenerateObject.mock.calls[0]?.[0]).toMatchObject({
       timeout: { totalMs: 90_000 },
     });
+  });
+
+  it("rejects an imported power assessment at 90000 ms and ignores a late rejection", async () => {
+    vi.useFakeTimers();
+    let operationSignal: AbortSignal | undefined;
+    let lateReject!: (error: Error) => void;
+    mockGenerateObject.mockImplementationOnce(async (opts: { abortSignal?: AbortSignal }) => {
+      operationSignal = opts.abortSignal;
+      return await new Promise<{ object: typeof humanStats }>((_resolve, reject) => {
+        lateReject = reject;
+      });
+    });
+
+    const startedAt = Date.now();
+    const pending = assessOriginalCharacterPowerStats(importedAssessmentInput());
+    let settledAt = -1;
+    void pending.catch(() => {
+      settledAt = Date.now() - startedAt;
+    });
+
+    await vi.advanceTimersByTimeAsync(89_999);
+    expect(settledAt).toBe(-1);
+    expect(operationSignal?.aborted).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(pending).rejects.toThrow(IngestionPipelineError);
+    expect(settledAt).toBe(90_000);
+    expect(operationSignal?.aborted).toBe(true);
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+
+    lateReject(new Error("late provider completion"));
+    await vi.runAllTicks();
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
   });
 
   it("lets an imported power fallback finish inside the remaining shared budget", async () => {

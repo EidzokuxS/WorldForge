@@ -252,4 +252,65 @@ describe("synthesizeDraftFromSources personality lift", () => {
 
     expect(draft.state.hp).toBe(5);
   });
+
+  it("preserves authored imported tags when the model returns no usable tags", async () => {
+    mockGenerateObject.mockResolvedValueOnce({
+      object: {
+        ...richOutput,
+        tags: [],
+      },
+    });
+
+    const authoredTags = ["Storm Listener", "Harbor Mechanic", "Signal Keeper"];
+    const draft = await synthesizeDraftFromSources({
+      sources: sources({
+        mode: "import",
+        card: {
+          name: "Mara Venn",
+          description: "A mechanic who hears a structured signal inside the storm.",
+          personality: "Patient, observant, and privately superstitious.",
+          scenario: "She has just reached the rain-soaked port city.",
+          tags: authoredTags,
+          mesExample: "",
+          importMode: "outsider",
+        } as never,
+      }),
+      classification,
+      researchDigest: null,
+      ctx,
+    });
+
+    expect(draft.capabilities.traits).toEqual(authoredTags);
+  });
+
+  it("does not fabricate tags when both the card and model provide none", async () => {
+    mockGenerateObject.mockResolvedValueOnce({
+      object: {
+        ...richOutput,
+        tags: [],
+      },
+    });
+
+    await expect(synthesizeDraftFromSources({
+      sources: sources({
+        mode: "import",
+        card: {
+          name: "Mara Venn",
+          description: "A mechanic who hears a structured signal inside the storm.",
+          personality: "Patient, observant, and privately superstitious.",
+          scenario: "She has just reached the rain-soaked port city.",
+          tags: [],
+          mesExample: "",
+          importMode: "outsider",
+        } as never,
+      }),
+      classification,
+      researchDigest: null,
+      ctx,
+    })).rejects.toMatchObject({
+      issues: expect.arrayContaining([
+        expect.objectContaining({ path: ["tags"] }),
+      ]),
+    });
+  });
 });

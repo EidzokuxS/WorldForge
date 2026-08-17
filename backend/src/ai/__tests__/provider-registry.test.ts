@@ -42,7 +42,7 @@ vi.mock("../../lib/logger.js", () => ({
 }));
 
 // Import after mocks are set up
-const { createModel, resolveProviderProtocol } = await import(
+const { createModel, resolveProviderProtocol, ZAI_CLAUDE_CODE_USER_AGENT } = await import(
   "../provider-registry.js"
 );
 
@@ -328,6 +328,32 @@ describe("createModel", () => {
 
     expect(mockWrapLanguageModel).toHaveBeenCalledTimes(1);
     expect(result.baseModel).toBe(fakeModel);
+  });
+
+  it("identifies Z.AI requests as Claude Code without changing generic providers", () => {
+    createModel({
+      id: "zai-coding-plan",
+      name: "ZAI Coding Plan",
+      baseUrl: "https://api.z.ai/api/coding/paas/v4",
+      apiKey: "key",
+      model: "glm-5.3",
+    });
+
+    expect(mockCreateOpenAI).toHaveBeenLastCalledWith(expect.objectContaining({
+      headers: { "User-Agent": ZAI_CLAUDE_CODE_USER_AGENT },
+    }));
+
+    createModel({
+      id: "generic-openai-compatible",
+      name: "Generic",
+      baseUrl: "https://models.example.test/v1",
+      apiKey: "key",
+      model: "model",
+    });
+
+    expect(mockCreateOpenAI).toHaveBeenLastCalledWith(expect.not.objectContaining({
+      headers: expect.anything(),
+    }));
   });
 
   it("wraps reasoning-capable OpenAI-compatible models with reasoning settings", () => {

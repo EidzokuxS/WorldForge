@@ -13,6 +13,10 @@ import { extractSampleLinesFromMesExample } from "./mes-example-parser.js";
 import { clampTokens } from "../../lib/clamp.js";
 import { createLogger } from "../../lib/index.js";
 import { withPipelineRetry } from "./retry.js";
+import {
+  IMPORT_GENERATION_OPERATION_BUDGET_MS,
+  withImportedGenerationBudget,
+} from "./import-generation-budget.js";
 import type { CharacterDraft, CharacterSourceKind } from "@worldforge/shared";
 import type {
   IngestionClassification,
@@ -21,23 +25,6 @@ import type {
 } from "./types.js";
 
 const log = createLogger("ingestion-synthesizer");
-const IMPORT_GENERATION_TIMEOUT_MS = 45_000;
-const IMPORT_GENERATION_OPERATION_BUDGET_MS = IMPORT_GENERATION_TIMEOUT_MS * 2;
-
-async function withImportedGenerationBudget<T>(
-  operation: (abortSignal: AbortSignal) => Promise<T>,
-): Promise<T> {
-  const controller = new AbortController();
-  const timer = setTimeout(
-    () => controller.abort(),
-    IMPORT_GENERATION_OPERATION_BUDGET_MS,
-  );
-  try {
-    return await operation(controller.signal);
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 const looseRichCharacterSchema = richCharacterSchema.extend({
   race: z.string().default(""),
@@ -395,7 +382,7 @@ FIELD LIMITS (must be respected literally):
       retries: 1,
     };
     const result = isImportedCharacter
-      ? await withImportedGenerationBudget((abortSignal) =>
+      ? await withImportedGenerationBudget("synthesize", (abortSignal) =>
           generateObject({
             ...generationOptions,
             timeout: { totalMs: IMPORT_GENERATION_OPERATION_BUDGET_MS },

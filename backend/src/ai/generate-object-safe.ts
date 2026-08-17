@@ -94,15 +94,53 @@ export type SafeGenerateErrorCode =
   | "invalid_json"
   | "full_retry_exhausted";
 
+export type SafeGenerateObjectSchemaIssue = Readonly<{
+  issueIndex: number;
+  code: string;
+  path: ReadonlyArray<string | number>;
+  valueState: "present" | "missing" | "unavailable";
+  valueType: StructuredOutputArgumentType | null;
+  schemaLiteralCount: number;
+  schemaLiteralsTruncated: boolean;
+  schemaLiteralMatch: "exact" | "normalized_string" | "none" | "unavailable";
+}>;
+
+export type SafeGenerateObjectSchemaDiagnostics = Readonly<{
+  schemaParseOutcome: "valid" | "invalid" | "unavailable";
+  schemaIssueCount: number;
+  schemaIssuesTruncated: boolean;
+  schemaIssues: ReadonlyArray<SafeGenerateObjectSchemaIssue>;
+}>;
+
+function freezeSafeGenerateObjectSchemaDiagnostics(
+  diagnostics: StructuredOutputSchemaDiagnostics,
+): SafeGenerateObjectSchemaDiagnostics {
+  const schemaIssues = Object.freeze(diagnostics.schemaIssues.map((issue) => Object.freeze({
+    ...issue,
+    path: Object.freeze([...issue.path]),
+  })));
+  return Object.freeze({
+    ...diagnostics,
+    schemaIssues,
+  });
+}
+
 class SafeGenerateError extends Error {
   readonly trace?: SafeGenerateTrace;
   readonly code?: SafeGenerateErrorCode;
+  readonly schemaDiagnostics?: SafeGenerateObjectSchemaDiagnostics;
 
-  constructor(message: string, trace?: SafeGenerateTrace, code?: SafeGenerateErrorCode) {
+  constructor(
+    message: string,
+    trace?: SafeGenerateTrace,
+    code?: SafeGenerateErrorCode,
+    schemaDiagnostics?: SafeGenerateObjectSchemaDiagnostics,
+  ) {
     super(message);
     this.name = "SafeGenerateError";
     this.trace = trace;
     this.code = code;
+    this.schemaDiagnostics = schemaDiagnostics;
   }
 }
 
@@ -124,6 +162,12 @@ export function getSafeGenerateObjectTrace(
   error: unknown,
 ): Readonly<SafeGenerateTrace> | null {
   return error instanceof SafeGenerateError ? error.trace ?? null : null;
+}
+
+export function getSafeGenerateObjectSchemaDiagnostics(
+  error: unknown,
+): Readonly<SafeGenerateObjectSchemaDiagnostics> | null {
+  return error instanceof SafeGenerateError ? error.schemaDiagnostics ?? null : null;
 }
 
 export function isSafeGenerateObjectError(error: unknown): boolean {
@@ -992,6 +1036,7 @@ function textFallbackDisabledError(
   reason: string,
   trace?: SafeGenerateTrace,
   code: SafeGenerateErrorCode = "text_fallback_disabled",
+  schemaDiagnostics?: SafeGenerateObjectSchemaDiagnostics,
 ): SafeGenerateError {
   return new SafeGenerateError(
     `safeGenerateObject ${strategy}: text fallback is disabled. ${reason}`,
@@ -1005,6 +1050,7 @@ function textFallbackDisabledError(
       reason,
     ),
     code,
+    schemaDiagnostics,
   );
 }
 
@@ -1957,14 +2003,18 @@ async function attemptToolModeGenerate<T>(
     );
   }
   if (toolInputResult.kind === "invalid") {
+    const schemaDiagnostics = freezeSafeGenerateObjectSchemaDiagnostics(
+      buildStructuredOutputSchemaDiagnostics(toolInputResult.input, opts.schema),
+    );
     log.event("llm.structured_output_invalid_tool_call", {
       ...toolInputResult.diagnostic,
-      ...buildStructuredOutputSchemaDiagnostics(toolInputResult.input, opts.schema),
+      ...schemaDiagnostics,
     });
     throw new SafeGenerateError(
       `safeGenerateObject tool mode: ${STRUCTURED_OUTPUT_TOOL_NAME} tool call was generated with invalid arguments`,
       trace,
       "invalid_structured_tool_call",
+      schemaDiagnostics,
     );
   }
 
@@ -2011,6 +2061,7 @@ async function attemptGenerate<T>(opts: SafeGenerateOpts<T>): Promise<SafeGenera
           fallbackReason,
           err instanceof SafeGenerateError ? err.trace : undefined,
           err instanceof SafeGenerateError ? err.code ?? "text_fallback_disabled" : "text_fallback_disabled",
+          err instanceof SafeGenerateError ? err.schemaDiagnostics : undefined,
         );
       }
       return attemptTextFallbackGenerate(opts, schemaHint, context, fallbackReason);
@@ -2052,6 +2103,7 @@ async function attemptGenerate<T>(opts: SafeGenerateOpts<T>): Promise<SafeGenera
           fallbackReason,
           err instanceof SafeGenerateError ? err.trace : undefined,
           err instanceof SafeGenerateError ? err.code ?? "text_fallback_disabled" : "text_fallback_disabled",
+          err instanceof SafeGenerateError ? err.schemaDiagnostics : undefined,
         );
       }
       return attemptTextFallbackGenerate(
@@ -2154,6 +2206,7 @@ export async function safeGenerateObject<T>(opts: SafeGenerateOpts<T>): Promise<
           }
         : undefined,
       lastError.code ?? "full_retry_exhausted",
+      lastError.schemaDiagnostics,
     );
   }
   throw lastError;

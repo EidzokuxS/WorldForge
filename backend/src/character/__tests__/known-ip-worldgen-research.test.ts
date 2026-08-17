@@ -19,6 +19,7 @@ vi.mock("../../lib/web-search.js", () => ({
 import {
   enrichKnownIpWorldgenNpcDraft,
   normalizeLlmPowerStats,
+  powerStatsGenerationSchema,
 } from "../known-ip-worldgen-research.js";
 import { buildPowerStatsPromptContract } from "../prompt-contract.js";
 
@@ -433,5 +434,49 @@ describe("normalizeLlmPowerStats", () => {
         ).attackPotency.rank,
       ).toBe(rank);
     }
+  });
+});
+
+describe("powerStatsGenerationSchema", () => {
+  function validGenerationOutput(): Record<string, unknown> {
+    return {
+      attackPotency: { tier: "Street", rank: 4 },
+      speed: { tier: "Human", rank: 8 },
+      durability: { tier: "Street", rank: 3 },
+      intelligence: { tier: "Above Average", rank: 6 },
+      hax: [],
+      vulnerabilities: [],
+    };
+  }
+
+  it("accepts a complete mundane object and rejects incomplete or non-exact shapes", () => {
+    expect(powerStatsGenerationSchema.safeParse(validGenerationOutput()).success).toBe(true);
+    expect(powerStatsGenerationSchema.safeParse({}).success).toBe(false);
+    expect(powerStatsGenerationSchema.safeParse({
+      ...validGenerationOutput(),
+      attackPotency: { tier: "Street" },
+    }).success).toBe(false);
+    expect(powerStatsGenerationSchema.safeParse({
+      ...validGenerationOutput(),
+      speed: { tier: "Human", rank: 11 },
+    }).success).toBe(false);
+    expect(powerStatsGenerationSchema.safeParse({
+      ...validGenerationOutput(),
+      intelligence: { tier: "Brilliant", rank: 5 },
+    }).success).toBe(false);
+    expect(powerStatsGenerationSchema.safeParse({
+      ...validGenerationOutput(),
+      extra: true,
+    }).success).toBe(false);
+    expect(powerStatsGenerationSchema.safeParse({
+      ...validGenerationOutput(),
+      hax: [{
+        name: "None",
+        type: "None",
+        bypassTier: null,
+        limitations: [],
+        extra: "not allowed",
+      }],
+    }).success).toBe(false);
   });
 });

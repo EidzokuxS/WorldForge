@@ -63,11 +63,13 @@ vi.mock("../../lib/index.js", () => ({
 
 const {
   getSafeGenerateObjectErrorCode,
+  getSafeGenerateObjectSchemaDiagnostics,
   getSafeGenerateObjectTrace,
   isSafeGenerateObjectContractErrorCode,
   isSafeGenerateObjectError,
   safeGenerateObject,
 } = await import("../generate-object-safe.js");
+const { powerStatsGenerationSchema } = await import("../../character/known-ip-worldgen-research.js");
 
 const repairPolicySourcePath = path.resolve(
   process.cwd(),
@@ -369,7 +371,7 @@ describe("safeGenerateObject", () => {
     }));
   });
 
-  it("uses native JSON mode for GLM/Z.AI chat-completions models that fail json_schema in live play", async () => {
+  it("uses strict tool mode for GLM/Z.AI chat-completions auto mode", async () => {
     const model = {};
     rememberStructuredOutputModelMetadata(
       model,
@@ -384,7 +386,14 @@ describe("safeGenerateObject", () => {
     );
     mockGenerateText.mockResolvedValue({
       text: "",
-      output: { hp: 5 },
+      finishReason: "tool-calls",
+      toolCalls: [
+        {
+          type: "tool-call",
+          toolName: "structured_output",
+          input: { hp: 5 },
+        },
+      ],
     });
 
     const result = await safeGenerateObject({
@@ -394,19 +403,80 @@ describe("safeGenerateObject", () => {
       }),
       prompt: "Return JSON.",
       retries: 1,
+      allowTextFallback: false,
     });
 
     expect(result.object).toEqual({ hp: 5 });
-    expect(result.trace.strategy).toBe("native_json");
-    expect(result.trace.primaryStrategy).toBe("native_json");
-    expect(mockOutputJson).toHaveBeenCalledTimes(1);
-    expect(mockOutputObject).not.toHaveBeenCalled();
-    expect(mockStreamText).toHaveBeenCalledWith(expect.objectContaining({
-      maxRetries: 0,
-      output: expect.objectContaining({
-        kind: "mock-output-json",
-      }),
+    expect(result.trace.strategy).toBe("tool_mode");
+    expect(result.trace.primaryStrategy).toBe("tool_mode");
+    expect(mockTool).toHaveBeenCalledWith(expect.objectContaining({
+      inputSchema: expect.any(Object),
+      strict: true,
     }));
+    expect(mockOutputObject).not.toHaveBeenCalled();
+    expect(mockOutputJson).not.toHaveBeenCalled();
+    expect(mockStreamText).not.toHaveBeenCalled();
+    expect(mockGenerateText).toHaveBeenCalledWith(expect.objectContaining({
+      maxRetries: 0,
+      tools: expect.objectContaining({
+        structured_output: expect.objectContaining({ kind: "mock-tool" }),
+      }),
+      toolChoice: { type: "tool", toolName: "structured_output" },
+    }));
+  });
+
+  it("passes the complete imported PowerStats contract to the strict tool", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "z-ai",
+        providerName: "GLM",
+        model: "glm-5.3",
+        protocol: "openai-compatible",
+        baseUrl: "https://api.z.ai/api/coding/paas/v4",
+        transport: "chat-completions",
+      }),
+    );
+    const validObject = {
+      attackPotency: { tier: "Street", rank: 4 },
+      speed: { tier: "Human", rank: 8 },
+      durability: { tier: "Street", rank: 3 },
+      intelligence: { tier: "Above Average", rank: 6 },
+      hax: [],
+      vulnerabilities: [],
+    };
+    mockGenerateText.mockResolvedValueOnce({
+      text: "",
+      finishReason: "tool-calls",
+      toolCalls: [{
+        type: "tool-call",
+        toolName: "structured_output",
+        input: validObject,
+      }],
+    });
+
+    const result = await safeGenerateObject({
+      model: model as never,
+      schema: powerStatsGenerationSchema,
+      prompt: "Return strict PowerStats.",
+      retries: 1,
+      allowTextFallback: false,
+      allowRepair: false,
+      strictSchema: true,
+    });
+
+    expect(result.object).toEqual(validObject);
+    const toolDefinition = mockTool.mock.calls.at(-1)?.[0] as {
+      inputSchema?: typeof powerStatsGenerationSchema;
+      strict?: boolean;
+    };
+    expect(toolDefinition.inputSchema).toBe(powerStatsGenerationSchema);
+    expect(toolDefinition.strict).toBe(true);
+    expect(powerStatsGenerationSchema.safeParse({}).success).toBe(false);
+    expect(powerStatsGenerationSchema.safeParse(validObject).success).toBe(true);
+    expect(mockStreamText).not.toHaveBeenCalled();
+    expect(mockOutputJson).not.toHaveBeenCalled();
   });
 
   it("can disable text fallback for strict native JSON call sites", async () => {
@@ -1048,6 +1118,85 @@ describe("safeGenerateObject", () => {
       }],
     }]);
     expect(JSON.stringify(diagnostics)).not.toContain("raw-invalid-argument");
+  });
+
+  it("exposes only immutable safe schema coordinates on an invalid tool error", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "openrouter",
+        providerName: "OpenRouter",
+        model: "tool-capable-model",
+        protocol: "openai-compatible",
+        baseUrl: "https://openrouter.ai/api/v1",
+        transport: "chat-completions",
+      }),
+    );
+    const rawInvalidValue = "player-secret-route-value";
+    mockGenerateText.mockResolvedValue({
+      text: "",
+      finishReason: "tool-calls",
+      toolCalls: [{
+        type: "tool-call",
+        toolName: "structured_output",
+        invalid: true,
+        input: {
+          disposition: "private-enum-literal",
+          movementRouteHandle: rawInvalidValue,
+        },
+      }],
+    });
+
+    let captured: unknown;
+    try {
+      await safeGenerateObject({
+        model: model as never,
+        schema: z.object({
+          disposition: z.enum(["deterministic", "uncertain"]),
+          movementRouteHandle: z.null(),
+        }).strict(),
+        prompt: "test",
+        mode: "tool",
+        retries: 1,
+        allowTextFallback: false,
+      });
+    } catch (error) {
+      captured = error;
+    }
+
+    expect(getSafeGenerateObjectErrorCode(captured)).toBe("invalid_structured_tool_call");
+    const diagnostics = getSafeGenerateObjectSchemaDiagnostics(captured);
+    expect(diagnostics).toMatchObject({
+      schemaParseOutcome: "invalid",
+      schemaIssueCount: 2,
+      schemaIssuesTruncated: false,
+    });
+    expect(diagnostics?.schemaIssues).toEqual([
+      expect.objectContaining({
+        issueIndex: 0,
+        path: ["disposition"],
+        valueState: "present",
+        valueType: "string",
+        schemaLiteralCount: 2,
+        schemaLiteralMatch: "none",
+      }),
+      expect.objectContaining({
+        issueIndex: 1,
+        path: ["movementRouteHandle"],
+        valueState: "present",
+        valueType: "string",
+        schemaLiteralCount: 0,
+      }),
+    ]);
+    expect(diagnostics && Object.isFrozen(diagnostics)).toBe(true);
+    expect(diagnostics && Object.isFrozen(diagnostics.schemaIssues)).toBe(true);
+    expect(diagnostics?.schemaIssues.every((issue) => Object.isFrozen(issue))).toBe(true);
+    expect(diagnostics?.schemaIssues.every((issue) => Object.isFrozen(issue.path))).toBe(true);
+    const safeText = JSON.stringify(diagnostics);
+    expect(safeText).not.toContain(rawInvalidValue);
+    expect(safeText).not.toContain("private-enum-literal");
+    expect(safeText).not.toContain("player");
   });
 
   it("records bounded origin metadata for an invalid structured output step call", async () => {

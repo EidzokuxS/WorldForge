@@ -32,6 +32,7 @@ vi.mock("ai", () => ({
 
 const { createModel } = await import("../provider-registry.js");
 const {
+  buildStructuredOutputModelMetadata,
   getStructuredOutputModelMetadata,
   resolveStructuredOutputCapability,
 } = await import("../structured-output-capabilities.js");
@@ -172,7 +173,7 @@ describe("structured output capability metadata", () => {
     expect(JSON.stringify(autoDecision)).not.toContain("sk-opencode-secret");
   });
 
-  it("routes GLM/Z.AI chat-completions auto mode to json_object instead of json_schema", () => {
+  it("routes GLM/Z.AI chat-completions auto mode to strict tool mode", () => {
     const model = createModel({
       id: "z-ai",
       name: "GLM",
@@ -190,13 +191,59 @@ describe("structured output capability metadata", () => {
     });
 
     expect(autoDecision).toMatchObject({
-      primaryStrategy: "native_json",
-      actualMode: "native_json",
+      primaryStrategy: "tool_mode",
+      actualMode: "tool_mode",
     });
     expect(explicitSchemaDecision).toMatchObject({
       primaryStrategy: "native_schema",
       actualMode: "native_schema",
     });
     expect(JSON.stringify(autoDecision)).not.toContain("sk-zai-secret");
+  });
+
+  it("keeps explicit Z.AI modes and metadata-negative auto cases unchanged", () => {
+    const zaiMetadata = buildStructuredOutputModelMetadata({
+      providerId: "z-ai",
+      providerName: "GLM",
+      model: "glm-5-turbo",
+      protocol: "openai-compatible",
+      baseUrl: "https://api.z.ai/api/coding/paas/v4",
+      transport: "chat-completions",
+    });
+
+    expect(resolveStructuredOutputCapability({ metadata: zaiMetadata, requestedMode: "json" }).primaryStrategy)
+      .toBe("native_json");
+    expect(resolveStructuredOutputCapability({ metadata: zaiMetadata, requestedMode: "native_json" }).primaryStrategy)
+      .toBe("native_json");
+    expect(resolveStructuredOutputCapability({ metadata: zaiMetadata, requestedMode: "tool" }).primaryStrategy)
+      .toBe("tool_mode");
+    expect(resolveStructuredOutputCapability({ metadata: zaiMetadata, requestedMode: "tool_mode" }).primaryStrategy)
+      .toBe("tool_mode");
+    expect(resolveStructuredOutputCapability({ metadata: zaiMetadata, requestedMode: "native_schema" }).primaryStrategy)
+      .toBe("native_schema");
+
+    expect(resolveStructuredOutputCapability({
+      metadata: {
+        ...zaiMetadata,
+        protocol: "anthropic-compatible",
+        transport: "anthropic-messages",
+        capabilityKey: "zai-anthropic-negative",
+      },
+    }).primaryStrategy).toBe("native_schema");
+    expect(resolveStructuredOutputCapability({
+      metadata: {
+        ...zaiMetadata,
+        transport: "anthropic-messages",
+        capabilityKey: "zai-transport-negative",
+      },
+    }).primaryStrategy).toBe("native_schema");
+    expect(resolveStructuredOutputCapability({
+      metadata: {
+        ...zaiMetadata,
+        baseUrlFamily: "api.example.test",
+        capabilityKey: "other-base-url-negative",
+      },
+    }).primaryStrategy).toBe("native_schema");
+    expect(resolveStructuredOutputCapability({}).primaryStrategy).toBe("text_fallback");
   });
 });

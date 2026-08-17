@@ -291,7 +291,7 @@ describe("Campaign Play character intake", () => {
         description: "A mechanic who hears a structured signal inside the storm.",
         personality: "Patient, observant, and privately superstitious.",
         scenario: "She has just reached the rain-soaked port city.",
-        tags: [],
+        tags: ["PRIVATE_TAG"],
         mesExample: "<START>\nMara: Give me a minute and a quiet room.",
         importMode: "outsider",
       },
@@ -308,7 +308,6 @@ describe("Campaign Play character intake", () => {
       "PRIVATE_POST_HISTORY",
       "PRIVATE_GREETING",
       "PRIVATE_BOOK",
-      "PRIVATE_TAG",
       "PRIVATE_EXTENSION",
     ]) {
       expect(serializedInput).not.toContain(privateValue);
