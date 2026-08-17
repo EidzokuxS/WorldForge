@@ -193,6 +193,17 @@ function sortText(values: readonly string[]): string[] {
   return [...values].sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
 }
 
+function clipCharacterText(value: string, maximum: number): string {
+  const trimmed = value.trim();
+  const codePoints = [...trimmed];
+  if (codePoints.length <= maximum) return trimmed;
+  return codePoints.slice(0, maximum).join("").trimEnd();
+}
+
+function clipCharacterName(value: string): string {
+  return clipCharacterText(value.replace(/\s+/g, " "), CAMPAIGN_PLAY_LIMITS.name);
+}
+
 function buildAcceptedWorldContext(
   campaignId: string,
   context: CampaignPlayCharacterContext,
@@ -237,13 +248,16 @@ function normalizeDraft(
 ): CampaignPlayCharacterDraft {
   const personality = draft.identity.personality;
   const candidate: CampaignPlayCharacterDraft = {
-    name: draft.identity.displayName,
-    summary: draft.profile.personaSummary,
+    name: clipCharacterName(draft.identity.displayName),
+    summary: clipCharacterText(draft.profile.personaSummary, CAMPAIGN_PLAY_LIMITS.text),
     species: draft.profile.species,
     gender: draft.profile.gender,
     ageText: draft.profile.ageText,
     appearance: draft.profile.appearance,
-    biography: draft.identity.baseFacts?.biography ?? draft.profile.backgroundSummary,
+    biography: clipCharacterText(
+      draft.identity.baseFacts?.biography ?? draft.profile.backgroundSummary,
+      CAMPAIGN_PLAY_LIMITS.text,
+    ),
     personality: {
       summary: personality?.summary ?? "",
       voice: personality?.voice ?? "",

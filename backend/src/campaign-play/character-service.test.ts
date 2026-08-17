@@ -454,6 +454,38 @@ describe("Campaign Play character intake", () => {
     });
   });
 
+  it("clips the broader ingestion identity fields at the Campaign Play boundary", async () => {
+    const { service, ingest } = makeService();
+    const donor = makeDonorDraft();
+    ingest.mockResolvedValueOnce(makeDonorDraft({
+      identity: {
+        ...donor.identity,
+        displayName: `${"N".repeat(121)} \n overflow`,
+        baseFacts: {
+          ...donor.identity.baseFacts!,
+          biography: `${"B".repeat(1_200)} trailing biography`,
+        },
+      },
+      profile: {
+        ...donor.profile,
+        personaSummary: `${"S".repeat(1_200)} trailing summary`,
+      },
+    }));
+
+    const result = await service.parsePlayerCard(
+      CAMPAIGN_ID,
+      { cardJson: JSON.stringify(makeV2Card()), importMode: "outsider" },
+      context(),
+    );
+
+    expect([...result.draft.name]).toHaveLength(120);
+    expect(result.draft.name).not.toContain("\n");
+    expect([...result.draft.summary]).toHaveLength(1_200);
+    expect([...result.draft.biography]).toHaveLength(1_200);
+    expect(result.draft.summary).not.toContain("trailing summary");
+    expect(result.draft.biography).not.toContain("trailing biography");
+  });
+
   it("rejects a donor profile with missing required character fields", async () => {
     const { service, ingest } = makeService();
     ingest.mockResolvedValueOnce(makeDonorDraft({
