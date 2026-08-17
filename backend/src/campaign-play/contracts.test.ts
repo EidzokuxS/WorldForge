@@ -1832,6 +1832,16 @@ describe("Campaign Play shared public contracts", () => {
     expect(() => validateNarrationAgainstPacket(
       {
         ...narrationFixture(),
+        suggestedActions: [{
+          choiceHandle: "choice_watch_bridge",
+          label: "Watch from shelter",
+        }],
+      },
+      narratorPacketFixture(),
+    )).not.toThrow();
+    expect(() => validateNarrationAgainstPacket(
+      {
+        ...narrationFixture(),
         suggestedActions: [{ choiceHandle: "choice_hidden", label: "Hidden" }],
       },
       narratorPacketFixture(),

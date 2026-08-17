@@ -962,9 +962,12 @@ export function validateNarrationAgainstPacket(
     const prefix = available
       ? campaignPlaySuggestedActionLabelPrefix(packet, available)
       : null;
-    const hasExactBinding = available?.kind === "move" || available?.kind === "wait"
-      ? action.label === prefix
-      : prefix !== null && action.label.startsWith(prefix) && action.label.length > prefix.length;
+    const hasExactBinding = available !== undefined && (
+      action.label === available.label ||
+      (available.kind === "move" || available.kind === "wait"
+        ? action.label === prefix
+        : prefix !== null && action.label.startsWith(prefix) && action.label.length > prefix.length)
+    );
     if (!available || available.handle !== action.choiceHandle || !hasExactBinding) {
       throw new CampaignPlayContractError(
         "narration_invalid",

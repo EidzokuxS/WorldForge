@@ -1031,7 +1031,7 @@ export function availableIntents(
   const campaignId = handle.campaignId;
   const intents: CampaignPlayAvailableIntent[] = [{
     handle: publicHandle("choice", campaignId, `${turnId}:observe`),
-    label: "Look around",
+    label: "Examine the immediate situation",
     kind: "observe",
     targets: [{ handle: scene.currentLocation.handle, kind: "location" }],
   }];

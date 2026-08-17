@@ -95,7 +95,7 @@ function packetFixture(): CampaignPlayNarratorPacket {
 
 function proposalFixture(): CampaignPlayNarratorProposal {
   return {
-    actionSelections: [{ intentIndex: 0, detail: "Mara Venn's signal ledger" }],
+    actionSelections: [{ intentIndex: 0, detail: null }],
     beats: [
       {
         purpose: "orientation",
@@ -584,7 +584,7 @@ describe("Campaign Play narrator", () => {
       createdAt: 1_000,
       suggestedActions: [{
         choiceHandle: "choice_public_observe",
-        label: "Examine Mara Venn's signal ledger",
+        label: "Study the signal ledger",
       }],
     });
     expect(first.narration.displayText).toBe(
@@ -712,12 +712,6 @@ describe("Campaign Play narrator", () => {
               intentKind: "move",
               detailIsNull: false,
             },
-            {
-              actionSelectionIndex: 2,
-              intentIndex: 26,
-              intentKind: null,
-              detailIsNull: true,
-            },
           ],
         },
       ],
@@ -794,7 +788,7 @@ describe("Campaign Play narrator", () => {
     expect(narratorWarn).not.toHaveBeenCalled();
   });
 
-  it("rejects a null attempt detail with the safe nullability diagnostic", () => {
+  it("rejects model-authored wording for an application-owned optional action", () => {
     const narrator = createCampaignPlayNarrator();
     const packet: CampaignPlayNarratorPacket = {
       ...packetFixture(),
@@ -823,7 +817,7 @@ describe("Campaign Play narrator", () => {
       narrationId: "narration-attempt-detail-null",
       packet,
       proposal: {
-        actionSelections: [{ intentIndex: 0, detail: null }],
+        actionSelections: [{ intentIndex: 0, detail: "work the jammed latch" }],
         beats: [{
           purpose: "consequence",
           observationIndexes: [],
@@ -848,47 +842,29 @@ describe("Campaign Play narrator", () => {
             actionSelectionIndex: 0,
             intentIndex: 0,
             intentKind: "attempt",
-            detailIsNull: true,
+            detailIsNull: false,
           }],
         }],
       }),
     );
   });
 
-  it("rejects details that repeat the code-owned action verb", () => {
+  it("publishes the exact code-owned optional action label", () => {
     const narrator = createCampaignPlayNarrator();
     narratorWarn.mockClear();
 
-    expect(() => narrator.compile({
-      narrationId: "narration-repeated-observe-verb",
+    const result = narrator.compile({
+      narrationId: "narration-code-owned-observe-label",
       packet: packetFixture(),
-      proposal: {
-        ...proposalFixture(),
-        actionSelections: [{ intentIndex: 0, detail: "examine the shuttered window" }],
-      },
+      proposal: proposalFixture(),
       createdAt: 1_000,
-    })).toThrowError(expect.objectContaining({
-      code: "narration_invalid",
-      modelEvidence: null,
-    }));
+    });
 
-    expect(narratorWarn).toHaveBeenCalledWith(
-      "narrator_packet_validation_mismatch",
-      expect.objectContaining({
-        diagnostic: "narrator_packet_validation_mismatch",
-        campaignId: "campaign-harbor",
-        turnId: "turn-opening",
-        failedChecks: [{
-          check: "action_selection_repeated_action_verb",
-          violations: [{
-            actionSelectionIndex: 0,
-            intentIndex: 0,
-            intentKind: "observe",
-            repeatedVerb: "examine",
-          }],
-        }],
-      }),
-    );
+    expect(result.narration.suggestedActions).toEqual([{
+      choiceHandle: "choice_public_observe",
+      label: "Study the signal ledger",
+    }]);
+    expect(narratorWarn).not.toHaveBeenCalled();
   });
 
   it("selects a noncontiguous subset from the frozen intent catalog", () => {
@@ -906,7 +882,7 @@ describe("Campaign Play narrator", () => {
         ...proposalFixture(),
         actionSelections: [4, 1, 3, 0].map((intentIndex) => ({
           intentIndex,
-          detail: `visible option ${intentIndex}`,
+          detail: null,
         })),
       },
       createdAt: 1_000,
@@ -922,7 +898,7 @@ describe("Campaign Play narrator", () => {
         ...proposalFixture(),
         actionSelections: [0, 0, 1, 2].map((intentIndex) => ({
           intentIndex,
-          detail: `visible option ${intentIndex}`,
+          detail: null,
         })),
       },
       createdAt: 1_000,
@@ -1010,11 +986,7 @@ describe("Campaign Play narrator", () => {
       beats,
       actionSelections: [1, 0, 2, 3].map((intentIndex) => ({
         intentIndex,
-        detail: intentIndex === 2 || intentIndex === 3
-          ? null
-          : intentIndex === 1
-            ? "accept the uncertain share"
-            : `visible option ${intentIndex}`,
+        detail: intentIndex === 1 ? "accept the uncertain share" : null,
       })),
     };
     const narrator = createCampaignPlayNarrator();
@@ -1025,11 +997,7 @@ describe("Campaign Play narrator", () => {
         beats,
         actionSelections: [0, 2, 3, 1].map((intentIndex) => ({
           intentIndex,
-          detail: intentIndex === 2 || intentIndex === 3
-            ? null
-            : intentIndex === 1
-              ? "accept the uncertain share"
-              : `visible option ${intentIndex}`,
+          detail: intentIndex === 1 ? "accept the uncertain share" : null,
         })),
       },
       createdAt: 1_000,
@@ -1104,11 +1072,14 @@ describe("Campaign Play narrator", () => {
       "the prose must make that reply legible before the choices appear",
     );
     expect(String(options.prompt)).toContain(
-      "merely accepting the exchange cannot stand in for that missing disclosure",
+      "that reply must answer the visible exchange with one concrete player-owned act",
     );
-    expect(String(options.prompt)).toContain("Set detail to null for move and wait");
-    expect(String(options.prompt)).toContain("Move and wait always set detail to null");
-    expect(String(options.prompt)).not.toContain("wait uses a base-form verb phrase");
+    expect(String(options.prompt)).toContain(
+      "Set detail=null for every application-owned optional intent",
+    );
+    expect(String(options.prompt)).toContain(
+      "The model selects which frozen intents to publish but never writes, revises, or completes their wording",
+    );
   });
 
   it("excludes the required reply index from every r125-shaped trailing selection", async () => {
@@ -1161,7 +1132,7 @@ describe("Campaign Play narrator", () => {
       }],
       actionSelections: [5, 6, 0, 1].map((intentIndex) => ({
         intentIndex,
-        detail: `visible option ${intentIndex}`,
+        detail: intentIndex === 5 ? "accept the uncertain share" : null,
       })),
     };
     const generateObject = vi.fn(async (
@@ -1183,7 +1154,7 @@ describe("Campaign Play narrator", () => {
       ...proposal,
       actionSelections: [5, 5, 0, 1].map((intentIndex) => ({
         intentIndex,
-        detail: `visible option ${intentIndex}`,
+        detail: intentIndex === 5 ? "accept the uncertain share" : null,
       })),
     }).success).toBe(false);
     const schema = z.toJSONSchema(options.schema) as unknown as {
@@ -1284,7 +1255,7 @@ describe("Campaign Play narrator", () => {
     const noReplyProposal = {
       ...proposalFixture(),
       beats: proposalFixture().beats.slice(0, 2),
-      actionSelections: [{ intentIndex: 0, detail: "look around" }],
+      actionSelections: [{ intentIndex: 0, detail: null }],
     };
     const noReplyGenerateObject = vi.fn(async (
       _options: Parameters<typeof safeGenerateObject>[0],
@@ -1303,7 +1274,7 @@ describe("Campaign Play narrator", () => {
     expect(noReplyOptions.schema.safeParse(noReplyProposal).success).toBe(true);
     expect(noReplyOptions.schema.safeParse({
       ...noReplyProposal,
-      actionSelections: [{ intentIndex: 1, detail: "look around" }],
+      actionSelections: [{ intentIndex: 1, detail: null }],
     }).success).toBe(true);
     const noReplySchema = z.toJSONSchema(noReplyOptions.schema) as unknown as {
       properties: { actionSelections: { items: { properties: { intentIndex: { minimum: number; maximum: number } } } } };
@@ -1329,7 +1300,7 @@ describe("Campaign Play narrator", () => {
     const requiredProposal = {
       actionSelections: [5, 6, 0, 1].map((intentIndex) => ({
         intentIndex,
-        detail: `option ${intentIndex}`,
+        detail: intentIndex === 5 ? "ask about the remaining supplies" : null,
       })),
       beats: [{
         purpose: "consequence" as const,
@@ -1426,7 +1397,7 @@ describe("Campaign Play narrator", () => {
       _options: Parameters<typeof safeGenerateObject>[0],
     ) => ({
       object: {
-        actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+        actionSelections: [{ intentIndex: 0, detail: null }],
         beats: [{
           purpose: "consequence" as const,
           observationIndexes: [0, 1],
@@ -1457,7 +1428,7 @@ describe("Campaign Play narrator", () => {
       _options: Parameters<typeof safeGenerateObject>[0],
     ) => ({
       object: {
-        actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+        actionSelections: [{ intentIndex: 0, detail: null }],
         beats: [{
           purpose: "consequence" as const,
           observationIndexes: [0],
@@ -1578,7 +1549,7 @@ describe("Campaign Play narrator", () => {
     };
     const narrator = createCampaignPlayNarrator();
     const proposal = {
-      actionSelections: [{ intentIndex: 0, detail: "the departing barge" }],
+      actionSelections: [{ intentIndex: 0, detail: null }],
       beats: [{
         purpose: "consequence" as const,
         observationIndexes: [0],
@@ -1611,7 +1582,7 @@ describe("Campaign Play narrator", () => {
   it("accepts a quoted reference from the performing actor without participant diagnostics", () => {
     const packet = r45ActorAttributionPacket();
     const proposal: CampaignPlayNarratorProposal = {
-      actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+      actionSelections: [{ intentIndex: 0, detail: null }],
       beats: [
         {
           purpose: "consequence",
@@ -1655,7 +1626,7 @@ describe("Campaign Play narrator", () => {
       narrationId: "narration-unacknowledged-quoted-reference",
       packet,
       proposal: {
-        actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+        actionSelections: [{ intentIndex: 0, detail: null }],
         beats: [{
           purpose: "consequence",
           observationIndexes: [0],
@@ -1681,7 +1652,7 @@ describe("Campaign Play narrator", () => {
         narrationId,
         packet,
         proposal: {
-          actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+          actionSelections: [{ intentIndex: 0, detail: null }],
           beats: [{ purpose: "consequence", observationIndexes: [0], text }],
         },
         createdAt: 1_000,
@@ -1792,7 +1763,7 @@ describe("Campaign Play narrator", () => {
       narrationId: "narration-quoted-reference-outside-dialogue",
       packet,
       proposal: {
-        actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+        actionSelections: [{ intentIndex: 0, detail: null }],
         beats: [{
           purpose: "consequence",
           observationIndexes: [0],
@@ -1813,7 +1784,7 @@ describe("Campaign Play narrator", () => {
       narrationId: "narration-quoted-reference-actor-action",
       packet,
       proposal: {
-        actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+        actionSelections: [{ intentIndex: 0, detail: null }],
         beats: [{
           purpose: "consequence",
           observationIndexes: [0],
@@ -1858,7 +1829,7 @@ describe("Campaign Play narrator", () => {
       narrationId: "narration-possessive-actor-outside-dialogue",
       packet: vedrisPacket,
       proposal: {
-        actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+        actionSelections: [{ intentIndex: 0, detail: null }],
         beats: [{
           purpose: "consequence",
           observationIndexes: [0],
@@ -1884,7 +1855,7 @@ describe("Campaign Play narrator", () => {
       narrationId,
       packet,
       proposal: {
-        actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+        actionSelections: [{ intentIndex: 0, detail: null }],
         beats: [{
           purpose: "consequence",
           observationIndexes: [0],
@@ -1925,7 +1896,7 @@ describe("Campaign Play narrator", () => {
       _options: Parameters<typeof safeGenerateObject>[0],
     ) => ({
       object: {
-        actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+        actionSelections: [{ intentIndex: 0, detail: null }],
         beats: [{
           purpose: "consequence" as const,
           observationIndexes: [0, 1],
@@ -1970,7 +1941,7 @@ describe("Campaign Play narrator", () => {
       _options: Parameters<typeof safeGenerateObject>[0],
     ) => ({
       object: {
-        actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+        actionSelections: [{ intentIndex: 0, detail: null }],
         beats: [{
           purpose: "consequence" as const,
           observationIndexes: [0],
@@ -2042,7 +2013,7 @@ describe("Campaign Play narrator", () => {
       narrationId: "narration-r45-shaped-combined-reference",
       packet,
       proposal: {
-        actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+        actionSelections: [{ intentIndex: 0, detail: null }],
         beats: [{
           purpose: "consequence",
           observationIndexes: [0, 1],
@@ -2062,7 +2033,7 @@ describe("Campaign Play narrator", () => {
       narrationId: "narration-false-attribution-diagnostic",
       packet,
       proposal: {
-        actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+        actionSelections: [{ intentIndex: 0, detail: null }],
         beats: [
           {
             purpose: "consequence",
@@ -2170,7 +2141,7 @@ describe("Campaign Play narrator", () => {
       elapsedMinutes: 5,
     };
     const proposal: CampaignPlayNarratorProposal = {
-      actionSelections: [{ intentIndex: 0, detail: "the receding footsteps" }],
+      actionSelections: [{ intentIndex: 0, detail: null }],
       beats: [{
         purpose: "consequence",
         observationIndexes: [0],
@@ -2295,7 +2266,7 @@ describe("Campaign Play narrator", () => {
       _options: Parameters<typeof safeGenerateObject>[0],
     ) => ({
       object: {
-        actionSelections: [{ intentIndex: 0, detail: "the rain crossing the rail" }],
+        actionSelections: [{ intentIndex: 0, detail: null }],
         beats: [{
           purpose: "consequence" as const,
           observationIndexes: [0],
@@ -2333,7 +2304,7 @@ describe("Campaign Play narrator", () => {
       _options: Parameters<typeof safeGenerateObject>[0],
     ) => ({
       object: {
-        actionSelections: [{ intentIndex: 0, detail: "the remaining supplies" }],
+        actionSelections: [{ intentIndex: 0, detail: null }],
         beats: [{
           purpose: "consequence" as const,
           observationIndexes: [0],
@@ -2422,7 +2393,7 @@ describe("Campaign Play narrator", () => {
       },
     };
     const proposal: CampaignPlayNarratorProposal = {
-      actionSelections: [{ intentIndex: 0, detail: "the watered garden bed" }],
+      actionSelections: [{ intentIndex: 0, detail: null }],
       beats: [{
         purpose: "action_handoff",
         observationIndexes: [],
@@ -2479,7 +2450,7 @@ describe("Campaign Play narrator", () => {
       narrationId: "narration-player-consequence",
       packet,
       proposal: {
-        actionSelections: [{ intentIndex: 0, detail: "the next door down" }],
+        actionSelections: [{ intentIndex: 0, detail: null }],
         beats: [{
           purpose: "consequence",
           observationIndexes: [],
@@ -2567,46 +2538,10 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("not the highest world stakes");
     expect(prompt).toContain("a central pressure has no automatic priority");
     expect(prompt).toContain("include a supported local intent for the chosen thread");
-    expect(prompt).toContain("grounded fragment of three to eight words");
-    expect(prompt).toContain("never a sentence or explanation");
-    expect(prompt).toContain(
-      "Never set detail to null for observe, contact, or attempt. If you cannot supply a grounded three-to-eight-word detail, do not select that intentIndex; select another supported intent instead.",
-    );
-    expect(prompt).toContain(
-      'For observe, contact, and attempt, do not begin a detail with the code-owned action verbs "examine", "talk", or "try". Start the detail with the grounded object or action phrase instead.',
-    );
-    expect(prompt).toContain("must authorize one concrete player action when clicked");
-    expect(prompt).toContain("mutually exclusive alternatives");
-    expect(prompt).toContain("must name exactly one supported alternative");
-    expect(prompt).toContain("leaves the Judge or Game Master to choose for the player");
-    expect(prompt).toContain("actionContext and continuity as a record of what the player has already tried and learned");
-    expect(prompt).toContain("possessions is current player custody");
-    expect(prompt).toContain("An item with positive quantity there is already acquired");
-    expect(prompt).toContain("A detail may require a tool or consumable only when possessions contains it with positive quantity");
-    expect(prompt).toContain("possession.quantity counts indivisible Rulebook stack units");
-    expect(prompt).toContain("never derive smaller units from a number, duration, volume, contents, or measure inside the item name");
-    expect(prompt).toContain("A detail may offer or spend only a positive integer no greater than that quantity");
-    expect(prompt).toContain("do not suggest giving one day from it");
-    expect(prompt).toContain("A general tool possession never includes raw material, fasteners, or another consumable");
-    expect(prompt).toContain("prior narration does not put supplies in player custody");
-    expect(prompt).toContain("Never suggest using, installing, spending, or transforming absent material");
-    expect(prompt).toContain("choose another unresolved step");
-    expect(prompt).toContain("direction payable means the player owes the named counterparty");
-    expect(prompt).toContain("direction receivable means that counterparty owes the player");
-    expect(prompt).toContain("prose cannot create, reverse, increase, reduce, pay, or settle an obligation");
-    expect(prompt).toContain("Treat the latest explicit object relation in newObservations or consequences as final");
-    expect(prompt).toContain("already at that fixture or inside a container");
-    expect(prompt).toContain("Never make a detail load, haul, insert, or move it there again");
-    expect(prompt).toContain("Do not infer a changed object position when the packet does not state one");
-    expect(prompt).toContain("Do not point an intent back at any other observation, question, or attempt that already resolved");
-    expect(prompt).toContain("explicitly refused, declined, corrected, or left");
-    expect(prompt).toContain("Do not suggest it or use it as a reason to return");
-    expect(prompt).toContain("The original need's continued existence does not renew the offer");
-    expect(prompt).toContain("Do not disguise the old action with synonyms");
-    expect(prompt).toContain("A click-to-submit suggestion cannot require the player to supply a missing fact");
-    expect(prompt).toContain("degree of disclosure, or another player-owned value absent from the packet");
-    expect(prompt).toContain('Never summarize missing values as "give the details" or "answer the question"');
-    expect(prompt).toContain("freeform input remains available");
+    expect(prompt).toContain("Optional available intents are complete application-owned player actions");
+    expect(prompt).toContain("never writes, revises, or completes their wording");
+    expect(prompt).toContain("Do not select an intent merely to imply a future action, a completed result, a promise, or a state change that has not occurred");
+    expect(prompt).toContain("Only the application-owned required reply uses a non-null detail");
     expect(prompt).toContain("Purposes label a beat's work. Do not emit one beat for every purpose");
     expect(prompt).toContain("Prefer one beat");
     expect(prompt).toContain("combine the action result and its immediately visible aftermath in one beat");
@@ -2637,16 +2572,6 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Never add a moment beat to repeat sourceMoment");
     expect(prompt).toContain("Each actionSelection contains exactly intentIndex and detail");
     expect(prompt).toContain("includesTravel belongs only to the input catalog");
-    expect(prompt).toContain("Move and wait always set detail to null");
-    expect(prompt).not.toContain("wait uses a base-form verb phrase");
-    expect(prompt).toContain("Code fixes includesTravel for each entry");
-    expect(prompt).toContain("When it is false, the whole action must finish in currentLocation");
-    expect(prompt).toContain("Never describe departure in a false entry or remove travel from a true entry");
-    expect(prompt).toContain("visibleRoutes is code-authoritative topology and access state");
-    expect(prompt).toContain("Dialogue, sourceMoment, and consequence prose do not make an open route gated or indirect");
-    expect(prompt).toContain("do not suggest asking about passage terms, travel conditions, stamping, clearance, permits, tolls, or fees");
-    expect(prompt).toContain("offer an ordinary move or another grounded local action");
-    expect(prompt).toContain("When an ordinary move intent exists for an open route, treat it as the supported travel action");
     expect(prompt).toContain('Address the player as "you"');
     expect(prompt).toContain("never switch to the player character's name");
     expect(prompt).toContain("visibleActors as authoritative current placement");
@@ -2655,20 +2580,7 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("A completed accepted actor movement removes that actor from visibleActors");
     expect(prompt).toContain("sourceMoment is the exact previous accepted player-visible scene");
     expect(prompt).toContain("another character's statement, question, assumption, or demand does not establish");
-    expect(prompt).toContain("Never turn an NPC premise into narrator fact or an action detail that adopts it");
     expect(prompt).toContain("an accepted your_action consequence in the packet explicitly establishes that experience");
-    expect(prompt).toContain("Preserve the epistemic status of every source used by a detail");
-    expect(prompt).toContain("Any claim made only by an NPC proves that the NPC made the claim");
-    expect(prompt).toContain("even when stated without a hedge");
-    expect(prompt).toContain("Unless another packet source independently corroborates the claim");
-    expect(prompt).toContain("preserve attribution by asking about the claim");
-    expect(prompt).toContain("No detail may restate an unconfirmed claim or condition as an existing fact");
-    expect(prompt).toContain("a contact detail must ask about the marks, evidence, condition, or possible cause");
-    expect(prompt).toContain("it must not call that cause recent maintenance, a repair, tampering, or restored function");
-    expect(prompt).toContain("Preserve the condition in actionable grammar");
-    expect(prompt).toContain('Do not use possessive or definite wording such as "your sister\'s passage terms"');
-    expect(prompt).toContain("Set detail to null for move and wait");
-    expect(prompt).toContain("code publishes their complete rendered action");
     expect(prompt).toContain("Every concrete claim in a beat must be supported");
     expect(prompt).toContain("When evidence is only consistent with maintenance, repair, tampering, restored function");
     expect(prompt).toContain('never turn it into "someone did" that act or claim that the purpose succeeded');
@@ -2833,7 +2745,7 @@ END_RECOVERY_DIAGNOSTIC`);
       _options: Parameters<typeof safeGenerateObject>[0],
     ) => ({
       object: {
-        actionSelections: [{ intentIndex: 0, detail: "Ask about supplies" }],
+        actionSelections: [{ intentIndex: 0, detail: null }],
         beats: [{
           purpose: "consequence",
           observationIndexes: [0],
@@ -3007,7 +2919,7 @@ END_RECOVERY_DIAGNOSTIC`);
     const toolTransport = {
       beats: toolProposal.beats,
       intentSelections: {
-        intent0: { selected: true, detail: toolProposal.actionSelections[0]!.detail },
+        intent0: { selected: true },
       },
     };
     const toolTrace = trace("tool_mode");
@@ -3061,20 +2973,18 @@ END_RECOVERY_DIAGNOSTIC`);
       ],
       actionSelections: [3, 0, 1, 2].map((intentIndex) => ({
         intentIndex,
-        detail: intentIndex === 3
-          ? "accept the uncertain share"
-          : `harbor option ${intentIndex}`,
+        detail: intentIndex === 3 ? "accept the uncertain share" : null,
       })),
     };
     const validTransport = {
       beats: validProposal.beats,
       requiredReplyDetail: validProposal.actionSelections[0]!.detail,
       intentSelections: {
-        intent0: { selected: true, detail: "harbor option 0" },
-        intent1: { selected: true, detail: "harbor option 1" },
-        intent2: { selected: true, detail: "harbor option 2" },
-        intent4: { selected: false, detail: "" },
-        intent5: { selected: false, detail: "" },
+        intent0: { selected: true },
+        intent1: { selected: true },
+        intent2: { selected: true },
+        intent4: { selected: false },
+        intent5: { selected: false },
       },
     };
     const toolTrace = trace("tool_mode");
@@ -3145,7 +3055,7 @@ END_RECOVERY_DIAGNOSTIC`);
       "REQUIRED_REPLY_INTENT_INDEX=application-owned (absent from model output)",
     );
     expect(initialPrompt).toContain(
-      "requiredReplyDetail supplies only its wording",
+      "requiredReplyDetail supplies only that immediate reply",
     );
     expect(initialPrompt).toContain(
       "intentSelections is an application-keyed selection map",
@@ -3206,7 +3116,7 @@ END_RECOVERY_DIAGNOSTIC`);
           ...validTransport,
           intentSelections: {
             ...validTransport.intentSelections,
-            intent3: { selected: true, detail: "accept the uncertain share" },
+            intent3: { selected: true },
           },
         },
         diagnostic: "narrator_generation_schema_mismatch",
@@ -3217,7 +3127,7 @@ END_RECOVERY_DIAGNOSTIC`);
           ...validTransport,
           intentSelections: {
             ...validTransport.intentSelections,
-            intent4: { selected: true, detail: "harbor option 4" },
+            intent4: { selected: true },
           },
         },
         diagnostic: "narrator_generation_schema_mismatch",
@@ -3316,7 +3226,7 @@ END_RECOVERY_DIAGNOSTIC`);
     const toolTransport = {
       beats: toolProposal.beats,
       intentSelections: {
-        intent0: { selected: true, detail: toolProposal.actionSelections[0]!.detail },
+        intent0: { selected: true },
       },
     };
     const toolTrace = trace("tool_mode");
@@ -3381,7 +3291,7 @@ END_RECOVERY_DIAGNOSTIC`);
       elapsedMinutes: 5,
     };
     const invalid: CampaignPlayNarratorProposal = {
-      actionSelections: [{ intentIndex: 0, detail: "the wet signal ledger" }],
+      actionSelections: [{ intentIndex: 0, detail: null }],
       beats: [
         {
           purpose: "consequence",

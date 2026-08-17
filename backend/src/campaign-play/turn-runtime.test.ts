@@ -413,13 +413,7 @@ function narratorActionSelections(
       .slice(0, CAMPAIGN_PLAY_LIMITS.suggestedActions);
   return finalIndexes.map((intentIndex) => ({
     intentIndex,
-    detail: packet.availableIntents[intentIndex]?.kind === "move"
-      ? null
-      : packet.availableIntents[intentIndex]?.kind === "wait"
-        ? null
-        : packet.availableIntents[intentIndex]?.kind === "contact"
-          ? contactDetail
-          : "the immediate situation",
+    detail: intentIndex === requiredReplyIndex ? contactDetail : null,
   }));
 }
 
@@ -3943,10 +3937,7 @@ describe("Campaign Play player-action turn runtime", () => {
         ])].slice(0, expectedActionCount);
         const actionSelections = selectedIndexes.map((intentIndex) => ({
           intentIndex,
-          detail: packet.availableIntents[intentIndex]?.kind === "move" ||
-            packet.availableIntents[intentIndex]?.kind === "wait"
-            ? null
-            : "the immediate situation",
+          detail: intentIndex === requiredIndex ? "the immediate situation" : null,
         }));
         const usesToolMode = (options.tools?.length ?? 0) > 0;
         observedStructuredOutputModes.push(usesToolMode ? "tool" : "auto");
