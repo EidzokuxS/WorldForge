@@ -349,6 +349,7 @@ function createToolExposureSchema(allHandles: readonly string[]) {
 function createToolProposalSchema(
   map: ReadonlyMap<string, CampaignPlayEntityRef>,
   permittedResourceEffectKinds: ReadonlySet<ResourceEffectKind>,
+  worldEventPerformerHandles: readonly string[],
 ) {
   const allHandles = [...map.keys(), NEW_SUPPORT_ACTOR_HANDLE];
   const handlesByKind = (kind: CampaignPlayEntityRef["kind"]) =>
@@ -405,7 +406,7 @@ function createToolProposalSchema(
     obligationHandle: toolHandleSchema(handlesByKind("obligation")).optional(),
     paymentPossessionHandle: toolHandleSchema(handlesByKind("possession")).optional(),
     eventClass: toolEnum(["dialogue", "interaction", "discovery", "scene"] as const).optional(),
-    performingActorHandle: toolHandleSchema(actorHandles).optional(),
+    performingActorHandle: toolHandleSchema(worldEventPerformerHandles).optional(),
   }).strict();
   return z.object({
     elapsedMinutes: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes),
@@ -628,8 +629,13 @@ function decodeToolProposal(
   rawProposal: unknown,
   map: ReadonlyMap<string, CampaignPlayEntityRef>,
   permittedResourceEffectKinds: ReadonlySet<ResourceEffectKind>,
+  worldEventPerformerHandles: readonly string[],
 ) {
-  const providerParsed = createToolProposalSchema(map, permittedResourceEffectKinds).safeParse(rawProposal);
+  const providerParsed = createToolProposalSchema(
+    map,
+    permittedResourceEffectKinds,
+    worldEventPerformerHandles,
+  ).safeParse(rawProposal);
   if (!providerParsed.success) toolContractFailure(providerParsed.error);
   const transport = providerParsed.data as unknown as {
     elapsedMinutes: number;
@@ -2463,6 +2469,12 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
         throw new CampaignPlayGameMasterError("structured_output_unavailable", null);
       }
       const permittedEffects = permittedResourceEffectKinds(effectiveRuling, admittedResolution.data);
+      const worldEventPerformerHandles = [...new Set([
+        ...effectiveRuling.normalizedIntent.targets
+          .filter((target) => target.kind === "actor")
+          .map((target) => target.handle),
+        NEW_SUPPORT_ACTOR_HANDLE,
+      ])];
       const toolMode = capability.primaryStrategy === "tool_mode";
       const started = Date.now();
       let phase: CampaignPlayGameMasterContractRejectedPhase = "generation";
@@ -2483,7 +2495,7 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
         generated = await dependencies.generateObject({
           model: request.model,
           schema: (toolMode
-            ? createToolProposalSchema(handleMap, permittedEffects)
+            ? createToolProposalSchema(handleMap, permittedEffects, worldEventPerformerHandles)
             : constrainedProposalSchema(handleMap, permittedEffects)) as z.ZodType<unknown>,
           prompt: promptText,
           temperature: request.temperature,
@@ -2519,7 +2531,7 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
       phase = "compilation";
       try {
         const proposal = toolMode
-          ? decodeToolProposal(generated.object, handleMap, permittedEffects)
+          ? decodeToolProposal(generated.object, handleMap, permittedEffects, worldEventPerformerHandles)
           : generated.object;
         const compiled = compile(
             request.frame,

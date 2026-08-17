@@ -1707,6 +1707,18 @@ describe("Campaign Play Game Master", () => {
     expect(proposalJson.properties?.effects?.items?.properties?.kind?.enum).toEqual(expect.arrayContaining([
       "record_world_event",
     ]));
+    expect(proposalSchema.safeParse({
+      ...proposal,
+      effects: [{ ...proposal.effects[0], performingActorHandle: "you" }],
+    }).success).toBe(false);
+    expect(proposalSchema.safeParse({
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        performingActorHandle: "introduced-support-actor",
+        affectedHandles: ["you", "introduced-support-actor"],
+      }],
+    }).success).toBe(true);
     const reviewerJson = z.toJSONSchema(reviewerSchema) as { required?: string[] };
     expect(reviewerJson.required).toEqual(expect.arrayContaining(["verdict", "reason", "failedChecks"]));
   });
