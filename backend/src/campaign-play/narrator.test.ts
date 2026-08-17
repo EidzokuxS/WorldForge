@@ -201,6 +201,48 @@ function r45SingleObservationPacket(): CampaignPlayNarratorPacket {
   };
 }
 
+function r216RequiredReplyToolPacket(): CampaignPlayNarratorPacket {
+  const basePacket = packetFixture();
+  const consequence = {
+    observationHandle: "observation_r216_offer",
+    performingActorHandle: "actor_public_keeper",
+    performingActorName: "Mara Venn",
+    whatChanged: "Mara Venn offers an uncertain share.",
+    whereOrRoute: "Salt Harbor",
+    worldTimeLabel: "Day 1, 00:10",
+    causalCue: "direct_perception" as const,
+  };
+  const sharedTarget = [{ handle: "actor_public_keeper", kind: "actor" as const }];
+  return {
+    ...basePacket,
+    turnId: "turn-r216-required-reply-tool",
+    visibleActors: [
+      basePacket.visibleActors[0]!,
+      {
+        ...basePacket.visibleActors[0]!,
+        handle: "actor_public_contact",
+        name: "Dren Vask",
+        monogram: "DV",
+      },
+    ],
+    newObservations: [{
+      observationHandle: consequence.observationHandle,
+      title: "Mara's offer",
+      text: consequence.whatChanged,
+      whereOrRoute: consequence.whereOrRoute,
+      worldTimeLabel: consequence.worldTimeLabel,
+      consequence,
+    }],
+    consequences: [consequence],
+    availableIntents: Array.from({ length: 6 }, (_value, intentIndex) => ({
+      handle: `choice_r216_${intentIndex}`,
+      label: intentIndex === 3 ? "Talk to Mara Venn" : `Observe option ${intentIndex}`,
+      kind: intentIndex === 3 ? "contact" as const : "observe" as const,
+      targets: sharedTarget,
+    })),
+  };
+}
+
 function r161SourceReferenceText(): string {
   return "Vedris Kast doesn't turn from the guard post. His voice stays low, meant for Dren, not you. The post remains still.";
 }
@@ -2958,6 +3000,10 @@ END_RECOVERY_DIAGNOSTIC`);
   });
 
   it("uses explicit tool transport without changing the narration contract", async () => {
+    const toolProposal = {
+      ...proposalFixture(),
+      beats: proposalFixture().beats.slice(0, 2),
+    };
     const toolTrace = trace("tool_mode");
     toolTrace.requestedMode = "tool";
     toolTrace.primaryStrategy = "tool_mode";
@@ -2972,7 +3018,7 @@ END_RECOVERY_DIAGNOSTIC`);
       options: Parameters<typeof safeGenerateObject>[0],
     ) => {
       expect(options.mode).toBe("tool");
-      return { object: proposalFixture(), trace: toolTrace };
+      return { object: toolProposal, trace: toolTrace };
     });
     const narrator = createCampaignPlayNarrator({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
@@ -2989,6 +3035,294 @@ END_RECOVERY_DIAGNOSTIC`);
     })).resolves.toMatchObject({
       modelEvidence: { actualStrategy: "tool_mode" },
     });
+    expect(generateObject).toHaveBeenCalledOnce();
+  });
+
+  it("uses an array-shaped tool schema and revalidates the r216 packet locally", async () => {
+    const packet = r216RequiredReplyToolPacket();
+    const validProposal = {
+      beats: [
+        {
+          purpose: "orientation" as const,
+          observationIndexes: [],
+          text: "Cold rain settles over the Salt Harbor steps.",
+        },
+        {
+          purpose: "consequence" as const,
+          observationIndexes: [0],
+          text: "Mara Venn offers an uncertain share and waits for your answer.",
+        },
+      ],
+      actionSelections: [3, 0, 1, 2].map((intentIndex) => ({
+        intentIndex,
+        detail: intentIndex === 3
+          ? "accept the uncertain share"
+          : `harbor option ${intentIndex}`,
+      })),
+    };
+    const validTransport = {
+      beats: validProposal.beats,
+      requiredReplyDetail: validProposal.actionSelections[0]!.detail,
+      actionSelections: validProposal.actionSelections.slice(1),
+    };
+    const toolTrace = trace("tool_mode");
+    toolTrace.requestedMode = "tool";
+    toolTrace.primaryStrategy = "tool_mode";
+    toolTrace.capability = {
+      requestedMode: "tool",
+      primaryStrategy: "tool_mode",
+      fallbackStrategy: "text_fallback",
+      actualMode: "tool_mode",
+      reason: "test tool capability",
+    };
+    let generatedProposal: unknown = validTransport;
+    const generateObject = vi.fn(async (
+      _options: Parameters<typeof safeGenerateObject>[0],
+    ) => ({ object: generatedProposal, trace: toolTrace }));
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    const request = (narrationId: string) => ({
+      narrationId,
+      packetBytes: canonicalizeCampaignPlayProjection(packet),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+      structuredOutputMode: "tool" as const,
+    });
+
+    await expect(narrator.narrate(request("narration-r216-tool-valid"))).resolves.toBeDefined();
+    const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    const providerSchema = z.toJSONSchema(options.schema) as unknown as {
+      properties: {
+        requiredReplyDetail: unknown;
+        actionSelections: {
+          items?: unknown;
+          minItems?: number;
+          maxItems?: number;
+        };
+      };
+    };
+    const providerSchemaText = JSON.stringify(providerSchema);
+    expect(providerSchemaText).not.toContain("prefixItems");
+    expect(providerSchemaText).not.toContain("\"const\"");
+    expect(providerSchemaText).not.toContain("oneOf");
+    expect(providerSchema.properties.actionSelections.items).toBeDefined();
+    expect(providerSchema.properties.requiredReplyDetail).toBeDefined();
+    expect(providerSchema.properties.actionSelections.minItems).toBe(3);
+    expect(providerSchema.properties.actionSelections.maxItems).toBe(3);
+    expect(options.schema.safeParse(validTransport).success).toBe(true);
+    expect(options.schema.safeParse(validProposal).success).toBe(false);
+    const initialPrompt = String(options.prompt);
+    expect(initialPrompt).toContain(
+      "REQUIRED_REPLY_INTENT_INDEX=application-owned (absent from model output)",
+    );
+    expect(initialPrompt).toContain(
+      "requiredReplyDetail supplies only its wording",
+    );
+    expect(initialPrompt).toContain(
+      "actionSelections contains only the remaining choices and must not contain that required index",
+    );
+    expect(initialPrompt).not.toContain("Put that exact index only in actionSelections[0]");
+
+    const recoveryFeedback: CampaignPlayNarratorRecoveryFeedback = {
+      diagnostic: "narrator_generation_schema_mismatch",
+      failedChecks: [{ check: "generation_schema_invalid" }],
+    };
+    await expect(narrator.narrate({
+      ...request("narration-r216-tool-recovery"),
+      recoveryFeedback,
+    })).resolves.toBeDefined();
+    const recoveryPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    expect(recoveryPrompt).toContain(
+      "REQUIRED_REPLY_INTENT_INDEX=application-owned (absent from model output)",
+    );
+    expect(recoveryPrompt).toContain(
+      "The required reply index is application-owned and was absent from the prior output.",
+    );
+    expect(recoveryPrompt).toContain(
+      "rebuild the remaining actionSelections without that index",
+    );
+    expect(recoveryPrompt).toContain(
+      "RECOVERY_DIAGNOSTIC",
+    );
+
+    const oneIntentPacket: CampaignPlayNarratorPacket = {
+      ...packet,
+      availableIntents: [packet.availableIntents[3]!],
+    };
+    generatedProposal = {
+      beats: validTransport.beats,
+      requiredReplyDetail: "accept the uncertain share",
+      actionSelections: [],
+    };
+    await expect(narrator.narrate({
+      ...request("narration-r216-tool-one-required-reply"),
+      packetBytes: canonicalizeCampaignPlayProjection(oneIntentPacket),
+    })).resolves.toBeDefined();
+    const oneIntentOptions = generateObject.mock.calls[2]![0] as Parameters<typeof safeGenerateObject>[0];
+    const oneIntentProviderSchema = z.toJSONSchema(oneIntentOptions.schema) as unknown as {
+      properties: { actionSelections: { minItems?: number; maxItems?: number } };
+    };
+    expect(oneIntentProviderSchema.properties.actionSelections.minItems).toBe(0);
+    expect(oneIntentProviderSchema.properties.actionSelections.maxItems).toBe(0);
+    expect(oneIntentOptions.schema.safeParse(generatedProposal).success).toBe(true);
+
+    const invalidCases: Array<{
+      name: string;
+      transport: unknown;
+      diagnostic: "narrator_generation_schema_mismatch" | "narrator_packet_validation_mismatch";
+    }> = [
+      {
+        name: "wrong-required-reply-position",
+        transport: {
+          ...validTransport,
+          actionSelections: [0, 3, 1].map((intentIndex) => ({
+            intentIndex,
+            detail: `harbor option ${intentIndex}`,
+          })),
+        },
+        diagnostic: "narrator_generation_schema_mismatch",
+      },
+      {
+        name: "duplicate-trailing-reply",
+        transport: {
+          ...validTransport,
+          actionSelections: [3, 0, 1].map((intentIndex) => ({
+            intentIndex,
+            detail: intentIndex === 3 ? "accept the uncertain share" : `harbor option ${intentIndex}`,
+          })),
+        },
+        diagnostic: "narrator_generation_schema_mismatch",
+      },
+      {
+        name: "excess-opening-beats",
+        transport: {
+          ...validTransport,
+          beats: [...validTransport.beats, validTransport.beats[0]],
+        },
+        diagnostic: "narrator_generation_schema_mismatch",
+      },
+      {
+        name: "bad-observation-coverage",
+        transport: {
+          ...validTransport,
+          beats: validTransport.beats.map((beat) => ({
+            ...beat,
+            observationIndexes: [],
+          })),
+        },
+        diagnostic: "narrator_packet_validation_mismatch",
+      },
+      {
+        name: "invalid-detail-nullability",
+        transport: {
+          ...validTransport,
+          requiredReplyDetail: null,
+        },
+        diagnostic: "narrator_generation_schema_mismatch",
+      },
+      {
+        name: "missing-required-reply-detail",
+        transport: {
+          ...validTransport,
+          requiredReplyDetail: undefined,
+        },
+        diagnostic: "narrator_generation_schema_mismatch",
+      },
+      {
+        name: "blank-required-reply-detail",
+        transport: {
+          ...validTransport,
+          requiredReplyDetail: "",
+        },
+        diagnostic: "narrator_generation_schema_mismatch",
+      },
+      {
+        name: "whitespace-required-reply-detail",
+        transport: {
+          ...validTransport,
+          requiredReplyDetail: "   ",
+        },
+        diagnostic: "narrator_generation_schema_mismatch",
+      },
+      {
+        name: "multiline-required-reply-detail",
+        transport: {
+          ...validTransport,
+          requiredReplyDetail: "accept the share\nthen leave",
+        },
+        diagnostic: "narrator_generation_schema_mismatch",
+      },
+    ];
+
+    for (const invalidCase of invalidCases) {
+      generatedProposal = invalidCase.transport;
+      await expect(narrator.narrate(request(`narration-r216-tool-${invalidCase.name}`)))
+        .rejects.toMatchObject({
+          code: invalidCase.diagnostic === "narrator_generation_schema_mismatch"
+            ? "model_contract_failed"
+            : "narration_invalid",
+          modelEvidence: { errorCode: "narration_invalid" },
+          recoveryFeedback: { diagnostic: invalidCase.diagnostic },
+        });
+    }
+    expect(generateObject).toHaveBeenCalledTimes(3 + invalidCases.length);
+  });
+
+  it("preserves the current tool shape when no required reply exists", async () => {
+    const toolProposal = {
+      ...proposalFixture(),
+      beats: proposalFixture().beats.slice(0, 2),
+    };
+    const toolTrace = trace("tool_mode");
+    toolTrace.requestedMode = "tool";
+    toolTrace.primaryStrategy = "tool_mode";
+    toolTrace.capability = {
+      requestedMode: "tool",
+      primaryStrategy: "tool_mode",
+      fallbackStrategy: "text_fallback",
+      actualMode: "tool_mode",
+      reason: "test tool capability",
+    };
+    const generateObject = vi.fn(async (
+      _options: Parameters<typeof safeGenerateObject>[0],
+    ) => ({ object: toolProposal, trace: toolTrace }));
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    await expect(narrator.narrate({
+      narrationId: "narration-tool-no-required-reply",
+      packetBytes: canonicalizeCampaignPlayProjection(packetFixture()),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+      structuredOutputMode: "tool",
+    })).resolves.toBeDefined();
+
+    const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    const providerSchema = z.toJSONSchema(options.schema) as unknown as {
+      properties: {
+        actionSelections: {
+          minItems?: number;
+          maxItems?: number;
+          items?: unknown;
+        };
+        requiredReplyDetail?: unknown;
+      };
+    };
+    expect(providerSchema.properties.requiredReplyDetail).toBeUndefined();
+    expect(providerSchema.properties.actionSelections.minItems).toBe(1);
+    expect(providerSchema.properties.actionSelections.maxItems).toBe(1);
+    expect(providerSchema.properties.actionSelections.items).toBeDefined();
+    expect(options.schema.safeParse(toolProposal).success).toBe(true);
+    expect(options.schema.safeParse({
+      ...toolProposal,
+      requiredReplyDetail: "should not be present",
+    }).success).toBe(false);
     expect(generateObject).toHaveBeenCalledOnce();
   });
 
