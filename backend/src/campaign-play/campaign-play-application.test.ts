@@ -20,6 +20,7 @@ import { openCampaignPlayDatabase, type CampaignPlayDatabaseHandle } from "./cam
 import {
   CAMPAIGN_PLAY_MINIMUM_OUTPUT_TOKENS,
   CampaignPlayApplicationError,
+  accumulateCampaignPlayNarratorRecoveryFeedback,
   campaignPlayActorReplannerOperationDeadlineMs,
   campaignPlayGameMasterOperationDeadlineMs,
   campaignPlayJudgeOperationDeadlineMs,
@@ -961,6 +962,48 @@ function openingRequest(
 }
 
 describe("CampaignPlayApplication", () => {
+  it("keeps prior safe Narrator checks in later automatic recovery attempts", () => {
+    const actorMismatch: CampaignPlayNarratorRecoveryFeedback = {
+      diagnostic: "narrator_packet_validation_mismatch",
+      failedChecks: [{
+        check: "visible_actor_observation_mismatch",
+        beatIndex: 0,
+        fieldPath: "beats[0].text",
+        observationIndexes: [0],
+        matchedActor: {
+          canonicalId: "actor:renzo",
+          canonicalName: "Renzo Malfatti",
+          matchedAlias: "Renzo",
+        },
+        allowedActors: [],
+        sourceObservationPerformers: [{
+          observationIndex: 0,
+          canonicalId: null,
+          canonicalName: null,
+        }],
+      }],
+    };
+    const duplicateIntent: CampaignPlayNarratorRecoveryFeedback = {
+      diagnostic: "narrator_packet_validation_mismatch",
+      failedChecks: [{ check: "duplicate_selected_intent_indexes", indexes: [0] }],
+    };
+
+    expect(accumulateCampaignPlayNarratorRecoveryFeedback(
+      actorMismatch,
+      duplicateIntent,
+    )).toEqual({
+      diagnostic: "narrator_packet_validation_mismatch",
+      failedChecks: [
+        actorMismatch.failedChecks[0],
+        duplicateIntent.failedChecks[0],
+      ],
+    });
+    expect(accumulateCampaignPlayNarratorRecoveryFeedback(
+      actorMismatch,
+      actorMismatch,
+    )).toEqual(actorMismatch);
+  });
+
   it("allows only the first two automatic attempts for retryable external stages", () => {
     const retryable = [
       {

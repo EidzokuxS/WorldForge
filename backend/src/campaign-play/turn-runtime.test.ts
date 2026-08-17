@@ -40,6 +40,7 @@ import {
   CampaignPlayNarratorError,
   createCampaignPlayNarrator,
   type CampaignPlayNarratorModelEvidence,
+  type CampaignPlayNarratorRecoveryFeedback,
 } from "./narrator.js";
 import { createCampaignPlayOpeningRuntime } from "./opening-runtime.js";
 import {
@@ -3744,6 +3745,80 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(result.handle.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     },
   );
+
+  it("carries every prior safe Narrator check into the third automatic attempt", async () => {
+    const successful = playerNarratorFixture();
+    const actorMismatch: CampaignPlayNarratorRecoveryFeedback = {
+      diagnostic: "narrator_packet_validation_mismatch",
+      failedChecks: [{
+        check: "visible_actor_observation_mismatch",
+        beatIndex: 0,
+        fieldPath: "beats[0].text",
+        observationIndexes: [0],
+        matchedActor: {
+          canonicalId: "actor_vedris_kast",
+          canonicalName: "Vedris Kast",
+          matchedAlias: "Vedris",
+        },
+        allowedActors: [],
+        sourceObservationPerformers: [{
+          observationIndex: 0,
+          canonicalId: null,
+          canonicalName: null,
+        }],
+      }],
+    };
+    const duplicateIntent: CampaignPlayNarratorRecoveryFeedback = {
+      diagnostic: "narrator_packet_validation_mismatch",
+      failedChecks: [{ check: "duplicate_selected_intent_indexes", indexes: [0] }],
+    };
+    const requests: Parameters<typeof successful.narrate>[0][] = [];
+    const narrator: TestNarrator = {
+      compile: successful.compile,
+      narrate: vi.fn(async (request) => {
+        requests.push(request);
+        if (requests.length === 1) {
+          throw new CampaignPlayNarratorError("narration_invalid", null, {
+            recoveryFeedback: actorMismatch,
+          });
+        }
+        if (requests.length === 2) {
+          throw new CampaignPlayNarratorError("narration_invalid", null, {
+            recoveryFeedback: duplicateIntent,
+          });
+        }
+        return successful.narrate(request);
+      }),
+    };
+
+    const result = await runPendingNarrationThroughApplication(narrator);
+
+    expect(requests.map((request) => request.recoveryFeedback)).toEqual([
+      undefined,
+      actorMismatch,
+      {
+        diagnostic: "narrator_packet_validation_mismatch",
+        failedChecks: [
+          actorMismatch.failedChecks[0],
+          duplicateIntent.failedChecks[0],
+        ],
+      },
+    ]);
+    expect(result.handle.sqlite.prepare(`SELECT attempt, status, error_code AS errorCode
+      FROM campaign_play_narration_attempts WHERE campaign_id = ? ORDER BY attempt`).all(
+        CAMPAIGN_ID,
+      )).toEqual([
+        { attempt: 1, status: "failed", errorCode: "narration_invalid" },
+        { attempt: 2, status: "failed", errorCode: "narration_invalid" },
+        { attempt: 3, status: "accepted", errorCode: null },
+      ]);
+    expect(result.handle.sqlite.prepare(`SELECT status, current_attempt AS currentAttempt
+      FROM campaign_play_narration_operations WHERE campaign_id = ? AND turn_id = ?`).get(
+        CAMPAIGN_ID,
+        result.turnId,
+      )).toEqual({ status: "complete", currentAttempt: 3 });
+    expect(playerActionMechanicsSnapshot(result.handle, result.turnId)).toEqual(result.mechanics);
+  });
 
   it.each([
     {

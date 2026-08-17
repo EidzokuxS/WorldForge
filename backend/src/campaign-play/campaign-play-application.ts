@@ -128,6 +128,27 @@ export class CampaignPlayApplicationError extends Error {
 
 const CAMPAIGN_PLAY_MAX_AUTOMATIC_STAGE_ATTEMPTS = 3;
 
+export function accumulateCampaignPlayNarratorRecoveryFeedback(
+  accumulated: CampaignPlayNarratorRecoveryFeedback | undefined,
+  next: CampaignPlayNarratorRecoveryFeedback | undefined,
+): CampaignPlayNarratorRecoveryFeedback | undefined {
+  if (next === undefined) return accumulated;
+  if (accumulated === undefined) return next;
+  if (
+    accumulated.diagnostic !== "narrator_packet_validation_mismatch"
+    || next.diagnostic !== "narrator_packet_validation_mismatch"
+  ) return next;
+
+  const failedChecks = new Map<string, typeof next.failedChecks[number]>();
+  for (const check of [...accumulated.failedChecks, ...next.failedChecks]) {
+    failedChecks.set(canonicalizeCampaignPlayProjection(check), check);
+  }
+  return {
+    diagnostic: "narrator_packet_validation_mismatch",
+    failedChecks: [...failedChecks.values()],
+  };
+}
+
 export function campaignPlayMayAutomaticallyResumeExternalStage(input: {
   turnKind: LoadedCampaignPlayTurn["turnKind"];
   interruptedStage: CampaignPlayClaimableTurnStage | null;
@@ -856,6 +877,7 @@ export function createCampaignPlayApplication(
       if (!turn || turn.turnKind !== "player_action" || turn.stage !== "completed") return;
       const runtime = runtimeFactory.createTurn(handle, turn.modelSelection);
       let operation = await runtime.runNarration(turnId, token ?? undefined);
+      let accumulatedRecoveryFeedback: CampaignPlayNarratorRecoveryFeedback | undefined;
       if (token !== null) return;
       while (
         operation !== null && operation.status === "failed" &&
@@ -890,10 +912,14 @@ export function createCampaignPlayApplication(
           packetHash: operation.packetHash,
           receiptIds: operation.receiptIds,
         }, "automatic");
+        accumulatedRecoveryFeedback = accumulateCampaignPlayNarratorRecoveryFeedback(
+          accumulatedRecoveryFeedback,
+          operation.recoveryFeedback,
+        );
         operation = await runtime.runNarration(
           turnId,
           recoveryToken,
-          operation.recoveryFeedback,
+          accumulatedRecoveryFeedback,
           "auto",
         );
       }
