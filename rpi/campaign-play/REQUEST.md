@@ -52,25 +52,43 @@ Collectives remain actors. The product adds no separate faction subsystem.
 
 ## Evidence requirement
 
-The plan must distinguish build events from gameplay turns. World-build acceptance proves that a world exists. Gameplay evidence begins at opening turn zero.
+Evidence must distinguish build events from gameplay turns. World-build acceptance proves that a world exists. Gameplay evidence begins at opening turn zero.
+
+Campaign Play development follows this ordered validation ladder. A later level cannot be used to discover defects that a cheaper earlier level can expose:
+
+1. deterministic owner, schema, transaction, and idempotency checks;
+2. provider/model qualification for every configuration presented as supported, including its exact structured-output transport and repair behavior;
+3. isolated Judge, Game Master, Actor Replanner, and Narrator success, rejection, timeout, and retry/state-preservation checks;
+4. adjacent-stage integration checks with one exact admitted input and durable artifact handoff;
+5. short rendered journeys covering opening, freeform and suggested actions, movement, contact, waiting, autonomous consequences, recovery, save, and reload;
+6. a twenty-to-thirty-action diagnostic journey whose accepted defects receive focused regressions and atomic commits;
+7. two fresh sixty-action campaigns through the normal UI as the final 1.0 playtest.
+
+Long acceptance campaigns begin only when levels 1-6 pass and no known blocker remains. When a long campaign exposes a defect, preserve its evidence, reproduce the smallest responsible boundary, repair and commit that owner, rerun the affected lower levels, and only then begin a fresh final campaign. Do not repeatedly use a new sixty-action campaign as the first check of each repair.
 
 Promotion requires:
 
 - deterministic contract and transaction tests for every owner boundary;
 - one complete opening and first custom action through the normal UI;
-- a twenty-turn causal proof with restart and hidden-information probes;
-- a thirty-turn live diagnostic whose accepted defects become regressions;
-- two fresh uninterrupted sixty-turn campaigns played through the normal UI;
-- one sixty-turn clone/provenance campaign with explicit lineage and independent live state;
-- one three-hundred-turn soak with scheduled restart and projection checks;
-- an explicit six-hundred-turn gate before claiming sustained longplay.
+- provider/model qualification for every configuration presented as supported;
+- focused proof that retryable transport, timeout, and repairable contract failures preserve the exact turn, context, accepted prior-stage artifacts, world/runtime versions, and idempotency identity;
+- a twenty-to-thirty-action causal diagnostic with restart and hidden-information probes;
+- two fresh sixty-turn campaigns played through the normal UI. One begins from a newly accepted world and one from an explicit provenance clone, so the two campaigns jointly cover both creation paths.
 
-Live promotion lanes use one declared provider and model configuration. They contain no manual database edits, provider swaps, silent retries, hidden model fallback, action resubmission, checkpoint restore, or player-facing failed turn.
+Each live campaign uses its declared provider/model configuration for the whole admitted turn. Different campaigns and users may use different qualified configurations. Provider adapters own transport differences; the internal Campaign Play domain contract remains stable.
+
+A retry policy may make up to three total attempts for failures classified as transient or safely repairable. Every attempt is recorded. Automatic retry keeps the same admitted action, frozen context, selected provider/model, base versions, idempotency key, and accepted earlier-stage artifacts. It commits no duplicate mutation and publishes exactly one accepted scene. After exhaustion, the game preserves the pending action and durable state, explains the recoverable failure, and lets the player continue that exact turn without database repair or action resubmission.
+
+Live promotion lanes contain no manual database edits, hidden provider/model substitution, synthetic narration or continuity scene, duplicate action submission, checkpoint rollback, invented mechanical result, or unreported recovery. A successful bounded retry is allowed and does not invalidate the campaign when its identity and state-preservation contract passes.
+
+The two sixty-action campaigns gate WorldForge 1.0. A three-hundred-action soak is post-release reliability work and does not block the 1.0 release. There is no six-hundred-action release gate.
 
 ## Hard stop conditions
 
-Promotion stops when any lane contains lost or duplicate input, a hidden-fact leak, a mechanical mutation without a Rulebook/bootstrap receipt, a runtime mutation without a fenced revision and campaign runtime event, a turn-owned runtime mutation without its sanitized turn event, narration that contradicts receipts, player-action seizure, stale-version execution, partial untracked state, a missing terminal turn, reload divergence, or an active call into the displaced gameplay path.
+Promotion stops when any lane contains lost or duplicate input, a hidden-fact leak, a mechanical mutation without a Rulebook/bootstrap receipt, a runtime mutation without a fenced revision and campaign runtime event, a turn-owned runtime mutation without its sanitized turn event, narration that contradicts receipts, unrecoverable player-action seizure, stale-version execution, partial untracked state, a missing terminal turn after recovery is exhausted, reload divergence, or an active call into the displaced gameplay path.
 
-## Planning output
+## Development output
 
-Produce an execution-ready Krypton package with explicit truth owners, contracts, migration and cutover, exact file ownership, small tasks, verification commands, target-perspective evidence, independent PRE review, and no standalone smoke suite.
+Ship WorldForge 1.0. Work proceeds in small owner-bounded repairs with explicit truth ownership, proportional checks, a representative rendered journey, and one atomic commit per accepted repair. Commit readiness depends on the repair's own evidence, not on a future endurance campaign. Progress is measured by remaining release criteria and player-visible behavior, not task-note count, run count, test count, or accumulated evidence.
+
+The release gate and player promise in this document cannot be weakened, renamed, supplemented, or replaced by a task-local contract without explicit user approval.

@@ -1,67 +1,43 @@
 # WorldForge Active Tasks
 
-## Current Focus: Campaign Play Planning (2026-07-10)
+## Current Focus: Campaign Play 1.0 Release Convergence (2026-08-17)
 
-Goal:
-- Produce an execution-ready Krypton plan that connects an accepted Campaign World to character setup, grounded opening, multi-turn play, autonomous actor motion, visibility, narration, persistence, and real playtests.
-- Restore the original living-world outcome instead of treating world generation as the end of playability.
+Canonical product and release contract: `rpi/campaign-play/REQUEST.md`.
 
-Planning board:
-- [x] Lock the original player promise and read the active planning, gameplay, playtest, and agent-harness guidance.
-- [x] Map the current `/game`, `/api/chat/*`, character, Campaign World, and SQLite ownership seams.
-- [x] Define the smallest genuine loop and the path from 20-turn proof to 60-turn acceptance and long-horizon soak.
-- [x] Define deterministic, live diagnostic, pristine acceptance, and long-horizon evidence lanes.
-- [x] Write `rpi/campaign-play/` research and the Krypton `PLAN.md` / `GOAL.md` package.
-- [x] Pass Droid GLM and independent Krypton PRE review before execution.
+Outcome:
+- Ship a finished WorldForge 1.0 whose Campaign Play loop survives ordinary provider faults through bounded state-preserving retry, never manufactures fallback truth, and completes two real sixty-action campaigns through the normal UI.
+- Support multiple qualified provider/model configurations through adapters without changing the internal game contract.
 
-Planning review:
-- The accepted Campaign World and mounted `/game` use different actor, player, clock, turn, and persistence authorities. The plan creates a mechanics-owned `campaign-play` runtime over Campaign World entities and removes the old route/API from the active path.
-- Accepted Review becomes immutable provenance. Mechanical world truth and operational runtime truth use separate version/hash contracts.
-- Opening is turn zero under the same idempotency, worker fencing, bootstrap/Rulebook, visibility, narration, and recovery boundaries as player actions.
-- The first playable gate proves one custom action, one peripheral wait/leave action, one sourced non-local consequence, and reload before longer runs.
-- Promotion counts completed player actions only: 20-action causal proof, 30-action diagnosis, one reusable-template lane, one new world saved as a reusable template, one zero-turn clone/provenance 60-action human-chosen campaign, and a 300-action soak. A separate 600-action run gates sustained-longplay wording.
-- Final PRE: Sol xhigh architecture aligned in round 4; Terra high gameplay aligned in round 2; Terra medium evidence aligned in round 3. Details: `rpi/campaign-play/plan/pre-review.md`.
+Current release board, in order:
+- [ ] R1 — Stabilize the inherited Task 231 worktree. Inventory the existing changes by owner, remove no accepted work, and split them into coherent atomic commits after their already-recorded focused checks are reconciled. Do not start another endurance campaign while this board item is open.
+  - Landed accepted bundles: `f51e9273` strict Z.AI character generation, `21f33d80` model-only recovery boundaries, `eeb2f0f0` public-character projection, `fadd9716` Opening Planner tool transport, and `a8acd337` coherent rendered-action binding.
+  - Preserved unresolved Game Master bundle: qualify the current provider-safe proposal and Reviewer transports against `zai-coding-plan/glm-5.3`, including the observed missing `effects[].kind` case and one route/obligation/possession-transform review case; then rerun its focused suite and commit it alone.
+  - Preserved unresolved Judge bundle: qualify the current suggested-action tool transport and local decoder against `zai-coding-plan/glm-5.3` for observe/contact/wait/move/attempt plus freeform and one sanitized recovery response; then rerun its focused suite and commit it alone.
+  - Preserved unresolved Narrator bundle: qualify the current required-reply tool transport and local decoder against `zai-coding-plan/glm-5.3` for one packet with a required reply and one without; then rerun its focused suite and commit it alone.
+  - R2 entry condition: the three preserved bundles above have each passed its named isolated qualification and focused checks, landed as separate atomic commits, and no ungrouped product diff remains. No endurance campaign is part of this condition.
+- [ ] R2 — Lock retry and recovery semantics. Retryable transport, timeout, and safely repairable schema failures receive up to three total attempts on the same admitted turn and selected provider/model; prove no lost context, duplicate mutation, repeated charge-bearing game action, stale write, or second scene. Exhaustion preserves an honest recoverable turn.
+- [ ] R3 — Qualify supported provider/model transports. Exercise the exact Judge, Game Master, Actor Replanner, Opening Narrator, and turn Narrator contracts outside an endurance campaign; record unsupported schema constructs and adapter behavior. A configuration that fails qualification is not exposed as supported.
+- [ ] R4 — Prove adjacent stage handoffs and reviewed subcalls. Cover Judge -> Game Master -> Rulebook, Actor proposal/review -> settlement, and settled packet -> Narrator, including one corrected schema response and one timeout recovery.
+- [ ] R5 — Run short rendered product journeys. Cover new-world and provenance-clone setup, opening, freeform and suggested actions, movement, contact, waiting, autonomous consequence, save/reload, and an exhausted-recovery UI without hidden fallback.
+- [ ] R6 — Run one twenty-to-thirty-action diagnostic journey. Every accepted defect gets a focused regression and its own atomic commit; repeat R2-R5 as affected. Do not promote the diagnostic itself into a sixty-action acceptance attempt.
+- [ ] R7 — Run two fresh sixty-action UI campaigns as the final 1.0 playtest: one new accepted world and one provenance clone. Bounded successful retries are allowed and audited; lost state, duplicate input/effect, synthetic continuity, hidden provider/model substitution, or unrecoverable turn failure rejects the lane.
+- [ ] R8 — Perform the bounded 1.0 release review, documentation, packaging, and handoff. Release when R1-R7 pass.
+- [ ] Post-release — Run a three-hundred-action reliability soak. This does not block WorldForge 1.0. There is no six-hundred-action gate.
 
-## Current Execution: Campaign Play (2026-07-10)
+Execution rules:
+- Only the first unchecked release-board item authorizes primary work. Historical task entries below are evidence and design history, not an active backlog or authority to launch another lane.
+- A long playtest may begin only from R7 after R1-R6 pass. A defect found there returns work to the smallest affected earlier item.
+- Commit each coherent accepted repair after its focused validation and representative journey. Never accumulate unrelated repairs while waiting for endurance acceptance.
+- No task-local note may weaken or add to `rpi/campaign-play/REQUEST.md` without explicit user approval.
 
-Canonical plan: `docs/goals/campaign-play/PLAN.md`.
+## Historical Campaign Play planning and execution record
 
-Execution board:
-- [x] Task 0: execution preflight and blast radius.
-- [x] Task 1A: immutable accepted-world snapshot.
-- [x] Task 1B: player actor domain and handoff constraints.
-- [x] Task 2A: shared Campaign Play contract.
-- [x] Task 2B1: core play and fenced-turn storage.
-- [x] Task 2B2: Rulebook and mechanical-state storage.
-- [x] Task 2B3: actor scheduling and visibility storage.
-- [x] Task 2B4: campaign store manifest and zero-turn provenance clone.
-- [x] Task 3A: mechanical/runtime projection and state repository.
-- [x] Task 3B: turn admission, events, artifacts, and worker fencing.
-- [x] Task 4: campaign-owned character intake.
-- [x] Task 5: pure opening planner and typed actor plans.
-- [x] Task 6A: Rulebook preflight.
-- [x] Task 6B: atomic Rulebook execution.
-- [x] Task 6C: receipt-bearing player bootstrap.
-- [x] Task 7: Judge, uncertainty, and GM planner.
-- [x] Task 8A: deterministic actor due set and scoped frames.
-- [x] Task 8B: sequential actor proposals and bounded replanning.
-- [x] Task 9: visibility, actor knowledge, and public projection.
-- [x] Task 10A: fenced turn worker and recovery service.
-- [x] Task 10B: opening turn-zero runtime.
-- [x] Task 10C: player action runtime and terminal narration.
-- [x] Task 11: Campaign Play API and resumable delivery.
-- [x] Task 12: UI and copy design gate.
-- [x] Task 13: frontend client and durable page state.
-- [x] Task 14A: scene and narration surface.
-- [x] Task 14B: action, consequence, journal, and recovery surface.
-- [x] Task 15: product handoff and hard cutover.
-- [x] Task 16A: deterministic integration and promotion gate.
-- [x] Task 16B: first playable slice gate.
-- [x] Task 17: real opening, custom action, 20-turn proof, and 30-turn diagnosis.
-- [x] Task 17B: concrete scene topology and exact visibility cutover.
-- [ ] Task 18: one reusable-template, one new-template, and one clone/provenance pristine 60-turn campaign.
-- [ ] Task 19: 300-turn long-horizon soak.
-- [ ] Task 20: documentation, independent audit, and handoff.
+The original Task 0-17B implementation and Task 18 diagnostic history below are retained as evidence. Their old promotion sequence, run names, stop conditions, and unchecked tasks are superseded by the current release board above.
+
+- [x] Task 0-17B: implemented the mechanics-owned Campaign Play path, first playable slice, cutover, deterministic integration, twenty-turn proof, thirty-turn diagnosis, and concrete scene topology.
+- [ ] Historical Task 18: endurance diagnostics and repairs; superseded by R1-R7.
+- [ ] Historical Task 19: 300-turn soak; moved to post-release.
+- [ ] Historical Task 20: documentation/audit/handoff; replaced by R8.
 
 Task 18 active repair — playable starting premise:
 
