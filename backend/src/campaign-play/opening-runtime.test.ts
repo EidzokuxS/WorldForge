@@ -39,6 +39,7 @@ import {
   CampaignPlayNarratorError,
   createCampaignPlayNarrator,
   type CampaignPlayNarratorModelEvidence,
+  type CampaignPlayNarratorRecoveryFeedback,
 } from "./narrator.js";
 import { buildCampaignPlayOpeningOptions } from "./opening-options.js";
 import { deriveCampaignPlayPublicHandle } from "./campaign-play-projection.js";
@@ -818,6 +819,112 @@ describe("Campaign Play opening runtime", () => {
         durationMs: 77,
         status: "interrupted",
       });
+  });
+
+  it("resumes the same Opening Narrator packet with its safe recovery feedback", async () => {
+    const { handle, state } = createPlayableCampaign();
+    const time = fixedClock(1_950);
+    const narratorBase = narratorFixture();
+    const recoveryFeedback: CampaignPlayNarratorRecoveryFeedback = {
+      diagnostic: "narrator_generation_schema_mismatch",
+      failedChecks: [{ check: "generation_schema_invalid" }],
+    };
+    let capturedRecoveryFeedback: CampaignPlayNarratorRecoveryFeedback | undefined;
+    const interruptedRuntime = createCampaignPlayOpeningRuntime({
+      handle,
+      owner: "opening-narrator-recovery-worker",
+      leaseDurationMs: 1_000,
+      heartbeatIntervalMs: 100,
+      clock: time.clock,
+      ...runtimeModels(),
+      openingPlanner: plannerFixture(),
+      narrator: {
+        compile: narratorBase.compile,
+        narrate: vi.fn(async () => {
+          throw new CampaignPlayNarratorError(
+            "model_contract_failed",
+            { ...narratorEvidence, errorCode: "narration_invalid" },
+            { recoveryFeedback },
+          );
+        }),
+      },
+      onNarratorRecoveryFeedback(feedback) {
+        capturedRecoveryFeedback = feedback;
+      },
+    });
+    const admission = interruptedRuntime.admitOpening({
+      submittedAt: 1_950,
+      request: {
+        idempotencyKey: "opening-narrator-safe-recovery",
+        expectedWorldVersion: state.authority.worldVersion,
+        expectedRuntimeRevision: state.authority.runtimeRevision,
+        startingConditions: { mode: "delegate" },
+      },
+    });
+    await runOpeningUntil(
+      interruptedRuntime,
+      time,
+      admission.turnId,
+      (turn) => turn.stage === "interrupted",
+    );
+
+    const interrupted = interruptedRuntime.loadTurn(admission.turnId)!;
+    expect(interrupted).toMatchObject({
+      stage: "interrupted",
+      interruptedStage: "visibility_projected",
+      errorCode: "model_contract_invalid",
+    });
+    expect(capturedRecoveryFeedback).toEqual(recoveryFeedback);
+    const packetBeforeRecovery = (handle.sqlite.prepare(`SELECT packet_json AS packetJson
+      FROM campaign_play_narrations WHERE campaign_id = ? AND turn_id = ?`).get(
+        CAMPAIGN_ID,
+        admission.turnId,
+      ) as { packetJson: string }).packetJson;
+
+    const recoveredNarrate = vi.fn(async (
+      request: Parameters<typeof narratorBase.narrate>[0],
+    ) => narratorBase.narrate(request));
+    const recoveredRuntime = createCampaignPlayOpeningRuntime({
+      handle,
+      owner: "opening-narrator-recovery-worker",
+      leaseDurationMs: 1_000,
+      heartbeatIntervalMs: 100,
+      clock: time.clock,
+      ...runtimeModels(),
+      openingPlanner: plannerFixture(),
+      narrator: {
+        compile: narratorBase.compile,
+        narrate: recoveredNarrate,
+      },
+      narratorRecoveryFeedback: capturedRecoveryFeedback,
+    });
+    time.advance();
+    await recoveredRuntime.resumeInterruptedStage({
+      turnId: admission.turnId,
+      interruptedStage: interrupted.interruptedStage!,
+      observedEpoch: interrupted.workerEpoch,
+    });
+    await runOpeningUntil(
+      recoveredRuntime,
+      time,
+      admission.turnId,
+      (turn) => turn.stage === "completed",
+    );
+
+    expect(recoveredNarrate).toHaveBeenCalledTimes(1);
+    expect(recoveredNarrate.mock.calls[0]?.[0]).toMatchObject({ recoveryFeedback });
+    expect((handle.sqlite.prepare(`SELECT packet_json AS packetJson
+      FROM campaign_play_narrations WHERE campaign_id = ? AND turn_id = ?`).get(
+        CAMPAIGN_ID,
+        admission.turnId,
+      ) as { packetJson: string }).packetJson).toBe(packetBeforeRecovery);
+    expect(handle.sqlite.prepare(`SELECT attempt, status, error_code AS errorCode
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'narrator'
+      ORDER BY attempt`).all(CAMPAIGN_ID, admission.turnId)).toEqual([
+      { attempt: 1, status: "interrupted", errorCode: "model_contract_invalid" },
+      { attempt: 2, status: "accepted", errorCode: null },
+    ]);
   });
 
   it.each(["planner", "narrator"] as const)(

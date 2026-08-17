@@ -90,6 +90,7 @@ import {
 } from "./campaign-play-read-model.js";
 import type { CampaignPlayJudgeRecoveryFeedback } from "./judge.js";
 import type { CampaignPlayGameMasterRecoveryFeedback } from "./game-master.js";
+import type { CampaignPlayNarratorRecoveryFeedback } from "./narrator.js";
 
 const LEASE_DURATION_MS = 150_000;
 const HEARTBEAT_INTERVAL_MS = 10_000;
@@ -149,6 +150,10 @@ export function campaignPlayMayAutomaticallyResumeExternalStage(input: {
         (input.interruptedStage === "admitted" ||
           input.interruptedStage === "visibility_projected"));
   }
+  if (input.turnKind === "opening") {
+    return input.errorCode === "model_contract_invalid"
+      && input.interruptedStage === "visibility_projected";
+  }
   if (input.turnKind !== "player_action") return false;
   if (input.errorCode !== "model_contract_invalid") return false;
   if (input.routeKind === "full_authority") {
@@ -162,6 +167,8 @@ interface CampaignPlayRuntimeFactory {
   createOpening(
     handle: CampaignPlayDatabaseHandle,
     selection?: CampaignPlayTurnModelSelection,
+    narratorRecoveryFeedback?: CampaignPlayNarratorRecoveryFeedback,
+    onNarratorRecoveryFeedback?: (feedback: CampaignPlayNarratorRecoveryFeedback) => void,
   ): CampaignPlayOpeningRuntime;
   createTurn(
     handle: CampaignPlayDatabaseHandle,
@@ -506,6 +513,8 @@ export function createCampaignPlayApplication(
   const createDefaultOpeningRuntime = (
     handle: CampaignPlayDatabaseHandle,
     selection?: CampaignPlayTurnModelSelection,
+    narratorRecoveryFeedback?: CampaignPlayNarratorRecoveryFeedback,
+    onNarratorRecoveryFeedback?: (feedback: CampaignPlayNarratorRecoveryFeedback) => void,
   ): CampaignPlayOpeningRuntime => {
     const settings = dependencies.loadSettings();
     const openingSelection = selection?.turnKind === "opening" ? selection : null;
@@ -546,6 +555,8 @@ export function createCampaignPlayApplication(
         maximumTotalTokens: MAXIMUM_INPUT_TOKENS + narratorMaximumOutputTokens,
         maximumCostMicros: MAXIMUM_COST_MICROS,
       },
+      narratorRecoveryFeedback,
+      onNarratorRecoveryFeedback,
     });
   };
 
@@ -699,8 +710,15 @@ export function createCampaignPlayApplication(
     onJudgeRecoveryFeedback?: (feedback: CampaignPlayJudgeRecoveryFeedback) => void,
     gameMasterRecoveryFeedback?: CampaignPlayGameMasterRecoveryFeedback,
     onGameMasterRecoveryFeedback?: (feedback: CampaignPlayGameMasterRecoveryFeedback) => void,
+    narratorRecoveryFeedback?: CampaignPlayNarratorRecoveryFeedback,
+    onNarratorRecoveryFeedback?: (feedback: CampaignPlayNarratorRecoveryFeedback) => void,
   ): CampaignPlayOpeningRuntime | CampaignPlayTurnRuntime => turn.turnKind === "opening"
-    ? runtimeFactory.createOpening(handle, turn.modelSelection)
+    ? runtimeFactory.createOpening(
+        handle,
+        turn.modelSelection,
+        narratorRecoveryFeedback,
+        onNarratorRecoveryFeedback,
+      )
     : runtimeFactory.createTurn(
         handle,
         turn.modelSelection,
@@ -750,6 +768,7 @@ export function createCampaignPlayApplication(
     const automaticRecoveryEnabled = resume === null;
     let pendingJudgeRecoveryFeedback: CampaignPlayJudgeRecoveryFeedback | undefined;
     let pendingGameMasterRecoveryFeedback: CampaignPlayGameMasterRecoveryFeedback | undefined;
+    let pendingNarratorRecoveryFeedback: CampaignPlayNarratorRecoveryFeedback | undefined;
     while (true) {
       const handle = dependencies.openDatabase(campaignId);
       try {
@@ -759,6 +778,7 @@ export function createCampaignPlayApplication(
         if (before.stage === "interrupted" && pendingResume === null) return;
         let recoveredJudgeFeedback: CampaignPlayJudgeRecoveryFeedback | undefined;
         let recoveredGameMasterFeedback: CampaignPlayGameMasterRecoveryFeedback | undefined;
+        let recoveredNarratorFeedback: CampaignPlayNarratorRecoveryFeedback | undefined;
         const runtime = runtimeForTurn(
           handle,
           before,
@@ -766,6 +786,8 @@ export function createCampaignPlayApplication(
           (feedback) => { recoveredJudgeFeedback = feedback; },
           pendingGameMasterRecoveryFeedback,
           (feedback) => { recoveredGameMasterFeedback = feedback; },
+          pendingNarratorRecoveryFeedback,
+          (feedback) => { recoveredNarratorFeedback = feedback; },
         );
         const result = pendingResume
           ? await runtime.resumeInterruptedStage({
@@ -777,8 +799,10 @@ export function createCampaignPlayApplication(
         pendingResume = null;
         const nextJudgeRecoveryFeedback = recoveredJudgeFeedback;
         const nextGameMasterRecoveryFeedback = recoveredGameMasterFeedback;
+        const nextNarratorRecoveryFeedback = recoveredNarratorFeedback;
         pendingJudgeRecoveryFeedback = undefined;
         pendingGameMasterRecoveryFeedback = undefined;
+        pendingNarratorRecoveryFeedback = undefined;
         if (result.recovery.kind === "explicit_resume_required" &&
           campaignPlayMayAutomaticallyResumeExternalStage({
             turnKind: before.turnKind,
@@ -796,6 +820,7 @@ export function createCampaignPlayApplication(
           };
           pendingJudgeRecoveryFeedback = nextJudgeRecoveryFeedback;
           pendingGameMasterRecoveryFeedback = nextGameMasterRecoveryFeedback;
+          pendingNarratorRecoveryFeedback = nextNarratorRecoveryFeedback;
           continue;
         }
         if (result.recovery.kind === "completed" && result.turn.turnKind === "player_action") {

@@ -38,6 +38,7 @@ import {
 import { hashCampaignPlayProjection } from "./campaign-play-projection.js";
 import { createCampaignPlayStateRepository } from "./campaign-play-state-repository.js";
 import type { CampaignPlayGameMasterRecoveryFeedback } from "./game-master.js";
+import type { CampaignPlayNarratorRecoveryFeedback } from "./narrator.js";
 import type { CampaignPlayTurnRuntime } from "./turn-runtime.js";
 import type { CampaignPlayOpeningRuntime } from "./opening-runtime.js";
 
@@ -981,6 +982,12 @@ describe("CampaignPlayApplication", () => {
         errorCode: "stage_timeout",
       },
       {
+        turnKind: "opening" as const,
+        interruptedStage: "visibility_projected" as const,
+        routeKind: undefined,
+        errorCode: "model_contract_invalid",
+      },
+      {
         turnKind: "player_action" as const,
         interruptedStage: "admitted" as const,
         routeKind: "full_authority" as const,
@@ -1038,7 +1045,7 @@ describe("CampaignPlayApplication", () => {
     }
     expect(campaignPlayMayAutomaticallyResumeExternalStage({
       turnKind: "opening",
-      interruptedStage: "visibility_projected",
+      interruptedStage: "admitted",
       routeKind: undefined,
       errorCode: "model_contract_invalid",
       attempt: 1,
@@ -1522,14 +1529,23 @@ describe("CampaignPlayApplication", () => {
     createAcceptedCampaign();
     const runNextStage = vi.fn();
     const resumeStage = vi.fn();
+    const narratorRecoveryFeedback: CampaignPlayNarratorRecoveryFeedback = {
+      diagnostic: "narrator_generation_schema_mismatch",
+      failedChecks: [{ check: "generation_schema_invalid" }],
+    };
+    const receivedNarratorRecoveryFeedback: unknown[] = [];
     const application = createCampaignPlayApplication({
       now: () => 1_300,
       runtimeFactory: {
-        createOpening: (handle) => fakeOpeningRuntime(handle, {
-          runNextStage,
-          resumeStage,
-          interruptOnRun: true,
-        }),
+        createOpening: (handle, _selection, recoveryFeedback, onRecoveryFeedback) => {
+          receivedNarratorRecoveryFeedback.push(recoveryFeedback);
+          onRecoveryFeedback?.(narratorRecoveryFeedback);
+          return fakeOpeningRuntime(handle, {
+            runNextStage,
+            resumeStage,
+            interruptOnRun: true,
+          });
+        },
         createTurn: () => { throw new Error("Player runtime is outside this test."); },
       },
     });
@@ -1541,6 +1557,12 @@ describe("CampaignPlayApplication", () => {
 
     expect(resumeStage).toHaveBeenCalledTimes(2);
     expect(runNextStage).toHaveBeenCalledTimes(1);
+    expect(receivedNarratorRecoveryFeedback).toEqual([
+      undefined,
+      undefined,
+      narratorRecoveryFeedback,
+      narratorRecoveryFeedback,
+    ]);
     const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
     try {
       const repository = createCampaignPlayTurnRepository(handle);

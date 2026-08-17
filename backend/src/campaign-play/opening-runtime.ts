@@ -38,6 +38,7 @@ import {
   type CampaignPlayNarrator,
   type CampaignPlayNarratorBudget,
   type CampaignPlayNarratorModelEvidence,
+  type CampaignPlayNarratorRecoveryFeedback,
 } from "./narrator.js";
 import {
   createCampaignPlayActorScheduler,
@@ -158,6 +159,8 @@ export interface CreateCampaignPlayOpeningRuntimeInput {
   clock?: CampaignPlayTurnServiceClock;
   openingPlanner?: CampaignPlayOpeningPlanner;
   narrator?: CampaignPlayNarrator;
+  narratorRecoveryFeedback?: CampaignPlayNarratorRecoveryFeedback;
+  onNarratorRecoveryFeedback?: (feedback: CampaignPlayNarratorRecoveryFeedback) => void;
   visibility?: CampaignPlayVisibilityService;
   actorScheduler?: CampaignPlayActorScheduler;
   actorProposalService?: CampaignPlayActorProposalService;
@@ -1010,6 +1013,7 @@ export function createCampaignPlayOpeningRuntime(
                 temperature: input.narratorModel.temperature,
                 budget: narratorBudget(input.narratorModel),
                 signal: context.signal,
+                recoveryFeedback: input.narratorRecoveryFeedback,
               });
               validateNarrationAgainstPacket(candidate.narration, pending.packet);
               const executionEvidence = acceptedNarratorExecutionEvidence(
@@ -1065,15 +1069,20 @@ export function createCampaignPlayOpeningRuntime(
                 ? cause.modelEvidence
                 : null;
               const narratorError = cause instanceof CampaignPlayNarratorError ? cause : null;
+              if (narratorError?.recoveryFeedback) {
+                input.onNarratorRecoveryFeedback?.(narratorError.recoveryFeedback);
+              }
               const errorCode = narratorError?.code === "stage_timeout"
                 ? "stage_timeout"
                 : narratorError?.code === "stage_budget_exceeded"
                   ? "stage_budget_exceeded"
                   : narratorError?.code === "transport_interrupted"
                     ? "provider_unavailable"
-                    : narratorError || cause instanceof CampaignPlayOpeningRuntimeError
-                      ? "narration_invalid"
-                      : "provider_unavailable";
+                    : narratorError
+                      ? "model_contract_invalid"
+                      : cause instanceof CampaignPlayOpeningRuntimeError
+                        ? "narration_invalid"
+                        : "provider_unavailable";
               throw new CampaignPlayExternalStageInterruption(
                 interruptionEvidence(
                   input.narratorModel.requested,
