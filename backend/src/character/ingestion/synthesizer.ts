@@ -71,6 +71,19 @@ function normalizeListString(raw: string): string[] {
     return [];
   }
 
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (Array.isArray(parsed) && parsed.every((item) => typeof item === "string")) {
+        return parsed
+          .map((item) => item.trim())
+          .filter(Boolean);
+      }
+    } catch {
+      // Continue through the ordinary human-authored list normalization below.
+    }
+  }
+
   const normalizedBullets = trimmed
     .replace(/\r\n/g, "\n")
     .replace(/[•◦]/g, "\n")

@@ -195,6 +195,41 @@ describe("synthesizeDraftFromSources personality lift", () => {
     ]);
   });
 
+  it("decodes provider stringified arrays before draft lift", async () => {
+    mockGenerateObject.mockResolvedValueOnce({
+      object: {
+        ...richOutput,
+        drives: '["Protect the convoy","Keep the route open"]',
+        tags: '["Scout","Veteran","Pragmatic"]',
+        equippedItems: '["Field Knife","Compass"]',
+        personalityContradictions: '["Plans every risk","Moves before the plan is complete"]',
+        personalitySampleLines: '["State your business.","We move at dawn."]',
+      },
+    });
+
+    const draft = await synthesizeDraftFromSources({
+      sources: sources(),
+      classification,
+      researchDigest: null,
+      ctx,
+    });
+
+    expect(draft.motivations.drives).toEqual([
+      "Protect the convoy",
+      "Keep the route open",
+    ]);
+    expect(draft.capabilities.traits).toEqual(["Scout", "Veteran", "Pragmatic"]);
+    expect(draft.loadout.inventorySeed).toEqual(["Field Knife", "Compass"]);
+    expect(draft.identity.personality?.internalContradictions).toEqual([
+      "Plans every risk",
+      "Moves before the plan is complete",
+    ]);
+    expect(draft.identity.personality?.sampleLines).toEqual([
+      "State your business.",
+      "We move at dawn.",
+    ]);
+  });
+
   it("forces imported characters to start at 5 hp even if the model returns a lower value", async () => {
     mockGenerateObject.mockResolvedValueOnce({
       object: {
