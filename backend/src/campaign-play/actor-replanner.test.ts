@@ -1697,7 +1697,7 @@ describe("Campaign Play actor replanner", () => {
       WHERE campaign_id = ? AND job_id = ?`).get(CAMPAIGN_ID, jobId)).toEqual({ count: 2 });
   });
 
-  it("terminates a route recovery schema-invalid attempt without a third call", async () => {
+  it("exhausts three route recovery attempts without a fourth call", async () => {
     const { handle, token, jobId } = createReplanFixture();
     const bypassModel = {} as LanguageModel;
     const recoveryModel = {} as LanguageModel;
@@ -1747,14 +1747,16 @@ describe("Campaign Play actor replanner", () => {
       errorCode: "model_contract_invalid",
       workerEpoch: 1,
     });
-    expect(generateObject).toHaveBeenCalledTimes(2);
+    expect(generateObject).toHaveBeenCalledTimes(3);
     expect(generateObject.mock.calls.map((call) => call[0]!.model)).toEqual([
+      bypassModel,
       bypassModel,
       bypassModel,
     ]);
     expect(generateObject.mock.calls.map((call) => call[0]!.mode)).toEqual([
       "auto",
       "auto",
+      "tool",
     ]);
     expect(handle.sqlite.prepare(`SELECT attempt, status, schema_outcome AS schemaOutcome,
         error_code AS errorCode FROM campaign_play_model_stages
@@ -1762,9 +1764,10 @@ describe("Campaign Play actor replanner", () => {
       ORDER BY attempt`).all(CAMPAIGN_ID)).toEqual([
       { attempt: 1, status: "interrupted", schemaOutcome: "invalid", errorCode: "model_contract_invalid" },
       { attempt: 2, status: "interrupted", schemaOutcome: "invalid", errorCode: "model_contract_invalid" },
+      { attempt: 3, status: "interrupted", schemaOutcome: "invalid", errorCode: "model_contract_invalid" },
     ]);
     expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_replan_attempts
-      WHERE campaign_id = ? AND job_id = ?`).get(CAMPAIGN_ID, jobId)).toEqual({ count: 2 });
+      WHERE campaign_id = ? AND job_id = ?`).get(CAMPAIGN_ID, jobId)).toEqual({ count: 3 });
     expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_plans
       WHERE campaign_id = ? AND actor_id = 'actor-b' AND status = 'active'`).get(CAMPAIGN_ID))
       .toEqual({ count: 0 });
@@ -1824,7 +1827,7 @@ describe("Campaign Play actor replanner", () => {
     expect(JSON.stringify(payload)).not.toContain("The next lead is there");
   });
 
-  it("consumes the one retry for two invalid attempts and defers without a third call", async () => {
+  it("consumes two recoveries for three invalid attempts and defers without a fourth call", async () => {
     const { handle, token, jobId } = createReplanFixture();
     const logCapture = captureActorReplanLogs();
     const bypassModel = {} as LanguageModel;
@@ -1879,13 +1882,14 @@ describe("Campaign Play actor replanner", () => {
     });
     await flushActorReplanLogs();
     const diagnostics = rejectionDiagnostics(logCapture);
-    expect(diagnostics).toHaveLength(2);
+    expect(diagnostics).toHaveLength(3);
     expect(diagnostics.map((diagnostic) => {
       const payload = diagnostic.payload as Record<string, unknown>;
       return [payload.attemptNumber, payload.modelWorkerEpoch, payload.reviewViolations];
     })).toEqual([
       [1, 1, "0:outcome_not_established"],
       [2, 2, "0:contradicts_accepted_frame"],
+      [3, 3, "0:contradicts_accepted_frame"],
     ]);
     const firstPrompt = generateObject.mock.calls[0]![0].prompt;
     const recoveryPrompt = generateObject.mock.calls[2]![0].prompt;
@@ -1899,9 +1903,11 @@ describe("Campaign Play actor replanner", () => {
       reviewViolations: "0:outcome_not_established",
       reviewViolationFields: "0:observableTrace",
     });
-    expect(generateObject).toHaveBeenCalledTimes(4);
+    expect(generateObject).toHaveBeenCalledTimes(6);
     expect(generateObject.mock.calls.map((call) => call[0]!.model)).toEqual([
       bypassModel,
+      bypassModel,
+      recoveryModel,
       bypassModel,
       recoveryModel,
       bypassModel,
@@ -1912,13 +1918,15 @@ describe("Campaign Play actor replanner", () => {
       ORDER BY attempt`).all(CAMPAIGN_ID)).toEqual([
       { attempt: 1, status: "interrupted", schemaOutcome: "invalid", errorCode: "model_contract_invalid" },
       { attempt: 2, status: "interrupted", schemaOutcome: "invalid", errorCode: "model_contract_invalid" },
+      { attempt: 3, status: "interrupted", schemaOutcome: "invalid", errorCode: "model_contract_invalid" },
     ]);
     expect(handle.sqlite.prepare(`SELECT attempt_number AS attemptNumber,
         retry_consumed_at AS retryConsumedAt FROM campaign_play_actor_replan_attempts
       WHERE campaign_id = ? AND job_id = ? ORDER BY attempt_number`).all(CAMPAIGN_ID, jobId))
       .toEqual([
         { attemptNumber: 1, retryConsumedAt: 1_601 },
-        { attemptNumber: 2, retryConsumedAt: null },
+        { attemptNumber: 2, retryConsumedAt: 1_602 },
+        { attemptNumber: 3, retryConsumedAt: null },
       ]);
     expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_plans
       WHERE campaign_id = ? AND actor_id = 'actor-b' AND status = 'active'`).get(CAMPAIGN_ID))
@@ -1930,11 +1938,11 @@ describe("Campaign Play actor replanner", () => {
       .toEqual({ proposalId: null });
   });
 
-  it("does not escalate provider unavailability even when a recovery model is available", async () => {
+  it("retries provider unavailability twice with the same requested model", async () => {
     const { handle, token, jobId } = createReplanFixture();
     const bypassModel = {} as LanguageModel;
     const recoveryModel = {} as LanguageModel;
-    const generateObject = vi.fn(async () => {
+    const generateObject = vi.fn(async (_request: { model: LanguageModel }) => {
       throw new Error("provider transport unavailable");
     });
     const replanner = createCampaignPlayActorReplanner(handle, {
@@ -1964,13 +1972,20 @@ describe("Campaign Play actor replanner", () => {
       errorCode: "provider_unavailable",
       workerEpoch: 1,
     });
-    expect(generateObject).toHaveBeenCalledTimes(1);
+    expect(generateObject).toHaveBeenCalledTimes(3);
+    expect(generateObject.mock.calls.map((call) => call[0]!.model)).toEqual([
+      bypassModel,
+      bypassModel,
+      bypassModel,
+    ]);
     expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_replan_attempts
-      WHERE campaign_id = ? AND job_id = ?`).get(CAMPAIGN_ID, jobId)).toEqual({ count: 1 });
+      WHERE campaign_id = ? AND job_id = ?`).get(CAMPAIGN_ID, jobId)).toEqual({ count: 3 });
     expect(handle.sqlite.prepare(`SELECT attempt, status, error_code AS errorCode
       FROM campaign_play_model_stages WHERE campaign_id = ? AND turn_id = 'turn-player'
-        AND kind = 'actor_replanner'`).all(CAMPAIGN_ID)).toEqual([
+        AND kind = 'actor_replanner' ORDER BY attempt`).all(CAMPAIGN_ID)).toEqual([
       { attempt: 1, status: "interrupted", errorCode: "provider_unavailable" },
+      { attempt: 2, status: "interrupted", errorCode: "provider_unavailable" },
+      { attempt: 3, status: "interrupted", errorCode: "provider_unavailable" },
     ]);
   });
 
@@ -2151,7 +2166,7 @@ describe("Campaign Play actor replanner", () => {
       .toEqual({ count: 1 });
   });
 
-  it("terminates after a first timeout followed by a second timeout", async () => {
+  it("terminates after three timed-out attempts without a fourth call", async () => {
     const { handle, token, jobId } = createReplanFixture();
     type Generated = { object: unknown; trace: SafeGenerateTrace };
     let now = 1_600;
@@ -2202,28 +2217,37 @@ describe("Campaign Play actor replanner", () => {
       object: singleStepProposalFromPrompt(generateObject.mock.calls[1]![0].prompt),
       trace: acceptedTrace(),
     });
+    await vi.waitFor(() => expect(generateObject).toHaveBeenCalledTimes(3));
+    now = 1_900;
+    timerCallbacks[2]!();
+    proposalResolvers[2]!({
+      object: singleStepProposalFromPrompt(generateObject.mock.calls[2]![0].prompt),
+      trace: acceptedTrace(),
+    });
     const outcome = await pending;
 
     expect(outcome).toEqual({ kind: "interrupted", jobId, errorCode: "stage_timeout", workerEpoch: 1 });
-    expect(generateObject).toHaveBeenCalledTimes(2);
+    expect(generateObject).toHaveBeenCalledTimes(3);
     expect(generateObject.mock.calls[0]![0].abortSignal?.aborted).toBe(true);
     expect(generateObject.mock.calls[1]![0].abortSignal?.aborted).toBe(true);
-    expect(clearCount).toBe(2);
+    expect(generateObject.mock.calls[2]![0].abortSignal?.aborted).toBe(true);
+    expect(clearCount).toBe(3);
     expect(handle.sqlite.prepare(`SELECT attempt, status, schema_outcome AS schemaOutcome,
         error_code AS errorCode FROM campaign_play_model_stages
       WHERE campaign_id = ? AND turn_id = 'turn-player' AND kind = 'actor_replanner'
       ORDER BY attempt`).all(CAMPAIGN_ID)).toEqual([
       { attempt: 1, status: "interrupted", schemaOutcome: "transport_error", errorCode: "stage_timeout" },
       { attempt: 2, status: "interrupted", schemaOutcome: "transport_error", errorCode: "stage_timeout" },
+      { attempt: 3, status: "interrupted", schemaOutcome: "transport_error", errorCode: "stage_timeout" },
     ]);
     expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_replan_attempts
-      WHERE campaign_id = ? AND job_id = ?`).get(CAMPAIGN_ID, jobId)).toEqual({ count: 2 });
+      WHERE campaign_id = ? AND job_id = ?`).get(CAMPAIGN_ID, jobId)).toEqual({ count: 3 });
     expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_plans
       WHERE campaign_id = ? AND actor_id = 'actor-b' AND status = 'active'`).get(CAMPAIGN_ID))
       .toEqual({ count: 0 });
   });
 
-  it("times out the second actor replan attempt without accepting a late provider result", async () => {
+  it("recovers after a timed-out second attempt without accepting its late result", async () => {
     const { handle, token, jobId } = createReplanFixture();
     const logCapture = captureActorReplanLogs();
     type Generated = { object: unknown; trace: SafeGenerateTrace };
@@ -2251,16 +2275,25 @@ describe("Campaign Play actor replanner", () => {
           trace: acceptedTrace(),
         });
       }
-      return new Promise<Generated>((resolve) => {
-        resolveSecond = resolve;
+      if (callNumber === 3) {
+        return new Promise<Generated>((resolve) => {
+          resolveSecond = resolve;
+        });
+      }
+      if (request.prompt.includes("ACTOR_PLAN_REVIEW\n")) {
+        return Promise.resolve({ object: { verdict: "accepted", violations: [] }, trace: acceptedTrace() });
+      }
+      return Promise.resolve({
+        object: singleStepProposalFromPrompt(request.prompt),
+        trace: acceptedTrace(),
       });
     });
     const replanner = createCampaignPlayActorReplanner(handle, {
-      now: () => 1_600,
+      now: () => now,
       generateObject: generateObject as unknown as typeof safeGenerateObject,
       setTimer: (callback, delayMs) => {
         timerCallNumber += 1;
-        expect(delayMs).toBe(timerCallNumber === 1 ? 100 : 101);
+        expect(delayMs).toBe(timerCallNumber === 2 ? 101 : 100);
         fireDeadline = callback;
         return 1 as unknown as ReturnType<typeof setTimeout>;
       },
@@ -2268,6 +2301,7 @@ describe("Campaign Play actor replanner", () => {
         clearCount += 1;
       },
     });
+    let now = 1_600;
     const pending = replanner.replan({
       jobId,
       token,
@@ -2289,7 +2323,9 @@ describe("Campaign Play actor replanner", () => {
       bypassModel,
       recoveryModel,
     ]);
+    now = 1_701;
     fireDeadline!();
+    await vi.waitFor(() => expect(generateObject).toHaveBeenCalledTimes(5));
     const outcome = await pending;
     resolveSecond!({
       object: singleStepProposalFromPrompt(generateObject.mock.calls[2]![0].prompt),
@@ -2297,12 +2333,7 @@ describe("Campaign Play actor replanner", () => {
     });
     await Promise.resolve();
 
-    expect(outcome).toEqual({
-      kind: "interrupted",
-      jobId,
-      errorCode: "stage_timeout",
-      workerEpoch: 1,
-    });
+    expect(outcome).toMatchObject({ kind: "replanned", jobId, workerEpoch: 1 });
     await flushActorReplanLogs();
     expect(rejectionDiagnostics(logCapture)).toHaveLength(1);
     expect(rejectionDiagnostics(logCapture)[0]!.payload).toMatchObject({
@@ -2313,15 +2344,16 @@ describe("Campaign Play actor replanner", () => {
       reviewViolations: "0:outcome_not_established",
       reviewViolationFields: "0:observableTrace",
     });
-    expect(generateObject).toHaveBeenCalledTimes(3);
+    expect(generateObject).toHaveBeenCalledTimes(5);
     expect(generateObject.mock.calls[2]![0].abortSignal?.aborted).toBe(true);
-    expect(clearCount).toBe(2);
+    expect(clearCount).toBe(3);
     expect(handle.sqlite.prepare(`SELECT attempt, status, schema_outcome AS schemaOutcome,
         error_code AS errorCode FROM campaign_play_model_stages
       WHERE campaign_id = ? AND turn_id = 'turn-player' AND kind = 'actor_replanner'
       ORDER BY attempt`).all(CAMPAIGN_ID)).toEqual([
       { attempt: 1, status: "interrupted", schemaOutcome: "invalid", errorCode: "model_contract_invalid" },
       { attempt: 2, status: "interrupted", schemaOutcome: "transport_error", errorCode: "stage_timeout" },
+      { attempt: 3, status: "accepted", schemaOutcome: "valid", errorCode: null },
     ]);
     const attempts = handle.sqlite.prepare(`SELECT attempt_number AS attemptNumber,
         model_worker_epoch AS modelWorkerEpoch,
@@ -2330,7 +2362,7 @@ describe("Campaign Play actor replanner", () => {
         deadline_at AS deadlineAt, retry_consumed_at AS retryConsumedAt
       FROM campaign_play_actor_replan_attempts
       WHERE campaign_id = ? AND job_id = ? ORDER BY attempt_number`).all(CAMPAIGN_ID, jobId) as Array<Record<string, unknown>>;
-    expect(attempts).toHaveLength(2);
+    expect(attempts).toHaveLength(3);
     expect(attempts[0]).toMatchObject({
       attemptNumber: 1,
       modelWorkerEpoch: 1,
@@ -2343,13 +2375,21 @@ describe("Campaign Play actor replanner", () => {
       modelWorkerEpoch: 2,
       actorJobWorkerEpoch: 1,
       claimTurnWorkerEpoch: token.epoch,
-      retryConsumedAt: null,
+      retryConsumedAt: 1_701,
     });
     expect(attempts[1]!.deadlineAt).toBe(1_701);
     expect(attempts[1]!.deadlineAt as number).toBeGreaterThan(attempts[0]!.deadlineAt as number);
+    expect(attempts[2]).toMatchObject({
+      attemptNumber: 3,
+      modelWorkerEpoch: 3,
+      actorJobWorkerEpoch: 1,
+      claimTurnWorkerEpoch: token.epoch,
+      retryConsumedAt: null,
+      deadlineAt: 1_801,
+    });
     expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_plans
       WHERE campaign_id = ? AND actor_id = 'actor-b' AND status = 'active'`).get(CAMPAIGN_ID))
-      .toEqual({ count: 0 });
+      .toEqual({ count: 1 });
   });
 
   it("defers a reverse-route move before replacing the active schedule plan", async () => {

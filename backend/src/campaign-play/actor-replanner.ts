@@ -46,6 +46,7 @@ import {
 } from "./actor-replan-prompts.js";
 
 const CAMPAIGN_PLAY_ACTOR_REPLANNER_MODEL_CALL_TIMEOUT_MS = 180_000;
+const CAMPAIGN_PLAY_MAX_ACTOR_REPLAN_ATTEMPTS = 3;
 
 const log = createLogger("campaign-play-actor-replanner");
 
@@ -1390,7 +1391,7 @@ export function createCampaignPlayActorReplanner(
                     JOIN campaign_play_actor_jobs job ON job.job_id = attempt.job_id
                     JOIN campaign_play_turns turn_row ON turn_row.id = job.turn_id
                     WHERE attempt.attempt_id = ? AND attempt.job_id = ?
-                      AND attempt.attempt_number IN (1, 2) AND attempt.attempt_number = ?
+                      AND attempt.attempt_number IN (1, 2, 3) AND attempt.attempt_number = ?
                       AND attempt.model_worker_epoch = ?
                       AND attempt.actor_job_worker_epoch = ?
                       AND attempt.claim_turn_worker_epoch = ?
@@ -1409,18 +1410,24 @@ export function createCampaignPlayActorReplanner(
                            AND prior_attempt.stage_id = attempt.stage_id
                            AND prior_attempt.turn_id = attempt.turn_id
                            AND prior_attempt.actor_id = attempt.actor_id
-                           AND prior_attempt.attempt_number = 1
+                            AND prior_attempt.attempt_number = attempt.attempt_number - 1
                            AND prior_attempt.retry_consumed_at = attempt.created_at
                            AND prior_attempt.frame_hash = attempt.frame_hash
                            AND prior_attempt.frozen_base_world_version = attempt.frozen_base_world_version
                            AND prior_attempt.requested_provider_id = attempt.requested_provider_id
                            AND prior_attempt.requested_model = attempt.requested_model
-                           AND ((prior_model.schema_outcome = 'invalid'
-                                 AND prior_model.error_code = 'model_contract_invalid'
-                                 AND attempt.created_at < prior_attempt.deadline_at
-                                 AND attempt.deadline_at > attempt.created_at
-                                 AND attempt.deadline_at > prior_attempt.deadline_at)
-                                 OR (prior_model.schema_outcome = 'transport_error'
+                            AND prior_model.status = 'interrupted'
+                            AND ((prior_model.schema_outcome = 'invalid'
+                                  AND prior_model.error_code = 'model_contract_invalid'
+                                  AND attempt.created_at < prior_attempt.deadline_at
+                                  AND attempt.deadline_at > attempt.created_at
+                                  AND attempt.deadline_at > prior_attempt.deadline_at)
+                                  OR (prior_model.schema_outcome = 'transport_error'
+                                  AND prior_model.error_code = 'provider_unavailable'
+                                  AND attempt.created_at < prior_attempt.deadline_at
+                                  AND attempt.deadline_at > attempt.created_at
+                                  AND attempt.deadline_at > prior_attempt.deadline_at)
+                                  OR (prior_model.schema_outcome = 'transport_error'
                                  AND prior_model.error_code = 'stage_timeout'
                                  AND attempt.created_at >= prior_attempt.deadline_at
                                  AND attempt.deadline_at > attempt.created_at
@@ -1756,7 +1763,8 @@ export function createCampaignPlayActorReplanner(
           : { kind: "interrupted", jobId: request.jobId, errorCode: failure.errorCode, workerEpoch };
       };
 
-      let firstResult = await runAttempt(
+      let attemptOperation = firstAttemptOperation;
+      let attemptResult = await runAttempt(
         request.model,
         request.model,
         firstModelWorkerEpoch,
@@ -1768,84 +1776,76 @@ export function createCampaignPlayActorReplanner(
         proposalPrompt,
         firstAttemptOperation,
       );
-      if (firstResult.kind === "replanned") {
-        return { kind: "replanned", jobId: request.jobId, plan: firstResult.plan, workerEpoch };
-      }
-      emitRejectionDiagnostic(firstResult);
-      if (request.signal?.aborted === true) {
-        return finalizeFailure({
-          ...firstResult,
-          errorCode: "worker_lease_lost",
-          schemaOutcome: "transport_error",
-          contractInvalid: false,
-        });
-      }
-      const firstAttemptTimedOut = firstAttemptOperation.isDeadlineReached() || dependencies.now() >= deadlineAt;
-      if (firstAttemptTimedOut) {
-        firstResult = {
-          ...firstResult,
-          errorCode: "stage_timeout",
-          schemaOutcome: "transport_error",
-          contractInvalid: false,
-        };
-        if (!linkedCall) return finalizeFailure(firstResult);
-      }
-      const recoveryModel = request.recoveryModel;
-      const stageTimeoutRecovery = linkedCall !== undefined && firstResult.errorCode === "stage_timeout";
-      const contractRecovery = linkedCall !== undefined && firstResult.contractInvalid &&
-        recoveryModel !== undefined &&
-        dependencies.now() < request.token.expiresAt && dependencies.now() < deadlineAt;
-      const recoveryAuthorized = contractRecovery || stageTimeoutRecovery;
-      // Attempt 2 is authorized only when its complete external-operation
-      // window fits inside the player-action actor budget. A shortened retry
-      // would violate the fresh-deadline contract and be rejected by SQLite,
-      // so defer the optional job before opening that transaction instead.
-      const retryStartedAt = Math.max(dependencies.now(), providerStartedAt + 1);
-      const fullRetryDeadlineAt = retryStartedAt + request.externalOperationDeadlineMs;
-      if (recoveryAuthorized && request.deferOnControlBudgetExhaustion === true &&
-        request.controlDeadlineAt !== undefined &&
-        Number.isSafeInteger(fullRetryDeadlineAt) &&
-        fullRetryDeadlineAt > request.controlDeadlineAt) {
-        return finalizeFailure({
-          ...firstResult,
-          controlBudgetDeferral: true,
-        });
-      }
-      const mayEscalate = (contractRecovery || stageTimeoutRecovery) &&
-        !request.signal?.aborted && dependencies.now() < request.token.expiresAt &&
-        dependencies.now() < (request.controlDeadlineAt ?? Number.MAX_SAFE_INTEGER);
-      if (mayEscalate) {
-        emitContractRejectionDiagnostic(firstResult);
-        // SQLite rejects a shared numeric deadline for new attempt-2 rows.  A
-        // same-millisecond clock sample is still a new operation, so advance
-        // the retry start by the smallest representable unit in that case.
-        const retryDeadlineAt = fullRetryDeadlineAt;
-        if (!Number.isSafeInteger(retryDeadlineAt) || retryDeadlineAt <= retryStartedAt) {
+      while (attemptResult.kind === "failed") {
+        emitRejectionDiagnostic(attemptResult);
+        if (request.signal?.aborted === true) {
           return finalizeFailure({
-            ...firstResult,
-            errorCode: "persistence_failed",
+            ...attemptResult,
+            errorCode: "worker_lease_lost",
             schemaOutcome: "transport_error",
             contractInvalid: false,
           });
         }
-        const secondModelWorkerEpoch = firstModelWorkerEpoch + 1;
-        const secondAttemptNumber = firstAttemptNumber + 1;
-        const secondModelStageRowId = stableId("model-stage-row", {
+        const attemptDeadlineAt = attemptOperation.deadlineAt;
+        if (attemptOperation.isDeadlineReached() || dependencies.now() >= attemptDeadlineAt) {
+          attemptResult = {
+            ...attemptResult,
+            errorCode: "stage_timeout",
+            schemaOutcome: "transport_error",
+            contractInvalid: false,
+          };
+        }
+        const recoveryModel = request.recoveryModel;
+        const stageTimeoutRecovery = linkedCall && attemptResult.errorCode === "stage_timeout";
+        const providerRecovery = linkedCall && attemptResult.errorCode === "provider_unavailable" &&
+          dependencies.now() < attemptDeadlineAt;
+        const contractRecovery = linkedCall && attemptResult.contractInvalid &&
+          recoveryModel !== undefined && dependencies.now() < attemptDeadlineAt;
+        const recoveryAuthorized =
+          attemptResult.attemptNumber < CAMPAIGN_PLAY_MAX_ACTOR_REPLAN_ATTEMPTS &&
+          (contractRecovery || providerRecovery || stageTimeoutRecovery);
+        if (!recoveryAuthorized) return finalizeFailure(attemptResult);
+
+        // Every recovery receives a complete external-operation window. If the
+        // optional actor budget cannot hold it, defer before opening a partial
+        // attempt rather than weakening the durable deadline contract.
+        const retryStartedAt = Math.max(dependencies.now(), attemptOperation.startedAt + 1);
+        const retryDeadlineAt = retryStartedAt + request.externalOperationDeadlineMs;
+        if (request.deferOnControlBudgetExhaustion === true &&
+          request.controlDeadlineAt !== undefined &&
+          Number.isSafeInteger(retryDeadlineAt) &&
+          retryDeadlineAt > request.controlDeadlineAt) {
+          return finalizeFailure({ ...attemptResult, controlBudgetDeferral: true });
+        }
+        const mayRecover = !request.signal?.aborted &&
+          dependencies.now() < request.token.expiresAt &&
+          dependencies.now() < (request.controlDeadlineAt ?? Number.MAX_SAFE_INTEGER);
+        if (!mayRecover || !Number.isSafeInteger(retryDeadlineAt) || retryDeadlineAt <= retryStartedAt) {
+          return finalizeFailure({
+            ...attemptResult,
+            errorCode: mayRecover ? "persistence_failed" : attemptResult.errorCode,
+            schemaOutcome: mayRecover ? "transport_error" : attemptResult.schemaOutcome,
+            contractInvalid: mayRecover ? false : attemptResult.contractInvalid,
+          });
+        }
+        const priorResult = attemptResult;
+        emitContractRejectionDiagnostic(priorResult);
+        const nextModelWorkerEpoch = priorResult.modelWorkerEpoch + 1;
+        const nextAttemptNumber = priorResult.attemptNumber + 1;
+        const nextModelStageRowId = stableId("model-stage-row", {
           stageId,
-          workerEpoch: secondModelWorkerEpoch,
+          workerEpoch: nextModelWorkerEpoch,
         });
-        const secondAttemptId = stableId("actor-replan-attempt", {
+        const nextAttemptId = stableId("actor-replan-attempt", {
           stageId,
-          attemptNumber: secondAttemptNumber,
-          modelWorkerEpoch: secondModelWorkerEpoch,
+          attemptNumber: nextAttemptNumber,
+          modelWorkerEpoch: nextModelWorkerEpoch,
         });
         try {
           if (stageTimeoutRecovery) {
-            if (request.signal?.aborted) {
-              throw new CampaignPlayActorReplannerError("replan_epoch_lost");
-            }
+            if (request.signal?.aborted) throw new CampaignPlayActorReplannerError("replan_epoch_lost");
           } else {
-            firstAttemptOperation.assertLive();
+            attemptOperation.assertLive();
           }
           requireTurnLease(handle, request.token, retryStartedAt);
           turnRepository.commitActorTransition({
@@ -1854,20 +1854,21 @@ export function createCampaignPlayActorReplanner(
             worldVersionAdvance: 0,
             mutationId: stableId("actor-job-event", {
               jobId: request.jobId,
-              stage: "replan_reasoning_escalated",
+              stage: "replan_attempt_recovered",
               workerEpoch,
+              attemptNumber: nextAttemptNumber,
             }),
             protectedPayloadHash: hashCampaignPlayProjection({
               jobId: request.jobId,
               stageId,
               frameHash: turn.frameHash,
               workerEpoch,
-              firstAttemptId,
-              secondAttemptId,
+              priorAttemptId: priorResult.attemptId,
+              nextAttemptId,
             }),
             committedAt: retryStartedAt,
             mutate(context) {
-              const firstStage = context.sqlite.prepare(`SELECT model.status AS status,
+              const priorStage = context.sqlite.prepare(`SELECT model.status AS status,
                   model.error_code AS errorCode, model.schema_outcome AS schemaOutcome,
                   attempt.deadline_at AS deadlineAt,
                   attempt.frame_hash AS frameHash,
@@ -1880,13 +1881,14 @@ export function createCampaignPlayActorReplanner(
                 WHERE model.id = ? AND model.stage_id = ? AND model.attempt = ?
                   AND model.kind = 'actor_replanner' AND model.worker_epoch = ?
                   AND attempt.attempt_id = ? AND attempt.job_id = ?
-                  AND attempt.attempt_number = 1`).get(
-                firstModelStageRowId,
+                  AND attempt.attempt_number = ?`).get(
+                priorResult.modelStageRowId,
                 stageId,
-                firstAttemptNumber,
-                firstModelWorkerEpoch,
-                firstAttemptId,
+                priorResult.attemptNumber,
+                priorResult.modelWorkerEpoch,
+                priorResult.attemptId,
                 request.jobId,
+                priorResult.attemptNumber,
               ) as {
                 status: string;
                 errorCode: string | null;
@@ -1897,72 +1899,74 @@ export function createCampaignPlayActorReplanner(
                 requestedProviderId: string;
                 requestedModel: string;
               } | undefined;
-              const retryErrorCode = stageTimeoutRecovery ? "stage_timeout" : "model_contract_invalid";
+              const retryErrorCode = stageTimeoutRecovery
+                ? "stage_timeout"
+                : providerRecovery
+                ? "provider_unavailable"
+                : "model_contract_invalid";
               const retryStartsInAllowedWindow = stageTimeoutRecovery
-                ? retryStartedAt >= deadlineAt
-                : retryStartedAt < deadlineAt;
-              if (firstStage?.status !== "started"
-                || firstStage.errorCode !== null
-                || firstStage.deadlineAt !== deadlineAt
-                || firstStage.frameHash !== turn.frameHash
-                || firstStage.frozenBaseWorldVersion !== frame.baseWorldVersion
-                || firstStage.requestedProviderId !== requestedModel.providerId
-                || firstStage.requestedModel !== requestedModel.model
-                || !retryStartsInAllowedWindow) {
+                ? retryStartedAt >= attemptDeadlineAt
+                : retryStartedAt < attemptDeadlineAt;
+              if (priorStage?.status !== "started" || priorStage.errorCode !== null ||
+                priorStage.deadlineAt !== attemptDeadlineAt || priorStage.frameHash !== turn.frameHash ||
+                priorStage.frozenBaseWorldVersion !== frame.baseWorldVersion ||
+                priorStage.requestedProviderId !== requestedModel.providerId ||
+                priorStage.requestedModel !== requestedModel.model || !retryStartsInAllowedWindow) {
                 throw new CampaignPlayActorReplannerError("replan_epoch_lost");
               }
-              const firstTrace = firstResult.trace;
-              const actualProviderId = firstResult.stageEvidence?.actualProviderId
-                ?? firstTrace?.capability?.providerId ?? null;
-              const actualModel = firstResult.stageEvidence?.actualModel
-                ?? firstTrace?.response?.modelId ?? firstTrace?.capability?.model ?? null;
+              const priorTrace = priorResult.trace;
+              const actualProviderId = priorResult.stageEvidence?.actualProviderId
+                ?? priorTrace?.capability?.providerId ?? null;
+              const actualModel = priorResult.stageEvidence?.actualModel
+                ?? priorTrace?.response?.modelId ?? priorTrace?.capability?.model ?? null;
               const hasActual = actualProviderId !== null && actualModel !== null;
               const modelUpdate = context.sqlite.prepare(`UPDATE campaign_play_model_stages SET
                 status = 'interrupted', actual_provider_id = ?, actual_model = ?,
                 actual_strategy = ?, input_tokens = ?, output_tokens = ?, finish_reason = ?,
-                duration_ms = ?, schema_outcome = ?, error_code = ?,
-                completed_at = ? WHERE id = ? AND stage_id = ? AND attempt = ?
-                  AND worker_epoch = ? AND status = 'started'`).run(
+                duration_ms = ?, schema_outcome = ?, error_code = ?, completed_at = ?
+                WHERE id = ? AND stage_id = ? AND attempt = ? AND worker_epoch = ?
+                  AND status = 'started'`).run(
                 hasActual ? actualProviderId : null,
                 hasActual ? actualModel : null,
                 hasActual ? "strict_object" : null,
-                firstResult.stageEvidence?.inputTokens ?? firstTrace?.usage?.inputTokens ?? null,
-                 firstResult.stageEvidence?.outputTokens ?? firstTrace?.usage?.outputTokens ?? null,
-                 firstResult.stageEvidence?.finishReason ?? firstTrace?.finishReason ?? null,
-                 firstResult.durationMs,
-                 stageTimeoutRecovery ? "transport_error" : "invalid",
-                 retryErrorCode,
-                 retryStartedAt,
-                firstModelStageRowId,
+                priorResult.stageEvidence?.inputTokens ?? priorTrace?.usage?.inputTokens ?? null,
+                priorResult.stageEvidence?.outputTokens ?? priorTrace?.usage?.outputTokens ?? null,
+                priorResult.stageEvidence?.finishReason ?? priorTrace?.finishReason ?? null,
+                priorResult.durationMs,
+                priorResult.schemaOutcome,
+                retryErrorCode,
+                retryStartedAt,
+                priorResult.modelStageRowId,
                 stageId,
-                firstAttemptNumber,
-                firstModelWorkerEpoch,
+                priorResult.attemptNumber,
+                priorResult.modelWorkerEpoch,
               );
               const retryMarker = context.sqlite.prepare(`UPDATE campaign_play_actor_replan_attempts
                 SET retry_consumed_at = ?
                 WHERE attempt_id = ? AND campaign_id = ? AND job_id = ?
-                  AND attempt_number = 1 AND retry_consumed_at IS NULL
-                  AND model_stage_row_id = ? AND actor_job_worker_epoch = ?
-                  AND claim_turn_worker_epoch = ? AND frame_hash = ?
-                   AND frozen_base_world_version = ? AND deadline_at = ?
-                   AND ((? = 'model_contract_invalid' AND ? < deadline_at)
-                     OR (? = 'stage_timeout' AND ? >= deadline_at))
-                   AND requested_provider_id = ?
-                  AND requested_model = ? AND requested_strategy = 'strict_object'`).run(
+                  AND attempt_number = ? AND attempt_number IN (1, 2)
+                  AND retry_consumed_at IS NULL AND model_stage_row_id = ?
+                  AND actor_job_worker_epoch = ? AND claim_turn_worker_epoch = ?
+                  AND frame_hash = ? AND frozen_base_world_version = ? AND deadline_at = ?
+                  AND ((? IN ('model_contract_invalid', 'provider_unavailable') AND ? < deadline_at)
+                    OR (? = 'stage_timeout' AND ? >= deadline_at))
+                  AND requested_provider_id = ? AND requested_model = ?
+                  AND requested_strategy = 'strict_object'`).run(
                 retryStartedAt,
-                firstAttemptId,
+                priorResult.attemptId,
                 context.campaignId,
                 request.jobId,
-                firstModelStageRowId,
+                priorResult.attemptNumber,
+                priorResult.modelStageRowId,
                 workerEpoch,
                 request.token.epoch,
                 turn.frameHash,
                 frame.baseWorldVersion,
-                 deadlineAt,
-                 retryErrorCode,
-                 retryStartedAt,
-                 retryErrorCode,
-                 retryStartedAt,
+                attemptDeadlineAt,
+                retryErrorCode,
+                retryStartedAt,
+                retryErrorCode,
+                retryStartedAt,
                 requestedModel.providerId,
                 requestedModel.model,
               );
@@ -1974,105 +1978,91 @@ export function createCampaignPlayActorReplanner(
                 error_code, created_at, completed_at
               ) VALUES (?, ?, ?, ?, ?, 'actor_replanner', 'started', ?, ?, ?, 'strict_object',
                 NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'pending', NULL, NULL, NULL, ?, NULL)`).run(
-                secondModelStageRowId,
+                nextModelStageRowId,
                 stageId,
-                secondAttemptNumber,
+                nextAttemptNumber,
                 context.campaignId,
                 frame.turnId,
-                secondModelWorkerEpoch,
+                nextModelWorkerEpoch,
                 requestedModel.providerId,
                 requestedModel.model,
                 retryStartedAt,
               );
-              const secondAttempt = context.sqlite.prepare(`INSERT INTO campaign_play_actor_replan_attempts (
+              const nextAttempt = context.sqlite.prepare(`INSERT INTO campaign_play_actor_replan_attempts (
                 attempt_id, campaign_id, job_id, stage_id, model_stage_row_id,
                 turn_id, actor_id, attempt_number, model_worker_epoch,
                 actor_job_worker_epoch, claim_turn_worker_epoch, frame_hash,
                 frozen_base_world_version, deadline_at, requested_provider_id, requested_model,
                 requested_strategy, retry_consumed_at, created_at
               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'strict_object', NULL, ?)`).run(
-                secondAttemptId,
+                nextAttemptId,
                 context.campaignId,
                 request.jobId,
                 stageId,
-                secondModelStageRowId,
+                nextModelStageRowId,
                 frame.turnId,
                 frame.actorId,
-                secondAttemptNumber,
-                secondModelWorkerEpoch,
+                nextAttemptNumber,
+                nextModelWorkerEpoch,
                 workerEpoch,
                 request.token.epoch,
                 turn.frameHash,
-                 frame.baseWorldVersion,
-                 retryDeadlineAt,
-                 requestedModel.providerId,
+                frame.baseWorldVersion,
+                retryDeadlineAt,
+                requestedModel.providerId,
                 requestedModel.model,
                 retryStartedAt,
               );
-              if (modelUpdate.changes !== 1 || retryMarker.changes !== 1 || secondAttempt.changes !== 1) {
+              if (modelUpdate.changes !== 1 || retryMarker.changes !== 1 || nextAttempt.changes !== 1) {
                 throw new CampaignPlayActorReplannerError("replan_epoch_lost");
               }
             },
           });
         } catch (cause) {
-          if (cause instanceof CampaignPlayActorReplannerError
-            && cause.code === "replan_epoch_lost") {
-            return {
-              kind: "interrupted",
-              jobId: request.jobId,
-              errorCode: "worker_lease_lost",
-              workerEpoch,
-            };
+          if (cause instanceof CampaignPlayActorReplannerError && cause.code === "replan_epoch_lost") {
+            return { kind: "interrupted", jobId: request.jobId, errorCode: "worker_lease_lost", workerEpoch };
           }
           return finalizeFailure({
-            ...firstResult,
+            ...priorResult,
             errorCode: "persistence_failed",
             schemaOutcome: "transport_error",
             contractInvalid: false,
           });
         }
-        firstAttemptOperation.dispose();
-        const secondAttemptOperation = createAttemptOperation(retryStartedAt, retryDeadlineAt);
-        const useGenerationRecoverySchema = firstResult.rejectionArtifact === undefined
-          || (
-            firstResult.rejectionArtifact.phase === "compilation"
-            && (
-              firstResult.rejectionArtifact.reason === "target_outside_step_location"
-              || firstResult.rejectionArtifact.reason === "route_not_traversable_from_step_location"
-            )
-          );
-        const useRouteRecoveryAutoMode = firstResult.rejectionArtifact?.phase === "compilation"
-          && firstResult.rejectionArtifact.reason === "route_not_traversable_from_step_location";
-        const useTimeoutRecoveryNormalPath = stageTimeoutRecovery;
-        const secondResult = await runAttempt(
-          useTimeoutRecoveryNormalPath || useRouteRecoveryAutoMode ? request.model : recoveryModel!,
+        attemptOperation.dispose();
+        attemptOperation = createAttemptOperation(retryStartedAt, retryDeadlineAt);
+        const useGenerationRecoverySchema = priorResult.rejectionArtifact === undefined || (
+          priorResult.rejectionArtifact.phase === "compilation" && (
+            priorResult.rejectionArtifact.reason === "target_outside_step_location" ||
+            priorResult.rejectionArtifact.reason === "route_not_traversable_from_step_location"
+          )
+        );
+        const useRouteRecoveryAutoMode = priorResult.rejectionArtifact?.phase === "compilation" &&
+          priorResult.rejectionArtifact.reason === "route_not_traversable_from_step_location";
+        const useNormalPath = stageTimeoutRecovery || providerRecovery;
+        attemptResult = await runAttempt(
+          useNormalPath || useRouteRecoveryAutoMode ? request.model : recoveryModel!,
           request.model,
-          secondModelWorkerEpoch,
-          secondAttemptNumber,
-          secondModelStageRowId,
-          secondAttemptId,
-          useTimeoutRecoveryNormalPath
-            ? proposalSchema
-            : useGenerationRecoverySchema
+          nextModelWorkerEpoch,
+          nextAttemptNumber,
+          nextModelStageRowId,
+          nextAttemptId,
+          useNormalPath ? proposalSchema : useGenerationRecoverySchema
             ? generationRecoveryProposalSchema
             : proposalSchema,
-          useTimeoutRecoveryNormalPath || useRouteRecoveryAutoMode ? "auto" : "tool",
-          useTimeoutRecoveryNormalPath
+          useNormalPath || useRouteRecoveryAutoMode ? "auto" : "tool",
+          useNormalPath
             ? proposalPrompt
-            : firstResult.rejectionArtifact === undefined
+            : priorResult.rejectionArtifact === undefined
             ? buildCampaignPlayActorReplanGenerationRecoveryPrompt(proposalPrompt)
             : buildCampaignPlayActorReplanRecoveryPrompt(
                 proposalPrompt,
-                recoveryFeedbackFromArtifact(firstResult.rejectionArtifact),
+                recoveryFeedbackFromArtifact(priorResult.rejectionArtifact),
               ),
-          secondAttemptOperation,
+          attemptOperation,
         );
-        if (secondResult.kind === "replanned") {
-          return { kind: "replanned", jobId: request.jobId, plan: secondResult.plan, workerEpoch };
-        }
-        return finalizeFailure(secondResult);
       }
-      return finalizeFailure(firstResult);
+      return { kind: "replanned", jobId: request.jobId, plan: attemptResult.plan, workerEpoch };
       } finally {
         clearDeadline();
       }

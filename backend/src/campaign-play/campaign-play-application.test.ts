@@ -582,6 +582,9 @@ function fakePlayerRuntime(
         mutationId: `resume:${input.observedEpoch + 1}`,
       });
       if (options.resumeErrorCode) {
+        if (options.resumeErrorCode === "model_contract_invalid") {
+          options.onGameMasterRecoveryFeedback?.(GAME_MASTER_RECOVERY_FEEDBACK);
+        }
         repository.interruptExternal({
           token,
           evidence: {
@@ -816,6 +819,7 @@ function fakeStageLocalRecoveryRuntime(
         throw new Error(`Unexpected resume stage ${input.interruptedStage}.`);
       }
       if (options.rejectGameMasterSecond) {
+        options.onGameMasterRecoveryFeedback?.(POSSESSION_TRANSFORM_RECOVERY_FEEDBACK);
         repository.interruptExternal({
           token,
           evidence: {
@@ -956,141 +960,89 @@ function openingRequest(
 }
 
 describe("CampaignPlayApplication", () => {
-  it("allows player-action and Opening visibility timeout recovery without widening other Opening recovery", () => {
-    expect(campaignPlayMayAutomaticallyResumeExternalStage({
-      turnKind: "player_action",
-      interruptedStage: "admitted",
-      routeKind: "full_authority",
-      errorCode: "stage_timeout",
-      attempt: 1,
-      wasResume: false,
-      alreadyAttemptedStages: new Set(),
-    })).toBe(true);
+  it("allows only the first two automatic attempts for retryable external stages", () => {
+    const retryable = [
+      {
+        turnKind: "player_action" as const,
+        interruptedStage: "admitted" as const,
+        routeKind: "full_authority" as const,
+        errorCode: "stage_timeout",
+      },
+      {
+        turnKind: "opening" as const,
+        interruptedStage: "admitted" as const,
+        routeKind: undefined,
+        errorCode: "stage_timeout",
+      },
+      {
+        turnKind: "opening" as const,
+        interruptedStage: "visibility_projected" as const,
+        routeKind: undefined,
+        errorCode: "stage_timeout",
+      },
+      {
+        turnKind: "player_action" as const,
+        interruptedStage: "admitted" as const,
+        routeKind: "full_authority" as const,
+        errorCode: "model_contract_invalid",
+      },
+      {
+        turnKind: "player_action" as const,
+        interruptedStage: "admitted" as const,
+        routeKind: "certified_contact" as const,
+        errorCode: "model_contract_invalid",
+      },
+      {
+        turnKind: "player_action" as const,
+        interruptedStage: "judged" as const,
+        routeKind: "full_authority" as const,
+        errorCode: "model_contract_invalid",
+      },
+    ];
+    for (const input of retryable) {
+      expect(campaignPlayMayAutomaticallyResumeExternalStage({
+        ...input,
+        attempt: 1,
+        automaticRecoveryEnabled: true,
+      })).toBe(true);
+      expect(campaignPlayMayAutomaticallyResumeExternalStage({
+        ...input,
+        attempt: 2,
+        automaticRecoveryEnabled: true,
+      })).toBe(true);
+      expect(campaignPlayMayAutomaticallyResumeExternalStage({
+        ...input,
+        attempt: 3,
+        automaticRecoveryEnabled: true,
+      })).toBe(false);
+      expect(campaignPlayMayAutomaticallyResumeExternalStage({
+        ...input,
+        attempt: 1,
+        automaticRecoveryEnabled: false,
+      })).toBe(false);
+    }
+
+    for (const interruptedStage of [
+      "primary_settled",
+      "planned",
+      "actors_settled",
+    ] as const) {
+      expect(campaignPlayMayAutomaticallyResumeExternalStage({
+        turnKind: "opening",
+        interruptedStage,
+        routeKind: undefined,
+        errorCode: "stage_timeout",
+        attempt: 1,
+        automaticRecoveryEnabled: true,
+      })).toBe(false);
+    }
     expect(campaignPlayMayAutomaticallyResumeExternalStage({
       turnKind: "opening",
       interruptedStage: "visibility_projected",
       routeKind: undefined,
-      errorCode: "stage_timeout",
-      attempt: 1,
-      wasResume: false,
-      alreadyAttemptedStages: new Set(),
-    })).toBe(true);
-    expect(campaignPlayMayAutomaticallyResumeExternalStage({
-      turnKind: "opening",
-      interruptedStage: "admitted",
-      routeKind: undefined,
-      errorCode: "stage_timeout",
-      attempt: 1,
-      wasResume: false,
-      alreadyAttemptedStages: new Set(),
-    })).toBe(false);
-    expect(campaignPlayMayAutomaticallyResumeExternalStage({
-      turnKind: "opening",
-      interruptedStage: "primary_settled",
-      routeKind: undefined,
-      errorCode: "stage_timeout",
-      attempt: 1,
-      wasResume: false,
-      alreadyAttemptedStages: new Set(),
-    })).toBe(false);
-    expect(campaignPlayMayAutomaticallyResumeExternalStage({
-      turnKind: "opening",
-      interruptedStage: "planned",
-      routeKind: undefined,
-      errorCode: "stage_timeout",
-      attempt: 1,
-      wasResume: false,
-      alreadyAttemptedStages: new Set(),
-    })).toBe(false);
-    expect(campaignPlayMayAutomaticallyResumeExternalStage({
-      turnKind: "opening",
-      interruptedStage: "actors_settled",
-      routeKind: undefined,
-      errorCode: "stage_timeout",
-      attempt: 1,
-      wasResume: false,
-      alreadyAttemptedStages: new Set(),
-    })).toBe(false);
-    expect(campaignPlayMayAutomaticallyResumeExternalStage({
-      turnKind: "opening",
-      interruptedStage: "visibility_projected",
-      routeKind: undefined,
       errorCode: "model_contract_invalid",
       attempt: 1,
-      wasResume: false,
-      alreadyAttemptedStages: new Set(),
-    })).toBe(false);
-    expect(campaignPlayMayAutomaticallyResumeExternalStage({
-      turnKind: "opening",
-      interruptedStage: "visibility_projected",
-      routeKind: undefined,
-      errorCode: "stage_timeout",
-      attempt: 2,
-      wasResume: true,
-      alreadyAttemptedStages: new Set(["visibility_projected"]),
-    })).toBe(false);
-    expect(campaignPlayMayAutomaticallyResumeExternalStage({
-      turnKind: "opening",
-      interruptedStage: "visibility_projected",
-      routeKind: undefined,
-      errorCode: "stage_timeout",
-      attempt: 1,
-      wasResume: false,
-      alreadyAttemptedStages: new Set(["visibility_projected"]),
-    })).toBe(false);
-    expect(campaignPlayMayAutomaticallyResumeExternalStage({
-      turnKind: "player_action",
-      interruptedStage: "admitted",
-      routeKind: "full_authority",
-      errorCode: "stage_timeout",
-      attempt: 2,
-      wasResume: true,
-      alreadyAttemptedStages: new Set(["admitted"]),
-    })).toBe(false);
-    expect(campaignPlayMayAutomaticallyResumeExternalStage({
-      turnKind: "player_action",
-      interruptedStage: "admitted",
-      routeKind: "full_authority",
-      errorCode: "model_contract_invalid",
-      attempt: 1,
-      wasResume: false,
-      alreadyAttemptedStages: new Set(),
-    })).toBe(true);
-    expect(campaignPlayMayAutomaticallyResumeExternalStage({
-      turnKind: "player_action",
-      interruptedStage: "admitted",
-      routeKind: "certified_contact",
-      errorCode: "model_contract_invalid",
-      attempt: 1,
-      wasResume: false,
-      alreadyAttemptedStages: new Set(),
-    })).toBe(true);
-    expect(campaignPlayMayAutomaticallyResumeExternalStage({
-      turnKind: "player_action",
-      interruptedStage: "judged",
-      routeKind: "full_authority",
-      errorCode: "model_contract_invalid",
-      attempt: 1,
-      wasResume: false,
-      alreadyAttemptedStages: new Set(),
-    })).toBe(true);
-    expect(campaignPlayMayAutomaticallyResumeExternalStage({
-      turnKind: "player_action",
-      interruptedStage: "judged",
-      routeKind: "full_authority",
-      errorCode: "model_contract_invalid",
-      attempt: 1,
-      wasResume: false,
-      alreadyAttemptedStages: new Set(["admitted"]),
-    })).toBe(true);
-    expect(campaignPlayMayAutomaticallyResumeExternalStage({
-      turnKind: "player_action",
-      interruptedStage: "judged",
-      routeKind: "full_authority",
-      errorCode: "model_contract_invalid",
-      attempt: 1,
-      wasResume: false,
-      alreadyAttemptedStages: new Set(["judged"]),
+      automaticRecoveryEnabled: true,
     })).toBe(false);
     expect(campaignPlayMayAutomaticallyResumeExternalStage({
       turnKind: "player_action",
@@ -1098,8 +1050,7 @@ describe("CampaignPlayApplication", () => {
       routeKind: "full_authority",
       errorCode: "model_contract_invalid",
       attempt: 1,
-      wasResume: false,
-      alreadyAttemptedStages: new Set(),
+      automaticRecoveryEnabled: true,
     })).toBe(false);
     expect(campaignPlayMayAutomaticallyResumeExternalStage({
       turnKind: "player_action",
@@ -1107,8 +1058,7 @@ describe("CampaignPlayApplication", () => {
       routeKind: "certified_contact",
       errorCode: "model_contract_invalid",
       attempt: 1,
-      wasResume: false,
-      alreadyAttemptedStages: new Set(),
+      automaticRecoveryEnabled: true,
     })).toBe(false);
   });
 
@@ -1537,16 +1487,19 @@ describe("CampaignPlayApplication", () => {
     expect(result.continuityCount).toEqual({ count: 0 });
   });
 
-  it("stops after the Game Master's independent repair also fails", async () => {
+  it("exhausts three Game Master attempts without replaying the accepted Judge stage", async () => {
     const result = await runStageLocalRecoveryScenario(true);
     expect(result.resumeInputs.map((input) => input.interruptedStage)).toEqual([
       "admitted",
+      "judged",
       "judged",
     ]);
     expect(result.rows).toEqual([
       { kind: "game_master", attempt: 1, status: "interrupted", workerEpoch: 3,
         actualModel: "game-master-frozen", errorCode: "model_contract_invalid" },
       { kind: "game_master", attempt: 2, status: "interrupted", workerEpoch: 4,
+        actualModel: "game-master-frozen", errorCode: "model_contract_invalid" },
+      { kind: "game_master", attempt: 3, status: "interrupted", workerEpoch: 5,
         actualModel: "game-master-frozen", errorCode: "model_contract_invalid" },
       { kind: "judge", attempt: 1, status: "interrupted", workerEpoch: 1,
         actualModel: "judge-frozen", errorCode: "model_contract_invalid" },
@@ -1556,16 +1509,16 @@ describe("CampaignPlayApplication", () => {
     expect(result.turn).toMatchObject({
       stage: "interrupted",
       interruptedStage: "judged",
-      workerEpoch: 4,
+      workerEpoch: 5,
       resumeEligible: true,
     });
     expect((result.rows as Array<{ kind: string }>).filter((row) => row.kind === "game_master"))
-      .toHaveLength(2);
-    expect((result.rows as Array<{ attempt: number }>).some((row) => row.attempt === 3)).toBe(false);
+      .toHaveLength(3);
+    expect((result.rows as Array<{ attempt: number }>).some((row) => row.attempt === 4)).toBe(false);
     expect(result.continuityCount).toEqual({ count: 0 });
   });
 
-  it("stops after one automatic resume when the resumed provider attempt fails", async () => {
+  it("stops after three Opening provider attempts on the same admitted turn", async () => {
     createAcceptedCampaign();
     const runNextStage = vi.fn();
     const resumeStage = vi.fn();
@@ -1586,7 +1539,7 @@ describe("CampaignPlayApplication", () => {
     const admission = application.admitOpening(CAMPAIGN_ID, request);
     await application.waitForIdle(CAMPAIGN_ID);
 
-    expect(resumeStage).toHaveBeenCalledTimes(1);
+    expect(resumeStage).toHaveBeenCalledTimes(2);
     expect(runNextStage).toHaveBeenCalledTimes(1);
     const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
     try {
@@ -1596,7 +1549,7 @@ describe("CampaignPlayApplication", () => {
         stage: "interrupted",
         interruptedStage: "admitted",
         errorCode: "provider_unavailable",
-        workerEpoch: 2,
+        workerEpoch: 3,
         resumeEligible: true,
         idempotencyKey: request.idempotencyKey,
       });
@@ -1609,10 +1562,12 @@ describe("CampaignPlayApplication", () => {
           errorCode: "provider_unavailable" },
         { attempt: 2, status: "interrupted", workerEpoch: 2, turnId: admission.turnId,
           errorCode: "provider_unavailable" },
+        { attempt: 3, status: "interrupted", workerEpoch: 3, turnId: admission.turnId,
+          errorCode: "provider_unavailable" },
       ]);
       expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
         FROM campaign_play_model_stages WHERE turn_id = ?`).get(admission.turnId))
-        .toEqual({ count: 2 });
+        .toEqual({ count: 3 });
     } finally {
       handle.close();
     }
@@ -1622,7 +1577,7 @@ describe("CampaignPlayApplication", () => {
     "model_contract_invalid",
     "stage_timeout",
     "provider_unavailable",
-  ] as const)("leaves the turn interrupted after automatic attempt-2 %s", async (resumeErrorCode) => {
+  ] as const)("leaves the turn interrupted after automatic attempt-3 %s", async (resumeErrorCode) => {
     createAcceptedCampaign();
     const runNextStage = vi.fn();
     const resumeStage = vi.fn();
@@ -1652,7 +1607,7 @@ describe("CampaignPlayApplication", () => {
     await application.waitForIdle(CAMPAIGN_ID);
 
     expect(runNextStage).toHaveBeenCalledTimes(1);
-    expect(resumeStage).toHaveBeenCalledTimes(1);
+    expect(resumeStage).toHaveBeenCalledTimes(2);
     const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
     try {
       expect(createCampaignPlayTurnRepository(handle).loadTurn(admission.turnId)).toMatchObject({
@@ -1666,9 +1621,10 @@ describe("CampaignPlayApplication", () => {
       )).toEqual([
         { attempt: 1, status: "interrupted", errorCode: "model_contract_invalid" },
         { attempt: 2, status: "interrupted", errorCode: resumeErrorCode },
+        { attempt: 3, status: "interrupted", errorCode: resumeErrorCode },
       ]);
       expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count FROM campaign_play_model_stages
-        WHERE turn_id = ? AND attempt = 3`).get(admission.turnId)).toEqual({ count: 0 });
+        WHERE turn_id = ? AND attempt = 4`).get(admission.turnId)).toEqual({ count: 0 });
       expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count FROM campaign_play_turn_results
         WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, admission.turnId))
         .toEqual({ count: 0 });
@@ -1776,7 +1732,6 @@ describe("CampaignPlayApplication", () => {
 
   it.each([
     "model_contract_invalid",
-    "stage_timeout",
     "stage_budget_exceeded",
   ] as const)("does not automatically resume %s", async (errorCode) => {
     createAcceptedCampaign();

@@ -2473,7 +2473,7 @@ export function createCampaignPlayTurnRuntime(
     model: CampaignPlayTurnRuntimeStageModel,
     recoveryFeedback: CampaignPlayGameMasterRecoveryFeedback | undefined,
   ): LanguageModel => {
-    if (attempt === 2 && recoveryFeedback !== undefined) return model.languageModel;
+    if (attempt > 1 && recoveryFeedback !== undefined) return model.languageModel;
     return modelForExternalAttempt(turnId, "game_master", attempt, model);
   };
 
@@ -2556,7 +2556,7 @@ export function createCampaignPlayTurnRuntime(
         ON attempt.model_stage_row_id = model.id AND attempt.job_id = job.job_id
       WHERE job.campaign_id = ? AND job.stage = 'claimed'
         AND (model.worker_epoch = job.worker_epoch OR (
-          attempt.attempt_number IN (1, 2)
+          attempt.attempt_number IN (1, 2, 3)
           AND attempt.actor_job_worker_epoch = job.worker_epoch
           AND attempt.claim_turn_worker_epoch = job.claim_turn_worker_epoch
         ))
@@ -2790,7 +2790,7 @@ export function createCampaignPlayTurnRuntime(
                   temperature: certifiedGameMasterModel.temperature,
                   budget: modelBudget(certifiedGameMasterModel),
                   signal: context.signal,
-                  ...(input.gameMasterRecoveryFeedback === undefined || context.attempt !== 2
+                  ...(input.gameMasterRecoveryFeedback === undefined || context.attempt <= 1
                     ? {}
                     : { recoveryFeedback: input.gameMasterRecoveryFeedback }),
                 });
@@ -2920,7 +2920,7 @@ export function createCampaignPlayTurnRuntime(
                 attempt: context.attempt,
                 workerEpoch: context.token.epoch,
                 signal: context.signal,
-                ...(input.judgeRecoveryFeedback === undefined || context.attempt !== 2
+                ...(input.judgeRecoveryFeedback === undefined || context.attempt <= 1
                   ? {}
                   : { recoveryFeedback: input.judgeRecoveryFeedback }),
               });
@@ -3034,7 +3034,7 @@ export function createCampaignPlayTurnRuntime(
                 temperature: input.gameMasterModel.temperature,
                 budget: modelBudget(input.gameMasterModel),
                 signal: context.signal,
-                ...(input.gameMasterRecoveryFeedback === undefined || context.attempt !== 2
+                ...(input.gameMasterRecoveryFeedback === undefined || context.attempt <= 1
                   ? {}
                   : { recoveryFeedback: input.gameMasterRecoveryFeedback }),
               });

@@ -1289,29 +1289,48 @@ function validateModelStages(
     linkedAttemptChains.set(attempt.jobId, chain);
   }
   const retryChainDeadlineValid = (
-    firstAttempt: LinkedActorReplanAttempt,
+    priorAttempt: LinkedActorReplanAttempt,
     laterAttempt: LinkedActorReplanAttempt,
   ): boolean => {
-    const firstStage = stageById.get(firstAttempt.modelStageRowId);
-    if (firstStage?.status !== "interrupted") return false;
-    const modelContractInvalid = firstStage.schemaOutcome === "invalid"
-      && firstStage.errorCode === "model_contract_invalid"
-      && laterAttempt.createdAt < firstAttempt.deadlineAt
+    const priorStage = stageById.get(priorAttempt.modelStageRowId);
+    if (priorStage?.status !== "interrupted") return false;
+    const modelContractInvalid = priorStage.schemaOutcome === "invalid"
+      && priorStage.errorCode === "model_contract_invalid"
+      && laterAttempt.createdAt < priorAttempt.deadlineAt
       && (
         // Keep immutable Task 213 chains readable after the guard migration.
-        laterAttempt.deadlineAt === firstAttempt.deadlineAt
+        (priorAttempt.attemptNumber === 1 && laterAttempt.attemptNumber === 2 &&
+          laterAttempt.deadlineAt === priorAttempt.deadlineAt)
         || (
           laterAttempt.deadlineAt > laterAttempt.createdAt
-          && laterAttempt.deadlineAt > firstAttempt.deadlineAt
+          && laterAttempt.deadlineAt > priorAttempt.deadlineAt
         )
       );
-    const stageTimeout = firstStage.schemaOutcome === "transport_error"
-      && firstStage.errorCode === "stage_timeout"
-      && laterAttempt.createdAt >= firstAttempt.deadlineAt
+    const providerUnavailable = priorStage.schemaOutcome === "transport_error"
+      && priorStage.errorCode === "provider_unavailable"
+      && laterAttempt.createdAt < priorAttempt.deadlineAt
       && laterAttempt.deadlineAt > laterAttempt.createdAt
-      && laterAttempt.deadlineAt > firstAttempt.deadlineAt;
-    return modelContractInvalid || stageTimeout;
+      && laterAttempt.deadlineAt > priorAttempt.deadlineAt;
+    const stageTimeout = priorStage.schemaOutcome === "transport_error"
+      && priorStage.errorCode === "stage_timeout"
+      && laterAttempt.createdAt >= priorAttempt.deadlineAt
+      && laterAttempt.deadlineAt > laterAttempt.createdAt
+      && laterAttempt.deadlineAt > priorAttempt.deadlineAt;
+    return modelContractInvalid || providerUnavailable || stageTimeout;
   };
+  const retryChainLinkValid = (
+    priorAttempt: LinkedActorReplanAttempt,
+    laterAttempt: LinkedActorReplanAttempt,
+  ): boolean => retryChainDeadlineValid(priorAttempt, laterAttempt) &&
+    laterAttempt.attemptNumber === priorAttempt.attemptNumber + 1 &&
+    laterAttempt.frameHash === priorAttempt.frameHash &&
+    laterAttempt.frozenBaseWorldVersion === priorAttempt.frozenBaseWorldVersion &&
+    laterAttempt.requestedProviderId === priorAttempt.requestedProviderId &&
+    laterAttempt.requestedModel === priorAttempt.requestedModel &&
+    laterAttempt.actorJobWorkerEpoch === priorAttempt.actorJobWorkerEpoch &&
+    laterAttempt.claimTurnWorkerEpoch === priorAttempt.claimTurnWorkerEpoch &&
+    laterAttempt.modelWorkerEpoch === priorAttempt.modelWorkerEpoch + 1 &&
+    priorAttempt.retryConsumedAt === laterAttempt.createdAt;
   for (const stage of stages) {
     try {
       campaignPlayModelStageSchema.parse({
@@ -1350,33 +1369,19 @@ function validateModelStages(
     const linkedAttemptChain = linkedAttempt === undefined
       ? undefined
       : linkedAttemptChains.get(linkedAttempt.jobId);
-    const priorLinkedAttempt = linkedAttemptChain?.get(1);
-    const laterLinkedAttempt = linkedAttemptChain?.get(2);
+    const priorLinkedAttempt = linkedAttempt === undefined
+      ? undefined
+      : linkedAttemptChain?.get(linkedAttempt.attemptNumber - 1);
+    const laterLinkedAttempt = linkedAttempt === undefined
+      ? undefined
+      : linkedAttemptChain?.get(linkedAttempt.attemptNumber + 1);
     const linkedAttemptChainValid = linkedAttempt === undefined
       ? false
-      : linkedAttempt.attemptNumber === 1
-        ? laterLinkedAttempt === undefined || (
-            retryChainDeadlineValid(linkedAttempt, laterLinkedAttempt) &&
-            laterLinkedAttempt.frameHash === linkedAttempt.frameHash &&
-            laterLinkedAttempt.frozenBaseWorldVersion === linkedAttempt.frozenBaseWorldVersion &&
-            laterLinkedAttempt.requestedProviderId === linkedAttempt.requestedProviderId &&
-            laterLinkedAttempt.requestedModel === linkedAttempt.requestedModel &&
-            laterLinkedAttempt.actorJobWorkerEpoch === linkedAttempt.actorJobWorkerEpoch &&
-            laterLinkedAttempt.claimTurnWorkerEpoch === linkedAttempt.claimTurnWorkerEpoch &&
-            laterLinkedAttempt.modelWorkerEpoch === linkedAttempt.modelWorkerEpoch + 1 &&
-            linkedAttempt.retryConsumedAt === laterLinkedAttempt.createdAt
-          )
-        : priorLinkedAttempt !== undefined &&
-          priorLinkedAttempt.attemptNumber === 1 &&
-          priorLinkedAttempt.retryConsumedAt === linkedAttempt.createdAt &&
-          retryChainDeadlineValid(priorLinkedAttempt, linkedAttempt) &&
-          priorLinkedAttempt.frameHash === linkedAttempt.frameHash &&
-          priorLinkedAttempt.frozenBaseWorldVersion === linkedAttempt.frozenBaseWorldVersion &&
-          priorLinkedAttempt.requestedProviderId === linkedAttempt.requestedProviderId &&
-          priorLinkedAttempt.requestedModel === linkedAttempt.requestedModel &&
-          priorLinkedAttempt.actorJobWorkerEpoch === linkedAttempt.actorJobWorkerEpoch &&
-          priorLinkedAttempt.claimTurnWorkerEpoch === linkedAttempt.claimTurnWorkerEpoch &&
-          linkedAttempt.modelWorkerEpoch === priorLinkedAttempt.modelWorkerEpoch + 1;
+      : linkedAttempt.attemptNumber >= 1 && linkedAttempt.attemptNumber <= 3 &&
+        (linkedAttempt.attemptNumber === 1 || (
+          priorLinkedAttempt !== undefined && retryChainLinkValid(priorLinkedAttempt, linkedAttempt)
+        )) &&
+        (laterLinkedAttempt === undefined || retryChainLinkValid(linkedAttempt, laterLinkedAttempt));
     const linkedStoredIdentityValid = linkedAttempt !== undefined &&
       linkedAttempt.stageId === stage.stageId &&
       linkedAttempt.stageId === deriveCampaignPlayActorReplanStageId(linkedAttempt.jobId) &&
@@ -2258,7 +2263,7 @@ function loadRow(handle: CampaignPlayDatabaseHandle, row: TurnRow): LoadedCampai
               attempt.actor_job_worker_epoch AS actorJobWorkerEpoch,
               attempt.claim_turn_worker_epoch AS claimTurnWorkerEpoch
             FROM campaign_play_actor_replan_attempts attempt
-            WHERE attempt.model_stage_row_id = ? AND attempt.attempt_number IN (1, 2)`).get(
+            WHERE attempt.model_stage_row_id = ? AND attempt.attempt_number IN (1, 2, 3)`).get(
               actorAttempt.id,
             ) as {
               jobId: string; stageId: string; actorJobWorkerEpoch: number; claimTurnWorkerEpoch: number;

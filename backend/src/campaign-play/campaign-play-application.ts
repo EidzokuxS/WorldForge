@@ -125,6 +125,8 @@ export class CampaignPlayApplicationError extends Error {
   }
 }
 
+const CAMPAIGN_PLAY_MAX_AUTOMATIC_STAGE_ATTEMPTS = 3;
+
 export function campaignPlayMayAutomaticallyResumeExternalStage(input: {
   turnKind: LoadedCampaignPlayTurn["turnKind"];
   interruptedStage: CampaignPlayClaimableTurnStage | null;
@@ -132,19 +134,20 @@ export function campaignPlayMayAutomaticallyResumeExternalStage(input: {
     | "certified_observe" | undefined;
   errorCode: string;
   attempt: number;
-  wasResume: boolean;
-  alreadyAttemptedStages: ReadonlySet<CampaignPlayClaimableTurnStage>;
+  automaticRecoveryEnabled: boolean;
 }): boolean {
   if (
-    input.wasResume
+    !input.automaticRecoveryEnabled
     || input.interruptedStage === null
-    || input.alreadyAttemptedStages.has(input.interruptedStage)
-    || input.attempt !== 1
+    || input.attempt < 1
+    || input.attempt >= CAMPAIGN_PLAY_MAX_AUTOMATIC_STAGE_ATTEMPTS
   ) return false;
   if (input.errorCode === "provider_unavailable") return true;
   if (input.errorCode === "stage_timeout") {
     return input.turnKind === "player_action"
-      || (input.turnKind === "opening" && input.interruptedStage === "visibility_projected");
+      || (input.turnKind === "opening" &&
+        (input.interruptedStage === "admitted" ||
+          input.interruptedStage === "visibility_projected"));
   }
   if (input.turnKind !== "player_action") return false;
   if (input.errorCode !== "model_contract_invalid") return false;
@@ -744,9 +747,9 @@ export function createCampaignPlayApplication(
     resume: { interruptedStage: LoadedCampaignPlayTurn["interruptedStage"]; observedEpoch: number } | null,
   ): Promise<void> => {
     let pendingResume = resume;
+    const automaticRecoveryEnabled = resume === null;
     let pendingJudgeRecoveryFeedback: CampaignPlayJudgeRecoveryFeedback | undefined;
     let pendingGameMasterRecoveryFeedback: CampaignPlayGameMasterRecoveryFeedback | undefined;
-    const automaticResumeAttemptedStages = new Set<CampaignPlayClaimableTurnStage>();
     while (true) {
       const handle = dependencies.openDatabase(campaignId);
       try {
@@ -764,7 +767,6 @@ export function createCampaignPlayApplication(
           pendingGameMasterRecoveryFeedback,
           (feedback) => { recoveredGameMasterFeedback = feedback; },
         );
-        const wasResume = pendingResume !== null;
         const result = pendingResume
           ? await runtime.resumeInterruptedStage({
               turnId,
@@ -786,10 +788,8 @@ export function createCampaignPlayApplication(
               : undefined,
             errorCode: result.recovery.errorCode,
             attempt: result.recovery.attempt,
-            wasResume,
-            alreadyAttemptedStages: automaticResumeAttemptedStages,
+            automaticRecoveryEnabled,
           })) {
-          automaticResumeAttemptedStages.add(result.recovery.interruptedStage);
           pendingResume = {
             interruptedStage: result.recovery.interruptedStage,
             observedEpoch: result.recovery.workerEpoch,
@@ -830,83 +830,48 @@ export function createCampaignPlayApplication(
       const turn = repository.loadTurn(turnId);
       if (!turn || turn.turnKind !== "player_action" || turn.stage !== "completed") return;
       const runtime = runtimeFactory.createTurn(handle, turn.modelSelection);
-      let operation: Awaited<ReturnType<CampaignPlayTurnRuntime["runNarration"]>>;
-      operation = await runtime.runNarration(turnId, token ?? undefined);
-      if (operation === null) return;
-      if (operation.status === "complete") return;
-      if (token !== null || operation.status !== "failed" || operation.attempt !== 1) return;
-      const failedOperation = handle.sqlite.prepare(`SELECT status,
-          current_attempt AS currentAttempt, current_attempt_id AS currentAttemptId,
-          error_code AS errorCode
-        FROM campaign_play_narration_operations
-        WHERE campaign_id = ? AND operation_id = ? AND turn_id = ?`).get(
-          campaignId,
-          operation.operationId,
-          operation.turnId,
-        ) as {
-          status: string;
-          currentAttempt: number;
-          currentAttemptId: string | null;
-          errorCode: string | null;
-        } | undefined;
-      if (
-        failedOperation?.status !== "failed" || failedOperation.currentAttempt !== 1 ||
-        failedOperation.currentAttemptId !== operation.attemptId ||
-        (failedOperation.errorCode !== "narration_invalid" &&
-          failedOperation.errorCode !== "provider_unavailable" &&
-          failedOperation.errorCode !== "stage_timeout")
-      ) return;
-      const actorObservationMismatch = operation.recoveryFeedback?.diagnostic ===
-          "narrator_packet_validation_mismatch" &&
-        operation.recoveryFeedback.failedChecks.some((check) =>
-          check.check === "visible_actor_observation_mismatch");
-      // Safe compiler coordinates let the existing bypass Narrator correct the
-      // rejected arrangement directly. Without them, retain the broader
-      // default-reasoning recovery introduced for opaque semantic failures.
-      // A tool-transport rejection has no compiler coordinates. Its native JSON
-      // recovery therefore uses the same default-reasoning path as an opaque
-      // semantic failure, while retaining the frozen provider and model. Actor
-      // observation mismatches also use that default-reasoning construction so
-      // the model can repair its narration with the existing safe coordinates.
-      let recoveryRuntime = runtime;
-      if (
-        failedOperation.errorCode === "provider_unavailable" ||
-        (failedOperation.errorCode === "narration_invalid" &&
-          (operation.recoveryFeedback === undefined || actorObservationMismatch))
+      let operation = await runtime.runNarration(turnId, token ?? undefined);
+      if (token !== null) return;
+      while (
+        operation !== null && operation.status === "failed" &&
+        operation.attempt < CAMPAIGN_PLAY_MAX_AUTOMATIC_STAGE_ATTEMPTS
       ) {
-        const originalCreateModel = dependencies.createModel;
-        let recoveryStorytellerModelCreated = false;
-        dependencies.createModel = ((provider, options = {}) => {
-          if (
-            !recoveryStorytellerModelCreated &&
-            options.role === "storyteller" &&
-            options.reasoningMode === "bypass"
-          ) {
-            recoveryStorytellerModelCreated = true;
-            const { reasoningMode: _reasoningMode, ...defaultReasoningOptions } = options;
-            return originalCreateModel(provider, defaultReasoningOptions);
-          }
-          return originalCreateModel(provider, options);
-        }) as typeof originalCreateModel;
-        try {
-          recoveryRuntime = runtimeFactory.createTurn(handle, turn.modelSelection);
-        } finally {
-          dependencies.createModel = originalCreateModel;
-        }
+        const failedOperation = handle.sqlite.prepare(`SELECT status,
+            current_attempt AS currentAttempt, current_attempt_id AS currentAttemptId,
+            error_code AS errorCode
+          FROM campaign_play_narration_operations
+          WHERE campaign_id = ? AND operation_id = ? AND turn_id = ?`).get(
+            campaignId,
+            operation.operationId,
+            operation.turnId,
+          ) as {
+            status: string;
+            currentAttempt: number;
+            currentAttemptId: string | null;
+            errorCode: string | null;
+          } | undefined;
+        if (
+          failedOperation?.status !== "failed" ||
+          failedOperation.currentAttempt !== operation.attempt ||
+          failedOperation.currentAttemptId !== operation.attemptId ||
+          (failedOperation.errorCode !== "narration_invalid" &&
+            failedOperation.errorCode !== "provider_unavailable" &&
+            failedOperation.errorCode !== "stage_timeout")
+        ) return;
+        const recoveryToken = runtime.prepareNarrationRecovery({
+          operationId: operation.operationId,
+          resultId: operation.resultId,
+          narrationId: operation.narrationId,
+          packetHash: operation.packetHash,
+          receiptIds: operation.receiptIds,
+        }, "automatic");
+        operation = await runtime.runNarration(
+          turnId,
+          recoveryToken,
+          operation.recoveryFeedback,
+          "auto",
+        );
       }
-      const recoveryToken = recoveryRuntime.prepareNarrationRecovery({
-        operationId: operation.operationId,
-        resultId: operation.resultId,
-        narrationId: operation.narrationId,
-        packetHash: operation.packetHash,
-        receiptIds: operation.receiptIds,
-      }, "automatic");
-      await recoveryRuntime.runNarration(
-        turnId,
-        recoveryToken,
-        operation.recoveryFeedback,
-        "auto",
-      );
     } finally {
       handle.close();
     }

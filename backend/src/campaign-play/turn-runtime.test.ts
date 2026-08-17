@@ -3752,46 +3752,40 @@ describe("Campaign Play player-action turn runtime", () => {
       safeCompilerFeedback: true,
       actorObservationMismatch: false,
       recoveryFails: false,
-      expectedRecoveryOptions: { role: "storyteller", reasoningMode: "bypass" },
     },
     {
-      label: "uses default reasoning for visible actor observation mismatch feedback",
+      label: "keeps the frozen Narrator construction for visible actor observation feedback",
       failure: "semantic_actor" as const,
       safeCompilerFeedback: false,
       actorObservationMismatch: true,
       recoveryFails: false,
-      expectedRecoveryOptions: { role: "storyteller" },
     },
     {
-      label: "keeps actor observation mismatch recovery terminal after one failed retry",
+      label: "keeps actor observation mismatch recovery terminal after three failed attempts",
       failure: "semantic_actor" as const,
       safeCompilerFeedback: false,
       actorObservationMismatch: true,
       recoveryFails: true,
-      expectedRecoveryOptions: { role: "storyteller" },
     },
     {
-      label: "uses default reasoning when the semantic failure has no safe feedback",
+      label: "keeps the frozen Narrator construction when semantic feedback is unavailable",
       failure: "semantic_opaque" as const,
       safeCompilerFeedback: false,
       actorObservationMismatch: false,
       recoveryFails: false,
-      expectedRecoveryOptions: { role: "storyteller" },
     },
     {
-      label: "uses default reasoning with native JSON after tool transport rejection",
+      label: "keeps the frozen Narrator construction after tool transport rejection",
       failure: "provider" as const,
       safeCompilerFeedback: false,
       actorObservationMismatch: false,
       recoveryFails: false,
-      expectedRecoveryOptions: { role: "storyteller" },
     },
   ])("$label", async ({
     failure,
     safeCompilerFeedback,
     actorObservationMismatch,
     recoveryFails,
-    expectedRecoveryOptions,
   }) => {
     const prepared = await createCompletedPlayerActionForApplication();
     closeTracked(prepared.handle);
@@ -3881,7 +3875,7 @@ describe("Campaign Play player-action turn runtime", () => {
         }));
         const usesToolMode = (options.tools?.length ?? 0) > 0;
         observedStructuredOutputModes.push(usesToolMode ? "tool" : "auto");
-        if (generatedCalls === 2 && recoveryFails) {
+        if (generatedCalls >= 2 && recoveryFails) {
           throw new Error("actor observation recovery interrupted");
         }
         if (generatedCalls === 1) {
@@ -4027,14 +4021,11 @@ describe("Campaign Play player-action turn runtime", () => {
         model: "test-narrator",
         options: { role: "storyteller", reasoningMode: "bypass" },
       },
-      ...(failure === "semantic_safe" ? [] : [{
-        providerId: provider.id,
-        model: "test-narrator",
-        options: expectedRecoveryOptions,
-      }]),
     ]);
-    expect(generatedCalls).toBe(2);
-    expect(observedStructuredOutputModes).toEqual(["auto", "auto"]);
+    expect(generatedCalls).toBe(recoveryFails ? 3 : 2);
+    expect(observedStructuredOutputModes).toEqual(
+      recoveryFails ? ["auto", "auto", "auto"] : ["auto", "auto"],
+    );
     const handle = track(openCampaignPlayDatabase(CAMPAIGN_ID));
     const operation = handle.sqlite.prepare(`SELECT operation_id AS operationId,
         result_id AS resultId, turn_id AS turnId, narration_id AS narrationId,
@@ -4061,7 +4052,7 @@ describe("Campaign Play player-action turn runtime", () => {
       packetHash: prepared.pending.packetHash,
       status: recoveryFails ? "failed" : "complete",
       sourceKind: "model_accepted",
-      currentAttempt: 2,
+      currentAttempt: recoveryFails ? 3 : 2,
       errorCode: recoveryFails ? "provider_unavailable" : null,
     });
     expect(JSON.parse((operation as { receiptIdsJson: string }).receiptIdsJson))
@@ -4082,8 +4073,9 @@ describe("Campaign Play player-action turn runtime", () => {
       status: string;
       errorCode: string | null;
     }>;
-    expect(attempts).toHaveLength(2);
-    expect(new Set(attempts.map((attempt) => attempt.attemptId)).size).toBe(2);
+    expect(attempts).toHaveLength(recoveryFails ? 3 : 2);
+    expect(new Set(attempts.map((attempt) => attempt.attemptId)).size)
+      .toBe(recoveryFails ? 3 : 2);
     expect(attempts).toEqual([
       expect.objectContaining({
         operationId: prepared.pending.operationId,
@@ -4101,10 +4093,18 @@ describe("Campaign Play player-action turn runtime", () => {
         status: recoveryFails ? "failed" : "accepted",
         errorCode: recoveryFails ? "provider_unavailable" : null,
       }),
+      ...(recoveryFails ? [expect.objectContaining({
+        operationId: prepared.pending.operationId,
+        campaignId: CAMPAIGN_ID,
+        turnId: prepared.turnId,
+        attempt: 3,
+        status: "failed",
+        errorCode: "provider_unavailable",
+      })] : []),
     ]);
     expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
       FROM campaign_play_narration_attempts WHERE campaign_id = ?`).get(CAMPAIGN_ID))
-      .toEqual({ count: 2 });
+      .toEqual({ count: recoveryFails ? 3 : 2 });
     const properScene = handle.sqlite.prepare(`SELECT operation_id AS operationId, narration_id AS narrationId,
         turn_id AS turnId, packet_hash AS packetHash, attempt_id AS attemptId
       FROM campaign_play_proper_scenes
@@ -4120,7 +4120,7 @@ describe("Campaign Play player-action turn runtime", () => {
         narrationId: prepared.pending.narrationId,
         turnId: prepared.turnId,
         packetHash: prepared.pending.packetHash,
-        attemptId: attempts[1]!.attemptId,
+        attemptId: attempts.at(-1)!.attemptId,
       });
     }
     expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
@@ -4132,7 +4132,7 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(handle.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 
-  it("keeps narration failed after two invalid attempts without publishing a scene", async () => {
+  it("keeps narration failed after three invalid attempts without publishing a scene", async () => {
     const fixtureNarrator = playerNarratorFixture();
     const requests: Parameters<typeof fixtureNarrator.narrate>[0][] = [];
     const narrator: TestNarrator = {
@@ -4160,24 +4160,27 @@ describe("Campaign Play player-action turn runtime", () => {
       CAMPAIGN_ID,
       operation.operationId,
     ) as Array<{ attemptId: string; attempt: number; status: string; errorCode: string | null }>;
-    expect(narrator.narrate).toHaveBeenCalledTimes(2);
+    expect(narrator.narrate).toHaveBeenCalledTimes(3);
     expect(requests.map((request) => request.recoveryFeedback)).toEqual([
+      undefined,
       undefined,
       undefined,
     ]);
     expect(requests.map((request) => request.structuredOutputMode)).toEqual([
       "auto",
       "auto",
+      "auto",
     ]);
-    expect(attempts).toHaveLength(2);
-    expect(new Set(attempts.map((attempt) => attempt.attemptId)).size).toBe(2);
-    expect(attempts.map((attempt) => attempt.attempt)).toEqual([1, 2]);
+    expect(attempts).toHaveLength(3);
+    expect(new Set(attempts.map((attempt) => attempt.attemptId)).size).toBe(3);
+    expect(attempts.map((attempt) => attempt.attempt)).toEqual([1, 2, 3]);
     expect(attempts[0]).toMatchObject({ status: "failed", errorCode: "narration_invalid" });
     expect(attempts[1]).toMatchObject({ status: "failed", errorCode: "narration_invalid" });
+    expect(attempts[2]).toMatchObject({ status: "failed", errorCode: "narration_invalid" });
     expect(operation).toMatchObject({
       status: "failed",
       sourceKind: "model_accepted",
-      currentAttempt: 2,
+      currentAttempt: 3,
       errorCode: "narration_invalid",
     });
     expect(result.handle.sqlite.prepare(`SELECT COUNT(*) AS count
@@ -4185,7 +4188,7 @@ describe("Campaign Play player-action turn runtime", () => {
       .toEqual({ count: 0 });
     expect(playerActionMechanicsSnapshot(result.handle, result.turnId)).toEqual(result.mechanics);
     expect(createCampaignPlayReadModel(result.handle).loadState()).toMatchObject({
-      narrationOperation: { status: "failed", attempt: 2, sourceKind: "model_accepted" },
+      narrationOperation: { status: "failed", attempt: 3, sourceKind: "model_accepted" },
     });
     expect(result.handle.sqlite.prepare("PRAGMA integrity_check").get())
       .toEqual({ integrity_check: "ok" });
@@ -4441,7 +4444,7 @@ describe("Campaign Play player-action turn runtime", () => {
     );
   });
 
-  it("leaves narration failed when attempt 2 times out", async () => {
+  it("leaves narration failed when attempts 2 and 3 time out", async () => {
     const successful = playerNarratorFixture();
     let calls = 0;
     const narrator: TestNarrator = {
@@ -4469,22 +4472,23 @@ describe("Campaign Play player-action turn runtime", () => {
       CAMPAIGN_ID,
       operation.operationId,
     ) as Array<{ attempt: number; status: string; errorCode: string | null }>;
-    expect(narrator.narrate).toHaveBeenCalledTimes(2);
+    expect(narrator.narrate).toHaveBeenCalledTimes(3);
     expect(attempts).toEqual([
       { attempt: 1, status: "failed", errorCode: "narration_invalid" },
       { attempt: 2, status: "failed", errorCode: "stage_timeout" },
+      { attempt: 3, status: "failed", errorCode: "stage_timeout" },
     ]);
     expect(operation).toMatchObject({
       status: "failed",
       sourceKind: "model_accepted",
-      currentAttempt: 2,
+      currentAttempt: 3,
       errorCode: "stage_timeout",
     });
     const state = createCampaignPlayReadModel(result.handle).loadState();
     expect(state.narration).toBeNull();
     expect(state.narrationOperation).toMatchObject({
       status: "failed",
-      attempt: 2,
+      attempt: 3,
       sourceKind: "model_accepted",
     });
     expect(result.handle.sqlite.prepare(`SELECT COUNT(*) AS count
@@ -4589,7 +4593,7 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(result.handle.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 
-  it("stops after one automatic retry when the first Narrator attempt times out", async () => {
+  it("stops after three automatic Narrator timeout attempts", async () => {
     const successful = playerNarratorFixture();
     const requests: Parameters<typeof successful.narrate>[0][] = [];
     const narrator: TestNarrator = {
@@ -4617,16 +4621,25 @@ describe("Campaign Play player-action turn runtime", () => {
       CAMPAIGN_ID,
       operation.operationId,
     ) as Array<{ attempt: number; status: string; errorCode: string | null }>;
-    expect(requests.map((request) => request.structuredOutputMode)).toEqual(["auto", "auto"]);
-    expect(requests.map((request) => request.recoveryFeedback)).toEqual([undefined, undefined]);
+    expect(requests.map((request) => request.structuredOutputMode)).toEqual([
+      "auto",
+      "auto",
+      "auto",
+    ]);
+    expect(requests.map((request) => request.recoveryFeedback)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
     expect(attempts).toEqual([
       { attempt: 1, status: "failed", errorCode: "stage_timeout" },
       { attempt: 2, status: "failed", errorCode: "stage_timeout" },
+      { attempt: 3, status: "failed", errorCode: "stage_timeout" },
     ]);
     expect(operation).toMatchObject({
       status: "failed",
       sourceKind: "model_accepted",
-      currentAttempt: 2,
+      currentAttempt: 3,
       errorCode: "stage_timeout",
     });
     expect(result.handle.sqlite.prepare(`SELECT COUNT(*) AS count
@@ -4637,7 +4650,7 @@ describe("Campaign Play player-action turn runtime", () => {
       narration: null,
       narrationOperation: {
         status: "failed",
-        attempt: 2,
+        attempt: 3,
         sourceKind: "model_accepted",
       },
     });
@@ -5032,7 +5045,7 @@ describe("Campaign Play player-action turn runtime", () => {
     },
   );
 
-  it("leaves narration failed after one automatic provider-unavailable recovery", async () => {
+  it("leaves narration failed after three provider-unavailable attempts", async () => {
     const fixtureNarrator = playerNarratorFixture();
     const requests: Parameters<typeof fixtureNarrator.narrate>[0][] = [];
     const narrator: TestNarrator = {
@@ -5043,8 +5056,9 @@ describe("Campaign Play player-action turn runtime", () => {
       }),
     };
     const result = await runPendingNarrationThroughApplication(narrator);
-    expect(narrator.narrate).toHaveBeenCalledTimes(2);
+    expect(narrator.narrate).toHaveBeenCalledTimes(3);
     expect(requests.map((request) => request.structuredOutputMode)).toEqual([
+      "auto",
       "auto",
       "auto",
     ]);
@@ -5054,13 +5068,14 @@ describe("Campaign Play player-action turn runtime", () => {
       )).toEqual([
         { attempt: 1, status: "failed", errorCode: "provider_unavailable" },
         { attempt: 2, status: "failed", errorCode: "provider_unavailable" },
+        { attempt: 3, status: "failed", errorCode: "provider_unavailable" },
       ]);
     expect(result.handle.sqlite.prepare(`SELECT status, source_kind AS sourceKind,
         current_attempt AS currentAttempt, error_code AS errorCode FROM campaign_play_narration_operations
       WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, result.turnId)).toEqual({
       status: "failed",
       sourceKind: "model_accepted",
-      currentAttempt: 2,
+      currentAttempt: 3,
       errorCode: "provider_unavailable",
       });
       expect(result.handle.sqlite.prepare(`SELECT COUNT(*) AS count

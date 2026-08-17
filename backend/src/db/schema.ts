@@ -3720,9 +3720,6 @@ export const campaignPlayActorReplanAttempts = sqliteTable(
     uniqueIndex("campaign_play_actor_replan_attempts_model_stage_unique").on(
       table.modelStageRowId,
     ),
-    uniqueIndex("campaign_play_actor_replan_attempts_job_retry_unique")
-      .on(table.jobId)
-      .where(sql`${table.attemptNumber} = 2`),
     index("idx_campaign_play_actor_replan_attempts_job_order").on(
       table.campaignId,
       table.jobId,
@@ -3739,7 +3736,7 @@ export const campaignPlayActorReplanAttempts = sqliteTable(
     ),
     check(
       "campaign_play_actor_replan_attempts_identity_valid",
-      sql`${table.attemptNumber} IN (1, 2)
+      sql`${table.attemptNumber} IN (1, 2, 3)
         AND ${table.modelWorkerEpoch} > 0
         AND ${table.actorJobWorkerEpoch} > 0
         AND ${table.claimTurnWorkerEpoch} > 0
@@ -3754,7 +3751,7 @@ export const campaignPlayActorReplanAttempts = sqliteTable(
     ),
     check(
       "campaign_play_actor_replan_attempts_retry_marker_valid",
-      sql`${table.attemptNumber} = 1 OR ${table.retryConsumedAt} IS NULL`,
+      sql`${table.attemptNumber} IN (1, 2) OR ${table.retryConsumedAt} IS NULL`,
     ),
   ],
 );
