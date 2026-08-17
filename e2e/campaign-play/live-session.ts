@@ -135,9 +135,12 @@ interface CampaignPlayModelStageScalar {
   completedAt: number | null;
 }
 
+export type CoherentPlayerTurnTerminalReason = "action_resolved" | "clarification_requested";
+
 interface CoherentSettlement {
   turnId: string;
   resultId: string;
+  terminalReason: CoherentPlayerTurnTerminalReason;
   operationId: string;
   narrationId: string;
   narrationStatus: string;
@@ -163,6 +166,15 @@ function sha256(value: string): string {
 
 function sha256File(filePath: string): string {
   return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+}
+
+export function assertCoherentPlayerTurnTerminalReason(
+  value: string,
+): CoherentPlayerTurnTerminalReason {
+  if (value !== "action_resolved" && value !== "clarification_requested") {
+    throw new Error("The exact player turn does not have one coherent durable result.");
+  }
+  return value;
 }
 
 function verifyTemplateWorldSource(
@@ -642,9 +654,10 @@ function inspectCoherentSettlementCopy(input: {
       campaignId: string;
       terminalReason: string;
     }>;
-    if (results.length !== 1 || results[0]!.terminalReason !== "action_resolved") {
-      throw new Error("The exact player turn does not have one action-resolved durable result.");
+    if (results.length !== 1) {
+      throw new Error("The exact player turn does not have one coherent durable result.");
     }
+    const terminalReason = assertCoherentPlayerTurnTerminalReason(results[0]!.terminalReason);
     const resultId = sqlite.prepare(`
       SELECT result_id AS resultId, operation_id AS operationId, narration_id AS narrationId,
         packet_hash AS packetHash, turn_id AS turnId, status, source_kind AS sourceKind,
@@ -755,6 +768,7 @@ function inspectCoherentSettlementCopy(input: {
     return {
       turnId: input.turnId,
       resultId: operation.resultId,
+      terminalReason,
       operationId: operation.operationId,
       narrationId: operation.narrationId,
       narrationStatus: narrations[0]!.status,
@@ -765,7 +779,7 @@ function inspectCoherentSettlementCopy(input: {
       replayHash: captured.replayHash,
       turnSubmittedAt: turn.submittedAt,
       turnCompletedAt: turn.completedAt,
-      narrationOperationCompletedAt: operation.completedAt,
+      narrationOperationCompletedAt: operation.completedAt!,
       modelStages,
     };
   } finally {
@@ -950,7 +964,13 @@ export async function bindCampaignPlayManualDecisionCoherent(input: {
 
   const sourceHandle = openCampaignPlayDatabase(config.campaignId);
   let settlement: CoherentSettlement;
-  const copyPath = path.join(root, "probes", "settlements", `action-${pending.playerActionNumber}-${input.admittedTurnId}.sqlite`);
+  const turnEvidenceId = sha256(input.admittedTurnId).slice(0, 16);
+  const copyPath = path.join(
+    root,
+    "probes",
+    "settlements",
+    `action-${pending.playerActionNumber}-${turnEvidenceId}.sqlite`,
+  );
   try {
     await backupCampaignPlayDatabase(sourceHandle.databasePath, copyPath);
     const inspected = inspectCoherentSettlementCopy({
@@ -1025,6 +1045,7 @@ export async function bindCampaignPlayManualDecisionCoherent(input: {
     playerActionNumber: pending.playerActionNumber,
     turnId: settlement.turnId,
     resultId: settlement.resultId,
+    terminalReason: settlement.terminalReason,
     operationId: settlement.operationId,
     narrationId: settlement.narrationId,
     narrationStatus: settlement.narrationStatus,

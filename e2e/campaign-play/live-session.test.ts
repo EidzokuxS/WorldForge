@@ -11,6 +11,7 @@ import { CAMPAIGN_PLAY_EVIDENCE_VERSION, type CampaignPlayRunConfig } from "./co
 import { createDefaultSettings } from "@worldforge/shared";
 import {
   assertCampaignPlayChoiceClickProof,
+  assertCoherentPlayerTurnTerminalReason,
   assertExactPlayerInput,
   assertCampaignPlayReadyChoiceMatchesApi,
   assertCampaignPlayRenderedChoiceCapture,
@@ -135,6 +136,14 @@ function writeLiveSessionFixture(
 }
 
 describe("Campaign Play live evidence session", () => {
+  it("accepts only coherent completed player-turn outcomes", () => {
+    expect(assertCoherentPlayerTurnTerminalReason("action_resolved")).toBe("action_resolved");
+    expect(assertCoherentPlayerTurnTerminalReason("clarification_requested")).toBe("clarification_requested");
+    expect(() => assertCoherentPlayerTurnTerminalReason("terminal_failure")).toThrow(
+      "does not have one coherent durable result",
+    );
+  });
+
   it("keeps reconciling a healthy turn past the historical 120-second window", async () => {
     vi.useFakeTimers();
     try {
