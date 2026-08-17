@@ -404,21 +404,7 @@ export function createCampaignPlayTurnService(
     };
     const configuredExternalOperationDeadlineMs = handler.externalOperationDeadlineMs
       ?? input.externalOperationDeadlineMs;
-    const controlTargetAt = turn.turnKind === "player_action"
-      ? turn.submittedAt + 115_000
-      : null;
-    const remainingControlBudgetMs = controlTargetAt === null
-      ? null
-      : controlTargetAt - attemptStartedAt;
-    const externalOperationDeadlineMs = remainingControlBudgetMs === null
-      ? configuredExternalOperationDeadlineMs
-      : configuredExternalOperationDeadlineMs === undefined
-        ? remainingControlBudgetMs
-        : Math.min(configuredExternalOperationDeadlineMs, remainingControlBudgetMs);
-    const deadlineLimitedByControl = controlTargetAt !== null &&
-      (configuredExternalOperationDeadlineMs === undefined ||
-        (externalOperationDeadlineMs !== undefined &&
-          externalOperationDeadlineMs < configuredExternalOperationDeadlineMs));
+    const externalOperationDeadlineMs = configuredExternalOperationDeadlineMs;
     if (
       configuredExternalOperationDeadlineMs !== undefined &&
       !isSafePositiveInteger(configuredExternalOperationDeadlineMs)
@@ -530,10 +516,7 @@ export function createCampaignPlayTurnService(
       return interrupt(
         token,
         attemptStartedAt,
-        interruptionEvidence(
-          deadlineLimitedByControl ? "stage_budget_exceeded" : "stage_timeout",
-          now() - attemptStartedAt,
-        ),
+        interruptionEvidence("stage_timeout", now() - attemptStartedAt),
         queueTimeMs,
         renewalCount,
         attempt,

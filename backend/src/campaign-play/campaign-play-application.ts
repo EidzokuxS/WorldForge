@@ -58,6 +58,7 @@ import {
   CampaignPlayTurnRepositoryError,
   type CampaignPlayModelPricing,
   type CampaignPlayRequestedModel,
+  type CampaignPlayClaimableTurnStage,
   type CampaignPlayTurnModelSelection,
   type LoadedCampaignPlayTurn,
 } from "./campaign-play-turn-repository.js";
@@ -92,10 +93,13 @@ import type { CampaignPlayGameMasterRecoveryFeedback } from "./game-master.js";
 
 const LEASE_DURATION_MS = 150_000;
 const HEARTBEAT_INTERVAL_MS = 10_000;
-const PLAYER_ACTION_JUDGE_OPERATION_DEADLINE_MS = 45_000;
-const PLAYER_ACTION_GAME_MASTER_OPERATION_DEADLINE_MS = 45_000;
-const PLAYER_ACTION_GAME_MASTER_SAFE_RECOVERY_OPERATION_DEADLINE_MS = 90_000;
-const ACTOR_REPLANNER_OPERATION_DEADLINE_MS = 90_000;
+const SINGLE_MODEL_OPERATION_DEADLINE_MS = 180_000;
+const REVIEWED_MODEL_OPERATION_DEADLINE_MS = 365_000;
+const PLAYER_ACTION_JUDGE_OPERATION_DEADLINE_MS = SINGLE_MODEL_OPERATION_DEADLINE_MS;
+const PLAYER_ACTION_GAME_MASTER_OPERATION_DEADLINE_MS = REVIEWED_MODEL_OPERATION_DEADLINE_MS;
+const PLAYER_ACTION_GAME_MASTER_SAFE_RECOVERY_OPERATION_DEADLINE_MS =
+  REVIEWED_MODEL_OPERATION_DEADLINE_MS;
+const ACTOR_REPLANNER_OPERATION_DEADLINE_MS = REVIEWED_MODEL_OPERATION_DEADLINE_MS;
 const MAXIMUM_INPUT_TOKENS = 64_000;
 export const CAMPAIGN_PLAY_MINIMUM_OUTPUT_TOKENS = 32_768;
 const MAXIMUM_COST_MICROS = Number.MAX_SAFE_INTEGER;
@@ -123,15 +127,20 @@ export class CampaignPlayApplicationError extends Error {
 
 export function campaignPlayMayAutomaticallyResumeExternalStage(input: {
   turnKind: LoadedCampaignPlayTurn["turnKind"];
-  interruptedStage: LoadedCampaignPlayTurn["interruptedStage"];
+  interruptedStage: CampaignPlayClaimableTurnStage | null;
   routeKind: "full_authority" | "certified_move" | "certified_wait" | "certified_contact"
     | "certified_observe" | undefined;
   errorCode: string;
   attempt: number;
   wasResume: boolean;
-  alreadyAttempted: boolean;
+  alreadyAttemptedStages: ReadonlySet<CampaignPlayClaimableTurnStage>;
 }): boolean {
-  if (input.wasResume || input.alreadyAttempted || input.attempt !== 1) return false;
+  if (
+    input.wasResume
+    || input.interruptedStage === null
+    || input.alreadyAttemptedStages.has(input.interruptedStage)
+    || input.attempt !== 1
+  ) return false;
   if (input.errorCode === "provider_unavailable") return true;
   if (input.errorCode === "stage_timeout") {
     return input.turnKind === "player_action"
@@ -289,6 +298,18 @@ function requestedModel(role: ResolvedRole): CampaignPlayRequestedModel {
 
 export function campaignPlayMaximumOutputTokens(configuredTokens: number): number {
   return Math.max(CAMPAIGN_PLAY_MINIMUM_OUTPUT_TOKENS, configuredTokens);
+}
+
+export function campaignPlayOpeningOperationDeadlineMs(): number {
+  return REVIEWED_MODEL_OPERATION_DEADLINE_MS;
+}
+
+export function campaignPlayJudgeOperationDeadlineMs(): number {
+  return PLAYER_ACTION_JUDGE_OPERATION_DEADLINE_MS;
+}
+
+export function campaignPlayActorReplannerOperationDeadlineMs(): number {
+  return ACTOR_REPLANNER_OPERATION_DEADLINE_MS;
 }
 
 export function campaignPlayGameMasterOperationDeadlineMs(
@@ -500,6 +521,7 @@ export function createCampaignPlayApplication(
       owner: dependencies.owner,
       leaseDurationMs: LEASE_DURATION_MS,
       heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
+      externalOperationDeadlineMs: REVIEWED_MODEL_OPERATION_DEADLINE_MS,
       openingPlannerModel: {
         languageModel: dependencies.createModel(generator.provider, {
           role: "generator",
@@ -510,7 +532,10 @@ export function createCampaignPlayApplication(
         maxOutputTokens: openingMaximumOutputTokens,
       },
       narratorModel: {
-        languageModel: dependencies.createModel(storyteller.provider, { role: "storyteller" }),
+        languageModel: dependencies.createModel(storyteller.provider, {
+          role: "storyteller",
+          reasoningMode: "bypass",
+        }),
         requested: narratorRequested,
         temperature: storyteller.temperature,
         maximumInputTokens: MAXIMUM_INPUT_TOKENS,
@@ -578,11 +603,11 @@ export function createCampaignPlayApplication(
       owner: dependencies.owner,
       leaseDurationMs: LEASE_DURATION_MS,
       heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
-      externalOperationDeadlineMs: PLAYER_ACTION_JUDGE_OPERATION_DEADLINE_MS,
+      externalOperationDeadlineMs: campaignPlayJudgeOperationDeadlineMs(),
       gameMasterOperationDeadlineMs: campaignPlayGameMasterOperationDeadlineMs(
         gameMasterRecoveryFeedback,
       ),
-      actorReplannerOperationDeadlineMs: ACTOR_REPLANNER_OPERATION_DEADLINE_MS,
+      actorReplannerOperationDeadlineMs: campaignPlayActorReplannerOperationDeadlineMs(),
       clock,
       uncertaintySeedKey: dependencies.uncertaintySeedKey(
         handle.campaignId,
@@ -721,18 +746,14 @@ export function createCampaignPlayApplication(
     let pendingResume = resume;
     let pendingJudgeRecoveryFeedback: CampaignPlayJudgeRecoveryFeedback | undefined;
     let pendingGameMasterRecoveryFeedback: CampaignPlayGameMasterRecoveryFeedback | undefined;
-    let automaticResumeAttempted = false;
+    const automaticResumeAttemptedStages = new Set<CampaignPlayClaimableTurnStage>();
     while (true) {
       const handle = dependencies.openDatabase(campaignId);
       try {
         const repository = createCampaignPlayTurnRepository(handle);
         const before = repository.loadTurn(turnId);
         if (!before || before.stage === "completed" || before.stage === "failed") return;
-        const controlTargetAt = before.submittedAt + 115_000;
-        if (
-          before.stage === "interrupted" && pendingResume === null &&
-          (before.turnKind !== "player_action" || dependencies.now() < controlTargetAt)
-        ) return;
+        if (before.stage === "interrupted" && pendingResume === null) return;
         let recoveredJudgeFeedback: CampaignPlayJudgeRecoveryFeedback | undefined;
         let recoveredGameMasterFeedback: CampaignPlayGameMasterRecoveryFeedback | undefined;
         const runtime = runtimeForTurn(
@@ -743,17 +764,6 @@ export function createCampaignPlayApplication(
           pendingGameMasterRecoveryFeedback,
           (feedback) => { recoveredGameMasterFeedback = feedback; },
         );
-        const turnRuntime = before.turnKind === "player_action"
-          ? runtime as CampaignPlayTurnRuntime
-          : null;
-        if (
-          before.turnKind === "player_action" &&
-          dependencies.now() >= controlTargetAt &&
-          turnRuntime?.commitControlBudgetContinuity
-        ) {
-          await turnRuntime.commitControlBudgetContinuity(turnId, "control_deadline");
-          return;
-        }
         const wasResume = pendingResume !== null;
         const result = pendingResume
           ? await runtime.resumeInterruptedStage({
@@ -767,30 +777,6 @@ export function createCampaignPlayApplication(
         const nextGameMasterRecoveryFeedback = recoveredGameMasterFeedback;
         pendingJudgeRecoveryFeedback = undefined;
         pendingGameMasterRecoveryFeedback = undefined;
-        if (
-          before.turnKind === "player_action" &&
-          turnRuntime?.commitControlBudgetContinuity &&
-          result.recovery.kind === "explicit_resume_required" &&
-          (result.recovery.errorCode === "stage_budget_exceeded" ||
-            dependencies.now() >= controlTargetAt)
-        ) {
-          await turnRuntime.commitControlBudgetContinuity(turnId, "authority_budget");
-          return;
-        }
-        if (
-          before.turnKind === "player_action" &&
-          turnRuntime?.commitControlBudgetContinuity &&
-          automaticResumeAttempted &&
-          wasResume &&
-          result.recovery.kind === "explicit_resume_required" &&
-          result.recovery.attempt === 2 &&
-          (result.recovery.errorCode === "model_contract_invalid" ||
-            result.recovery.errorCode === "stage_timeout" ||
-            result.recovery.errorCode === "provider_unavailable")
-        ) {
-          await turnRuntime.commitControlBudgetContinuity(turnId, "authority_budget");
-          return;
-        }
         if (result.recovery.kind === "explicit_resume_required" &&
           campaignPlayMayAutomaticallyResumeExternalStage({
             turnKind: before.turnKind,
@@ -801,9 +787,9 @@ export function createCampaignPlayApplication(
             errorCode: result.recovery.errorCode,
             attempt: result.recovery.attempt,
             wasResume,
-            alreadyAttempted: automaticResumeAttempted,
+            alreadyAttemptedStages: automaticResumeAttemptedStages,
           })) {
-          automaticResumeAttempted = true;
+          automaticResumeAttemptedStages.add(result.recovery.interruptedStage);
           pendingResume = {
             interruptedStage: result.recovery.interruptedStage,
             observedEpoch: result.recovery.workerEpoch,
@@ -844,36 +830,11 @@ export function createCampaignPlayApplication(
       const turn = repository.loadTurn(turnId);
       if (!turn || turn.turnKind !== "player_action" || turn.stage !== "completed") return;
       const runtime = runtimeFactory.createTurn(handle, turn.modelSelection);
-      const commitContinuity = (fallbackReason: "narration_budget" | "control_deadline"): boolean => {
-        const latest = repository.loadTurn(turnId);
-        if (
-          !latest || latest.turnKind !== "player_action" || latest.stage !== "completed" ||
-          !runtime.commitNarrationContinuity
-        ) return false;
-        const committedAt = dependencies.now();
-        if (committedAt >= latest.submittedAt + 120_000) return false;
-        runtime.commitNarrationContinuity(
-          turnId,
-          committedAt >= latest.submittedAt + 115_000 ? "control_deadline" : fallbackReason,
-        );
-        return true;
-      };
       let operation: Awaited<ReturnType<CampaignPlayTurnRuntime["runNarration"]>>;
-      try {
-        operation = await runtime.runNarration(turnId, token ?? undefined);
-      } catch (error) {
-        if (commitContinuity("narration_budget")) return;
-        throw error;
-      }
-      if (operation === null) {
-        if (commitContinuity("narration_budget")) return;
-        return;
-      }
+      operation = await runtime.runNarration(turnId, token ?? undefined);
+      if (operation === null) return;
       if (operation.status === "complete") return;
-      if (token !== null || operation.status !== "failed" || operation.attempt !== 1) {
-        if (operation.status === "failed" && token === null && commitContinuity("narration_budget")) return;
-        return;
-      }
+      if (token !== null || operation.status !== "failed" || operation.attempt !== 1) return;
       const failedOperation = handle.sqlite.prepare(`SELECT status,
           current_attempt AS currentAttempt, current_attempt_id AS currentAttemptId,
           error_code AS errorCode
@@ -894,14 +855,7 @@ export function createCampaignPlayApplication(
         (failedOperation.errorCode !== "narration_invalid" &&
           failedOperation.errorCode !== "provider_unavailable" &&
           failedOperation.errorCode !== "stage_timeout")
-      ) {
-        if (commitContinuity("narration_budget")) return;
-        return;
-      }
-      if (dependencies.now() >= turn.submittedAt + 115_000) {
-        if (commitContinuity("control_deadline")) return;
-        return;
-      }
+      ) return;
       const actorObservationMismatch = operation.recoveryFeedback?.diagnostic ===
           "narrator_packet_validation_mismatch" &&
         operation.recoveryFeedback.failedChecks.some((check) =>
@@ -940,26 +894,19 @@ export function createCampaignPlayApplication(
           dependencies.createModel = originalCreateModel;
         }
       }
-      try {
-        const recoveryToken = recoveryRuntime.prepareNarrationRecovery({
-          operationId: operation.operationId,
-          resultId: operation.resultId,
-          narrationId: operation.narrationId,
-          packetHash: operation.packetHash,
-          receiptIds: operation.receiptIds,
-        }, "automatic");
-        const recovery = await recoveryRuntime.runNarration(
-          turnId,
-          recoveryToken,
-          operation.recoveryFeedback,
-          "auto",
-        );
-        if (recovery?.status === "complete") return;
-      } catch (error) {
-        if (commitContinuity("narration_budget")) return;
-        throw error;
-      }
-      if (commitContinuity("narration_budget")) return;
+      const recoveryToken = recoveryRuntime.prepareNarrationRecovery({
+        operationId: operation.operationId,
+        resultId: operation.resultId,
+        narrationId: operation.narrationId,
+        packetHash: operation.packetHash,
+        receiptIds: operation.receiptIds,
+      }, "automatic");
+      await recoveryRuntime.runNarration(
+        turnId,
+        recoveryToken,
+        operation.recoveryFeedback,
+        "auto",
+      );
     } finally {
       handle.close();
     }
@@ -1047,16 +994,6 @@ export function createCampaignPlayApplication(
           return;
         }
         const runtime = runtimeForTurn(handle, active);
-        if (
-          active.turnKind === "player_action" &&
-          active.workerLeaseOwner === null &&
-          dependencies.now() >= active.submittedAt + 115_000 &&
-          "commitControlBudgetContinuity" in runtime &&
-          typeof runtime.commitControlBudgetContinuity === "function"
-        ) {
-          await runtime.commitControlBudgetContinuity(active.turnId, "control_deadline");
-          return;
-        }
         const result = await runtime.recoverActiveTurn();
         if (!result) return;
         if (result.recovery.kind === "external_in_flight") {

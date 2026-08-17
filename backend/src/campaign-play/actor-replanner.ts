@@ -45,6 +45,8 @@ import {
   type CampaignPlayActorReplanProposal,
 } from "./actor-replan-prompts.js";
 
+const CAMPAIGN_PLAY_ACTOR_REPLANNER_MODEL_CALL_TIMEOUT_MS = 180_000;
+
 const log = createLogger("campaign-play-actor-replanner");
 
 export interface CampaignPlayActorReplanRequest {
@@ -1199,6 +1201,7 @@ export function createCampaignPlayActorReplanner(
               allowTextFallback: false,
               retries: 1,
               abortSignal: operation.signal,
+              timeout: { totalMs: CAMPAIGN_PLAY_ACTOR_REPLANNER_MODEL_CALL_TIMEOUT_MS },
             }));
           } catch (cause) {
             safeGenerationCode = getSafeGenerateObjectErrorCode(cause);
@@ -1288,6 +1291,7 @@ export function createCampaignPlayActorReplanner(
               allowTextFallback: false,
               retries: 1,
               abortSignal: operation.signal,
+              timeout: { totalMs: CAMPAIGN_PLAY_ACTOR_REPLANNER_MODEL_CALL_TIMEOUT_MS },
             }));
           } catch (cause) {
             safeGenerationCode = getSafeGenerateObjectErrorCode(cause);

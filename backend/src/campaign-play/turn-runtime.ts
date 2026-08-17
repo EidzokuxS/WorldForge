@@ -393,14 +393,6 @@ export interface CampaignPlayTurnRuntime {
   runNextStage(turnId: string): Promise<CampaignPlayTurnServiceResult>;
   recoverActiveTurn(): Promise<CampaignPlayTurnServiceResult | null>;
   resumeInterruptedStage(input: ResumeCampaignPlayTurnInput): Promise<CampaignPlayTurnServiceResult>;
-  commitControlBudgetContinuity?(
-    turnId: string,
-    reason: "authority_budget" | "narration_budget" | "control_deadline",
-  ): LoadedCampaignPlayTurn;
-  commitNarrationContinuity?(
-    turnId: string,
-    reason: "narration_budget" | "control_deadline",
-  ): CampaignPlayNarrationOperation;
   runNarration(
     turnId: string,
     claimedToken?: CampaignPlayNarrationAttemptToken,
@@ -2251,51 +2243,6 @@ function playerActionContext(
   });
 }
 
-function controlBudgetContinuityPacket(
-  handle: CampaignPlayDatabaseHandle,
-  turn: LoadedCampaignPlayTurn,
-  repository: ReturnType<typeof createCampaignPlayTurnRepository>,
-): CampaignPlayNarratorPacket {
-  const admission = loadCampaignPlayPlayerActionAdmissionFrame(turn);
-  const mechanical = loadCampaignPlayRulebookFrame(handle);
-  const state = createCampaignPlayStateRepository(handle).loadState();
-  if (!state) {
-    throw new CampaignPlayTurnRuntimeError(
-      "turn_state_invalid",
-      "Campaign Play continuity requires the authoritative play state.",
-    );
-  }
-  const source = admission.sourcePacket;
-  const actionContext = repository.loadAcceptedModelArtifact(turn.turnId, "judge")
-    ? playerActionContext(turn, repository)
-    : campaignPlayActionContextSchema.parse({
-        submittedText: admission.judgeInput.originalText,
-        intentKind: admission.judgeInput.choiceHandle === null
-          ? "attempt"
-          : admission.choiceBindings.find((choice) =>
-              choice.handle === admission.judgeInput.choiceHandle)?.kind ?? "attempt",
-        disposition: "uncertain",
-        result: "no_effect",
-        clarificationQuestion: null,
-      });
-  return campaignPlayNarratorPacketSchema.parse({
-    ...source,
-    campaignId: turn.campaignId,
-    turnId: turn.turnId,
-    turnKind: "player_action",
-    openingContext: null,
-    actionContext,
-    sourceMoment: admission.sourceMoment.displayText,
-    acceptedWorldVersion: mechanical.acceptedWorldVersion,
-    worldVersion: mechanical.worldVersion,
-    runtimeRevision: state.authority.runtimeRevision + 1,
-    newObservations: [],
-    consequences: [],
-    observationSubjects: [],
-    elapsedMinutes: 0,
-  });
-}
-
 function pendingPlayerNarration(
   handle: CampaignPlayDatabaseHandle,
   turn: LoadedCampaignPlayTurn,
@@ -2537,16 +2484,7 @@ export function createCampaignPlayTurnRuntime(
   ): "auto" | "tool" => {
     if (attempt <= 1) return "auto";
     if (kind === "judge") {
-      if (input.judgeRecoveryFeedback !== undefined) return "auto";
-      const previous = input.handle.sqlite.prepare(`SELECT error_code AS errorCode
-        FROM campaign_play_model_stages
-        WHERE campaign_id = ? AND turn_id = ? AND kind = ? AND attempt = ?`).get(
-        input.handle.campaignId,
-        turnId,
-        kind,
-        attempt - 1,
-      ) as { errorCode: string | null } | undefined;
-      return previous?.errorCode === "stage_timeout" ? "auto" : "tool";
+      return "auto";
     }
     const previous = input.handle.sqlite.prepare(`SELECT error_code AS errorCode
       FROM campaign_play_model_stages
@@ -3460,29 +3398,19 @@ export function createCampaignPlayTurnRuntime(
             }
             if (outcome.kind === "replan_required") {
               const replanningStartedAt = now();
-              const controlTargetAt = context.turn.submittedAt + 115_000;
-              const actorControlDeadlineAt = Math.min(
-                controlTargetAt - 30_000,
-                replanningStartedAt + 30_000,
-              );
+              const actorControlDeadlineAt = replanningStartedAt + actorReplannerOperationDeadlineMs;
+              if (!Number.isSafeInteger(actorControlDeadlineAt)) {
+                throw new CampaignPlayTurnRuntimeError(
+                  "turn_state_invalid",
+                  "Campaign Play actor deadline exceeds the timestamp range.",
+                );
+              }
               if (acceptedActorReplanCount(context.turn.turnId) >= actorCriticalPathReplanLimit) {
                 const deferred = actorProposalService.deferReplan({
                   jobId: outcome.jobId,
                   token: context.token,
                   createdAt: replanningStartedAt,
-                  reason: actorControlDeadlineAt <= replanningStartedAt
-                    ? "control_budget"
-                    : "replan_capacity",
-                });
-                releaseActorBoundary(context.token, outcome.jobId, deferred.kind);
-                return;
-              }
-              if (actorControlDeadlineAt <= replanningStartedAt) {
-                const deferred = actorProposalService.deferReplan({
-                  jobId: outcome.jobId,
-                  token: context.token,
-                  createdAt: replanningStartedAt,
-                  reason: "control_budget",
+                  reason: "replan_capacity",
                 });
                 releaseActorBoundary(context.token, outcome.jobId, deferred.kind);
                 return;
@@ -3618,81 +3546,6 @@ export function createCampaignPlayTurnRuntime(
       return null;
     },
   });
-
-  const commitControlBudgetContinuity = (
-    turnId: string,
-    reason: "authority_budget" | "narration_budget" | "control_deadline",
-  ): LoadedCampaignPlayTurn => {
-    const turn = repository.loadTurn(turnId);
-    const committedAt = now();
-    if (
-      !turn || turn.turnKind !== "player_action" || turn.stage === "failed" ||
-      committedAt >= turn.submittedAt + 120_000
-    ) {
-      throw new CampaignPlayTurnRuntimeError(
-        "turn_state_invalid",
-        "Campaign Play control-budget continuity reached its durable boundary.",
-      );
-    }
-    if (turn.stage === "visibility_projected") {
-      narrationOperations.commitVisibleResult(turnId, committedAt);
-      const completed = repository.loadTurn(turnId);
-      if (!completed) {
-        throw new CampaignPlayTurnRuntimeError(
-          "turn_state_invalid",
-          "Campaign Play visible result disappeared before continuity commit.",
-        );
-      }
-      narrationOperations.commitContinuity(turnId, committedAt,
-        reason === "authority_budget" ? "authority_budget" : "control_deadline");
-      return repository.loadTurn(turnId)!;
-    }
-    if (turn.stage === "completed") {
-      narrationOperations.commitContinuity(turnId, committedAt,
-        reason === "authority_budget" ? "authority_budget" : "control_deadline");
-      return repository.loadTurn(turnId)!;
-    }
-    const packet = controlBudgetContinuityPacket(input.handle, turn, repository);
-    repository.commitControlBudgetContinuity({
-      turnId,
-      packet,
-      reason,
-      committedAt,
-      mutationId: runtimeId("player-control-budget-continuity", {
-        turnId,
-        reason,
-        submittedAt: turn.submittedAt,
-      }),
-    });
-    narrationOperations.commitVisibleResult(turnId, committedAt);
-    narrationOperations.commitContinuity(turnId, committedAt, reason);
-    const completed = repository.loadTurn(turnId);
-    if (!completed) {
-      throw new CampaignPlayTurnRuntimeError(
-        "turn_state_invalid",
-        "Campaign Play control-budget continuity turn disappeared after commit.",
-      );
-    }
-    return completed;
-  };
-
-  const commitNarrationContinuity = (
-    turnId: string,
-    reason: "narration_budget" | "control_deadline",
-  ): CampaignPlayNarrationOperation => {
-    const turn = repository.loadTurn(turnId);
-    const completedAt = now();
-    if (
-      !turn || turn.turnKind !== "player_action" || turn.stage !== "completed" ||
-      completedAt >= turn.submittedAt + 120_000
-    ) {
-      throw new CampaignPlayTurnRuntimeError(
-        "turn_state_invalid",
-        "Campaign Play narration continuity reached its durable boundary.",
-      );
-    }
-    return narrationOperations.commitContinuity(turnId, completedAt, reason);
-  };
 
   return {
     admitAction(admission) {
@@ -3906,10 +3759,7 @@ export function createCampaignPlayTurnRuntime(
         maximumTotalTokens: input.actorReplannerModel.maximumTotalTokens,
         maximumCostMicros: input.actorReplannerModel.maximumCostMicros,
         externalOperationDeadlineMs: actorReplannerOperationDeadlineMs,
-        controlDeadlineAt: Math.min(
-          turn.submittedAt + 115_000 - 30_000,
-          resumedAt + 30_000,
-        ),
+        controlDeadlineAt: resumedAt + actorReplannerOperationDeadlineMs,
         deferOnControlBudgetExhaustion: true,
         signal: controller.signal,
         createdAt: resumedAt,
@@ -3953,8 +3803,6 @@ export function createCampaignPlayTurnRuntime(
       }
       return token;
     },
-    commitControlBudgetContinuity,
-    commitNarrationContinuity,
     loadTurn: (turnId) => repository.loadTurn(turnId),
     loadTelemetry: (turnId) => repository.loadTurnTelemetry(turnId),
   };

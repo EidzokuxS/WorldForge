@@ -6,7 +6,6 @@ import type {
 } from "@worldforge/shared";
 import type { CampaignPlayDatabaseHandle } from "./campaign-play-database.js";
 import {
-  buildCampaignPlaySuggestedActionLabel,
   campaignPlayNarrationSchema,
   campaignPlayNarratorPacketSchema,
   campaignPlaySseEventSchema,
@@ -23,8 +22,8 @@ import type {
   CampaignPlayRequestedModel,
 } from "./campaign-play-turn-repository.js";
 
-export const CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS = 90_000;
-export const CAMPAIGN_PLAY_MANUAL_NARRATION_WINDOW_MS = 90_000;
+export const CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS = 180_000;
+export const CAMPAIGN_PLAY_MANUAL_NARRATION_WINDOW_MS = 180_000;
 
 export type CampaignPlayNarrationRecoveryKind = "automatic" | "manual";
 
@@ -280,14 +279,7 @@ export function createCampaignPlayNarrationOperationRepository(
         "Campaign Play visible result lacks its immutable narration packet.",
       );
     }
-    // A player-action turn that reaches the internal completion target is
-    // committed directly through the deterministic continuity path.  Keep
-    // the pending operation self-fenced in that narrow race window instead
-    // of creating an already-expired operation that cannot be persisted.
-    const automaticDeadlineAt = Math.max(completedAt, Math.min(
-      completedAt + CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS,
-      turn.submittedAt + 115_000,
-    ));
+    const automaticDeadlineAt = completedAt + CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS;
     if (!Number.isSafeInteger(automaticDeadlineAt) || automaticDeadlineAt < completedAt) {
       throw new CampaignPlayNarrationOperationError(
         "operation_fence_lost",
@@ -595,187 +587,6 @@ export function createCampaignPlayNarrationOperationRepository(
     return { ...token, expiresAt: effectiveLeaseExpiresAt };
   }).immediate();
 
-  const commitContinuity = (
-    turnId: string,
-    completedAt: number,
-    reason: "authority_budget" | "narration_budget" | "control_deadline",
-  ): CampaignPlayNarrationOperation => handle.sqlite.transaction(() => {
-    const operation = selectOperation(handle, "turn_id", turnId);
-    if (!operation) {
-      throw new CampaignPlayNarrationOperationError(
-        "operation_not_found",
-        "Campaign Play narration operation was not found.",
-      );
-    }
-    const existingScene = handle.sqlite.prepare(`SELECT artifact_hash AS artifactHash
-      FROM campaign_play_proper_scenes WHERE operation_id = ?`).get(
-        operation.operationId,
-      ) as { artifactHash: string } | undefined;
-    if (operation.status === "complete" && existingScene) return operationView(operation);
-    if (operation.status === "running") {
-      throw new CampaignPlayNarrationOperationError(
-        "operation_fence_lost",
-        "Campaign Play narration continuity cannot replace a running model attempt.",
-      );
-    }
-    const turn = handle.sqlite.prepare(`SELECT submitted_at AS submittedAt
-      FROM campaign_play_turns WHERE campaign_id = ? AND id = ?`).get(
-        handle.campaignId,
-        turnId,
-      ) as { submittedAt: number } | undefined;
-    if (
-      !turn || completedAt < operation.updatedAt ||
-      completedAt >= turn.submittedAt + 120_000 ||
-      currentResultTurnId(handle) !== turnId
-    ) {
-      throw new CampaignPlayNarrationOperationError(
-        "operation_fence_lost",
-        "Campaign Play narration continuity arrived outside its durable control boundary.",
-      );
-    }
-    const packet = packetForOperation(handle, operation);
-    const parsedPacket = campaignPlayNarratorPacketSchema.parse(JSON.parse(packet.packetJson) as unknown);
-    if (parsedPacket.turnKind !== "player_action" || parsedPacket.sourceMoment === null) {
-      throw new CampaignPlayNarrationOperationError(
-        "operation_corrupt",
-        "Campaign Play continuity lacks the exact prior public moment.",
-      );
-    }
-    const displayText = parsedPacket.sourceMoment;
-    const beatId = `beat:${hashCampaignPlayProjection({
-      domain: "campaign_play_continuity_beat",
-      operationId: operation.operationId,
-      packetHash: operation.packetHash,
-      sourceMoment: displayText,
-    }).slice(0, 40)}`;
-    const narration = campaignPlayNarrationSchema.parse({
-      narrationId: operation.narrationId,
-      turnId: operation.turnId,
-      beats: [{ beatId, text: displayText }],
-      displayText,
-      suggestedActions: parsedPacket.availableIntents.slice(0, 4).map((intent) => ({
-        choiceHandle: intent.handle,
-        label: intent.kind === "move" || intent.kind === "wait"
-          ? buildCampaignPlaySuggestedActionLabel(parsedPacket, intent, null)
-          : buildCampaignPlaySuggestedActionLabel(parsedPacket, intent, intent.label),
-      })),
-      effects: [{ kind: "flash", beatId }],
-      createdAt: completedAt,
-    });
-    const turnSelection = handle.sqlite.prepare(`SELECT model_selection_json AS modelSelectionJson
-      FROM campaign_play_turns WHERE campaign_id = ? AND id = ?`).get(
-        handle.campaignId,
-        turnId,
-      ) as { modelSelectionJson: string } | undefined;
-    let requestedProviderId: string | undefined;
-    let requestedModel: string | undefined;
-    try {
-      const selection = JSON.parse(turnSelection?.modelSelectionJson ?? "null") as {
-        narrator?: { providerId?: unknown; model?: unknown };
-      } | null;
-      requestedProviderId = typeof selection?.narrator?.providerId === "string"
-        ? selection.narrator.providerId
-        : undefined;
-      requestedModel = typeof selection?.narrator?.model === "string"
-        ? selection.narrator.model
-        : undefined;
-    } catch {
-      requestedProviderId = undefined;
-      requestedModel = undefined;
-    }
-    if (!requestedProviderId || !requestedModel) {
-      throw new CampaignPlayNarrationOperationError(
-        "operation_corrupt",
-        "Campaign Play continuity lacks frozen narrator model identity.",
-      );
-    }
-    // A continuity scene is not a third model attempt.  Reuse the terminal
-    // failed attempt as its truthful evidence, or record one failed attempt
-    // when the operation never reached a provider.  This keeps the existing
-    // attempt cap and late-result fences intact while still giving the scene
-    // an immutable attempt relationship.
-    const attempt = operation.currentAttempt > 0 ? operation.currentAttempt : 1;
-    // A continuity result can be committed before the Narrator claims its
-    // pending operation.  Such an operation still has lease_epoch 0, while
-    // narration attempts require a positive worker epoch.  Start the
-    // truthful deterministic attempt at epoch 1 in that narrow path; claimed
-    // or failed model attempts retain their immutable epoch.
-    const workerEpoch = Math.max(operation.leaseEpoch, 1);
-    const attemptId = operation.currentAttemptId ?? `narration-attempt:${hashCampaignPlayProjection({
-      domain: "campaign_play_deterministic_continuity_attempt",
-      operationId: operation.operationId,
-      attempt,
-      workerEpoch,
-      reason,
-    }).slice(0, 40)}`;
-    const artifactHash = hashCampaignPlayProjection({
-      domain: "campaign_play_deterministic_continuity_scene",
-      operationId: operation.operationId,
-      packetHash: operation.packetHash,
-      narration,
-    });
-    if (operation.currentAttemptId === null) {
-      handle.sqlite.prepare(`INSERT INTO campaign_play_narration_attempts (
-        attempt_id, operation_id, campaign_id, turn_id, attempt, status, worker_epoch,
-        requested_provider_id, requested_model, requested_strategy, duration_ms,
-        schema_outcome, error_code, created_at, completed_at
-      ) VALUES (?, ?, ?, ?, ?, 'failed', ?, ?, ?, 'strict_object', 0,
-        'transport_error', 'stage_budget_exceeded', ?, ?)`).run(
-          attemptId,
-          operation.operationId,
-          handle.campaignId,
-          turnId,
-          attempt,
-          workerEpoch,
-          requestedProviderId,
-          requestedModel,
-          completedAt,
-          completedAt,
-        );
-    }
-    handle.sqlite.prepare(`INSERT INTO campaign_play_proper_scenes (
-      narration_id, operation_id, campaign_id, turn_id, packet_hash, attempt_id,
-      beats_json, display_text, suggested_actions_json, effects_json, artifact_hash, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-      narration.narrationId,
-      operation.operationId,
-      handle.campaignId,
-      turnId,
-      operation.packetHash,
-      attemptId,
-      canonicalizeCampaignPlayProjection(narration.beats),
-      narration.displayText,
-      canonicalizeCampaignPlayProjection(narration.suggestedActions),
-      canonicalizeCampaignPlayProjection(narration.effects),
-      artifactHash,
-      completedAt,
-    );
-    const updated = handle.sqlite.prepare(`UPDATE campaign_play_narration_operations
-      SET status = 'complete', source_kind = 'deterministic_continuity',
-        current_attempt = ?, current_attempt_id = ?, lease_epoch = ?,
-        error_code = NULL, lease_owner = NULL, lease_expires_at = NULL,
-        updated_at = ?, completed_at = ?
-      WHERE operation_id = ? AND campaign_id = ? AND status IN ('pending', 'failed')
-        AND current_attempt = ? AND current_attempt_id IS ?`).run(
-          attempt,
-          attemptId,
-          workerEpoch,
-          completedAt,
-          completedAt,
-          operation.operationId,
-          handle.campaignId,
-          operation.currentAttempt,
-          operation.currentAttemptId,
-        );
-    if (updated.changes !== 1) {
-      throw new CampaignPlayNarrationOperationError(
-        "operation_fence_lost",
-        "Campaign Play narration continuity lost its operation compare-and-swap.",
-      );
-    }
-    return operationView(selectOperation(handle, "operation_id", operation.operationId)!);
-  }).immediate();
-
   const failAttempt = (input: {
     token: CampaignPlayNarrationAttemptToken;
     evidence: CampaignPlayExternalInterruptionEvidence;
@@ -1018,12 +829,9 @@ export function createCampaignPlayNarrationOperationRepository(
         "Campaign Play narration operation lost its turn authority.",
       );
     }
-    const activeDeadlineAt = Math.min(
-      kind === "automatic"
+    const activeDeadlineAt = kind === "automatic"
       ? preparedAt + CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS
-      : preparedAt + CAMPAIGN_PLAY_MANUAL_NARRATION_WINDOW_MS,
-      turn.submittedAt + 115_000,
-    );
+      : preparedAt + CAMPAIGN_PLAY_MANUAL_NARRATION_WINDOW_MS;
     if (!Number.isSafeInteger(activeDeadlineAt) || activeDeadlineAt <= preparedAt) {
       throw new CampaignPlayNarrationOperationError(
         "operation_not_recoverable",
@@ -1121,7 +929,6 @@ export function createCampaignPlayNarrationOperationRepository(
 
   return {
     commitVisibleResult,
-    commitContinuity,
     claim,
     renew,
     failAttempt,

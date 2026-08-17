@@ -410,30 +410,22 @@ function schemaContractFailureModel(): LanguageModel {
   const value = new MockLanguageModelV3({
     provider: "test-provider",
     modelId: "actor-replanner",
-    doStream: async () => ({
-      stream: new ReadableStream({
-        start(controller) {
-          controller.enqueue({ type: "stream-start", warnings: [] });
-          controller.enqueue({ type: "text-start", id: "text-1" });
-          controller.enqueue({
-            type: "text-delta",
-            id: "text-1",
-            delta: JSON.stringify({
-              SENTINEL_RAW_PROPOSAL: "SENTINEL_PLAYER_AND_ACTOR_PROSE",
-            }),
-          });
-          controller.enqueue({ type: "text-end", id: "text-1" });
-          controller.enqueue({
-            type: "finish",
-            usage: {
-              inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
-              outputTokens: { total: 12, text: 12, reasoning: undefined },
-            },
-            finishReason: { unified: "stop", raw: undefined },
-          });
-          controller.close();
-        },
-      }),
+    doGenerate: async () => ({
+      content: [{
+        type: "tool-call",
+        toolCallId: "structured-output-failure",
+        toolName: "structured_output",
+        input: JSON.stringify({
+          SENTINEL_RAW_PROPOSAL: "SENTINEL_PLAYER_AND_ACTOR_PROSE",
+        }),
+      }],
+      finishReason: { unified: "tool-calls", raw: undefined },
+      response: { modelId: "actor-replanner" },
+      usage: {
+        inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
+        outputTokens: { total: 12, text: 12, reasoning: undefined },
+      },
+      warnings: [],
     }),
   });
   rememberStructuredOutputModelMetadata(value, buildStructuredOutputModelMetadata({
@@ -778,6 +770,7 @@ describe("Campaign Play actor replanner", () => {
     const generateObject = vi.fn(async (request: {
       prompt: string;
       abortSignal?: AbortSignal;
+      timeout?: { totalMs: number };
       mode: "auto" | "tool";
       schema: { safeParse(value: unknown): { success: boolean } };
     }) => request.prompt.includes("ACTOR_PLAN_REVIEW\n")
@@ -875,7 +868,7 @@ describe("Campaign Play actor replanner", () => {
       retries: 1,
       strictSchema: true,
     });
-    expect("timeout" in generateObject.mock.calls[0]![0]).toBe(false);
+    expect(generateObject.mock.calls[0]![0].timeout).toEqual({ totalMs: 180_000 });
     expect(generateObject.mock.calls[0]![0].abortSignal).toBeInstanceOf(AbortSignal);
     expect(generateObject.mock.calls[0]![0].abortSignal).not.toBe(controller.signal);
     expect(generateObject.mock.calls[1]![0]).toMatchObject({
@@ -886,6 +879,7 @@ describe("Campaign Play actor replanner", () => {
       strictSchema: true,
       temperature: 0,
       abortSignal: generateObject.mock.calls[0]![0].abortSignal,
+      timeout: { totalMs: 180_000 },
     });
     expect(generateObject.mock.calls[1]![0].prompt).toContain("ACTOR_PLAN_REVIEW");
     expect(generateObject.mock.calls[1]![0].prompt).toContain("Fresh sealing wax flakes");
@@ -1011,7 +1005,7 @@ describe("Campaign Play actor replanner", () => {
       modelWorkerEpoch: 1,
       phase: "generation",
       errorCode: "model_contract_invalid",
-      safeGenerationCode: "schema_validation_failed",
+      safeGenerationCode: "invalid_structured_tool_call",
       recoveryPhase: null,
       recoveryReason: null,
       goalHandle: null,

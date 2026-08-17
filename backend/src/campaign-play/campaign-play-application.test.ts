@@ -20,17 +20,22 @@ import { openCampaignPlayDatabase, type CampaignPlayDatabaseHandle } from "./cam
 import {
   CAMPAIGN_PLAY_MINIMUM_OUTPUT_TOKENS,
   CampaignPlayApplicationError,
+  campaignPlayActorReplannerOperationDeadlineMs,
   campaignPlayGameMasterOperationDeadlineMs,
+  campaignPlayJudgeOperationDeadlineMs,
   campaignPlayMayAutomaticallyResumeExternalStage,
   campaignPlayMaximumOutputTokens,
+  campaignPlayOpeningOperationDeadlineMs,
   createCampaignPlayApplication,
   resolveCampaignPlayRequestedModel,
 } from "./campaign-play-application.js";
 import {
   createCampaignPlayTurnRepository,
+  type CampaignPlayClaimableTurnStage,
   type CampaignPlayExternalInterruptionEvidence,
   type CampaignPlayTurnModelSelection,
 } from "./campaign-play-turn-repository.js";
+import { hashCampaignPlayProjection } from "./campaign-play-projection.js";
 import { createCampaignPlayStateRepository } from "./campaign-play-state-repository.js";
 import type { CampaignPlayGameMasterRecoveryFeedback } from "./game-master.js";
 import type { CampaignPlayTurnRuntime } from "./turn-runtime.js";
@@ -495,10 +500,6 @@ function fakePlayerRuntime(
     onRun?: (turnId: string) => void;
     initialErrorCode?: CampaignPlayExternalInterruptionEvidence["errorCode"];
     resumeErrorCode?: CampaignPlayExternalInterruptionEvidence["errorCode"];
-    onContinuity?: (
-      turnId: string,
-      reason: "authority_budget" | "narration_budget" | "control_deadline",
-    ) => void;
     onResume?: (input: {
       turnId: string;
       gameMasterRecoveryFeedback?: CampaignPlayGameMasterRecoveryFeedback;
@@ -618,13 +619,327 @@ function fakePlayerRuntime(
     loadTurn: (turnId) => repository.loadTurn(turnId),
     loadTelemetry: (turnId) => repository.loadTurnTelemetry(turnId),
   };
-  if (options.onContinuity) {
-    runtime.commitControlBudgetContinuity = (turnId, reason) => {
-      options.onContinuity?.(turnId, reason);
-      return repository.loadTurn(turnId)!;
-    };
-  }
   return runtime;
+}
+
+const JUDGE_RECOVERY_FEEDBACK = {
+  issues: [{ issueIndex: 0, code: "invalid_type", path: ["ruling"] }],
+} as const;
+
+const POSSESSION_TRANSFORM_RECOVERY_FEEDBACK: CampaignPlayGameMasterRecoveryFeedback = {
+  diagnostic: "game_master_semantic_validation_mismatch",
+  failedChecks: [{
+    check: "mechanical_authority_rejected",
+    reviewFailedChecks: ["possession_transform_identity_incomplete"],
+  }],
+};
+
+function stageLocalJudgeArtifact() {
+  return {
+    ruling: {
+      disposition: "deterministic" as const,
+      normalizedIntent: {
+        originalText: "Ask about the current signal.",
+        source: "freeform" as const,
+        choiceHandle: null,
+        kind: "contact" as const,
+        targets: [],
+        method: "Ask about the current signal.",
+        stakes: "Learn what the signal means.",
+      },
+      movementRouteHandle: null,
+      possessionEffectAuthority: { kind: "none" as const },
+      requiredObligationEffect: { kind: "none" as const },
+      citedVisibleFactHandles: [],
+      resultBounds: { minimum: "limited" as const, maximum: "success" as const },
+      elapsedBounds: { minimumMinutes: 0, maximumMinutes: 0 },
+      uncertainty: { kind: "none" as const },
+      reason: "The visible signal can be discussed without a hidden mechanical change.",
+      clarificationQuestion: null,
+    },
+    resolution: { kind: "deterministic" as const, result: "success" as const },
+    uncertaintyAuthority: null,
+    publicResult: {
+      intentKind: "contact" as const,
+      disposition: "deterministic" as const,
+      result: "success" as const,
+      clarificationQuestion: null,
+    },
+    primaryPlan: { kind: "game_master_required" as const },
+  };
+}
+
+function stageLocalGameMasterArtifact(turnId: string, judgeArtifactHash: string, baseWorldVersion: number) {
+  const batch = {
+    batchId: `batch-stage-local-${turnId}`,
+    baseWorldVersion,
+    commands: [{
+      kind: "record_world_event" as const,
+      commandId: `command-stage-local-${turnId}`,
+      batchId: `batch-stage-local-${turnId}`,
+      order: 0,
+      causalParent: { kind: "turn" as const, turnId },
+      source: { kind: "system" as const, system: "game_master" as const },
+      expectedWorldVersion: baseWorldVersion,
+      eventClass: "scene" as const,
+      performingActorId: null,
+      summary: "The signal remains available for a careful conversation.",
+      observableTrace: null,
+      affectedRefs: [{ kind: "actor" as const, id: "actor-player" }],
+      readScope: [{ kind: "actor" as const, id: "actor-player" }],
+      writeScope: [],
+      exposure: { mode: "protected" as const },
+    }],
+  };
+  return {
+    judgeArtifactHash,
+    batch,
+    batchHash: hashCampaignPlayProjection(batch),
+    semanticReview: { kind: "not_required" as const },
+  };
+}
+
+function fakeStageLocalRecoveryRuntime(
+  handle: CampaignPlayDatabaseHandle,
+  options: {
+    rejectGameMasterSecond?: boolean;
+    gameMasterRecoveryFeedback?: CampaignPlayGameMasterRecoveryFeedback;
+    onJudgeRecoveryFeedback?: (feedback: typeof JUDGE_RECOVERY_FEEDBACK) => void;
+    onGameMasterRecoveryFeedback?: (feedback: CampaignPlayGameMasterRecoveryFeedback) => void;
+    onResume?: (input: {
+      interruptedStage: CampaignPlayClaimableTurnStage;
+      observedEpoch: number;
+      gameMasterRecoveryFeedback?: CampaignPlayGameMasterRecoveryFeedback;
+    }) => void;
+  },
+): CampaignPlayTurnRuntime {
+  const repository = createCampaignPlayTurnRepository(handle);
+  const snapshot = (turnId: string, observedAt: number) => ({
+    turn: repository.loadTurn(turnId)!,
+    recovery: repository.loadRecoveryState(turnId, observedAt),
+    telemetry: null,
+  });
+  return {
+    admitAction({ request, submittedAt }) {
+      const turnId = `turn:${request.idempotencyKey}`;
+      return repository.admitTurn({
+        turnId,
+        supersedesTurnId: null,
+        mutationId: `admit:${request.idempotencyKey}`,
+        submittedAt,
+        document: { turnKind: "player_action", request, frame: {} },
+        modelSelection: PLAYER_SELECTION,
+      });
+    },
+    async runNextStage(turnId) {
+      const turn = repository.loadTurn(turnId)!;
+      if (turn.workerLeaseOwner !== null || turn.stage === "planned") {
+        return snapshot(turnId, turn.updatedAt);
+      }
+      const claimedAt = turn.updatedAt + 1;
+      const token = repository.claimStage({
+        turnId,
+        expectedStage: turn.stage as CampaignPlayClaimableTurnStage,
+        observedEpoch: turn.workerEpoch,
+        owner: "application-stage-local",
+        claimedAt,
+        leaseExpiresAt: claimedAt + 1_000,
+        mutationId: `claim:${turn.workerEpoch + 1}`,
+      });
+      if (turn.stage === "admitted") {
+        options.onJudgeRecoveryFeedback?.(JUDGE_RECOVERY_FEEDBACK);
+      } else if (turn.stage === "judged") {
+        options.onGameMasterRecoveryFeedback?.(POSSESSION_TRANSFORM_RECOVERY_FEEDBACK);
+      } else {
+        throw new Error(`Unexpected stage-local recovery stage ${turn.stage}.`);
+      }
+      repository.interruptExternal({
+        token,
+        evidence: {
+          actualProviderId: "provider-frozen",
+          actualModel: turn.stage === "admitted" ? "judge-frozen" : "game-master-frozen",
+          actualStrategy: "strict_object",
+          inputTokens: 3,
+          outputTokens: 0,
+          durationMs: 2,
+          finishReason: "invalid_output",
+          schemaOutcome: "invalid",
+          errorCode: "model_contract_invalid",
+        },
+        interruptedAt: claimedAt + 2,
+        mutationId: `interrupt:${token.epoch}`,
+      });
+      return snapshot(turnId, claimedAt + 2);
+    },
+    async recoverActiveTurn() {
+      const turn = repository.loadActiveTurn();
+      return turn ? snapshot(turn.turnId, turn.updatedAt) : null;
+    },
+    async resumeInterruptedStage(input) {
+      options.onResume?.({
+        interruptedStage: input.interruptedStage,
+        observedEpoch: input.observedEpoch,
+        gameMasterRecoveryFeedback: options.gameMasterRecoveryFeedback,
+      });
+      const turn = repository.loadTurn(input.turnId)!;
+      const resumedAt = turn.updatedAt + 1;
+      const token = repository.resumeExternal({
+        turnId: input.turnId,
+        interruptedStage: input.interruptedStage,
+        observedEpoch: input.observedEpoch,
+        owner: "application-stage-local-resume",
+        resumedAt,
+        leaseExpiresAt: resumedAt + 1_000,
+        mutationId: `resume:${input.observedEpoch + 1}`,
+      });
+      if (input.interruptedStage === "admitted") {
+        const artifact = stageLocalJudgeArtifact();
+        repository.acceptModelArtifact({
+          token,
+          artifact,
+          evidence: {
+            actualProviderId: "provider-frozen",
+            actualModel: "judge-frozen",
+            actualStrategy: "strict_object",
+            inputTokens: 4,
+            outputTokens: 8,
+            durationMs: 2,
+            finishReason: "stop",
+          },
+          mutationDomain: "runtime",
+          acceptedAt: resumedAt + 2,
+          mutationId: `judge-accept:${token.epoch}`,
+        });
+        return snapshot(input.turnId, resumedAt + 2);
+      }
+      if (input.interruptedStage !== "judged") {
+        throw new Error(`Unexpected resume stage ${input.interruptedStage}.`);
+      }
+      if (options.rejectGameMasterSecond) {
+        repository.interruptExternal({
+          token,
+          evidence: {
+            actualProviderId: "provider-frozen",
+            actualModel: "game-master-frozen",
+            actualStrategy: "strict_object",
+            inputTokens: 4,
+            outputTokens: 0,
+            durationMs: 2,
+            finishReason: "invalid_output",
+            schemaOutcome: "invalid",
+            errorCode: "model_contract_invalid",
+          },
+          interruptedAt: resumedAt + 2,
+          mutationId: `game-master-interrupt:${token.epoch}`,
+        });
+        return snapshot(input.turnId, resumedAt + 2);
+      }
+      const judgeArtifact = repository.loadAcceptedModelArtifact(input.turnId, "judge");
+      if (!judgeArtifact) throw new Error("Stage-local Judge artifact disappeared.");
+      repository.acceptModelArtifact({
+        token,
+        artifact: stageLocalGameMasterArtifact(
+          input.turnId,
+          judgeArtifact.artifactHash,
+          turn.baseWorldVersion,
+        ),
+        evidence: {
+          actualProviderId: "provider-frozen",
+          actualModel: "game-master-frozen",
+          actualStrategy: "strict_object",
+          inputTokens: 4,
+          outputTokens: 8,
+          durationMs: 2,
+          finishReason: "stop",
+        },
+        mutationDomain: "runtime",
+        acceptedAt: resumedAt + 2,
+        mutationId: `game-master-accept:${token.epoch}`,
+      });
+      return snapshot(input.turnId, resumedAt + 2);
+    },
+    runNarration: async () => null,
+    prepareNarrationRecovery: () => { throw new Error("Narration is outside this application fixture."); },
+    loadTurn: (turnId) => repository.loadTurn(turnId),
+    loadTelemetry: (turnId) => repository.loadTurnTelemetry(turnId),
+  };
+}
+
+async function runStageLocalRecoveryScenario(rejectGameMasterSecond = false) {
+  createAcceptedCampaign();
+  const createTurnInputs: Array<{
+    judgeRecoveryFeedback: unknown;
+    gameMasterRecoveryFeedback: CampaignPlayGameMasterRecoveryFeedback | undefined;
+  }> = [];
+  const resumeInputs: Array<{
+    interruptedStage: CampaignPlayClaimableTurnStage;
+    observedEpoch: number;
+    gameMasterRecoveryFeedback?: CampaignPlayGameMasterRecoveryFeedback;
+  }> = [];
+  const createTurn = vi.fn((
+    handle: CampaignPlayDatabaseHandle,
+    _selection?: CampaignPlayTurnModelSelection,
+    judgeRecoveryFeedback?: unknown,
+    onJudgeRecoveryFeedback?: unknown,
+    gameMasterRecoveryFeedback?: CampaignPlayGameMasterRecoveryFeedback,
+    onGameMasterRecoveryFeedback?: (feedback: CampaignPlayGameMasterRecoveryFeedback) => void,
+  ) => {
+    createTurnInputs.push({ judgeRecoveryFeedback, gameMasterRecoveryFeedback });
+    return fakeStageLocalRecoveryRuntime(handle, {
+      rejectGameMasterSecond,
+      gameMasterRecoveryFeedback,
+      onJudgeRecoveryFeedback: typeof onJudgeRecoveryFeedback === "function"
+        ? (feedback) => (onJudgeRecoveryFeedback as (value: typeof JUDGE_RECOVERY_FEEDBACK) => void)(feedback)
+        : undefined,
+      onGameMasterRecoveryFeedback,
+      onResume: (input) => resumeInputs.push(input),
+    });
+  });
+  const application = createCampaignPlayApplication({
+    now: () => 1_300,
+    runtimeFactory: {
+      createOpening: (handle) => fakeOpeningRuntime(handle, { runNextStage: vi.fn() }),
+      createTurn,
+    },
+  });
+  bootstrapPlayer(application);
+  markPlayerPhaseReady();
+  const state = application.loadState(CAMPAIGN_ID);
+  const admission = application.admitTurn(CAMPAIGN_ID, {
+    source: "freeform",
+    idempotencyKey: rejectGameMasterSecond
+      ? "player-stage-local-recovery-fails"
+      : "player-stage-local-recovery-succeeds",
+    text: "Ask about the current signal.",
+    expectedWorldVersion: state.worldVersion,
+    expectedRuntimeRevision: state.runtimeRevision,
+  });
+  await application.waitForIdle(CAMPAIGN_ID);
+
+  const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
+  try {
+    const repository = createCampaignPlayTurnRepository(handle);
+    const rows = handle.sqlite.prepare(`SELECT kind, attempt, status,
+        worker_epoch AS workerEpoch, actual_model AS actualModel,
+        error_code AS errorCode
+      FROM campaign_play_model_stages WHERE turn_id = ? ORDER BY kind, attempt`).all(
+      admission.turnId,
+    );
+    return {
+      admission,
+      createTurnInputs,
+      resumeInputs,
+      rows,
+      turn: repository.loadTurn(admission.turnId),
+      continuityCount: handle.sqlite.prepare(`SELECT COUNT(*) AS count
+        FROM campaign_play_narration_operations WHERE campaign_id = ? AND turn_id = ?
+          AND source_kind IN ('deterministic_continuity', 'control_budget_continuity')`).get(
+        CAMPAIGN_ID, admission.turnId,
+      ),
+    };
+  } finally {
+    handle.close();
+  }
 }
 
 function openingRequest(
@@ -649,7 +964,7 @@ describe("CampaignPlayApplication", () => {
       errorCode: "stage_timeout",
       attempt: 1,
       wasResume: false,
-      alreadyAttempted: false,
+      alreadyAttemptedStages: new Set(),
     })).toBe(true);
     expect(campaignPlayMayAutomaticallyResumeExternalStage({
       turnKind: "opening",
@@ -658,7 +973,7 @@ describe("CampaignPlayApplication", () => {
       errorCode: "stage_timeout",
       attempt: 1,
       wasResume: false,
-      alreadyAttempted: false,
+      alreadyAttemptedStages: new Set(),
     })).toBe(true);
     expect(campaignPlayMayAutomaticallyResumeExternalStage({
       turnKind: "opening",
@@ -667,7 +982,7 @@ describe("CampaignPlayApplication", () => {
       errorCode: "stage_timeout",
       attempt: 1,
       wasResume: false,
-      alreadyAttempted: false,
+      alreadyAttemptedStages: new Set(),
     })).toBe(false);
     expect(campaignPlayMayAutomaticallyResumeExternalStage({
       turnKind: "opening",
@@ -676,7 +991,7 @@ describe("CampaignPlayApplication", () => {
       errorCode: "stage_timeout",
       attempt: 1,
       wasResume: false,
-      alreadyAttempted: false,
+      alreadyAttemptedStages: new Set(),
     })).toBe(false);
     expect(campaignPlayMayAutomaticallyResumeExternalStage({
       turnKind: "opening",
@@ -685,7 +1000,7 @@ describe("CampaignPlayApplication", () => {
       errorCode: "stage_timeout",
       attempt: 1,
       wasResume: false,
-      alreadyAttempted: false,
+      alreadyAttemptedStages: new Set(),
     })).toBe(false);
     expect(campaignPlayMayAutomaticallyResumeExternalStage({
       turnKind: "opening",
@@ -694,7 +1009,7 @@ describe("CampaignPlayApplication", () => {
       errorCode: "stage_timeout",
       attempt: 1,
       wasResume: false,
-      alreadyAttempted: false,
+      alreadyAttemptedStages: new Set(),
     })).toBe(false);
     expect(campaignPlayMayAutomaticallyResumeExternalStage({
       turnKind: "opening",
@@ -703,7 +1018,7 @@ describe("CampaignPlayApplication", () => {
       errorCode: "model_contract_invalid",
       attempt: 1,
       wasResume: false,
-      alreadyAttempted: false,
+      alreadyAttemptedStages: new Set(),
     })).toBe(false);
     expect(campaignPlayMayAutomaticallyResumeExternalStage({
       turnKind: "opening",
@@ -712,7 +1027,7 @@ describe("CampaignPlayApplication", () => {
       errorCode: "stage_timeout",
       attempt: 2,
       wasResume: true,
-      alreadyAttempted: true,
+      alreadyAttemptedStages: new Set(["visibility_projected"]),
     })).toBe(false);
     expect(campaignPlayMayAutomaticallyResumeExternalStage({
       turnKind: "opening",
@@ -721,7 +1036,7 @@ describe("CampaignPlayApplication", () => {
       errorCode: "stage_timeout",
       attempt: 1,
       wasResume: false,
-      alreadyAttempted: true,
+      alreadyAttemptedStages: new Set(["visibility_projected"]),
     })).toBe(false);
     expect(campaignPlayMayAutomaticallyResumeExternalStage({
       turnKind: "player_action",
@@ -730,7 +1045,7 @@ describe("CampaignPlayApplication", () => {
       errorCode: "stage_timeout",
       attempt: 2,
       wasResume: true,
-      alreadyAttempted: true,
+      alreadyAttemptedStages: new Set(["admitted"]),
     })).toBe(false);
     expect(campaignPlayMayAutomaticallyResumeExternalStage({
       turnKind: "player_action",
@@ -739,7 +1054,7 @@ describe("CampaignPlayApplication", () => {
       errorCode: "model_contract_invalid",
       attempt: 1,
       wasResume: false,
-      alreadyAttempted: false,
+      alreadyAttemptedStages: new Set(),
     })).toBe(true);
     expect(campaignPlayMayAutomaticallyResumeExternalStage({
       turnKind: "player_action",
@@ -748,7 +1063,7 @@ describe("CampaignPlayApplication", () => {
       errorCode: "model_contract_invalid",
       attempt: 1,
       wasResume: false,
-      alreadyAttempted: false,
+      alreadyAttemptedStages: new Set(),
     })).toBe(true);
     expect(campaignPlayMayAutomaticallyResumeExternalStage({
       turnKind: "player_action",
@@ -757,8 +1072,35 @@ describe("CampaignPlayApplication", () => {
       errorCode: "model_contract_invalid",
       attempt: 1,
       wasResume: false,
-      alreadyAttempted: false,
+      alreadyAttemptedStages: new Set(),
     })).toBe(true);
+    expect(campaignPlayMayAutomaticallyResumeExternalStage({
+      turnKind: "player_action",
+      interruptedStage: "judged",
+      routeKind: "full_authority",
+      errorCode: "model_contract_invalid",
+      attempt: 1,
+      wasResume: false,
+      alreadyAttemptedStages: new Set(["admitted"]),
+    })).toBe(true);
+    expect(campaignPlayMayAutomaticallyResumeExternalStage({
+      turnKind: "player_action",
+      interruptedStage: "judged",
+      routeKind: "full_authority",
+      errorCode: "model_contract_invalid",
+      attempt: 1,
+      wasResume: false,
+      alreadyAttemptedStages: new Set(["judged"]),
+    })).toBe(false);
+    expect(campaignPlayMayAutomaticallyResumeExternalStage({
+      turnKind: "player_action",
+      interruptedStage: null,
+      routeKind: "full_authority",
+      errorCode: "model_contract_invalid",
+      attempt: 1,
+      wasResume: false,
+      alreadyAttemptedStages: new Set(),
+    })).toBe(false);
     expect(campaignPlayMayAutomaticallyResumeExternalStage({
       turnKind: "player_action",
       interruptedStage: "judged",
@@ -766,7 +1108,7 @@ describe("CampaignPlayApplication", () => {
       errorCode: "model_contract_invalid",
       attempt: 1,
       wasResume: false,
-      alreadyAttempted: false,
+      alreadyAttemptedStages: new Set(),
     })).toBe(false);
   });
 
@@ -775,10 +1117,13 @@ describe("CampaignPlayApplication", () => {
     expect(campaignPlayMaximumOutputTokens(65_536)).toBe(65_536);
   });
 
-  it("keeps the Game Master deadline ordinary unless safe recovery feedback is present", () => {
-    expect(campaignPlayGameMasterOperationDeadlineMs()).toBe(45_000);
-    expect(campaignPlayGameMasterOperationDeadlineMs(undefined)).toBe(45_000);
-    expect(campaignPlayGameMasterOperationDeadlineMs(GAME_MASTER_RECOVERY_FEEDBACK)).toBe(90_000);
+  it("keeps each model stage on its single-call or reviewed deadline contract", () => {
+    expect(campaignPlayOpeningOperationDeadlineMs()).toBe(365_000);
+    expect(campaignPlayJudgeOperationDeadlineMs()).toBe(180_000);
+    expect(campaignPlayGameMasterOperationDeadlineMs()).toBe(365_000);
+    expect(campaignPlayGameMasterOperationDeadlineMs(undefined)).toBe(365_000);
+    expect(campaignPlayGameMasterOperationDeadlineMs(GAME_MASTER_RECOVERY_FEEDBACK)).toBe(365_000);
+    expect(campaignPlayActorReplannerOperationDeadlineMs()).toBe(365_000);
   });
 
   it("freezes exact known role pricing into Campaign Play model authority", () => {
@@ -849,7 +1194,7 @@ describe("CampaignPlayApplication", () => {
           apiKey: "",
           model: "storyteller-model",
         },
-        { role: "storyteller" },
+        { role: "storyteller", reasoningMode: "bypass" },
       ],
     ]);
 
@@ -881,7 +1226,7 @@ describe("CampaignPlayApplication", () => {
           apiKey: "",
           model: "storyteller-model",
         },
-        { role: "storyteller" },
+        { role: "storyteller", reasoningMode: "bypass" },
       ],
       [
         {
@@ -1149,6 +1494,77 @@ describe("CampaignPlayApplication", () => {
     }
   });
 
+  it("gives Judge and Game Master independent automatic repair opportunities", async () => {
+    const result = await runStageLocalRecoveryScenario();
+    expect(result.resumeInputs).toEqual([
+      {
+        interruptedStage: "admitted",
+        observedEpoch: 1,
+        gameMasterRecoveryFeedback: undefined,
+      },
+      {
+        interruptedStage: "judged",
+        observedEpoch: 3,
+        gameMasterRecoveryFeedback: POSSESSION_TRANSFORM_RECOVERY_FEEDBACK,
+      },
+    ]);
+    expect(result.createTurnInputs).toContainEqual({
+      judgeRecoveryFeedback: JUDGE_RECOVERY_FEEDBACK,
+      gameMasterRecoveryFeedback: undefined,
+    });
+    expect(result.createTurnInputs).toContainEqual({
+      judgeRecoveryFeedback: undefined,
+      gameMasterRecoveryFeedback: POSSESSION_TRANSFORM_RECOVERY_FEEDBACK,
+    });
+    expect(result.createTurnInputs).not.toContainEqual(expect.objectContaining({
+      judgeRecoveryFeedback: JUDGE_RECOVERY_FEEDBACK,
+      gameMasterRecoveryFeedback: POSSESSION_TRANSFORM_RECOVERY_FEEDBACK,
+    }));
+    expect(result.rows).toEqual([
+      { kind: "game_master", attempt: 1, status: "interrupted", workerEpoch: 3,
+        actualModel: "game-master-frozen", errorCode: "model_contract_invalid" },
+      { kind: "game_master", attempt: 2, status: "accepted", workerEpoch: 4,
+        actualModel: "game-master-frozen", errorCode: null },
+      { kind: "judge", attempt: 1, status: "interrupted", workerEpoch: 1,
+        actualModel: "judge-frozen", errorCode: "model_contract_invalid" },
+      { kind: "judge", attempt: 2, status: "accepted", workerEpoch: 2,
+        actualModel: "judge-frozen", errorCode: null },
+    ]);
+    expect(new Set((result.rows as Array<{ workerEpoch: number }>).map((row) => row.workerEpoch)).size)
+      .toBe(4);
+    expect((result.rows as Array<{ attempt: number }>).some((row) => row.attempt === 3)).toBe(false);
+    expect(result.turn).toMatchObject({ stage: "planned", workerEpoch: 4 });
+    expect(result.continuityCount).toEqual({ count: 0 });
+  });
+
+  it("stops after the Game Master's independent repair also fails", async () => {
+    const result = await runStageLocalRecoveryScenario(true);
+    expect(result.resumeInputs.map((input) => input.interruptedStage)).toEqual([
+      "admitted",
+      "judged",
+    ]);
+    expect(result.rows).toEqual([
+      { kind: "game_master", attempt: 1, status: "interrupted", workerEpoch: 3,
+        actualModel: "game-master-frozen", errorCode: "model_contract_invalid" },
+      { kind: "game_master", attempt: 2, status: "interrupted", workerEpoch: 4,
+        actualModel: "game-master-frozen", errorCode: "model_contract_invalid" },
+      { kind: "judge", attempt: 1, status: "interrupted", workerEpoch: 1,
+        actualModel: "judge-frozen", errorCode: "model_contract_invalid" },
+      { kind: "judge", attempt: 2, status: "accepted", workerEpoch: 2,
+        actualModel: "judge-frozen", errorCode: null },
+    ]);
+    expect(result.turn).toMatchObject({
+      stage: "interrupted",
+      interruptedStage: "judged",
+      workerEpoch: 4,
+      resumeEligible: true,
+    });
+    expect((result.rows as Array<{ kind: string }>).filter((row) => row.kind === "game_master"))
+      .toHaveLength(2);
+    expect((result.rows as Array<{ attempt: number }>).some((row) => row.attempt === 3)).toBe(false);
+    expect(result.continuityCount).toEqual({ count: 0 });
+  });
+
   it("stops after one automatic resume when the resumed provider attempt fails", async () => {
     createAcceptedCampaign();
     const runNextStage = vi.fn();
@@ -1206,11 +1622,10 @@ describe("CampaignPlayApplication", () => {
     "model_contract_invalid",
     "stage_timeout",
     "provider_unavailable",
-  ] as const)("commits one authority continuity after automatic attempt-2 %s", async (resumeErrorCode) => {
+  ] as const)("leaves the turn interrupted after automatic attempt-2 %s", async (resumeErrorCode) => {
     createAcceptedCampaign();
     const runNextStage = vi.fn();
     const resumeStage = vi.fn();
-    const continuity: Array<[string, "authority_budget" | "narration_budget" | "control_deadline"]> = [];
     const application = createCampaignPlayApplication({
       now: () => 1_300,
       runtimeFactory: {
@@ -1220,7 +1635,6 @@ describe("CampaignPlayApplication", () => {
           onResume: ({ turnId }) => resumeStage(turnId),
           initialErrorCode: "model_contract_invalid",
           resumeErrorCode,
-          onContinuity: (turnId, reason) => continuity.push([turnId, reason]),
         }),
       },
     });
@@ -1239,9 +1653,13 @@ describe("CampaignPlayApplication", () => {
 
     expect(runNextStage).toHaveBeenCalledTimes(1);
     expect(resumeStage).toHaveBeenCalledTimes(1);
-    expect(continuity).toEqual([[admission.turnId, "authority_budget"]]);
     const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
     try {
+      expect(createCampaignPlayTurnRepository(handle).loadTurn(admission.turnId)).toMatchObject({
+        stage: "interrupted",
+        errorCode: resumeErrorCode,
+        resumeEligible: true,
+      });
       expect(handle.sqlite.prepare(`SELECT attempt, status, error_code AS errorCode
         FROM campaign_play_model_stages WHERE turn_id = ? ORDER BY attempt`).all(
         admission.turnId,
@@ -1268,7 +1686,6 @@ describe("CampaignPlayApplication", () => {
   it("does not auto-commit continuity for an unallowlisted automatic attempt-2 error", async () => {
     createAcceptedCampaign();
     const resumeStage = vi.fn();
-    const continuity = vi.fn();
     const application = createCampaignPlayApplication({
       now: () => 1_300,
       runtimeFactory: {
@@ -1276,7 +1693,6 @@ describe("CampaignPlayApplication", () => {
         createTurn: (handle) => fakePlayerRuntime(handle, {
           resumeErrorCode: "persistence_failed",
           onResume: ({ turnId }) => resumeStage(turnId),
-          onContinuity: continuity,
         }),
       },
     });
@@ -1294,7 +1710,6 @@ describe("CampaignPlayApplication", () => {
     await application.waitForIdle(CAMPAIGN_ID);
 
     expect(resumeStage).toHaveBeenCalledTimes(1);
-    expect(continuity).not.toHaveBeenCalled();
     const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
     try {
       expect(handle.sqlite.prepare(`SELECT attempt, status, error_code AS errorCode
@@ -1312,7 +1727,6 @@ describe("CampaignPlayApplication", () => {
   it("does not auto-commit continuity after a manual Resume failure", async () => {
     createAcceptedCampaign();
     const resumeStage = vi.fn();
-    const continuity = vi.fn();
     const application = createCampaignPlayApplication({
       now: () => 1_300,
       runtimeFactory: {
@@ -1321,7 +1735,6 @@ describe("CampaignPlayApplication", () => {
           initialErrorCode: "persistence_failed",
           resumeErrorCode: "stage_timeout",
           onResume: ({ turnId }) => resumeStage(turnId),
-          onContinuity: continuity,
         }),
       },
     });
@@ -1347,7 +1760,6 @@ describe("CampaignPlayApplication", () => {
     await application.waitForIdle(CAMPAIGN_ID);
 
     expect(resumeStage).toHaveBeenCalledTimes(1);
-    expect(continuity).not.toHaveBeenCalled();
     const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
     try {
       expect(handle.sqlite.prepare(`SELECT attempt, status, error_code AS errorCode
@@ -1515,7 +1927,7 @@ describe("CampaignPlayApplication", () => {
     expect(recoveredRun).toHaveBeenCalledTimes(1);
   });
 
-  it("closes an unclaimed player action at the shared control target during restart recovery", async () => {
+  it("does not manufacture continuity for an old unclaimed player action during restart recovery", async () => {
     createAcceptedCampaign();
     let now = 1_300;
     const firstApplication = createCampaignPlayApplication({
@@ -1551,29 +1963,34 @@ describe("CampaignPlayApplication", () => {
     await firstApplication.waitForIdle(CAMPAIGN_ID);
 
     now = 116_301;
-    const continuity = vi.fn((turnId: string) => {
-      const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
-      try {
-        return createCampaignPlayTurnRepository(handle).loadTurn(turnId)!;
-      } finally {
-        handle.close();
-      }
-    });
     const restarted = createCampaignPlayApplication({
       now: () => now,
       runtimeFactory: {
         createOpening: (handle) => fakeOpeningRuntime(handle, { runNextStage: vi.fn() }),
-        createTurn: (handle) => {
-          const runtime = fakePlayerRuntime(handle, {});
-          runtime.commitControlBudgetContinuity = continuity;
-          return runtime;
-        },
+        createTurn: (handle) => fakePlayerRuntime(handle, {
+          resumeErrorCode: "model_contract_invalid",
+        }),
       },
     });
 
     await restarted.recoverCampaign(CAMPAIGN_ID);
+    await restarted.waitForIdle(CAMPAIGN_ID);
 
-    expect(continuity).toHaveBeenCalledWith(admission.turnId, "control_deadline");
+    const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
+    try {
+      expect(createCampaignPlayTurnRepository(handle).loadTurn(admission.turnId)).toMatchObject({
+        stage: "interrupted",
+        errorCode: "model_contract_invalid",
+        resumeEligible: true,
+      });
+      expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+        FROM campaign_play_proper_scenes WHERE campaign_id = ? AND turn_id = ?`).get(
+        CAMPAIGN_ID,
+        admission.turnId,
+      )).toEqual({ count: 0 });
+    } finally {
+      handle.close();
+    }
   });
 
   it("wakes startup recovery when a foreign deterministic lease reaches its durable expiry", async () => {
