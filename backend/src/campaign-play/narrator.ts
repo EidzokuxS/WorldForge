@@ -20,6 +20,7 @@ import {
 import { createLogger } from "../lib/index.js";
 import {
   buildCampaignPlaySuggestedActionLabel,
+  campaignPlaySuggestedActionLabelPrefix,
   campaignPlayNarrationSchema,
   campaignPlayNarratorPacketSchema,
   validateNarrationAgainstPacket,
@@ -46,7 +47,7 @@ const narrationPurposeSchema = z.enum([
 
 const campaignPlayNarratorActionSelectionSchema = z.object({
   intentIndex: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.availableIntents - 1),
-  detail: line(80).nullable(),
+  detail: line(CAMPAIGN_PLAY_LIMITS.label).nullable(),
 }).strict();
 
 const campaignPlayNarratorCodeOwnedActionSelectionSchema =
@@ -71,6 +72,22 @@ export const campaignPlayNarratorProposalSchema = z.object({
 }).strict();
 
 export type CampaignPlayNarratorProposal = z.infer<typeof campaignPlayNarratorProposalSchema>;
+
+function requiredReplyDetailSchema(
+  packet: CampaignPlayNarratorPacket,
+  intentIndex: number,
+) {
+  const intent = packet.availableIntents[intentIndex];
+  if (intent === undefined) {
+    throw new Error("Required reply intent is outside the frozen intent catalog.");
+  }
+  const prefix = campaignPlaySuggestedActionLabelPrefix(packet, intent);
+  const maximum = CAMPAIGN_PLAY_LIMITS.label - prefix.length;
+  if (maximum < 1) {
+    throw new Error("Required reply intent leaves no room for player-facing detail.");
+  }
+  return line(maximum);
+}
 
 export interface CampaignPlayNarratorModelEvidence {
   requestedStrategy: "strict_object";
@@ -832,7 +849,7 @@ function narratorProposalSchemaForPacket(packet: CampaignPlayNarratorPacket) {
   }
   const requiredSelection = campaignPlayNarratorActionSelectionSchema.extend({
     intentIndex: z.literal(requiredIntentIndex),
-    detail: line(80),
+    detail: requiredReplyDetailSchema(packet, requiredIntentIndex),
   });
   if (expectedActionCount === 1) {
     return campaignPlayNarratorProposalSchema.extend({
@@ -887,7 +904,7 @@ function narratorToolSchemaForPacket(packet: CampaignPlayNarratorPacket) {
   if (requiredIntentIndex !== null) {
     return z.object({
       beats,
-      requiredReplyDetail: line(80),
+      requiredReplyDetail: requiredReplyDetailSchema(packet, requiredIntentIndex),
       intentSelections,
     }).strict();
   }

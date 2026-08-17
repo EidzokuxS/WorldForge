@@ -3040,6 +3040,32 @@ END_RECOVERY_DIAGNOSTIC`);
     ]);
     expect(providerSchema.properties.intentSelections.additionalProperties).toBe(false);
     expect(options.schema.safeParse(validTransport).success).toBe(true);
+    const requiredReplyPrefix = "Talk to Mara Venn: ";
+    const maximumRequiredReplyDetail = "a".repeat(
+      CAMPAIGN_PLAY_LIMITS.label - requiredReplyPrefix.length,
+    );
+    expect(options.schema.safeParse({
+      ...validTransport,
+      requiredReplyDetail: maximumRequiredReplyDetail,
+    }).success).toBe(true);
+    expect(options.schema.safeParse({
+      ...validTransport,
+      requiredReplyDetail: `${maximumRequiredReplyDetail}a`,
+    }).success).toBe(false);
+    generatedProposal = {
+      ...validTransport,
+      requiredReplyDetail: maximumRequiredReplyDetail,
+    };
+    const boundaryReply = await narrator.narrate(
+      request("narration-r216-tool-reply-label-limit"),
+    );
+    expect(boundaryReply.narration.suggestedActions[0]!.label).toBe(
+      `${requiredReplyPrefix}${maximumRequiredReplyDetail}`,
+    );
+    expect(boundaryReply.narration.suggestedActions[0]!.label).toHaveLength(
+      CAMPAIGN_PLAY_LIMITS.label,
+    );
+    generatedProposal = validTransport;
     expect(options.schema.safeParse(validProposal).success).toBe(false);
     expect(options.schema.safeParse({
       beats: validTransport.beats,
@@ -3071,7 +3097,7 @@ END_RECOVERY_DIAGNOSTIC`);
       ...request("narration-r216-tool-recovery"),
       recoveryFeedback,
     })).resolves.toBeDefined();
-    const recoveryPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    const recoveryPrompt = String(generateObject.mock.calls[2]![0].prompt);
     expect(recoveryPrompt).toContain(
       "REQUIRED_REPLY_INTENT_INDEX=application-owned (absent from model output)",
     );
@@ -3098,7 +3124,7 @@ END_RECOVERY_DIAGNOSTIC`);
       ...request("narration-r216-tool-one-required-reply"),
       packetBytes: canonicalizeCampaignPlayProjection(oneIntentPacket),
     })).resolves.toBeDefined();
-    const oneIntentOptions = generateObject.mock.calls[2]![0] as Parameters<typeof safeGenerateObject>[0];
+    const oneIntentOptions = generateObject.mock.calls[3]![0] as Parameters<typeof safeGenerateObject>[0];
     const oneIntentProviderSchema = z.toJSONSchema(oneIntentOptions.schema) as unknown as {
       properties: { intentSelections: { properties?: Record<string, unknown> } };
     };
@@ -3215,7 +3241,7 @@ END_RECOVERY_DIAGNOSTIC`);
           recoveryFeedback: { diagnostic: invalidCase.diagnostic },
         });
     }
-    expect(generateObject).toHaveBeenCalledTimes(3 + invalidCases.length);
+    expect(generateObject).toHaveBeenCalledTimes(4 + invalidCases.length);
   });
 
   it("uses the same code-keyed tool transport when no required reply exists", async () => {
