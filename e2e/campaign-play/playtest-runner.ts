@@ -10,12 +10,14 @@ import {
 } from "./contracts.js";
 import { assertCampaignPlayBundle } from "./probes.js";
 import {
-  bindCampaignPlayManualDecision,
+  bindCampaignPlayManualDecisionCoherent,
   captureCampaignPlayReloadBoundary,
   captureCampaignPlaySubscriptionQuota,
   cancelCampaignPlayManualDecision,
   loadCampaignPlayLiveSession,
   prepareCampaignPlayLiveSession,
+  authorizeCampaignPlayManualChoice,
+  readCampaignPlayRenderedChoiceCapture,
   stageCampaignPlayManualDecision,
 } from "./live-session.js";
 import { captureCampaignPlayReplay } from "./replay-report.js";
@@ -132,19 +134,56 @@ async function runLiveLane(config: CampaignPlayRunConfig, phase: string): Promis
       if (control !== "choice" && control !== "freeform") {
         throw new Error("--control must be choice or freeform.");
       }
+      const choiceCapturePath = argumentValue("--choice-capture");
+      const manuallyEnteredHandle = argumentValue("--choice-handle");
+      if (control === "choice" && choiceCapturePath === null) {
+        throw new Error("A suggested choice requires --choice-capture from the exact rendered control.");
+      }
+      if (control === "choice" && manuallyEnteredHandle !== null) {
+        throw new Error("--choice-handle is not accepted; use the atomic rendered choice capture.");
+      }
+      if (control === "freeform" && choiceCapturePath !== null) {
+        throw new Error("A freeform decision cannot carry a suggested-choice capture.");
+      }
       const pending = await stageCampaignPlayManualDecision({
         runConfig: config,
         control,
         chosenText: argumentValue("--chosen-text") ?? "",
-        choiceHandle: argumentValue("--choice-handle"),
+        choiceHandle: null,
+        choiceCapture: choiceCapturePath === null
+          ? undefined
+          : readCampaignPlayRenderedChoiceCapture(choiceCapturePath),
         decisionNote: argumentValue("--decision-note") ?? "",
         signedAt: Date.now(),
       });
       process.stdout.write(`${JSON.stringify({ phase, pending })}\n`);
       return;
     }
+    case "authorize-click": {
+      const capturePath = argumentValue("--choice-capture");
+      if (capturePath === null) {
+        throw new Error("authorize-click requires --choice-capture from the same DOM evaluation as signing.");
+      }
+      const capture = await authorizeCampaignPlayManualChoice({
+        runConfig: config,
+        capture: readCampaignPlayRenderedChoiceCapture(capturePath),
+      });
+      process.stdout.write(`${JSON.stringify({ phase, capture })}\n`);
+      return;
+    }
     case "bind": {
-      const evidence = bindCampaignPlayManualDecision(config);
+      const admittedTurnId = argumentValue("--turn-id");
+      const renderProofPath = argumentValue("--render-proof");
+      const clickProofPath = argumentValue("--click-proof");
+      if (admittedTurnId === null || renderProofPath === null) {
+        throw new Error("Coherent bind requires --turn-id and --render-proof.");
+      }
+      const evidence = await bindCampaignPlayManualDecisionCoherent({
+        runConfig: config,
+        admittedTurnId,
+        renderProofPath: path.resolve(renderProofPath),
+        clickProofPath: clickProofPath === null ? undefined : path.resolve(clickProofPath),
+      });
       process.stdout.write(`${JSON.stringify({ phase, evidence })}\n`);
       return;
     }

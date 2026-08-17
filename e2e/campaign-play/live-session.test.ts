@@ -10,6 +10,11 @@ import { createCampaignPlayStateRepository } from "../../backend/src/campaign-pl
 import { CAMPAIGN_PLAY_EVIDENCE_VERSION, type CampaignPlayRunConfig } from "./contracts.js";
 import { createDefaultSettings } from "@worldforge/shared";
 import {
+  assertCampaignPlayChoiceClickProof,
+  assertExactPlayerInput,
+  assertCampaignPlayReadyChoiceMatchesApi,
+  assertCampaignPlayRenderedChoiceCapture,
+  authorizeCampaignPlayManualChoice,
   bindCampaignPlayManualDecision,
   cancelCampaignPlayManualDecision,
   captureCampaignPlayReloadBoundary,
@@ -17,6 +22,7 @@ import {
   campaignPlayLiveSessionRoot,
   prepareCampaignPlayLiveSession,
   stageCampaignPlayManualDecision,
+  waitForCompletedPublicTurn,
 } from "./live-session.js";
 import {
   createSeededAcceptedCampaign,
@@ -129,6 +135,54 @@ function writeLiveSessionFixture(
 }
 
 describe("Campaign Play live evidence session", () => {
+  it("keeps reconciling a healthy turn past the historical 120-second window", async () => {
+    vi.useFakeTimers();
+    try {
+      let ready = false;
+      const turnId = "turn-wait-healthy";
+      const projectionHash = "a".repeat(64);
+      const fetchMock = vi.fn(async (input: unknown) => {
+        const url = String(input);
+        if (url.endsWith("/state")) {
+          return new Response(JSON.stringify({
+            phase: ready ? "ready" : "acting",
+            activeTurn: ready ? null : { turnId, status: "processing" },
+            projectionHash,
+          }), { status: 200, headers: { "content-type": "application/json" } });
+        }
+        return new Response(JSON.stringify({
+          turn: { turnId, status: ready ? "completed" : "processing" },
+          result: ready
+            ? {
+                status: "completed",
+                narration: { turnId, narrationId: "narration-wait-healthy" },
+                narrationOperation: { turnId, operationId: "operation-wait-healthy" },
+              }
+            : { status: "pending", narration: null, narrationOperation: null },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      let settled = false;
+      const resultPromise = waitForCompletedPublicTurn("campaign-wait-healthy", turnId)
+        .then((result) => {
+          settled = true;
+          return result;
+        });
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(settled).toBe(false);
+      expect(fetchMock.mock.calls.length).toBeGreaterThan(100);
+
+      ready = true;
+      await vi.advanceTimersByTimeAsync(1_000);
+      const result = await resultPromise;
+      expect(result.turn).toMatchObject({ turn: { turnId, status: "completed" } });
+      expect(result.readyObservedAt).toBeGreaterThanOrEqual(120_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("freezes an accepted eligible campaign before character creation and signs the next visible decision", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "worldforge-live-prepare-"));
     roots.push(root);
@@ -200,6 +254,157 @@ describe("Campaign Play live evidence session", () => {
       decisionNote: "This must wait for the first durable turn.",
       signedAt: 1_201,
     })).rejects.toThrow("already awaiting");
+  });
+
+  it("signs and authorizes only the same rendered choice handle and control", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "worldforge-live-choice-capture-"));
+    roots.push(root);
+    process.env.GSD_CAMPAIGNS_ROOT = root;
+    const campaignId = "d16b0000-0000-4000-8000-000000000009";
+    createSeededAcceptedCampaign(root, campaignId);
+    const replay = (() => {
+      const handle = openCampaignPlayDatabase(campaignId);
+      try {
+        createCampaignPlayStateRepository(handle).createState({
+          eventId: "choice-capture-session-created",
+          createdAt: 1_000,
+        });
+        return captureCampaignPlayReplay(handle);
+      } finally {
+        handle.close();
+      }
+    })();
+    const config = liveConfig(path.join(root, "evidence"), campaignId, 1);
+    const sessionRoot = writeLiveSessionFixture(config, replay);
+    const projectionHash = replay.report.publicState.hash;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      phase: "ready",
+      activeTurn: null,
+      projectionHash,
+      narration: {
+        suggestedActions: [{
+          choiceHandle: "opaque-choice-1",
+          label: "Follow the visible signal.",
+        }],
+      },
+      utilityActions: [],
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+
+    const capture = {
+      playerActionNumber: 1,
+      control: "choice" as const,
+      enabled: true as const,
+      ready: true as const,
+      chosenText: "Follow the visible signal.",
+      choiceHandle: "opaque-choice-1",
+      choiceContainer: "suggested" as const,
+      choiceOrdinal: 0,
+      visibleLabel: "Follow the visible signal.",
+      renderedControlIdentity: "campaign-play-choices:0",
+      visibleStateHash: projectionHash,
+      capturedAt: 1_200,
+    };
+    await expect(stageCampaignPlayManualDecision({
+      runConfig: config,
+      control: "choice",
+      chosenText: capture.chosenText,
+      choiceHandle: "manually-entered-handle",
+      choiceCapture: capture,
+      decisionNote: "A manually supplied handle must never become the signed choice.",
+      signedAt: 1_200,
+    })).rejects.toThrow("rendered capture");
+    const pending = await stageCampaignPlayManualDecision({
+      runConfig: config,
+      control: "choice",
+      chosenText: "",
+      choiceHandle: null,
+      choiceCapture: capture,
+      decisionNote: "The visible enabled choice is the only signed player input.",
+      signedAt: 1_201,
+    });
+    expect(pending).toMatchObject({
+      control: "choice",
+      chosenText: capture.chosenText,
+      choiceHandle: capture.choiceHandle,
+      choiceContainer: capture.choiceContainer,
+      choiceOrdinal: capture.choiceOrdinal,
+      visibleLabel: capture.visibleLabel,
+      renderedControlIdentity: capture.renderedControlIdentity,
+      choiceCaptureAt: capture.capturedAt,
+    });
+    expect(assertCampaignPlayRenderedChoiceCapture(capture)).toEqual(capture);
+
+    await expect(authorizeCampaignPlayManualChoice({
+      runConfig: config,
+      capture: { ...capture, renderedControlIdentity: "campaign-play-choices:1" },
+    })).rejects.toThrow("cancel the pending decision before clicking");
+    expect(fs.existsSync(path.join(sessionRoot, "pending-decision.json"))).toBe(true);
+
+    await expect(authorizeCampaignPlayManualChoice({
+      runConfig: config,
+      capture: { ...capture, choiceHandle: "another-handle" },
+    })).rejects.toThrow("cancel the pending decision before clicking");
+    const authorized = await authorizeCampaignPlayManualChoice({ runConfig: config, capture });
+    expect(authorized.choiceHandle).toBe(capture.choiceHandle);
+    expect(assertCampaignPlayChoiceClickProof({
+      ...capture,
+      clickDispatchedAt: 1_202,
+      clickCompletedAt: 1_203,
+    })).toMatchObject({
+      choiceHandle: capture.choiceHandle,
+      renderedControlIdentity: capture.renderedControlIdentity,
+    });
+    expect(() => assertCampaignPlayReadyChoiceMatchesApi({
+      phase: "ready",
+      activeTurn: null,
+      projectionHash,
+      narration: {
+        suggestedActions: [
+          { choiceHandle: capture.choiceHandle, label: capture.visibleLabel },
+          { choiceHandle: capture.choiceHandle, label: "Duplicate" },
+        ],
+      },
+      utilityActions: [],
+      }, capture)).toThrow("duplicate choice handle");
+    expect(() => assertCampaignPlayRenderedChoiceCapture({
+      ...capture,
+      enabled: false,
+    })).toThrow("enabled-control scalar");
+    expect(() => assertCampaignPlayReadyChoiceMatchesApi({
+      phase: "ready",
+      activeTurn: null,
+      projectionHash,
+      narration: {
+        suggestedActions: [{
+          choiceHandle: capture.choiceHandle,
+          label: capture.visibleLabel,
+        }],
+      },
+      utilityActions: [],
+    }, {
+      ...capture,
+      choiceOrdinal: 1,
+    })).toThrow("does not match");
+    expect(() => assertCampaignPlayReadyChoiceMatchesApi({
+      phase: "ready",
+      activeTurn: null,
+      projectionHash,
+      narration: {
+        suggestedActions: [{
+          choiceHandle: capture.choiceHandle,
+          label: "Changed visible label",
+        }],
+      },
+      utilityActions: [],
+    }, capture)).toThrow("does not match");
+    expect(() => assertExactPlayerInput(
+      JSON.stringify({ request: { source: "suggested", choiceHandle: "different-handle" } }),
+      pending,
+    )).toThrow("does not match the signed manual decision");
+    expect(() => assertExactPlayerInput(
+      JSON.stringify({ request: { source: "suggested", choiceHandle: capture.choiceHandle } }),
+      pending,
+    )).not.toThrow();
   });
 
   it("captures a declared completed-action checkpoint across a byte-stable reload", async () => {

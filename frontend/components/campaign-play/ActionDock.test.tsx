@@ -32,7 +32,9 @@ describe("ActionDock", () => {
     const user = userEvent.setup();
     const onSuggested = vi.fn();
     const { container } = render(<Harness onFreeform={vi.fn()} onSuggested={onSuggested} />);
-    await user.click(screen.getByRole("button", { name: "Follow the lantern" }));
+    const button = screen.getByRole("button", { name: "Follow the lantern" });
+    expect(button).toHaveAttribute("data-choice-handle", "choice-opaque");
+    await user.click(button);
     expect(onSuggested).toHaveBeenCalledWith("choice-opaque");
     expect(container).not.toHaveTextContent("choice-opaque");
   });
@@ -95,6 +97,7 @@ describe("ActionDock", () => {
     />);
     const story = screen.getByRole("button", { name: /Follow the lantern/ });
     const utility = screen.getByRole("button", { name: "Wait 10 minutes" });
+    expect(utility).toHaveAttribute("data-choice-handle", "utility-wait");
     expect(story.parentElement?.parentElement).toHaveClass("campaign-play-choices");
     expect(utility.parentElement).toHaveClass("campaign-play-utility-actions");
     expect(utility).not.toHaveTextContent("a.");

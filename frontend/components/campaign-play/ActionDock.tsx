@@ -53,6 +53,7 @@ export function ActionDock({
           <div>
             {suggestedActions.map((action, index) => (
               <button
+                data-choice-handle={action.choiceHandle}
                 disabled={inputLocked}
                 key={action.choiceHandle}
                 onClick={() => onSubmitSuggested(action.choiceHandle)}
@@ -70,6 +71,7 @@ export function ActionDock({
           {utilityActions.map((action) => (
             <button
               className="campaign-play-utility-action"
+              data-choice-handle={action.choiceHandle}
               disabled={inputLocked}
               key={action.choiceHandle}
               onClick={() => onSubmitSuggested(action.choiceHandle)}
