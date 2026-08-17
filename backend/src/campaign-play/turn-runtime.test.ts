@@ -706,7 +706,6 @@ function gameMasterFixture(
                 kind: "record_world_event" as const,
                 eventClass: performingActorHandle === null ? "scene" as const : "dialogue" as const,
                 performingActorHandle,
-                routeAccessClaims: [],
                 summary: includeSubmittedText
                   ? `${request.ruling.normalizedIntent.originalText} (trace ${index + 1}).`
                   : worldEventCount === 1
@@ -751,7 +750,6 @@ function repeatedDialogueErrorForRequest(
           kind: "record_world_event",
           eventClass: "dialogue",
           performingActorHandle: continuity.actorHandle,
-          routeAccessClaims: [],
           summary: recentSummary,
           affectedHandles: [playerHandle, locationHandle],
         }],
@@ -831,7 +829,6 @@ function supportActorGameMasterFixture() {
                 kind: "record_world_event" as const,
                 eventClass: "dialogue" as const,
                 performingActorHandle: "introduced-support-actor",
-                routeAccessClaims: [],
                 summary: "Dario Calvo sets his satchel beside the toolkit and shows Nera the rain-softened stitching at its buckle.",
                 affectedHandles: ["introduced-support-actor", playerHandle, locationHandle],
               },

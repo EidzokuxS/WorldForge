@@ -244,7 +244,6 @@ const proposal = {
     kind: "record_world_event" as const,
     eventClass: "dialogue" as const,
     performingActorHandle: "guard",
-    routeAccessClaims: [],
     summary: "The player asks the guard about the passage.",
     affectedHandles: ["you", "guard"],
   }],
@@ -254,7 +253,6 @@ const guardResponseEffect = {
   kind: "record_world_event" as const,
   eventClass: "dialogue" as const,
   performingActorHandle: "guard",
-  routeAccessClaims: [],
   summary: "The guard answers the player's question.",
   affectedHandles: ["you", "guard"],
 };
@@ -552,7 +550,6 @@ describe("Campaign Play Game Master obligations", () => {
           kind: "record_world_event",
           eventClass: "dialogue",
           performingActorHandle: "guard",
-          routeAccessClaims: [],
           summary: "Oren acknowledges the request but does not transfer any copper yet.",
           affectedHandles: ["you", "guard", "guard-receivable"],
         }],
@@ -589,7 +586,6 @@ describe("Campaign Play Game Master obligations", () => {
         kind: "record_world_event" as const,
         eventClass: "dialogue" as const,
         performingActorHandle: "guard",
-        routeAccessClaims: [],
         summary: "Oren acknowledges the request but does not transfer any copper yet.",
         affectedHandles: ["you", "guard", "guard-receivable"],
       }],
@@ -640,6 +636,193 @@ describe("Campaign Play Game Master obligations", () => {
   });
 });
 
+describe("Campaign Play Game Master obligation authority prompt", () => {
+  const obligationRecoveryFeedback = {
+    diagnostic: "game_master_semantic_validation_mismatch" as const,
+    failedChecks: [{
+      check: "mechanical_authority_rejected" as const,
+      reviewFailedChecks: ["obligation_authority_missing" as const],
+    }],
+  };
+
+  it("shares one canonical Judge obligation authority with initial, recovery, and reviewer prompts", async () => {
+    const requiredObligationEffect = {
+      kind: "incur_actor_obligation" as const,
+      debtorHandle: "you",
+      creditorHandle: "guard",
+      unitKey: "copper" as const,
+      amount: 8,
+      minimumResult: "setback" as const,
+    };
+    const obligationProposal = {
+      elapsedMinutes: 1,
+      effects: [{
+        kind: "incur_actor_obligation" as const,
+        debtorActorHandle: "you",
+        creditorActorHandle: "guard",
+        unitKey: "copper" as const,
+        amount: 8,
+        summary: "You owe Oren Tide eight copper for the broken glass.",
+        affectedHandles: ["you", "guard"],
+      }, guardResponseEffect],
+    };
+    const initialGenerateObject = vi.fn()
+      .mockResolvedValueOnce({ object: obligationProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: { verdict: "accepted", reason: "The debt is the typed Judge transition." },
+        trace: trace(),
+      });
+    await createCampaignPlayGameMaster({
+      generateObject: initialGenerateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: ruling({ requiredObligationEffect }), resolution,
+      uncertaintyAuthority: null, model: model(), temperature: 0.2, budget,
+    });
+
+    const recoveryGenerateObject = vi.fn()
+      .mockResolvedValueOnce({ object: obligationProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: { verdict: "accepted", reason: "The repaired debt remains typed." },
+        trace: trace(),
+      });
+    await createCampaignPlayGameMaster({
+      generateObject: recoveryGenerateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: ruling({ requiredObligationEffect }), resolution,
+      uncertaintyAuthority: null, model: model(), temperature: 0.2, budget,
+      recoveryFeedback: obligationRecoveryFeedback,
+    });
+
+    const expected = 'OBLIGATION_AUTHORITY={"kind":"incur_actor_obligation","debtorHandle":"you","creditorHandle":"guard","unitKey":"copper","amount":8,"minimumResult":"setback"}';
+    const initialPrompt = String(initialGenerateObject.mock.calls[0]![0].prompt);
+    const recoveryPrompt = String(recoveryGenerateObject.mock.calls[0]![0].prompt);
+    const initialReviewPrompt = String(initialGenerateObject.mock.calls[1]![0].prompt);
+    const recoveryReviewPrompt = String(recoveryGenerateObject.mock.calls[1]![0].prompt);
+    expect(initialPrompt).toContain(expected);
+    expect(recoveryPrompt).toContain(expected);
+    expect(initialReviewPrompt).toContain(expected);
+    expect(recoveryReviewPrompt).toContain(expected);
+    expect(initialPrompt.match(/OBLIGATION_AUTHORITY=.*$/m)?.[0]).toBe(expected);
+    expect(recoveryPrompt.match(/OBLIGATION_AUTHORITY=.*$/m)?.[0]).toBe(expected);
+    expect(initialReviewPrompt.match(/OBLIGATION_AUTHORITY=.*$/m)?.[0]).toBe(expected);
+    expect(recoveryReviewPrompt.match(/OBLIGATION_AUTHORITY=.*$/m)?.[0]).toBe(expected);
+    expect(recoveryPrompt).toContain(
+      "For obligation_authority_missing, follow OBLIGATION_AUTHORITY exactly. If kind is none, remove every claim that a debt, payment, fee liability, duty balance, or completed bargain changed; keep only the non-binding offer, request, promise, quoted terms, refusal, counteroffer, accepted assignment, or future plan established by the action. If kind is incur_actor_obligation or pay_actor_obligation, emit the one exact permitted typed effect and match its parties, handles, unit, and amount in the public consequence. Do not invent a second obligation or payment.",
+    );
+    expect(initialPrompt).not.toContain("For obligation_authority_missing,");
+    expect(initialGenerateObject).toHaveBeenCalledTimes(2);
+    expect(recoveryGenerateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves pay authority handles, unit, amount, and threshold in the canonical block", async () => {
+    const paymentFrame = frame();
+    const possessionKey = deriveCampaignPlayPossessionKey("Copper coins");
+    const paymentPossessionId = deriveCampaignPlayPossessionId(CAMPAIGN_ID, PLAYER_ID, possessionKey);
+    const obligationId = deriveCampaignPlayObligationId(
+      CAMPAIGN_ID,
+      PLAYER_ID,
+      "actor-guard",
+      "copper",
+    );
+    paymentFrame.visibleFacts.push(
+      { handle: "coins", kind: "possession", summary: "Five copper coins." },
+      { handle: "guard-debt", kind: "obligation", summary: "Seven copper owed to Oren Tide." },
+    );
+    paymentFrame.handleBindings.push(
+      { handle: "coins", reference: { kind: "possession", id: paymentPossessionId } },
+      { handle: "guard-debt", reference: { kind: "obligation", id: obligationId } },
+    );
+    paymentFrame.rulebookFrame.possessions.push({
+      possessionId: paymentPossessionId,
+      actorId: PLAYER_ID,
+      possessionKey,
+      name: "Copper coins",
+      quantity: 5,
+    });
+    paymentFrame.rulebookFrame.obligations.push({
+      obligationId,
+      debtorActorId: PLAYER_ID,
+      creditorActorId: "actor-guard",
+      unitKey: "copper",
+      principalAmount: 7,
+      outstandingAmount: 7,
+    });
+    paymentFrame.authority.authorizedRefs.push(
+      { kind: "possession", id: paymentPossessionId },
+      { kind: "obligation", id: obligationId },
+    );
+    const requiredObligationEffect = {
+      kind: "pay_actor_obligation" as const,
+      debtorHandle: "you",
+      creditorHandle: "guard",
+      obligationHandle: "guard-debt",
+      paymentPossessionHandle: "coins",
+      unitKey: "copper" as const,
+      amount: 2,
+      minimumResult: "success" as const,
+    };
+    const paymentProposal = {
+      elapsedMinutes: 1,
+      effects: [{
+        kind: "pay_actor_obligation" as const,
+        debtorActorHandle: "you",
+        creditorActorHandle: "guard",
+        obligationHandle: "guard-debt",
+        paymentPossessionHandle: "coins",
+        unitKey: "copper" as const,
+        amount: 2,
+        summary: "You pay two copper toward the recorded debt.",
+        affectedHandles: ["you", "guard", "coins", "guard-debt"],
+      }, guardResponseEffect],
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: paymentProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: { verdict: "accepted", reason: "The payment matches the Judge transition." },
+        trace: trace(),
+      });
+    await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: paymentFrame,
+      ruling: ruling({ requiredObligationEffect }),
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+    });
+    expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
+      'OBLIGATION_AUTHORITY={"kind":"pay_actor_obligation","debtorHandle":"you","creditorHandle":"guard","obligationHandle":"guard-debt","paymentPossessionHandle":"coins","unitKey":"copper","amount":2,"minimumResult":"success"}',
+    );
+    expect(String(generateObject.mock.calls[1]![0].prompt)).toContain(
+      'OBLIGATION_AUTHORITY={"kind":"pay_actor_obligation","debtorHandle":"you","creditorHandle":"guard","obligationHandle":"guard-debt","paymentPossessionHandle":"coins","unitKey":"copper","amount":2,"minimumResult":"success"}',
+    );
+  });
+
+  it("keeps obligation recovery wording targeted to its safe reviewer coordinate", async () => {
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: proposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: { verdict: "accepted", reason: "The event remains non-mechanical." },
+        trace: trace(),
+      });
+    await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget,
+      recoveryFeedback: obligationRecoveryFeedback,
+    });
+    const promptText = String(generateObject.mock.calls[0]![0].prompt);
+    expect(promptText).toContain('OBLIGATION_AUTHORITY={"kind":"none"}');
+    expect(promptText).toContain("OBLIGATION_AUTHORITY is the exact Judge-owned obligation transition for this action.");
+    expect(promptText).toContain("For obligation_authority_missing, follow OBLIGATION_AUTHORITY exactly.");
+    expect(promptText).not.toContain("SENTINEL_RAW_PROPOSAL");
+    expect(promptText).not.toContain("SENTINEL_REVIEW_REASON");
+  });
+});
+
 describe("Campaign Play Game Master repeated-dialogue recovery", () => {
   const repeatedSummary = frame().actorContinuity[0]!.recentOwnActions[0]!.summary;
   const recoveryFeedback = {
@@ -654,7 +837,20 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
   };
   const mechanicalRecoveryFeedback = {
     diagnostic: "game_master_semantic_validation_mismatch" as const,
-    failedChecks: [{ check: "mechanical_authority_rejected" as const }],
+    failedChecks: [{
+      check: "mechanical_authority_rejected" as const,
+      reviewFailedChecks: [
+        "possession_authority_missing" as const,
+        "route_authority_missing" as const,
+      ],
+    }],
+  };
+  const possessionTransformRecoveryFeedback = {
+    diagnostic: "game_master_semantic_validation_mismatch" as const,
+    failedChecks: [{
+      check: "mechanical_authority_rejected" as const,
+      reviewFailedChecks: ["possession_transform_identity_incomplete" as const],
+    }],
   };
   const targetedActorRecoveryFeedback = {
     diagnostic: "game_master_semantic_validation_mismatch" as const,
@@ -758,6 +954,7 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
     });
     const normalPrompt = String(normalGenerate.mock.calls[0]![0].prompt);
     expect(normalPrompt).not.toContain("GAME_MASTER_RECOVERY");
+    expect(normalPrompt).toContain("ROUTE_AUTHORITY=[]");
 
     const recoveryGenerate = vi.fn()
       .mockResolvedValueOnce({ object: proposal, trace: trace() })
@@ -773,7 +970,7 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
     const recoveryBlock = recoveryPrompt.slice(recoveryPrompt.indexOf("GAME_MASTER_RECOVERY"));
     expect(recoveryBlock).toBe([
       "GAME_MASTER_RECOVERY",
-      "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. For mechanical_authority_rejected, make every mechanically durable claim in each event summary agree with the typed resource effects and route access claims. If no typed authority changes a possession, obligation, or route, keep the event summary non-mechanical. All schema, authority, continuity, and Rulebook rules above still apply.",
+      "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. For mechanical_authority_rejected, make every mechanically durable claim in each event summary agree with the typed resource effects and ROUTE_AUTHORITY. If no typed authority changes a possession, obligation, or route, keep the event summary non-mechanical. All schema, authority, continuity, and Rulebook rules above still apply.",
       "RECOVERY_DIAGNOSTIC",
       JSON.stringify(recoveryFeedback),
       "END_RECOVERY_DIAGNOSTIC",
@@ -848,7 +1045,10 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
       modelEvidenceErrorCode: "mechanical_authority_rejected",
       safeGenerationCode: null,
       recoveryDiagnostic: "game_master_semantic_validation_mismatch",
-      failedChecks: [{ check: "mechanical_authority_rejected" }],
+      failedChecks: [{
+        check: "mechanical_authority_rejected",
+        reviewFailedChecks: ["possession_authority_missing", "route_authority_missing"],
+      }],
       reviewFailedChecks: ["possession_authority_missing", "route_authority_missing"],
       denial: null,
     });
@@ -856,6 +1056,87 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
     expect(JSON.stringify(eventPayload)).not.toContain("SENTINEL_RAW_PROPOSAL");
     expect(JSON.stringify(eventPayload)).not.toContain("Dren Vask");
     expect(generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it("passes route-authority reviewer checks to the automatic second plan request", async () => {
+    const routeRuling = ruling({
+      normalizedIntent: {
+        originalText: "I ask whether this direct route needs a permit.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "contact",
+        targets: [{ handle: "guard", kind: "actor" }, { handle: "passage", kind: "route" }],
+        method: "Ask about the visible route",
+        stakes: "Learn its access rule",
+      },
+    });
+    const rejectedProposal = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        summary: "The guard describes a toll bridge before the south harbor.",
+      }],
+    };
+    const correctedProposal = {
+      ...rejectedProposal,
+      effects: [{
+        ...rejectedProposal.effects[0],
+        summary: "The guard says the passage runs directly south and needs no permit.",
+      }],
+    };
+    const firstGenerateObject = vi.fn()
+      .mockResolvedValueOnce({ object: rejectedProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "rejected",
+          reason: "The summary invents an access condition.",
+          failedChecks: ["route_authority_missing"],
+        },
+        trace: trace(),
+      });
+    let firstError: unknown;
+    try {
+      await createCampaignPlayGameMaster({
+        generateObject: firstGenerateObject as unknown as typeof safeGenerateObject,
+      }).plan({
+        frame: frame(), ruling: routeRuling, resolution, uncertaintyAuthority: null,
+        model: model(), temperature: 0.2, budget,
+      });
+    } catch (error) {
+      firstError = error;
+    }
+    const feedback = getCampaignPlayGameMasterRecoveryFeedback(firstError);
+    expect(feedback).toEqual({
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [{
+        check: "mechanical_authority_rejected",
+        reviewFailedChecks: ["route_authority_missing"],
+      }],
+    });
+
+    const secondGenerateObject = vi.fn()
+      .mockResolvedValueOnce({ object: correctedProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: { verdict: "accepted", reason: "The route claim matches the open route." },
+        trace: trace(),
+      });
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: secondGenerateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: routeRuling, resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget,
+      recoveryFeedback: feedback,
+    });
+    expect(candidate.preflight.accepted).toBe(true);
+    const recoveryPrompt = String(secondGenerateObject.mock.calls[0]![0].prompt);
+    expect(recoveryPrompt).toContain(
+      'ROUTE_AUTHORITY=[{"routeHandle":"passage","state":"open","accessRequirement":"none","viaLocationHandle":null}]',
+    );
+    expect(recoveryPrompt).toContain(
+      "For route_authority_missing, remove or correct only unsupported campaign-route edge topology, state, waypoint, detour, or traversal requirements. Preserve grounded ordinary location descriptions and wayfinding that make none of those claims. Do not invent a location while repairing.",
+    );
+    expect(recoveryPrompt).toContain(JSON.stringify(feedback));
+    expect(secondGenerateObject).toHaveBeenCalledTimes(2);
   });
 
   it("renders the mechanical-authority recovery instruction without rejected content", async () => {
@@ -877,11 +1158,39 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
     expect(promptText).not.toContain("SENTINEL_RAW_PROPOSAL");
     expect(promptText).toContain([
       "GAME_MASTER_RECOVERY",
-      "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. For mechanical_authority_rejected, make every mechanically durable claim in each event summary agree with the typed resource effects and route access claims. If no typed authority changes a possession, obligation, or route, keep the event summary non-mechanical. All schema, authority, continuity, and Rulebook rules above still apply.",
+      "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. For mechanical_authority_rejected, make every mechanically durable claim in each event summary agree with the typed resource effects and ROUTE_AUTHORITY. If no typed authority changes a possession, obligation, or route, keep the event summary non-mechanical. For route_authority_missing, remove or correct only unsupported campaign-route edge topology, state, waypoint, detour, or traversal requirements. Preserve grounded ordinary location descriptions and wayfinding that make none of those claims. Do not invent a location while repairing. All schema, authority, continuity, and Rulebook rules above still apply.",
       "RECOVERY_DIAGNOSTIC",
       JSON.stringify(mechanicalRecoveryFeedback),
       "END_RECOVERY_DIAGNOSTIC",
     ].join("\n"));
+    expect(promptText).not.toContain(
+      "For possession_transform_identity_incomplete, name each transformed possession as the complete retained item or container after the transform. Preserve the source identity and include every material content or state added by the accepted action. Do not rely on summary to carry durable identity, and do not imply an untracked split or remainder.",
+    );
+  });
+
+  it("renders the possession-transform recovery instruction only for its safe reviewer coordinate", async () => {
+    const acceptedReview = {
+      object: { verdict: "accepted", reason: "The corrected possession remains within typed authority." },
+      trace: trace(),
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: proposal, trace: trace() })
+      .mockResolvedValueOnce(acceptedReview);
+    await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget,
+      recoveryFeedback: possessionTransformRecoveryFeedback,
+    });
+    const promptText = String(generateObject.mock.calls[0]![0].prompt);
+    expect(promptText).toContain(
+      "For possession_transform_identity_incomplete, name each transformed possession as the complete retained item or container after the transform. Preserve the source identity and include every material content or state added by the accepted action. Do not rely on summary to carry durable identity, and do not imply an untracked split or remainder.",
+    );
+    expect(promptText).not.toContain("SENTINEL_RAW_PROPOSAL");
+    expect(promptText).not.toContain("SENTINEL_REVIEW_REASON");
+    expect(promptText).not.toContain("Dren Vask");
+    expect(JSON.stringify(possessionTransformRecoveryFeedback)).not.toContain("SENTINEL_RAW_PROPOSAL");
   });
 
   it("renders the targeted-contact recovery instruction with only safe coordinates", async () => {
@@ -926,30 +1235,22 @@ function schemaContractFailureModel(): LanguageModel {
   const value = new MockLanguageModelV3({
     provider: "test-provider",
     modelId: "test-model",
-    doStream: async () => ({
-      stream: new ReadableStream({
-        start(controller) {
-          controller.enqueue({ type: "stream-start", warnings: [] });
-          controller.enqueue({ type: "text-start", id: "text-1" });
-          controller.enqueue({
-            type: "text-delta",
-            id: "text-1",
-            delta: JSON.stringify({
-              SENTINEL_RAW_PROPOSAL: "SENTINEL_PLAYER_AND_ACTOR_PROSE",
-            }),
-          });
-          controller.enqueue({ type: "text-end", id: "text-1" });
-          controller.enqueue({
-            type: "finish",
-            usage: {
-              inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
-              outputTokens: { total: 12, text: 12, reasoning: undefined },
-            },
-            finishReason: { unified: "stop", raw: undefined },
-          });
-          controller.close();
-        },
-      }),
+    doGenerate: async () => ({
+      content: [{
+        type: "tool-call",
+        toolCallId: "structured-output-failure",
+        toolName: "structured_output",
+        input: JSON.stringify({
+          SENTINEL_RAW_PROPOSAL: "SENTINEL_PLAYER_AND_ACTOR_PROSE",
+        }),
+      }],
+      finishReason: { unified: "tool-calls", raw: undefined },
+      response: { modelId: "test-model" },
+      usage: {
+        inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
+        outputTokens: { total: 12, text: 12, reasoning: undefined },
+      },
+      warnings: [],
     }),
   });
   rememberStructuredOutputModelMetadata(value, buildStructuredOutputModelMetadata({
@@ -1082,12 +1383,15 @@ describe("Campaign Play Game Master", () => {
     });
   });
 
-  it("uses one strict proposal and one strict authority review without exposing canonical bindings", async () => {
+  it("gives the strict proposal and authority review independent model-call timeouts", async () => {
     const workerController = new AbortController();
     const generateObject = vi.fn()
       .mockResolvedValueOnce({ object: proposal, trace: trace() })
       .mockResolvedValueOnce({
-        object: { verdict: "accepted", reason: "The dialogue changes no mechanical resource state." },
+        object: {
+          verdict: "accepted",
+          reason: "The dialogue changes no mechanical resource state.",
+        },
         trace: trace(),
       });
     const gameMaster = createCampaignPlayGameMaster({ generateObject: generateObject as unknown as typeof safeGenerateObject });
@@ -1101,18 +1405,21 @@ describe("Campaign Play Game Master", () => {
     expect(generateObject).toHaveBeenCalledTimes(2);
     const options = generateObject.mock.calls[0]![0];
     expect(options).toMatchObject({ strictSchema: true, allowRepair: false, allowTextFallback: false,
-      retries: 1, abortSignal: workerController.signal, mode: "auto" });
-    expect("timeout" in options).toBe(false);
+      retries: 1, abortSignal: workerController.signal, mode: "auto", timeout: { totalMs: 180_000 } });
     const reviewOptions = generateObject.mock.calls[1]![0];
     expect(reviewOptions).toMatchObject({ strictSchema: true, allowRepair: false,
-      allowTextFallback: false, retries: 1, abortSignal: workerController.signal, mode: "auto" });
-    expect("timeout" in reviewOptions).toBe(false);
+      allowTextFallback: false, retries: 1, abortSignal: workerController.signal, mode: "auto",
+      timeout: { totalMs: 180_000 } });
     const reviewSchema = reviewOptions.schema as z.ZodType;
     expect(reviewSchema.safeParse({
       verdict: "accepted",
       reason: "No mechanical claim changes.",
       failedChecks: [],
     }).success).toBe(true);
+    expect(reviewSchema.safeParse({
+      verdict: "accepted",
+      reason: "No mechanical claim changes.",
+    }).success).toBe(false);
     expect(reviewSchema.safeParse({
       verdict: "accepted",
       reason: "No mechanical claim changes.",
@@ -1133,6 +1440,10 @@ describe("Campaign Play Game Master", () => {
       reason: "A typed authority check failed.",
       failedChecks: ["SENTINEL_UNKNOWN_CHECK"],
     }).success).toBe(false);
+    expect(reviewSchema.safeParse({
+      verdict: "rejected",
+      reason: "A typed authority check failed.",
+    }).success).toBe(false);
     const reviewSchemaJson = JSON.stringify(z.toJSONSchema(reviewSchema));
     expect(reviewSchemaJson).toContain("possession_authority_missing");
     expect(reviewSchemaJson).toContain("obligation_authority_missing");
@@ -1147,6 +1458,15 @@ describe("Campaign Play Game Master", () => {
     expect(String(reviewOptions.prompt)).toContain('"typedResourceEffects":[]');
     expect(String(reviewOptions.prompt)).toContain(
       "Set failedChecks to [] when verdict is accepted. When verdict is rejected, include each applicable safe check once: possession_authority_missing for an untyped possession or custody change; obligation_authority_missing for an untyped debt, payment, or duty change; route_authority_missing for an unsupported route or access claim; possession_transform_identity_incomplete when a typed transformation leaves retained possession identity incomplete; other_mechanical_authority_mismatch only when none of the specific checks applies. Do not copy event summaries, proposal text, player text, actor names, location names, provider text, or the free-form reason into failedChecks.",
+    );
+    expect(String(reviewOptions.prompt)).toContain(
+      "Do not classify an ordinary location description or ordinary wayfinding as route_authority_missing unless the prose actually asserts a campaign route edge",
+    );
+    expect(String(reviewOptions.prompt)).toContain(
+      "REVIEW_OUTPUT_CONTRACT\nReturn exactly one object with exactly these keys: verdict, reason, failedChecks. failedChecks is mandatory.",
+    );
+    expect(String(reviewOptions.prompt).trimEnd()).toMatch(
+      /REVIEW_OUTPUT_CONTRACT[\s\S]*Do not add, omit, default, or repair any key\.$/,
     );
     expect(String(options.prompt)).toContain("opaque handles");
     expect(String(options.prompt)).toContain("SOURCE_MOMENT is the exact accepted player-visible scene");
@@ -1163,6 +1483,12 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("state whether it was first put inside");
     expect(String(options.prompt)).toContain("never defer that spatial decision to a later stage");
     expect(String(options.prompt)).toContain("RULING defines feasibility, result bounds, and elapsed bounds");
+    expect(String(options.prompt)).toContain(
+      "ROUTE_AUTHORITY governs campaign route edges and their traversal state or requirements. A location description or ordinary wayfinding",
+    );
+    expect(String(options.prompt)).toContain(
+      "Such information must still be grounded in SOURCE_MOMENT, VISIBLE_FACTS, ACTOR_CONTINUITY, or ACTOR_DIRECTIVES",
+    );
     expect(String(options.prompt)).toContain("not a new source of world facts");
     expect(String(options.prompt)).toContain("A clean, empty, missing, or disturbed surface establishes only its current observable state");
     expect(String(options.prompt)).toContain("Do not expose protected truth by guessing");
@@ -1294,10 +1620,7 @@ describe("Campaign Play Game Master", () => {
       "Do not repeat, qualify, defend, or preserve the conflicting toll",
     );
     expect(String(options.prompt)).toContain(
-      "whose PLAYER_INTENT targets or RULING cites a route, routeAccessClaims is required",
-    );
-    expect(String(options.prompt)).toContain(
-      "Every route topology or access statement in summary must agree with these claims",
+      "Do not output routeAccessClaims or other route-authority metadata. Route topology and access are supplied by code to the reviewer. Write event prose that agrees with VISIBLE_FACTS and accepted set_route_state effects.",
     );
     expect(String(options.prompt)).toContain('"eventClass":"discovery"');
     expect(String(options.prompt)).toContain(
@@ -1343,7 +1666,11 @@ describe("Campaign Play Game Master", () => {
     const generateObject = vi.fn()
       .mockResolvedValueOnce({ object: proposal, trace: trace("tool_mode", undefined, "tool") })
       .mockResolvedValueOnce({
-        object: { verdict: "accepted", reason: "The dialogue changes no mechanical resource state." },
+        object: {
+          verdict: "accepted",
+          reason: "The dialogue changes no mechanical resource state.",
+          failedChecks: [],
+        },
         trace: trace("tool_mode", undefined, "tool"),
       });
     const gameMaster = createCampaignPlayGameMaster({
@@ -1361,6 +1688,52 @@ describe("Campaign Play Game Master", () => {
     });
     expect(generateObject).toHaveBeenCalledTimes(2);
     expect(generateObject.mock.calls.map(([options]) => options.mode)).toEqual(["tool", "tool"]);
+
+    const proposalSchema = generateObject.mock.calls[0]![0].schema as z.ZodType<unknown>;
+    const reviewerSchema = generateObject.mock.calls[1]![0].schema as z.ZodType<unknown>;
+    const proposalSchemaJson = JSON.stringify(z.toJSONSchema(proposalSchema));
+    const reviewerSchemaJson = JSON.stringify(z.toJSONSchema(reviewerSchema));
+    for (const forbiddenKeyword of ["anyOf", "oneOf", "const", "prefixItems"]) {
+      expect(proposalSchemaJson).not.toContain(forbiddenKeyword);
+      expect(reviewerSchemaJson).not.toContain(forbiddenKeyword);
+    }
+    const proposalJson = z.toJSONSchema(proposalSchema) as {
+      required?: string[];
+      properties?: Record<string, {
+        items?: { properties?: Record<string, { enum?: string[] }> };
+      }>;
+    };
+    expect(proposalJson.required).toEqual(expect.arrayContaining(["elapsedMinutes", "effects"]));
+    expect(proposalJson.properties?.effects?.items?.properties?.kind?.enum).toEqual(expect.arrayContaining([
+      "record_world_event",
+    ]));
+    const reviewerJson = z.toJSONSchema(reviewerSchema) as { required?: string[] };
+    expect(reviewerJson.required).toEqual(expect.arrayContaining(["verdict", "reason", "failedChecks"]));
+  });
+
+  it("rejects irrelevant flat tool fields before any reviewer call", async () => {
+    const generateObject = vi.fn().mockResolvedValue({
+      object: {
+        ...proposal,
+        effects: [{ ...proposal.effects[0], actorHandle: "guard" }],
+      },
+      trace: trace("tool_mode", undefined, "tool"),
+    });
+    const gameMaster = createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    await expect(gameMaster.plan({
+      frame: frame(),
+      ruling: ruling(),
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      structuredOutputMode: "tool",
+    })).rejects.toMatchObject({ code: "model_contract_failed" });
+    expect(generateObject).toHaveBeenCalledTimes(1);
   });
 
   it("rejects a verbatim repeat of the performing actor's recent dialogue", () => {
@@ -1417,7 +1790,7 @@ describe("Campaign Play Game Master", () => {
     );
   });
 
-  it("omits route claims from an observation that neither targets nor cites a route", async () => {
+  it("does not require route metadata for an observation", async () => {
     const observationRuling = ruling({
       normalizedIntent: {
         originalText: "I inspect the marks beside the gate.",
@@ -1528,7 +1901,6 @@ describe("Campaign Play Game Master", () => {
       kind: "record_world_event" as const,
       eventClass: "interaction" as const,
       performingActorHandle: "guard",
-      routeAccessClaims: [],
       summary: "The guard plants one hand on the gate and orders you away from the latch.",
       affectedHandles: ["guard"],
     };
@@ -1611,7 +1983,7 @@ describe("Campaign Play Game Master", () => {
     ]));
   });
 
-  it("binds route-targeted dialogue to the code-owned direct access state", () => {
+  it("accepts route-targeted dialogue without model-owned route metadata", () => {
     const routeRuling = ruling({
       normalizedIntent: {
         originalText: "I ask whether this direct route needs a permit.",
@@ -1627,12 +1999,7 @@ describe("Campaign Play Game Master", () => {
       ...proposal,
       effects: [{
         ...proposal.effects[0],
-        routeAccessClaims: [{
-          routeHandle: "passage",
-          state: "open" as const,
-          accessRequirement: "none" as const,
-          viaLocationHandle: null,
-        }],
+        summary: "The guard says the passage runs directly south and needs no permit.",
       }],
     };
     expect(createCampaignPlayGameMaster().compile(
@@ -1654,12 +2021,6 @@ describe("Campaign Play Game Master", () => {
       frame(), citedRouteRuling, resolution, null, grounded,
     ).preflight.accepted).toBe(true);
     expect(() => createCampaignPlayGameMaster().compile(
-      frame(), citedRouteRuling, resolution, null, proposal,
-    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
-    expect(() => createCampaignPlayGameMaster().compile(
-      frame(), routeRuling, resolution, null, proposal,
-    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
-    expect(() => createCampaignPlayGameMaster().compile(
       frame(), routeRuling, resolution, null, {
         ...grounded,
         effects: [{
@@ -1670,22 +2031,87 @@ describe("Campaign Play Game Master", () => {
       },
     )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
     expect(() => createCampaignPlayGameMaster().compile(
-      frame(), routeRuling, resolution, null, {
-        ...grounded,
-        effects: [{
-          ...grounded.effects[0],
-          routeAccessClaims: [{
-            routeHandle: "passage",
-            state: "restricted",
-            accessRequirement: "required",
-            viaLocationHandle: "south",
-          }],
-        }],
-      },
+      frame(), routeRuling, resolution, null,
+      { ...grounded, effects: [{ ...grounded.effects[0], routeAccessClaims: [] }] },
     )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
   });
 
-  it("rejects route prose that contradicts its mechanically valid route claim", async () => {
+  it("rejects route-authority metadata as an extra strict schema key", () => {
+    const extraMetadata = {
+      ...proposal,
+      effects: [{ ...proposal.effects[0], routeAccessClaims: [] }],
+    };
+    expect(campaignPlayGameMasterProposalSchema.safeParse(extraMetadata).success).toBe(false);
+    expect(() => createCampaignPlayGameMaster().compile(
+      frame(), ruling(), resolution, null, extraMetadata,
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+  });
+
+  it("supplies canonical code-owned route authority to the reviewer", async () => {
+    const routeRuling = ruling({
+      normalizedIntent: {
+        originalText: "I ask whether this direct route needs a permit.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "contact",
+        targets: [{ handle: "guard", kind: "actor" }, { handle: "passage", kind: "route" }],
+        method: "Ask about the visible route",
+        stakes: "Learn its access rule",
+      },
+      citedVisibleFactHandles: ["passage", "guard"],
+    });
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({
+        object: {
+          ...proposal,
+          effects: [{
+            ...proposal.effects[0],
+            summary: "The guard says the passage runs directly south and needs no permit.",
+          }],
+        },
+        trace: trace(),
+      })
+      .mockResolvedValueOnce({
+        object: { verdict: "accepted", reason: "The route prose agrees with code-owned authority." },
+        trace: trace(),
+      });
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: routeRuling, resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget,
+    });
+    expect(candidate.preflight.accepted).toBe(true);
+    const proposerPrompt = String(generateObject.mock.calls[0]![0].prompt);
+    expect(proposerPrompt).toContain(
+      'ROUTE_AUTHORITY=[{"routeHandle":"passage","state":"open","accessRequirement":"none","viaLocationHandle":null}]',
+    );
+    expect(proposerPrompt).toContain(
+      "ROUTE_AUTHORITY is code-owned route topology and access for the current action. Every route or access statement in event prose must match it. Do not invent payment, permission, stamps, credentials, checkpoints, intermediate locations, blockage, or detours.",
+    );
+    expect(proposerPrompt).toContain(
+      "ROUTE_AUTHORITY governs campaign route edges and their traversal state or requirements. A location description or ordinary wayfinding",
+    );
+    expect(proposerPrompt).toContain(
+      "Such information must still be grounded in SOURCE_MOMENT, VISIBLE_FACTS, ACTOR_CONTINUITY, or ACTOR_DIRECTIVES",
+    );
+    const reviewPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    expect(reviewPrompt).toContain(
+      'ROUTE_AUTHORITY=[{"routeHandle":"passage","state":"open","accessRequirement":"none","viaLocationHandle":null}]',
+    );
+    expect(reviewPrompt).toContain(
+      "Do not classify an ordinary location description or ordinary wayfinding as route_authority_missing unless the prose actually asserts a campaign route edge",
+    );
+    expect(reviewPrompt).toContain(
+      "Grounding of non-route location information remains owned by the existing source/directive contracts",
+    );
+    expect(reviewPrompt.trimEnd()).toMatch(
+      /REVIEW_OUTPUT_CONTRACT[\s\S]*Do not add, omit, default, or repair any key\.$/,
+    );
+    expect(reviewPrompt).not.toContain("routeAccessClaims");
+  });
+
+  it("rejects route prose that contradicts code-owned route authority", async () => {
     const routeRuling = ruling({
       normalizedIntent: {
         originalText: "I ask whether this direct route needs a permit.",
@@ -1702,18 +2128,16 @@ describe("Campaign Play Game Master", () => {
       effects: [{
         ...proposal.effects[0],
         summary: "Oren says every crossing reaches a toll bridge before the south harbor.",
-        routeAccessClaims: [{
-          routeHandle: "passage",
-          state: "open" as const,
-          accessRequirement: "none" as const,
-          viaLocationHandle: null,
-        }],
       }],
     };
     const generateObject = vi.fn()
       .mockResolvedValueOnce({ object: contradictory, trace: trace() })
       .mockResolvedValueOnce({
-        object: { verdict: "rejected", reason: "The summary invents a toll bridge." },
+        object: {
+          verdict: "rejected",
+          reason: "The summary invents a toll bridge.",
+          failedChecks: ["route_authority_missing"],
+        },
         trace: trace(),
       });
     await expect(createCampaignPlayGameMaster({
@@ -1737,6 +2161,40 @@ describe("Campaign Play Game Master", () => {
     );
   });
 
+  it("keeps ordinary location wayfinding outside route-authority classification", async () => {
+    const wayfinding = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        summary: "Oren points toward the market counter and says the south stall is beside the back room.",
+      }],
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: wayfinding, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The ordinary location guidance asserts no campaign route mechanics.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget,
+    });
+    expect(candidate.semanticReview.kind).toBe("mechanical_authority");
+    const proposerPrompt = String(generateObject.mock.calls[0]![0].prompt);
+    const reviewPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    expect(proposerPrompt).toContain("ordinary wayfinding to a person, shop, counter, room, row, landmark, or destination is not a route claim by itself");
+    expect(proposerPrompt).toContain("Such information must still be grounded in SOURCE_MOMENT, VISIBLE_FACTS, ACTOR_CONTINUITY, or ACTOR_DIRECTIVES");
+    expect(reviewPrompt).toContain("ROUTE_AUTHORITY=[]");
+    expect(reviewPrompt).toContain("this Reviewer must neither authorize nor reject it as route mechanics");
+    expect(reviewPrompt).toContain("REVIEW_OUTPUT_CONTRACT");
+  });
+
   it("rejects resource consumption and payment hidden inside an ordinary world event", async () => {
     const unbackedRepair = {
       ...proposal,
@@ -1752,6 +2210,7 @@ describe("Campaign Play Game Master", () => {
         object: {
           verdict: "rejected",
           reason: "The summary consumes material and completes payment without typed resource effects.",
+          failedChecks: ["possession_authority_missing"],
         },
         trace: trace(),
       });
@@ -1809,7 +2268,7 @@ describe("Campaign Play Game Master", () => {
       "Words such as passage, bond, stamp, clearance, gate, permit, or contract",
     );
     expect(reviewPrompt).toContain('"typedResourceEffects":[]');
-    expect(reviewPrompt).toContain('"routeAccessClaims":[]');
+    expect(reviewPrompt).toContain('ROUTE_AUTHORITY=[]');
   });
 
   it("persists an independent review hash for route prose accepted against typed authority", async () => {
@@ -1831,12 +2290,6 @@ describe("Campaign Play Game Master", () => {
       effects: [{
         ...proposal.effects[0],
         summary: "Oren says the passage runs directly south and needs no permit.",
-        routeAccessClaims: [{
-          routeHandle: "passage",
-          state: "open" as const,
-          accessRequirement: "none" as const,
-          viaLocationHandle: null,
-        }],
       }],
     };
     const generateObject = vi.fn()
@@ -2442,7 +2895,6 @@ describe("Campaign Play Game Master", () => {
             kind: "record_world_event",
             eventClass: "scene",
             performingActorHandle: null,
-            routeAccessClaims: [],
             summary: "The player reaches the market interior.",
             affectedHandles: ["you", "south"],
           },
@@ -2859,7 +3311,6 @@ describe("Campaign Play Game Master", () => {
           kind: "record_world_event",
           eventClass: "scene",
           performingActorHandle: null,
-          routeAccessClaims: [],
           summary: "The guard closes the gap before the traveler reaches the passage.",
           affectedHandles: ["you", "passage"],
         }],
@@ -2910,7 +3361,6 @@ describe("Campaign Play Game Master", () => {
           kind: "record_world_event",
           eventClass: "scene",
           performingActorHandle: null,
-          routeAccessClaims: [],
           summary: "The player reaches South Harbor.",
           affectedHandles: ["you", "south"],
         },
@@ -2951,7 +3401,6 @@ describe("Campaign Play Game Master", () => {
           kind: "record_world_event",
           eventClass: "dialogue",
           performingActorHandle: "guard",
-          routeAccessClaims: [],
           summary: "The guard points the player toward South Harbor.",
           affectedHandles: ["you", "guard", "here"],
         },
@@ -2960,7 +3409,6 @@ describe("Campaign Play Game Master", () => {
           kind: "record_world_event",
           eventClass: "scene",
           performingActorHandle: null,
-          routeAccessClaims: [],
           summary: "At South Harbor, the player's call receives no reply.",
           affectedHandles: ["you", "south"],
         },
@@ -3013,7 +3461,6 @@ describe("Campaign Play Game Master", () => {
           kind: "record_world_event",
           eventClass: "dialogue",
           performingActorHandle: "guard",
-          routeAccessClaims: [],
           summary: "Oren agrees to walk beside the player and steps toward the passage.",
           affectedHandles: ["you", "guard", "here"],
         },
@@ -3023,7 +3470,6 @@ describe("Campaign Play Game Master", () => {
           kind: "record_world_event",
           eventClass: "scene",
           performingActorHandle: null,
-          routeAccessClaims: [],
           summary: "The player and Oren enter South Harbor together.",
           affectedHandles: ["you", "guard", "south"],
         },
@@ -3093,7 +3539,6 @@ describe("Campaign Play Game Master", () => {
       kind: "record_world_event" as const,
       eventClass: "scene" as const,
       performingActorHandle: null,
-      routeAccessClaims: [],
       summary: "The player and Oren enter South Harbor together.",
       affectedHandles: ["you", "guard", "south"],
     };
@@ -3112,7 +3557,6 @@ describe("Campaign Play Game Master", () => {
           kind: "record_world_event",
           eventClass: "dialogue",
           performingActorHandle: "guard",
-          routeAccessClaims: [],
           summary: "Oren agrees to walk beside the player.",
           affectedHandles: ["you", "guard", "here"],
         },
@@ -3149,7 +3593,6 @@ describe("Campaign Play Game Master", () => {
           kind: "record_world_event",
           eventClass: "dialogue",
           performingActorHandle: "guard",
-          routeAccessClaims: [],
           summary: "At South Harbor, the player asks the guard about passage delays.",
           affectedHandles: ["you", "guard", "south"],
         },
@@ -3332,7 +3775,6 @@ describe("Campaign Play Game Master", () => {
           kind: "record_world_event",
           eventClass: "dialogue",
           performingActorHandle: "guard",
-          routeAccessClaims: [],
           summary: "The guard answers the player's question.",
           affectedHandles,
         }, guardResponseEffect],
@@ -3496,13 +3938,13 @@ describe("Campaign Play Game Master contract rejection diagnostics", () => {
     expect(JSON.stringify(eventPayload)).not.toContain("SENTINEL_PROVIDER_BODY_AND_STACK");
   });
 
-  it("emits the SafeGenerate contract code for a primary schema failure", async () => {
+  it("emits the SafeGenerate contract code for a primary strict tool failure", async () => {
     await expect(createCampaignPlayGameMaster().plan({
       frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
       model: schemaContractFailureModel(), temperature: 0.2, budget,
     })).rejects.toMatchObject({
       code: "model_contract_failed",
-      modelEvidence: { errorCode: "schema_validation_failed" },
+      modelEvidence: { errorCode: "invalid_structured_tool_call" },
     });
 
     expect(gameMasterEvent).toHaveBeenCalledTimes(1);
@@ -3511,8 +3953,8 @@ describe("Campaign Play Game Master contract rejection diagnostics", () => {
     expect(eventPayload).toEqual({
       phase: "generation",
       errorCode: "model_contract_failed",
-      modelEvidenceErrorCode: "schema_validation_failed",
-      safeGenerationCode: "schema_validation_failed",
+      modelEvidenceErrorCode: "invalid_structured_tool_call",
+      safeGenerationCode: "invalid_structured_tool_call",
       recoveryDiagnostic: null,
       failedChecks: [],
       reviewFailedChecks: [],
@@ -3613,7 +4055,6 @@ describe("Campaign Play Game Master contract rejection diagnostics", () => {
           kind: "record_world_event" as const,
           eventClass: "interaction" as const,
           performingActorHandle: "guard",
-          routeAccessClaims: [],
           summary: "SENTINEL_RAW_EVENT_SUMMARY",
           affectedHandles: ["you", "guard", "south"],
         },

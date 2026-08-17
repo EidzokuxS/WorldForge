@@ -6,6 +6,7 @@ import {
   getSafeGenerateObjectTrace,
   isSafeGenerateObjectContractErrorCode,
   safeGenerateObject,
+  type SafeGenerateResult,
   type SafeGenerateTrace,
 } from "../ai/generate-object-safe.js";
 import {
@@ -15,6 +16,9 @@ import {
 import { createLogger } from "../lib/index.js";
 import {
   CAMPAIGN_PLAY_RESULT_TIER_VALUES,
+  CAMPAIGN_PLAY_ACTOR_CONDITION_VALUES,
+  CAMPAIGN_PLAY_GOAL_STATUS_VALUES,
+  CAMPAIGN_PLAY_PRESSURE_STATUS_VALUES,
   CAMPAIGN_PLAY_COMMAND_METADATA,
   campaignPlayActorConditionSchema,
   campaignPlayElapsedBoundsSchema,
@@ -38,6 +42,7 @@ import {
   deriveCampaignPlayPossessionKey,
   deriveCampaignPlaySupportActorIds,
   hashCampaignPlayProjection,
+  type CampaignPlayLiveRouteState,
 } from "./campaign-play-projection.js";
 import type { CampaignPlayActorContinuity } from "./actor-continuity.js";
 import {
@@ -101,16 +106,9 @@ function createExposureProposalSchema(handleSchema: z.ZodType<string>) {
 function createEffectProposalSchema(
   handleSchema: z.ZodType<string>,
   exposureSchema: ReturnType<typeof createExposureProposalSchema>,
-  requireRouteAccessClaims = false,
   permittedResourceEffectKinds: ReadonlySet<ResourceEffectKind> = ALL_RESOURCE_EFFECT_KINDS,
 ) {
   const effectBase = { exposure: exposureSchema };
-  const routeAccessClaimsSchema = z.array(z.object({
-    routeHandle: handleSchema,
-    state: z.enum(CAMPAIGN_PLAY_ROUTE_STATE_VALUES),
-    accessRequirement: z.enum(["none", "required"]),
-    viaLocationHandle: handleSchema.nullable(),
-  }).strict()).max(CAMPAIGN_PLAY_LIMITS.suggestedActions);
   const effectSchemas = [
   { kind: "move_actor", schema: z.object({ kind: z.literal("move_actor"), actorHandle: handleSchema.nullable() }).strict() },
   { kind: "enter_local_scene", schema: z.object({
@@ -167,9 +165,6 @@ function createEffectProposalSchema(
   { kind: "record_world_event", schema: z.object({ kind: z.literal("record_world_event"),
     eventClass: z.enum(["dialogue", "interaction", "discovery", "scene"]),
     performingActorHandle: handleSchema.nullable(),
-    routeAccessClaims: requireRouteAccessClaims
-      ? routeAccessClaimsSchema
-      : routeAccessClaimsSchema.optional(),
     summary: text(CAMPAIGN_PLAY_LIMITS.text),
     affectedHandles: z.array(handleSchema).min(1).max(CAMPAIGN_PLAY_LIMITS.affectedRefs)
       .refine((values) => new Set(values).size === values.length) }).strict()
@@ -194,14 +189,12 @@ function createEffectProposalSchema(
 
 function createProposalSchema(
   handleSchema: z.ZodType<string>,
-  requireRouteAccessClaims = false,
   permittedResourceEffectKinds: ReadonlySet<ResourceEffectKind> = ALL_RESOURCE_EFFECT_KINDS,
 ) {
   const exposureSchema = createExposureProposalSchema(handleSchema);
   const effectSchema = createEffectProposalSchema(
     handleSchema,
     exposureSchema,
-    requireRouteAccessClaims,
     permittedResourceEffectKinds,
   );
   return z.object({
@@ -233,13 +226,25 @@ const mechanicalAuthorityReviewSchema = z.discriminatedUnion("verdict", [
     failedChecks: z.array(mechanicalAuthorityFailedCheckSchema).min(1).max(5),
   }).strict(),
 ]);
+const CAMPAIGN_ROUTE_AUTHORITY_BOUNDARY =
+  "ROUTE_AUTHORITY governs campaign route edges and their traversal state or requirements. A location description or ordinary wayfinding to a person, shop, counter, room, row, landmark, or destination is not a route claim by itself. Such information must still be grounded in SOURCE_MOMENT, VISIBLE_FACTS, ACTOR_CONTINUITY, or ACTOR_DIRECTIVES, and must not be turned into a campaign edge, an intermediate waypoint on an edge, a detour, an open/restricted/blocked route state, or a traversal requirement.";
+const MECHANICAL_REVIEW_ROUTE_AUTHORITY_BOUNDARY =
+  "Do not classify an ordinary location description or ordinary wayfinding as route_authority_missing unless the prose actually asserts a campaign route edge, an intermediate waypoint on that edge, a detour, a route state, or a traversal requirement. Continue to reject every such route-edge claim not entailed by ROUTE_AUTHORITY, including unsupported payment, permission, stamp, credential, checkpoint, blockage, detour, or access condition. Grounding of non-route location information remains owned by the existing source/directive contracts; this Reviewer must neither authorize nor reject it as route mechanics.";
+const MECHANICAL_REVIEW_OUTPUT_CONTRACT = [
+  "REVIEW_OUTPUT_CONTRACT",
+  "Return exactly one object with exactly these keys: verdict, reason, failedChecks. failedChecks is mandatory.",
+  "accepted requires verdict=accepted and failedChecks=[]; rejected requires verdict=rejected and one to five allowed safe-check values from the supplied enum.",
+  "Do not add, omit, default, or repair any key.",
+].join("\n");
 
 function mechanicalAuthorityReviewInput(
   rawProposal: unknown,
   frame: CampaignPlayGameMasterFrame,
   ruling: CampaignPlayJudgeRuling,
+  obligationAuthority: CampaignPlayObligationAuthority,
 ) {
   const proposal = campaignPlayGameMasterProposalSchema.parse(rawProposal);
+  const routeAuthority = canonicalRouteAuthority(frame, ruling);
   const referenceKinds = new Map(frame.handleBindings.map((binding) => [
     binding.handle,
     binding.reference.kind,
@@ -248,7 +253,6 @@ function mechanicalAuthorityReviewInput(
     if (effect.kind !== "record_world_event") return [];
     const mechanicallySensitive = effect.eventClass === "dialogue"
       || effect.eventClass === "interaction"
-      || (effect.routeAccessClaims?.length ?? 0) > 0
       || effect.affectedHandles.some((handleValue) => {
         const kind = referenceKinds.get(handleValue);
         return kind === "possession" || kind === "obligation";
@@ -259,7 +263,6 @@ function mechanicalAuthorityReviewInput(
           performingActorHandle: effect.performingActorHandle,
           summary: effect.summary,
           affectedHandles: effect.affectedHandles,
-          routeAccessClaims: effect.routeAccessClaims ?? [],
         }]
       : [];
   });
@@ -278,6 +281,8 @@ function mechanicalAuthorityReviewInput(
     fact.kind === "possession" && transformedPossessionHandles.has(fact.handle));
   return {
     events,
+    routeAuthority,
+    obligationAuthority,
     typedResourceEffects,
     sourcePossessions,
     normalizedIntent: ruling.normalizedIntent,
@@ -302,15 +307,341 @@ function mechanicalAuthorityReviewPrompt(
     "Apply the possession and obligation rules to an actor's mechanical custody, quantity, debtor or creditor balance, payment, or completed bargain. A statement about an untracked scene document's classification, validity, filing, disposal procedure, or history is not by itself an actor possession or obligation change.",
     "For each adjust_actor_possession transform, compare normalizedIntent, sourcePossessions, and the effect's name and summary. Accept only when the name is a concise durable identity for the complete retained possession after the transform: it preserves the source container or item, includes every material new content or state established by the accepted action, and does not imply an untracked split or remainder.",
     "Reject a transform that reuses the source name, names only remaining empty containers while omitting what was collected or sealed inside the set, or otherwise relies on summary to carry material possession state missing from name. Do not require transient handling, scene description, or cosmetic detail in the name.",
-    "For route claims, apply the same strict boundary: every asserted route topology or access rule must be entailed by the event's typed routeAccessClaims. An open route with no access requirement cannot acquire a toll point, checkpoint, intermediate location, payment, permission, stamp, or credential requirement in prose.",
+    "OBLIGATION_AUTHORITY is the exact Judge-owned obligation transition for this action. When kind is none, event prose may describe an offer, quote, request, promise, acceptance in principle, refusal, counteroffer, or future plan only while every debt balance, payment, and completed bargain remains unchanged. Do not say or imply that anyone now owes, is due, must pay, has paid, is square, settled, fulfilled, or has completed a bargained return. When kind is incur_actor_obligation or pay_actor_obligation, include exactly the matching permitted typed effect and make the prose agree with it. Do not invent parties, handles, units, amounts, payment, or another obligation.",
+    "ROUTE_AUTHORITY is code-owned. Reject route topology or access statements that are not entailed by it. A claim about payment, permission, a stamp, credential, checkpoint, intermediate location, blockage, or detour must match the corresponding route fact.",
+    MECHANICAL_REVIEW_ROUTE_AUTHORITY_BOUNDARY,
     "A route claim asserts where traversal goes or what traversal requires. Words such as passage, bond, stamp, clearance, gate, permit, or contract in a document, filing, job, title, or other non-traversal context do not by themselves assert route topology or access; judge the sentence's actual claim.",
     "The route itself may be named or described as a bridge, toll bridge, gate, or passage; that name alone does not add an intermediate structure or access rule. An explicit statement that no toll, payment, permission, stamp, or permit is required agrees with an open route carrying no access requirement.",
     "Calling a contradiction personal experience, uncertainty, hearsay, warning, or belief does not make it consistent with typed authority.",
     "Set failedChecks to [] when verdict is accepted. When verdict is rejected, include each applicable safe check once: possession_authority_missing for an untyped possession or custody change; obligation_authority_missing for an untyped debt, payment, or duty change; route_authority_missing for an unsupported route or access claim; possession_transform_identity_incomplete when a typed transformation leaves retained possession identity incomplete; other_mechanical_authority_mismatch only when none of the specific checks applies. Do not copy event summaries, proposal text, player text, actor names, location names, provider text, or the free-form reason into failedChecks.",
-    "Accept only when every mechanically durable claim in every reviewed summary is entailed by the supplied typed effects and route claims. Explain only the verdict basis.",
+    "Accept only when every mechanically durable claim in every reviewed summary is entailed by the supplied typed effects and ROUTE_AUTHORITY. Explain only the verdict basis.",
     `Keep reason on one line and within ${CAMPAIGN_PLAY_LIMITS.text} characters.`,
-    `MECHANICAL_REVIEW_INPUT=${JSON.stringify(input)}`,
+    `OBLIGATION_AUTHORITY=${JSON.stringify(input.obligationAuthority)}`,
+    `ROUTE_AUTHORITY=${JSON.stringify(input.routeAuthority)}`,
+    `MECHANICAL_REVIEW_INPUT=${JSON.stringify({ ...input, obligationAuthority: undefined, routeAuthority: undefined })}`,
+    MECHANICAL_REVIEW_OUTPUT_CONTRACT,
   ].join("\n");
+}
+
+function toolEnum<T extends string>(values: readonly T[]) {
+  return z.enum(values as [T, ...T[]]);
+}
+
+function toolHandleSchema(handles: readonly string[]) {
+  return handles.length > 0
+    ? toolEnum(handles)
+    : z.string().min(1).max(CAMPAIGN_PLAY_LIMITS.handle);
+}
+
+function createToolExposureSchema(allHandles: readonly string[]) {
+  const predicate = z.object({
+    channel: toolEnum(["direct_perception", "local_aftermath", "route_state", "witness_report"] as const),
+    anchorHandle: toolHandleSchema(allHandles).optional(),
+    visibleForMinutes: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes).optional(),
+    triggers: z.array(toolEnum(["inspect", "attempt", "traverse"] as const)).min(1).max(3).optional(),
+  }).strict();
+  return z.object({
+    mode: toolEnum(["protected", "projectable"] as const),
+    predicates: z.array(predicate).min(1).max(CAMPAIGN_PLAY_LIMITS.exposuresPerEvent).optional(),
+  }).strict();
+}
+
+function createToolProposalSchema(
+  map: ReadonlyMap<string, CampaignPlayEntityRef>,
+  permittedResourceEffectKinds: ReadonlySet<ResourceEffectKind>,
+) {
+  const allHandles = [...map.keys(), NEW_SUPPORT_ACTOR_HANDLE];
+  const handlesByKind = (kind: CampaignPlayEntityRef["kind"]) =>
+    [...map.entries()]
+      .filter(([, reference]) => reference.kind === kind)
+      .map(([value]) => value);
+  const actorHandles = [...handlesByKind("actor"), NEW_SUPPORT_ACTOR_HANDLE];
+  const effectKinds = [
+    "move_actor",
+    "enter_local_scene",
+    "set_route_state",
+    "set_actor_condition",
+    "update_actor_relation",
+    "update_actor_goal",
+    "advance_pressure",
+    ...[...ALL_RESOURCE_EFFECT_KINDS].filter((kind) => permittedResourceEffectKinds.has(kind)),
+    "materialize_support_actor",
+    "record_world_event",
+  ] as const;
+  const effectKindSchema = toolEnum(effectKinds);
+  const stringValue = z.string().min(1);
+  const exposureSchema = createToolExposureSchema(allHandles);
+  const effectSchema = z.object({
+    kind: effectKindSchema,
+    exposure: exposureSchema.optional(),
+    actorHandle: toolHandleSchema(actorHandles).optional(),
+    name: stringValue.max(CAMPAIGN_PLAY_LIMITS.name).optional(),
+    description: stringValue.max(CAMPAIGN_PLAY_LIMITS.text).optional(),
+    routeHandle: toolHandleSchema(handlesByKind("route")).optional(),
+    state: toolEnum(CAMPAIGN_PLAY_ROUTE_STATE_VALUES).optional(),
+    reason: stringValue.max(CAMPAIGN_PLAY_LIMITS.shortText).optional(),
+    condition: toolEnum(CAMPAIGN_PLAY_ACTOR_CONDITION_VALUES).optional(),
+    operation: toolEnum(["set", "clear", "acquire", "spend", "transform"] as const).optional(),
+    summary: stringValue.max(CAMPAIGN_PLAY_LIMITS.text).optional(),
+    relationHandle: toolHandleSchema(handlesByKind("relation")).optional(),
+    intensity: z.number().int().min(1).max(5).optional(),
+    goalHandle: toolHandleSchema(handlesByKind("goal")).optional(),
+    status: toolEnum(CAMPAIGN_PLAY_GOAL_STATUS_VALUES).optional(),
+    pressureHandle: toolHandleSchema(handlesByKind("pressure")).optional(),
+    amount: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity).optional(),
+    resultStatus: toolEnum(CAMPAIGN_PLAY_PRESSURE_STATUS_VALUES).optional(),
+    possessionHandle: toolHandleSchema(handlesByKind("possession")).optional(),
+    quantity: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity).optional(),
+    affectedHandles: z.array(toolHandleSchema(allHandles)).max(CAMPAIGN_PLAY_LIMITS.affectedRefs).optional(),
+    goal: stringValue.max(CAMPAIGN_PLAY_LIMITS.shortText).optional(),
+    motivation: stringValue.max(CAMPAIGN_PLAY_LIMITS.shortText).optional(),
+    nextIntentKind: toolEnum(["observe", "contact", "wait", "attempt"] as const).optional(),
+    nextAction: stringValue.max(CAMPAIGN_PLAY_LIMITS.shortText).optional(),
+    observableTrace: stringValue.max(CAMPAIGN_PLAY_LIMITS.shortText).optional(),
+    cadenceMinutes: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes).optional(),
+    debtorActorHandle: toolHandleSchema(actorHandles).optional(),
+    creditorActorHandle: toolHandleSchema(actorHandles).optional(),
+    unitKey: toolEnum(["copper"] as const).optional(),
+    obligationHandle: toolHandleSchema(handlesByKind("obligation")).optional(),
+    paymentPossessionHandle: toolHandleSchema(handlesByKind("possession")).optional(),
+    eventClass: toolEnum(["dialogue", "interaction", "discovery", "scene"] as const).optional(),
+    performingActorHandle: toolHandleSchema(actorHandles).optional(),
+  }).strict();
+  return z.object({
+    elapsedMinutes: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes),
+    effects: z.array(effectSchema).min(1).max(CAMPAIGN_PLAY_LIMITS.commandsPerBatch - 1),
+  }).strict();
+}
+
+function createToolMechanicalAuthorityReviewSchema() {
+  return z.object({
+    verdict: toolEnum(["accepted", "rejected"] as const),
+    reason: line(CAMPAIGN_PLAY_LIMITS.text),
+    failedChecks: z.array(mechanicalAuthorityFailedCheckSchema).min(0).max(5),
+  }).strict();
+}
+
+function toolContractFailure(cause?: unknown): never {
+  throw new CampaignPlayGameMasterError(
+    "model_contract_failed",
+    null,
+    null,
+    cause === undefined ? undefined : { cause },
+  );
+}
+
+function hasToolField(value: Record<string, unknown>, field: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, field);
+}
+
+function requireToolField<T>(value: Record<string, unknown>, field: string): T {
+  if (!hasToolField(value, field)) toolContractFailure();
+  return value[field] as T;
+}
+
+function requireToolKeys(value: Record<string, unknown>, allowed: readonly string[]): void {
+  const allowedSet = new Set(allowed);
+  if (Object.keys(value).some((key) => !allowedSet.has(key))) toolContractFailure();
+}
+
+function decodeToolExposure(value: Record<string, unknown>): z.infer<typeof exposureProposalSchema> {
+  const mode = requireToolField<string>(value, "mode");
+  if (mode === "protected") {
+    requireToolKeys(value, ["mode"]);
+    return { mode };
+  }
+  if (mode !== "projectable") toolContractFailure();
+  requireToolKeys(value, ["mode", "predicates"]);
+  const predicatesValue = requireToolField<unknown[]>(value, "predicates");
+  return {
+    mode,
+    predicates: predicatesValue.map((rawPredicate) => {
+      const predicate = rawPredicate as Record<string, unknown>;
+      const channel = requireToolField<string>(predicate, "channel");
+      switch (channel) {
+        case "direct_perception":
+        case "witness_report":
+          requireToolKeys(predicate, ["channel", "anchorHandle"]);
+          return {
+            channel,
+            anchorHandle: requireToolField<string>(predicate, "anchorHandle"),
+          };
+        case "local_aftermath":
+          requireToolKeys(predicate, ["channel", "anchorHandle", "visibleForMinutes"]);
+          return {
+            channel,
+            anchorHandle: requireToolField<string>(predicate, "anchorHandle"),
+            visibleForMinutes: requireToolField<number>(predicate, "visibleForMinutes"),
+          };
+        case "route_state": {
+          requireToolKeys(predicate, ["channel", "anchorHandle", "triggers"]);
+          const triggers = requireToolField<Array<"inspect" | "attempt" | "traverse">>(predicate, "triggers");
+          if (new Set(triggers).size !== triggers.length) toolContractFailure();
+          return {
+            channel,
+            anchorHandle: requireToolField<string>(predicate, "anchorHandle"),
+            triggers,
+          };
+        }
+        default:
+          toolContractFailure();
+      }
+    }),
+  };
+}
+
+function decodeToolEffect(value: Record<string, unknown>): Record<string, unknown> {
+  const kind = requireToolField<string>(value, "kind");
+  const exposure = () => decodeToolExposure(requireToolField<Record<string, unknown>>(value, "exposure"));
+  switch (kind) {
+    case "move_actor":
+      requireToolKeys(value, ["kind", "actorHandle"]);
+      return { kind, actorHandle: hasToolField(value, "actorHandle") ? value.actorHandle : null };
+    case "enter_local_scene":
+      requireToolKeys(value, ["kind", "name", "description"]);
+      return {
+        kind,
+        name: requireToolField<string>(value, "name"),
+        description: requireToolField<string>(value, "description"),
+      };
+    case "set_route_state":
+      requireToolKeys(value, ["kind", "exposure", "routeHandle", "state", "reason"]);
+      return {
+        kind,
+        exposure: exposure(),
+        routeHandle: requireToolField<string>(value, "routeHandle"),
+        state: requireToolField<string>(value, "state"),
+        reason: requireToolField<string>(value, "reason"),
+      };
+    case "set_actor_condition":
+      requireToolKeys(value, ["kind", "exposure", "actorHandle", "condition", "operation", "summary"]);
+      return {
+        kind,
+        exposure: exposure(),
+        actorHandle: requireToolField<string>(value, "actorHandle"),
+        condition: requireToolField<string>(value, "condition"),
+        operation: requireToolField<string>(value, "operation"),
+        summary: requireToolField<string>(value, "summary"),
+      };
+    case "update_actor_relation":
+      requireToolKeys(value, ["kind", "exposure", "relationHandle", "intensity", "summary"]);
+      return {
+        kind,
+        exposure: exposure(),
+        relationHandle: requireToolField<string>(value, "relationHandle"),
+        intensity: requireToolField<number>(value, "intensity"),
+        summary: requireToolField<string>(value, "summary"),
+      };
+    case "update_actor_goal":
+      requireToolKeys(value, ["kind", "exposure", "goalHandle", "status", "summary"]);
+      return {
+        kind,
+        exposure: exposure(),
+        goalHandle: requireToolField<string>(value, "goalHandle"),
+        status: requireToolField<string>(value, "status"),
+        summary: requireToolField<string>(value, "summary"),
+      };
+    case "advance_pressure":
+      requireToolKeys(value, ["kind", "exposure", "pressureHandle", "amount", "resultStatus"]);
+      return {
+        kind,
+        exposure: exposure(),
+        pressureHandle: requireToolField<string>(value, "pressureHandle"),
+        amount: requireToolField<number>(value, "amount"),
+        resultStatus: requireToolField<string>(value, "resultStatus"),
+      };
+    case "adjust_actor_possession":
+      requireToolKeys(value, [
+        "kind", "operation", "actorHandle", "possessionHandle", "name", "quantity", "summary", "affectedHandles",
+      ]);
+      return {
+        kind,
+        operation: requireToolField<string>(value, "operation"),
+        actorHandle: requireToolField<string>(value, "actorHandle"),
+        possessionHandle: hasToolField(value, "possessionHandle") ? value.possessionHandle : null,
+        name: hasToolField(value, "name") ? value.name : null,
+        quantity: requireToolField<number>(value, "quantity"),
+        summary: requireToolField<string>(value, "summary"),
+        affectedHandles: requireToolField<string[]>(value, "affectedHandles"),
+      };
+    case "materialize_support_actor":
+      requireToolKeys(value, [
+        "kind", "actorHandle", "name", "summary", "goal", "motivation", "nextIntentKind", "nextAction",
+        "observableTrace", "cadenceMinutes",
+      ]);
+      return {
+        kind,
+        actorHandle: requireToolField<string>(value, "actorHandle"),
+        name: requireToolField<string>(value, "name"),
+        summary: requireToolField<string>(value, "summary"),
+        goal: requireToolField<string>(value, "goal"),
+        motivation: requireToolField<string>(value, "motivation"),
+        nextIntentKind: requireToolField<string>(value, "nextIntentKind"),
+        ...(hasToolField(value, "nextAction") ? { nextAction: value.nextAction } : {}),
+        observableTrace: requireToolField<string>(value, "observableTrace"),
+        cadenceMinutes: requireToolField<number>(value, "cadenceMinutes"),
+      };
+    case "incur_actor_obligation":
+      requireToolKeys(value, [
+        "kind", "debtorActorHandle", "creditorActorHandle", "unitKey", "amount", "summary", "affectedHandles",
+      ]);
+      return {
+        kind,
+        debtorActorHandle: requireToolField<string>(value, "debtorActorHandle"),
+        creditorActorHandle: requireToolField<string>(value, "creditorActorHandle"),
+        unitKey: requireToolField<string>(value, "unitKey"),
+        amount: requireToolField<number>(value, "amount"),
+        summary: requireToolField<string>(value, "summary"),
+        affectedHandles: requireToolField<string[]>(value, "affectedHandles"),
+      };
+    case "pay_actor_obligation":
+      requireToolKeys(value, [
+        "kind", "debtorActorHandle", "creditorActorHandle", "obligationHandle", "paymentPossessionHandle", "unitKey",
+        "amount", "summary", "affectedHandles",
+      ]);
+      return {
+        kind,
+        debtorActorHandle: requireToolField<string>(value, "debtorActorHandle"),
+        creditorActorHandle: requireToolField<string>(value, "creditorActorHandle"),
+        obligationHandle: requireToolField<string>(value, "obligationHandle"),
+        paymentPossessionHandle: requireToolField<string>(value, "paymentPossessionHandle"),
+        unitKey: requireToolField<string>(value, "unitKey"),
+        amount: requireToolField<number>(value, "amount"),
+        summary: requireToolField<string>(value, "summary"),
+        affectedHandles: requireToolField<string[]>(value, "affectedHandles"),
+      };
+    case "record_world_event":
+      requireToolKeys(value, ["kind", "eventClass", "performingActorHandle", "summary", "affectedHandles"]);
+      return {
+        kind,
+        eventClass: requireToolField<string>(value, "eventClass"),
+        performingActorHandle: hasToolField(value, "performingActorHandle") ? value.performingActorHandle : null,
+        summary: requireToolField<string>(value, "summary"),
+        affectedHandles: requireToolField<string[]>(value, "affectedHandles"),
+      };
+    default:
+      toolContractFailure();
+  }
+}
+
+function decodeToolProposal(
+  rawProposal: unknown,
+  map: ReadonlyMap<string, CampaignPlayEntityRef>,
+  permittedResourceEffectKinds: ReadonlySet<ResourceEffectKind>,
+) {
+  const providerParsed = createToolProposalSchema(map, permittedResourceEffectKinds).safeParse(rawProposal);
+  if (!providerParsed.success) toolContractFailure(providerParsed.error);
+  const transport = providerParsed.data as unknown as {
+    elapsedMinutes: number;
+    effects: Array<Record<string, unknown>>;
+  };
+  const decoded = {
+    elapsedMinutes: transport.elapsedMinutes,
+    effects: transport.effects.map((effect) => decodeToolEffect(effect)),
+  };
+  const exactParsed = constrainedProposalSchema(map, permittedResourceEffectKinds).safeParse(decoded);
+  if (!exactParsed.success) toolContractFailure(exactParsed.error);
+  return exactParsed.data;
 }
 
 export interface CampaignPlayGameMasterHandleBinding {
@@ -384,6 +715,7 @@ export type CampaignPlayGameMasterRecoveryCheck =
     }
   | {
       readonly check: "mechanical_authority_rejected";
+      readonly reviewFailedChecks: readonly MechanicalAuthorityFailedCheck[];
     }
   | {
       readonly check: "targeted_actor_response_missing";
@@ -446,6 +778,8 @@ export function getCampaignPlayGameMasterRecoveryFeedback(
 }
 
 interface Dependencies { generateObject: typeof safeGenerateObject }
+
+const CAMPAIGN_PLAY_GAME_MASTER_MODEL_CALL_TIMEOUT_MS = 180_000;
 
 type CampaignPlayGameMasterContractRejectedPhase =
   | "generation"
@@ -626,7 +960,6 @@ function requireRef(
 
 function constrainedProposalSchema(
   map: ReadonlyMap<string, CampaignPlayEntityRef>,
-  requireRouteAccessClaims = false,
   permittedResourceEffectKinds: ReadonlySet<ResourceEffectKind> = ALL_RESOURCE_EFFECT_KINDS,
 ) {
   const allowedHandles = [...map.keys(), NEW_SUPPORT_ACTOR_HANDLE];
@@ -635,7 +968,6 @@ function constrainedProposalSchema(
   }
   return createProposalSchema(
     z.enum(allowedHandles as [string, ...string[]]),
-    requireRouteAccessClaims,
     permittedResourceEffectKinds,
   );
 }
@@ -723,6 +1055,73 @@ function liveLocation(frame: CampaignPlayRulebookFrame, locationId: string) {
 function liveRoute(frame: CampaignPlayRulebookFrame, routeId: string) {
   return frame.runtimeRoutes.find((candidate) => candidate.id === routeId)
     ?? frame.acceptedWorld.routes.find((candidate) => candidate.id === routeId);
+}
+
+interface CampaignPlayRouteAuthority {
+  routeHandle: string;
+  state: CampaignPlayLiveRouteState["state"];
+  accessRequirement: "none" | "required";
+  viaLocationHandle: string | null;
+}
+
+type CampaignPlayObligationAuthority = CampaignPlayJudgeRuling["requiredObligationEffect"];
+
+function canonicalObligationAuthority(
+  ruling: CampaignPlayJudgeRuling,
+): CampaignPlayObligationAuthority {
+  const effect = ruling.requiredObligationEffect;
+  if (effect.kind === "none") return { kind: "none" };
+  if (effect.kind === "incur_actor_obligation") {
+    return {
+      kind: effect.kind,
+      debtorHandle: effect.debtorHandle,
+      creditorHandle: effect.creditorHandle,
+      unitKey: effect.unitKey,
+      amount: effect.amount,
+      minimumResult: effect.minimumResult,
+    };
+  }
+  return {
+    kind: effect.kind,
+    debtorHandle: effect.debtorHandle,
+    creditorHandle: effect.creditorHandle,
+    obligationHandle: effect.obligationHandle,
+    paymentPossessionHandle: effect.paymentPossessionHandle,
+    unitKey: effect.unitKey,
+    amount: effect.amount,
+    minimumResult: effect.minimumResult,
+  };
+}
+
+function canonicalRouteAuthority(
+  frame: CampaignPlayGameMasterFrame,
+  ruling: CampaignPlayJudgeRuling,
+): CampaignPlayRouteAuthority[] {
+  const map = bindings(frame);
+  const relevantHandles = [
+    ...ruling.normalizedIntent.targets
+      .filter((target) => target.kind === "route")
+      .map((target) => target.handle),
+    ...(ruling.movementRouteHandle === null ? [] : [ruling.movementRouteHandle]),
+    ...ruling.citedVisibleFactHandles.filter((citedHandle) =>
+      map.get(citedHandle)?.kind === "route"),
+  ];
+  const routeHandles = [...new Set(relevantHandles)].sort((left, right) =>
+    left < right ? -1 : left > right ? 1 : 0);
+  return routeHandles.map((routeHandle) => {
+    const route = requireRef(map, routeHandle, "route");
+    if (!liveRoute(frame.rulebookFrame, route.id)) {
+      throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
+    }
+    const state = frame.rulebookFrame.routeStates.find((candidate) =>
+      candidate.routeId === route.id)?.state ?? "open";
+    return {
+      routeHandle,
+      state,
+      accessRequirement: state === "open" ? "none" : "required",
+      viaLocationHandle: null,
+    };
+  });
 }
 
 function liveActor(frame: CampaignPlayRulebookFrame, actorId: string) {
@@ -1502,50 +1901,6 @@ function compile(
     }
   }
   const movement = canonicalMovement(frame, ruling, resolution, map);
-  const targetedRouteHandles = ruling.normalizedIntent.targets
-    .filter((target) => target.kind === "route")
-    .map((target) => target.handle);
-  const citedRouteHandles = ruling.citedVisibleFactHandles.filter((citedHandle) =>
-    map.get(citedHandle)?.kind === "route");
-  const reviewableRouteHandles = new Set([
-    ...targetedRouteHandles,
-    ...citedRouteHandles,
-  ]);
-  const routeAccessClaims = proposal.effects.flatMap((effect) =>
-    effect.kind === "record_world_event"
-      && (effect.eventClass === "dialogue" || effect.eventClass === "interaction")
-      ? effect.routeAccessClaims ?? []
-      : []);
-  const misplacedRouteAccessClaim = proposal.effects.some((effect) =>
-    effect.kind === "record_world_event"
-      && effect.eventClass !== "dialogue"
-      && effect.eventClass !== "interaction"
-      && (effect.routeAccessClaims?.length ?? 0) > 0);
-  if (
-    misplacedRouteAccessClaim
-    || (ruling.normalizedIntent.kind === "contact"
-      && ruling.movementRouteHandle === null
-      && reviewableRouteHandles.size > 0
-      && routeAccessClaims.length !== reviewableRouteHandles.size)
-    || routeAccessClaims.some((claim) => !reviewableRouteHandles.has(claim.routeHandle))
-    || new Set(routeAccessClaims.map((claim) => claim.routeHandle)).size !== routeAccessClaims.length
-  ) {
-    throw new CampaignPlayGameMasterError("model_contract_failed", null);
-  }
-  for (const claim of routeAccessClaims) {
-    const routeRef = requireRef(map, claim.routeHandle, "route");
-    const route = liveRoute(frame.rulebookFrame, routeRef.id);
-    if (!route) throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
-    const state = frame.rulebookFrame.routeStates.find((candidate) =>
-      candidate.routeId === route.id)?.state ?? "open";
-    if (
-      claim.state !== state
-      || claim.accessRequirement !== (state === "open" ? "none" : "required")
-      || claim.viaLocationHandle !== null
-    ) {
-      throw new CampaignPlayGameMasterError("model_contract_failed", null);
-    }
-  }
   if (proposal.elapsedMinutes < ruling.elapsedBounds.minimumMinutes
     || proposal.elapsedMinutes > ruling.elapsedBounds.maximumMinutes) {
     throw new CampaignPlayGameMasterError("model_contract_failed", null);
@@ -1823,8 +2178,12 @@ function prompt(
   ruling: CampaignPlayJudgeRuling,
   resolution: CampaignPlayUncertaintyResolution,
   recoveryFeedback?: CampaignPlayGameMasterRecoveryFeedback,
+  obligationAuthority?: CampaignPlayObligationAuthority,
+  toolMode = false,
 ): string {
   const effectiveRuling = normalizeReceivableCollectionAuthority(frame, ruling);
+  const canonicalObligation = obligationAuthority ?? canonicalObligationAuthority(effectiveRuling);
+  const routeAuthority = canonicalRouteAuthority(frame, effectiveRuling);
   const resourceEffectKinds = permittedResourceEffectKinds(effectiveRuling, resolution);
   const permittedEffectKinds = [
     "move_actor",
@@ -1934,7 +2293,9 @@ function prompt(
     "CANONICAL_PEOPLE is the complete durable person roster at the start of this call, not permission to disclose anyone. Mention a listed person only when VISIBLE_FACTS, ACTOR_CONTINUITY, or ACTOR_DIRECTIVES supports the reference. A person name outside this list does not identify an actor, even when SOURCE_MOMENT or prior prose mentions it. Do not repeat that name as established identity. Unless the materialize_support_actor contract below applies, an unlisted resident cannot own a job, payment, permission, appointment, access, or future reply.",
     "Use materialize_support_actor only for a contact with unnamed ambient residents in CURRENT_EXACT_SCENE, with no actor target, when one concrete person voluntarily gives an identity-bearing reply or takes a specific continuing stake that must persist beyond this paragraph. Silence, refusal without identity, a passing glance, crowd noise, generic service, or scenery is not enough. Return at most one. Set actorHandle exactly to introduced-support-actor. Give the person a stable name and compact summary, then state one goal, the motivation behind it, and one stationary next action that belongs to the person rather than the player. nextIntentKind must be observe, contact, wait, or attempt; move is not allowed. nextAction may be omitted only when goal already states the concrete action. observableTrace is the sensory evidence that next action would leave in the scene. cadenceMinutes is when this person may next act. Put materialize_support_actor immediately before one dialogue or interaction record_world_event whose performingActorHandle is introduced-support-actor and whose affectedHandles includes that handle. The event contains the person's actual words or action. Code derives every identity, placement, role, priority, plan step, timing bounds, scope, version, and receipt; it persists the goal and plan and admits the person to the normal scheduler.",
     "For contact with a roster person, write that targeted person's actual spoken reply, silence, gesture, or action in the record_world_event summary and copy the person's handle into performingActorHandle. The performer must be one of PLAYER_INTENT's actor targets. The only exception is introduced-support-actor immediately after its materialize_support_actor effect. Do not replace the exchange with audit labels such as common knowledge, offers no interpretation, nothing further, or has nothing to share. If the person withholds something, show the words or action used to withhold it. A concrete deflection, counterquestion, or condition is useful when ACTOR_DIRECTIVES support one.",
-    "For a no-travel contact whose PLAYER_INTENT targets or RULING cites a route, routeAccessClaims is required on every record_world_event and must include exactly one claim per relevant route on the dialogue or interaction; use an empty array on its other events. A general passage, clearance, stamping, permit, toll, or fee question cites every currently visible route, so answer against every supplied claim rather than preserving a generic requirement from earlier dialogue. Otherwise omit routeAccessClaims. Each claim has only routeHandle, state, accessRequirement, and viaLocationHandle. Copy routeHandle from the target or cited visible fact. Match state to VISIBLE_FACTS, use accessRequirement none for open and required for restricted or blocked, and use viaLocationHandle null for a direct route. Every route topology or access statement in summary must agree with these claims. Code rejects a missing, extra, duplicated, misplaced, or mechanically false claim before Rulebook execution.",
+    CAMPAIGN_ROUTE_AUTHORITY_BOUNDARY,
+    "ROUTE_AUTHORITY is code-owned route topology and access for the current action. Every route or access statement in event prose must match it. Do not invent payment, permission, stamps, credentials, checkpoints, intermediate locations, blockage, or detours.",
+    "Do not output routeAccessClaims or other route-authority metadata. Route topology and access are supplied by code to the reviewer. Write event prose that agrees with VISIBLE_FACTS and accepted set_route_state effects.",
     "PLAYER_MOVEMENT is code-authoritative. When it is non-null, return exactly one {\"kind\":\"move_actor\",\"actorHandle\":null} effect for the player at the chronological point where travel occurs. Code binds the player actor, route, endpoints, and direct perception from this order. When PLAYER_MOVEMENT is null, never return move_actor. Do not copy PLAYER_MOVEMENT fields or exposure into an effect.",
     "PLAYER_MOVEMENT also carries the route's code-authoritative travelCost ticks. For a pure move ruling or resolution, elapsedMinutes must equal travelCost exactly; do not emit enter_local_scene. An actorless record_world_event remains permitted. For a compound action that includes travel, elapsedMinutes must be at least travelCost and remain within RULING.elapsedBounds. Never estimate a different route duration.",
     "When a grounded observe or attempt physically advances the player into a distinct directly perceivable scene and the accepted result is limited or better, return exactly one enter_local_scene before one actorless discovery or scene event. enter_local_scene has exactly kind, name, and description. Give the reached scene its own concrete local name. Its name must differ case-insensitively from every LOCAL_SCENE_AUTHORITY.forbiddenNames entry; use a narrower name for the reached interior instead of repeating the current scene or its broader destination. Describe that local scene using only stable sensory or publicly obvious context; do not put secrets, hidden causes, actor motives, or unresolved outcomes in its description. PLAYER_MOVEMENT already places the player in its known destination scene; never add enter_local_scene merely for that arrival. Add enter_local_scene only for a further distinct local scene reached after movement, and only when RULING.elapsedBounds permits elapsedMinutes to be greater than travelCost. When maximumMinutes equals travelCost, omit enter_local_scene even for observe or attempt. Without PLAYER_MOVEMENT, code binds the local travel cost to all elapsedMinutes. With PLAYER_MOVEMENT, put enter_local_scene after every movement effect, make elapsedMinutes greater than travelCost, and use the remaining time for the local transition. Code owns both durations, transition order, derived topology, placement, receipt, version, and persistence. Do not use enter_local_scene when the player only looks, searches, listens, manipulates something in place, or fails to advance.",
@@ -1972,6 +2333,7 @@ function prompt(
     effectiveRuling.requiredObligationEffect.kind !== "none"
       ? "requiredObligationEffect in RULING is code-enforced Judge authority. Include exactly one matching obligation effect and no other obligation effect. Match both actor directions and every supplied handle, unit, and amount. Omitting, duplicating, reversing, or changing that effect invalidates the whole proposal before Rulebook execution. Prose never creates or settles an obligation."
       : "",
+    "OBLIGATION_AUTHORITY is the exact Judge-owned obligation transition for this action. When kind is none, event prose may describe an offer, quote, request, promise, acceptance in principle, refusal, counteroffer, or future plan only while every debt balance, payment, and completed bargain remains unchanged. Do not say or imply that anyone now owes, is due, must pay, has paid, is square, settled, fulfilled, or has completed a bargained return. When kind is incur_actor_obligation or pay_actor_obligation, include exactly the matching permitted typed effect and make the prose agree with it. Do not invent parties, handles, units, amounts, payment, or another obligation.",
     resourceEffectKinds.has("adjust_actor_possession")
       ? `Every non-null adjust_actor_possession name must be at most ${CAMPAIGN_PLAY_LIMITS.name} characters. Keep the name short and put state, contents, provenance, and other details in summary.`
       : "",
@@ -1996,6 +2358,8 @@ function prompt(
     `ACTOR_DIRECTIVES=${JSON.stringify(directives)}`,
     `REQUIRED_ACTOR_RESPONSES=${JSON.stringify(requiredActorResponseHandles)}`,
     `CANONICAL_PEOPLE=${JSON.stringify(canonicalPersonNames)}`,
+    `OBLIGATION_AUTHORITY=${JSON.stringify(canonicalObligation)}`,
+    `ROUTE_AUTHORITY=${JSON.stringify(routeAuthority)}`,
     `PLAYER_INTENT=${JSON.stringify(effectiveRuling.normalizedIntent)}`,
     `RULING=${JSON.stringify({ ...effectiveRuling, normalizedIntent: undefined })}`,
     `RESOLUTION=${JSON.stringify(resolution)}`,
@@ -2008,8 +2372,29 @@ function prompt(
     const hasRecordWorldEventScopeOverflow = recoveryFeedback.failedChecks.some(
       (check) => check.check === "record_world_event_scope_overflow",
     );
+    const hasRouteAuthorityMissing = recoveryFeedback.failedChecks.some(
+      (check) => check.check === "mechanical_authority_rejected"
+        && check.reviewFailedChecks.includes("route_authority_missing"),
+    );
+    const hasPossessionTransformIdentityIncomplete = recoveryFeedback.failedChecks.some(
+      (check) => check.check === "mechanical_authority_rejected"
+        && check.reviewFailedChecks.includes("possession_transform_identity_incomplete"),
+    );
+    const hasObligationAuthorityMissing = recoveryFeedback.failedChecks.some(
+      (check) => check.check === "mechanical_authority_rejected"
+        && check.reviewFailedChecks.includes("obligation_authority_missing"),
+    );
     const recoveryInstruction = [
-      "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. For mechanical_authority_rejected, make every mechanically durable claim in each event summary agree with the typed resource effects and route access claims. If no typed authority changes a possession, obligation, or route, keep the event summary non-mechanical.",
+      "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. For mechanical_authority_rejected, make every mechanically durable claim in each event summary agree with the typed resource effects and ROUTE_AUTHORITY. If no typed authority changes a possession, obligation, or route, keep the event summary non-mechanical.",
+      ...(hasRouteAuthorityMissing
+        ? ["For route_authority_missing, remove or correct only unsupported campaign-route edge topology, state, waypoint, detour, or traversal requirements. Preserve grounded ordinary location descriptions and wayfinding that make none of those claims. Do not invent a location while repairing."]
+        : []),
+      ...(hasObligationAuthorityMissing
+        ? ["For obligation_authority_missing, follow OBLIGATION_AUTHORITY exactly. If kind is none, remove every claim that a debt, payment, fee liability, duty balance, or completed bargain changed; keep only the non-binding offer, request, promise, quoted terms, refusal, counteroffer, accepted assignment, or future plan established by the action. If kind is incur_actor_obligation or pay_actor_obligation, emit the one exact permitted typed effect and match its parties, handles, unit, and amount in the public consequence. Do not invent a second obligation or payment."]
+        : []),
+      ...(hasPossessionTransformIdentityIncomplete
+        ? ["For possession_transform_identity_incomplete, name each transformed possession as the complete retained item or container after the transform. Preserve the source identity and include every material content or state added by the accepted action. Do not rely on summary to carry durable identity, and do not imply an untracked split or remainder."]
+        : []),
       ...(hasTargetedActorResponseMissing
         ? ["For targeted_actor_response_missing, include one dialogue or interaction record_world_event for every handle in requiredActorHandles, copy that same handle into performingActorHandle, and put all required responses before the first actorless discovery or scene event."]
         : []),
@@ -2024,6 +2409,13 @@ function prompt(
       "RECOVERY_DIAGNOSTIC",
       JSON.stringify(recoveryFeedback),
       "END_RECOVERY_DIAGNOSTIC",
+    ].join("\n"));
+  }
+  if (toolMode) {
+    instructions.push([
+      "TOOL_MODE_OUTPUT_CONTRACT",
+      "Return one strict object with elapsedMinutes and an ordered effects array of flat effect envelopes. Every envelope has kind and only fields for that kind; use the exact field names and bounds in the effect instructions above, with no unknown or irrelevant fields.",
+      "For transport-null fields move_actor.actorHandle, adjust_actor_possession.possessionHandle/name, and record_world_event.performingActorHandle, omit the field to mean null; do not emit null. For exposure, protected omits predicates and projectable requires its non-empty channel-specific predicates. Preserve effect order and return no prose.",
     ].join("\n"));
   }
   return instructions.filter((instruction) => instruction.length > 0).join("\n");
@@ -2062,6 +2454,7 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
         request.frame,
         admittedRuling.data,
       );
+      const obligationAuthority = canonicalObligationAuthority(effectiveRuling);
       const capability = resolveStructuredOutputCapability({
         metadata: getStructuredOutputModelMetadata(request.model),
         requestedMode: request.structuredOutputMode ?? "auto",
@@ -2069,6 +2462,8 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
       if (capability.primaryStrategy === "text_fallback") {
         throw new CampaignPlayGameMasterError("structured_output_unavailable", null);
       }
+      const permittedEffects = permittedResourceEffectKinds(effectiveRuling, admittedResolution.data);
+      const toolMode = capability.primaryStrategy === "tool_mode";
       const started = Date.now();
       let phase: CampaignPlayGameMasterContractRejectedPhase = "generation";
       let safeGenerationCode: string | null = null;
@@ -2079,24 +2474,17 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
         effectiveRuling,
         admittedResolution.data,
         request.recoveryFeedback,
+        obligationAuthority,
+        toolMode,
       );
-      const requireRouteAccessClaims = effectiveRuling.normalizedIntent.kind === "contact"
-        && effectiveRuling.movementRouteHandle === null
-        && (
-          effectiveRuling.normalizedIntent.targets.some((target) => target.kind === "route")
-          || effectiveRuling.citedVisibleFactHandles.some((citedHandle) =>
-            handleMap.get(citedHandle)?.kind === "route")
-        );
-      let generated;
+      let generated: SafeGenerateResult<unknown>;
       try {
         planningStarted = true;
         generated = await dependencies.generateObject({
           model: request.model,
-          schema: constrainedProposalSchema(
-            handleMap,
-            requireRouteAccessClaims,
-            permittedResourceEffectKinds(effectiveRuling, admittedResolution.data),
-          ),
+          schema: (toolMode
+            ? createToolProposalSchema(handleMap, permittedEffects)
+            : constrainedProposalSchema(handleMap, permittedEffects)) as z.ZodType<unknown>,
           prompt: promptText,
           temperature: request.temperature,
           maxOutputTokens: request.budget.maximumOutputTokens,
@@ -2106,6 +2494,7 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
           allowRepair: false,
           allowTextFallback: false,
           retries: 1,
+          timeout: { totalMs: CAMPAIGN_PLAY_GAME_MASTER_MODEL_CALL_TIMEOUT_MS },
         });
       } catch (cause) {
         const safeCode = getSafeGenerateObjectErrorCode(cause);
@@ -2129,17 +2518,21 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
       }
       phase = "compilation";
       try {
+        const proposal = toolMode
+          ? decodeToolProposal(generated.object, handleMap, permittedEffects)
+          : generated.object;
         const compiled = compile(
             request.frame,
             effectiveRuling,
             admittedResolution.data,
             request.uncertaintyAuthority,
-            generated.object,
+            proposal,
           );
         const reviewInput = mechanicalAuthorityReviewInput(
-          generated.object,
+          proposal,
           request.frame,
           effectiveRuling,
+          obligationAuthority,
         );
         if (reviewInput === null) {
           return freeze({
@@ -2154,7 +2547,9 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
         try {
           reviewed = await dependencies.generateObject({
             model: request.model,
-            schema: mechanicalAuthorityReviewSchema,
+            schema: toolMode
+              ? createToolMechanicalAuthorityReviewSchema()
+              : mechanicalAuthorityReviewSchema,
             prompt: mechanicalAuthorityReviewPrompt(reviewInput),
             temperature: 0,
             maxOutputTokens: request.budget.maximumOutputTokens,
@@ -2164,6 +2559,7 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
             allowRepair: false,
             allowTextFallback: false,
             retries: 1,
+            timeout: { totalMs: CAMPAIGN_PLAY_GAME_MASTER_MODEL_CALL_TIMEOUT_MS },
           });
         } catch (cause) {
           const safeCode = getSafeGenerateObjectErrorCode(cause);
@@ -2214,18 +2610,23 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
             { ...combined, errorCode: "stage_budget_exceeded" },
           );
         }
-        if (reviewed.object.verdict !== "accepted") {
+        const reviewObject = toolMode
+          ? (() => {
+              const parsed = mechanicalAuthorityReviewSchema.safeParse(reviewed.object);
+              if (!parsed.success) toolContractFailure(parsed.error);
+              return parsed.data;
+            })()
+          : reviewed.object;
+        if (reviewObject.verdict !== "accepted") {
           const error = new CampaignPlayGameMasterError(
             "model_contract_failed",
             { ...combined, errorCode: "mechanical_authority_rejected" },
           );
-          const reviewFailedChecks = canonicalizeMechanicalAuthorityFailedChecks(
-            (reviewed.object as { failedChecks?: readonly string[] }).failedChecks ?? [],
-          );
+          const reviewFailedChecks = canonicalizeMechanicalAuthorityFailedChecks(reviewObject.failedChecks);
           rememberMechanicalAuthorityReviewFailedChecks(error, reviewFailedChecks);
           rememberCampaignPlayGameMasterRecoveryFeedback(error, {
             diagnostic: "game_master_semantic_validation_mismatch",
-            failedChecks: [{ check: "mechanical_authority_rejected" }],
+            failedChecks: [{ check: "mechanical_authority_rejected", reviewFailedChecks }],
           });
           throw error;
         }
@@ -2235,7 +2636,7 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
             kind: "mechanical_authority" as const,
             reviewHash: hashCampaignPlayProjection({
               input: reviewInput,
-              verdict: reviewed.object,
+              verdict: reviewObject,
             }),
           },
           modelEvidence: combined,
@@ -2244,10 +2645,15 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
         const reviewFailedChecks = cause instanceof CampaignPlayGameMasterError
           ? mechanicalAuthorityReviewFailedChecksByError.get(cause)
           : undefined;
+        const recoveryFeedback = cause instanceof CampaignPlayGameMasterError
+          ? getCampaignPlayGameMasterRecoveryFeedback(cause)
+          : undefined;
         log.warn("Game Master proposal failed semantic compilation.", {
           code: cause instanceof CampaignPlayGameMasterError ? cause.code : null,
           denial: cause instanceof CampaignPlayGameMasterError ? cause.denial : null,
-          ...(reviewFailedChecks === undefined ? { proposal: generated.object } : { reviewFailedChecks }),
+          ...(!toolMode && reviewFailedChecks === undefined && recoveryFeedback === undefined
+            ? { proposal: generated.object }
+            : { reviewFailedChecks: reviewFailedChecks ?? [] }),
           stack: cause instanceof Error ? cause.stack : String(cause),
         });
         if (cause instanceof CampaignPlayGameMasterError) {
