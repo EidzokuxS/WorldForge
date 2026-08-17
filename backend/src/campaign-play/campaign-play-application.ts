@@ -128,6 +128,37 @@ export class CampaignPlayApplicationError extends Error {
 
 const CAMPAIGN_PLAY_MAX_AUTOMATIC_STAGE_ATTEMPTS = 3;
 
+export function accumulateCampaignPlayJudgeRecoveryFeedback(
+  accumulated: CampaignPlayJudgeRecoveryFeedback | undefined,
+  next: CampaignPlayJudgeRecoveryFeedback | undefined,
+): CampaignPlayJudgeRecoveryFeedback | undefined {
+  if (next === undefined) return accumulated;
+  if (accumulated === undefined) return next;
+
+  const issues = new Map<string, typeof next.issues[number]>();
+  for (const issue of [...accumulated.issues, ...next.issues]) {
+    issues.set(canonicalizeCampaignPlayProjection(issue), issue);
+  }
+  return { issues: [...issues.values()] };
+}
+
+export function accumulateCampaignPlayGameMasterRecoveryFeedback(
+  accumulated: CampaignPlayGameMasterRecoveryFeedback | undefined,
+  next: CampaignPlayGameMasterRecoveryFeedback | undefined,
+): CampaignPlayGameMasterRecoveryFeedback | undefined {
+  if (next === undefined) return accumulated;
+  if (accumulated === undefined) return next;
+
+  const failedChecks = new Map<string, typeof next.failedChecks[number]>();
+  for (const check of [...accumulated.failedChecks, ...next.failedChecks]) {
+    failedChecks.set(canonicalizeCampaignPlayProjection(check), check);
+  }
+  return {
+    diagnostic: "game_master_semantic_validation_mismatch",
+    failedChecks: [...failedChecks.values()],
+  };
+}
+
 export function accumulateCampaignPlayNarratorRecoveryFeedback(
   accumulated: CampaignPlayNarratorRecoveryFeedback | undefined,
   next: CampaignPlayNarratorRecoveryFeedback | undefined,
@@ -818,9 +849,18 @@ export function createCampaignPlayApplication(
             })
           : await runtime.runNextStage(turnId);
         pendingResume = null;
-        const nextJudgeRecoveryFeedback = recoveredJudgeFeedback;
-        const nextGameMasterRecoveryFeedback = recoveredGameMasterFeedback;
-        const nextNarratorRecoveryFeedback = recoveredNarratorFeedback;
+        const nextJudgeRecoveryFeedback = accumulateCampaignPlayJudgeRecoveryFeedback(
+          pendingJudgeRecoveryFeedback,
+          recoveredJudgeFeedback,
+        );
+        const nextGameMasterRecoveryFeedback = accumulateCampaignPlayGameMasterRecoveryFeedback(
+          pendingGameMasterRecoveryFeedback,
+          recoveredGameMasterFeedback,
+        );
+        const nextNarratorRecoveryFeedback = accumulateCampaignPlayNarratorRecoveryFeedback(
+          pendingNarratorRecoveryFeedback,
+          recoveredNarratorFeedback,
+        );
         pendingJudgeRecoveryFeedback = undefined;
         pendingGameMasterRecoveryFeedback = undefined;
         pendingNarratorRecoveryFeedback = undefined;

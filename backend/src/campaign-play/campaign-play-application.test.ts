@@ -20,6 +20,8 @@ import { openCampaignPlayDatabase, type CampaignPlayDatabaseHandle } from "./cam
 import {
   CAMPAIGN_PLAY_MINIMUM_OUTPUT_TOKENS,
   CampaignPlayApplicationError,
+  accumulateCampaignPlayGameMasterRecoveryFeedback,
+  accumulateCampaignPlayJudgeRecoveryFeedback,
   accumulateCampaignPlayNarratorRecoveryFeedback,
   campaignPlayActorReplannerOperationDeadlineMs,
   campaignPlayGameMasterOperationDeadlineMs,
@@ -962,6 +964,55 @@ function openingRequest(
 }
 
 describe("CampaignPlayApplication", () => {
+  it("keeps prior safe Judge and Game Master checks in later automatic recovery attempts", () => {
+    const judgeEnforcement = {
+      issues: [{
+        issueIndex: 0,
+        code: "custom",
+        path: ["possessionEffectAuthority", "enforcement"],
+      }],
+    } as const;
+    const judgeReaction = {
+      issues: [{
+        issueIndex: 0,
+        code: "invalid_value",
+        path: ["visibleActorReactions", 1, "reaction"],
+      }],
+    } as const;
+    expect(accumulateCampaignPlayJudgeRecoveryFeedback(
+      judgeEnforcement,
+      judgeReaction,
+    )).toEqual({ issues: [...judgeEnforcement.issues, ...judgeReaction.issues] });
+    expect(accumulateCampaignPlayJudgeRecoveryFeedback(
+      judgeEnforcement,
+      judgeEnforcement,
+    )).toEqual(judgeEnforcement);
+
+    const actorResponse: CampaignPlayGameMasterRecoveryFeedback = {
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [{
+        check: "targeted_actor_response_missing",
+        intentKind: "contact",
+        requiredActorHandles: ["actor:renzo"],
+        firstActorlessEffectIndex: 0,
+      }],
+    };
+    expect(accumulateCampaignPlayGameMasterRecoveryFeedback(
+      GAME_MASTER_RECOVERY_FEEDBACK,
+      actorResponse,
+    )).toEqual({
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [
+        GAME_MASTER_RECOVERY_FEEDBACK.failedChecks[0],
+        actorResponse.failedChecks[0],
+      ],
+    });
+    expect(accumulateCampaignPlayGameMasterRecoveryFeedback(
+      actorResponse,
+      actorResponse,
+    )).toEqual(actorResponse);
+  });
+
   it("keeps prior safe Narrator checks in later automatic recovery attempts", () => {
     const actorMismatch: CampaignPlayNarratorRecoveryFeedback = {
       diagnostic: "narrator_packet_validation_mismatch",
