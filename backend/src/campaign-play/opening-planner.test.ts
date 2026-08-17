@@ -1,5 +1,6 @@
 import type { LanguageModel } from "ai";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import type { CampaignWorldReview } from "@worldforge/shared";
 import {
   buildStructuredOutputModelMetadata,
@@ -365,24 +366,62 @@ function structuredModel(): LanguageModel {
   return model;
 }
 
+function toolModel(): LanguageModel {
+  const model = {} as LanguageModel;
+  rememberStructuredOutputModelMetadata(
+    model,
+    buildStructuredOutputModelMetadata({
+      providerId: "zai-coding-plan",
+      providerName: "Z.AI",
+      model: "glm-5.3",
+      protocol: "openai-compatible",
+      baseUrl: "https://api.z.ai/api/paas/v4",
+      transport: "chat-completions",
+    }),
+  );
+  return model;
+}
+
+function toolProposalFixture(): Record<string, unknown> {
+  const proposal = proposalFixture();
+  const premise = proposal.playerPremise;
+  return {
+    start: proposal.start,
+    scene: proposal.scene,
+    playerPremise: premise === null
+      ? { state: "none" }
+      : {
+          state: "motivated",
+          motivationIndex: premise.motivationIndex,
+          anchor: premise.anchor,
+          eventClass: premise.eventClass,
+          summary: premise.summary,
+          routeRestriction: premise.routeRestriction === null
+            ? { state: "none", reason: "" }
+            : { state: "restricted", reason: premise.routeRestriction.reason },
+        },
+  };
+}
+
 function trace(strategy: SafeGenerateTrace["strategy"] = "native_schema"): SafeGenerateTrace {
+  const primaryStrategy = strategy === "tool_mode" ? "tool_mode" : "native_schema";
   return {
     text: "private model output",
     cleanedText: "private model output",
     requestedMode: "auto",
     strategy,
-    primaryStrategy: "native_schema",
+    primaryStrategy,
     fallbackStrategy: "text_fallback",
     capability: {
       requestedMode: "auto",
-      primaryStrategy: "native_schema",
+      primaryStrategy,
       fallbackStrategy: "text_fallback",
-      actualMode: "native_schema",
+      actualMode: primaryStrategy,
       reason: "test capability",
     },
     usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
     response: { modelId: "test-model" },
-    finishReason: "stop",
+    finishReason: strategy === "tool_mode" ? "tool-calls" : "stop",
   };
 }
 
@@ -574,39 +613,167 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain("North Harbor");
   });
 
-  it("uses one strict structured call and caps output at the compact contract budget", async () => {
-    const generateObject = vi.fn(async () => ({
-      object: proposalFixture(),
-      trace: trace(),
+  it("uses a strict tuple-free tool transport and decodes it through the exact proposal contract", async () => {
+    const generateObject = vi.fn(async (_options: unknown) => ({
+      object: toolProposalFixture(),
+      trace: trace("tool_mode"),
     }));
+    const frame = frameFixture();
     const planner = createCampaignPlayOpeningPlanner({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     });
+
     const result = await planner.plan({
-      frame: frameFixture(),
+      frame,
       startingConditions: chosenConditions,
-      model: structuredModel(),
+      model: toolModel(),
       temperature: 0.4,
       maxOutputTokens: 32_000,
       signal: new AbortController().signal,
     });
 
     expect(generateObject).toHaveBeenCalledTimes(1);
-    expect(generateObject).toHaveBeenCalledWith(expect.objectContaining({
-      schema: campaignPlayOpeningProposalSchema,
-      maxOutputTokens: 2_048,
-      strictSchema: true,
-      allowRepair: false,
-      allowTextFallback: false,
-      retries: 1,
+    expect(result.modelEvidence).toMatchObject({ actualStrategy: "tool_mode" });
+    const options = generateObject.mock.calls[0]![0] as {
+      schema: z.ZodType<unknown>;
+      prompt: string;
+    };
+    const schema = z.toJSONSchema(options.schema as never) as Record<string, any>;
+    const forbiddenKeywords = new Set(["anyOf", "oneOf", "const", "prefixItems"]);
+    const foundForbidden: string[] = [];
+    const visit = (value: unknown): void => {
+      if (Array.isArray(value)) {
+        value.forEach(visit);
+        return;
+      }
+      if (!value || typeof value !== "object") return;
+      for (const [key, child] of Object.entries(value)) {
+        if (forbiddenKeywords.has(key)) foundForbidden.push(key);
+        visit(child);
+      }
+    };
+    visit(schema);
+
+    expect(foundForbidden).toEqual([]);
+    expect(schema.required).toEqual(["start", "scene", "playerPremise"]);
+    expect(schema.additionalProperties).toBe(false);
+    expect(schema.properties.start.properties.role.enum).toEqual([chosenConditions.role]);
+    expect(schema.properties.start.properties.arrivalMode.enum)
+      .toEqual([chosenConditions.arrivalMode]);
+    expect(schema.properties.start.properties.immediateSituation.enum)
+      .toEqual([chosenConditions.immediateSituation]);
+    expect(schema.properties.scene.properties.candidateId.enum)
+      .toContain(proposalFixture().scene.candidateId);
+    expect(schema.properties.playerPremise.properties.state.enum).toEqual(["motivated"]);
+    expect(schema.properties.playerPremise.properties.routeRestriction.required)
+      .toEqual(["state", "reason"]);
+    expect(options.schema.safeParse(toolProposalFixture()).success).toBe(true);
+    expect(options.prompt).toContain("TOOL_OUTPUT_CONTRACT");
+    expect(options.prompt).not.toContain("set playerPremise to null");
+    expect(options.prompt).not.toContain("routeRestriction is null");
+  });
+
+  it("keeps motivationless delegated tool transport exact and decodes none states to null", async () => {
+    const frame = frameFixture();
+    frame.player.motivations = [];
+    const delegated = { mode: "delegate" as const };
+    const toolObject = toolProposalFixture();
+    toolObject.playerPremise = { state: "none" };
+    const generateObject = vi.fn(async (_options: unknown) => ({
+      object: toolObject,
+      trace: trace("tool_mode"),
     }));
-    expect(result.artifact.actorPlans).toEqual([]);
-    expect(result.modelEvidence).toMatchObject({
-      actualStrategy: "native_schema",
-      inputTokens: 100,
-      outputTokens: 50,
-      totalTokens: 150,
+    const planner = createCampaignPlayOpeningPlanner({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
     });
+
+    const result = await planner.plan({
+      frame,
+      startingConditions: delegated,
+      model: toolModel(),
+      temperature: 0,
+      maxOutputTokens: 2_048,
+      signal: new AbortController().signal,
+    });
+
+    expect(result.artifact.playerPremise).toBeNull();
+    const options = generateObject.mock.calls[0]![0] as { schema: z.ZodType<unknown> };
+    const schema = z.toJSONSchema(options.schema as never) as Record<string, any>;
+    expect(schema.properties.playerPremise.required).toEqual(["state"]);
+    expect(schema.properties.playerPremise.properties).toEqual({
+      state: { type: "string", enum: ["none"] },
+    });
+    expect(schema.properties.start.properties.role.enum).toBeUndefined();
+    expect(options.schema.safeParse(toolObject).success).toBe(true);
+  });
+
+  it("fails closed on inconsistent tool route state without a second generation call", async () => {
+    const invalid = toolProposalFixture();
+    (invalid.playerPremise as Record<string, unknown>).routeRestriction = {
+      state: "none",
+      reason: "passage is blocked",
+    };
+    const generateObject = vi.fn(async (_options: unknown) => ({
+      object: invalid,
+      trace: trace("tool_mode"),
+    }));
+    const planner = createCampaignPlayOpeningPlanner({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    await expect(planner.plan({
+      frame: frameFixture(),
+      startingConditions: chosenConditions,
+      model: toolModel(),
+      temperature: 0,
+      maxOutputTokens: 2_048,
+      signal: new AbortController().signal,
+    })).rejects.toMatchObject({ code: "model_contract_failed" });
+    expect(generateObject).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses one strict structured call and caps output at the compact contract budget", async () => {
+    vi.useFakeTimers();
+    const generateObject = vi.fn(async () => ({
+      object: proposalFixture(),
+      trace: trace(),
+    }));
+    const signal = new AbortController().signal;
+    try {
+      const planner = createCampaignPlayOpeningPlanner({
+        generateObject: generateObject as unknown as typeof safeGenerateObject,
+      });
+      const result = await planner.plan({
+        frame: frameFixture(),
+        startingConditions: chosenConditions,
+        model: structuredModel(),
+        temperature: 0.4,
+        maxOutputTokens: 32_000,
+        signal,
+      });
+
+      expect(generateObject).toHaveBeenCalledTimes(1);
+      expect(generateObject).toHaveBeenCalledWith(expect.objectContaining({
+        schema: campaignPlayOpeningProposalSchema,
+        prompt: expect.not.stringContaining("TOOL_OUTPUT_CONTRACT"),
+        maxOutputTokens: 2_048,
+        strictSchema: true,
+        allowRepair: false,
+        allowTextFallback: false,
+        retries: 1,
+        timeout: { totalMs: 180_000 },
+        abortSignal: signal,
+      }));
+      expect(result.artifact.actorPlans).toEqual([]);
+      expect(result.modelEvidence).toMatchObject({
+        actualStrategy: "native_schema",
+        inputTokens: 100,
+        outputTokens: 50,
+        totalTokens: 150,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rejects malformed starting conditions before a model call", async () => {

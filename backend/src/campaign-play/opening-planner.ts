@@ -83,6 +83,100 @@ export const campaignPlayOpeningProposalSchema = z.object({
 export type CampaignPlayOpeningProposal =
   z.infer<typeof campaignPlayOpeningProposalSchema>;
 
+/**
+ * Z.AI strict tools do not reliably accept the exact opening proposal's
+ * nullable unions or frame-dependent alternatives. Keep this transport shape
+ * flat and structural; the exact proposal schema remains authoritative after
+ * the result is decoded.
+ */
+function openingPlannerToolSchemaForFrame(
+  frame: CampaignPlayOpeningFrame,
+  startingConditions: CampaignPlayResolvedStartingConditions,
+  sceneCandidates: readonly CampaignPlayOpeningSceneCandidate[],
+) {
+  const candidateIds = sceneCandidates.map((candidate) => candidate.candidateId);
+  const scene = z.object({
+    candidateId: z.enum(candidateIds as [string, ...string[]]),
+  }).strict();
+  const start = startingConditions.mode === "chosen"
+    ? z.object({
+        role: z.enum([startingConditions.role]),
+        arrivalMode: z.enum([startingConditions.arrivalMode]),
+        immediateSituation: z.enum([startingConditions.immediateSituation]),
+      }).strict()
+    : z.object({
+        role: boundedLine(CAMPAIGN_PLAY_LIMITS.shortText),
+        arrivalMode: boundedLine(CAMPAIGN_PLAY_LIMITS.shortText),
+        immediateSituation: boundedText(CAMPAIGN_PLAY_LIMITS.text),
+      }).strict();
+  const routeRestriction = z.object({
+    state: z.enum(["none", "restricted"]),
+    reason: z.string()
+      .max(CAMPAIGN_PLAY_LIMITS.shortText)
+      .refine((value) => value === value.trim())
+      .refine((value) => !value.includes("\n") && !value.includes("\r")),
+  }).strict();
+  const playerPremise = frame.player.motivations.length === 0
+    ? z.object({ state: z.enum(["none"]) }).strict()
+    : z.object({
+        state: z.enum(["motivated"]),
+        motivationIndex: z.number().int().min(0)
+          .max(frame.player.motivations.length - 1),
+        anchor: z.enum(["openingActor", "supportActor"]),
+        eventClass: z.enum(["dialogue", "interaction"]),
+        summary: boundedText(CAMPAIGN_PLAY_LIMITS.text),
+        routeRestriction,
+      }).strict();
+  return z.object({ start, scene, playerPremise }).strict();
+}
+
+function decodeOpeningPlannerToolResult(
+  frame: CampaignPlayOpeningFrame,
+  startingConditions: CampaignPlayResolvedStartingConditions,
+  sceneCandidates: readonly CampaignPlayOpeningSceneCandidate[],
+  raw: unknown,
+): CampaignPlayOpeningProposal {
+  const transportResult = openingPlannerToolSchemaForFrame(
+    frame,
+    startingConditions,
+    sceneCandidates,
+  ).safeParse(raw);
+  if (!transportResult.success) fail("model_contract_failed", transportResult.error);
+
+  const transportPremise = transportResult.data.playerPremise;
+  const playerPremise = transportPremise.state === "none"
+    ? null
+    : (() => {
+        const route = transportPremise.routeRestriction;
+        if (route.state === "none") {
+          if (route.reason !== "") fail("model_contract_failed");
+          return {
+            motivationIndex: transportPremise.motivationIndex,
+            anchor: transportPremise.anchor,
+            eventClass: transportPremise.eventClass,
+            summary: transportPremise.summary,
+            routeRestriction: null,
+          };
+        }
+        const reasonResult = boundedLine(CAMPAIGN_PLAY_LIMITS.shortText).safeParse(route.reason);
+        if (!reasonResult.success) fail("model_contract_failed", reasonResult.error);
+        return {
+          motivationIndex: transportPremise.motivationIndex,
+          anchor: transportPremise.anchor,
+          eventClass: transportPremise.eventClass,
+          summary: transportPremise.summary,
+          routeRestriction: { reason: reasonResult.data },
+        };
+      })();
+  const proposalResult = campaignPlayOpeningProposalSchema.safeParse({
+    start: transportResult.data.start,
+    scene: transportResult.data.scene,
+    playerPremise,
+  });
+  if (!proposalResult.success) fail("model_contract_failed", proposalResult.error);
+  return proposalResult.data;
+}
+
 const campaignPlayOpeningStartSchema = z.object({
   sceneLocationId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
   role: boundedLine(CAMPAIGN_PLAY_LIMITS.shortText),
@@ -966,13 +1060,22 @@ export function createCampaignPlayOpeningPlanner(
       }
       let generated;
       try {
+        const toolMode = capability.primaryStrategy === "tool_mode";
+        const generationSchema = toolMode
+          ? openingPlannerToolSchemaForFrame(
+            request.frame,
+            startingConditions,
+            sceneCandidates,
+          ) as unknown as z.ZodType<CampaignPlayOpeningProposal>
+          : campaignPlayOpeningProposalSchema;
         generated = await dependencies.generateObject({
           model: request.model,
-          schema: campaignPlayOpeningProposalSchema,
+          schema: generationSchema,
           prompt: buildCampaignPlayOpeningPrompt(
             request.frame,
             startingConditions,
             sceneCandidates,
+            toolMode ? "tool_mode" : "native",
           ),
           temperature: request.temperature,
           maxOutputTokens: Math.min(request.maxOutputTokens, OPENING_MAX_OUTPUT_TOKENS),
@@ -982,6 +1085,7 @@ export function createCampaignPlayOpeningPlanner(
           allowRepair: false,
           allowTextFallback: false,
           retries: 1,
+          timeout: { totalMs: 180_000 },
         });
       } catch (error) {
         const code = getSafeGenerateObjectErrorCode(error);
@@ -1010,10 +1114,18 @@ export function createCampaignPlayOpeningPlanner(
       }
       const modelEvidence = successfulEvidence(generated.trace);
       try {
+        const proposal = capability.primaryStrategy === "tool_mode"
+          ? decodeOpeningPlannerToolResult(
+            request.frame,
+            startingConditions,
+            sceneCandidates,
+            generated.object,
+          )
+          : generated.object;
         return compile(
           request.frame,
           startingConditions,
-          generated.object,
+          proposal,
           modelEvidence,
         );
       } catch (cause) {
