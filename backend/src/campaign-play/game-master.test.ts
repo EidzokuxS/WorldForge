@@ -1445,6 +1445,7 @@ describe("Campaign Play Game Master", () => {
       reason: "A typed authority check failed.",
     }).success).toBe(false);
     const reviewSchemaJson = JSON.stringify(z.toJSONSchema(reviewSchema));
+    expect(reviewSchemaJson).toContain("player_intent_unfulfilled");
     expect(reviewSchemaJson).toContain("possession_authority_missing");
     expect(reviewSchemaJson).toContain("obligation_authority_missing");
     expect(reviewSchemaJson).toContain("route_authority_missing");
@@ -1457,7 +1458,7 @@ describe("Campaign Play Game Master", () => {
     expect(String(reviewOptions.prompt)).toContain("unless typedResourceEffects contains the matching obligation effect");
     expect(String(reviewOptions.prompt)).toContain('"typedResourceEffects":[]');
     expect(String(reviewOptions.prompt)).toContain(
-      "Set failedChecks to [] when verdict is accepted. When verdict is rejected, include each applicable safe check once: possession_authority_missing for an untyped possession or custody change; obligation_authority_missing for an untyped debt, payment, or duty change; route_authority_missing for an unsupported route or access claim; possession_transform_identity_incomplete when a typed transformation leaves retained possession identity incomplete; other_mechanical_authority_mismatch only when none of the specific checks applies. Do not copy event summaries, proposal text, player text, actor names, location names, provider text, or the free-form reason into failedChecks.",
+      "Set failedChecks to [] when verdict is accepted. When verdict is rejected, include each applicable safe check once: player_intent_unfulfilled when the proposal drops or leaves unresolved a material part of PLAYER_INTENT; possession_authority_missing for an untyped possession or custody change; obligation_authority_missing for an untyped debt, payment, or duty change; route_authority_missing for an unsupported route or access claim; possession_transform_identity_incomplete when a typed transformation leaves retained possession identity incomplete; other_mechanical_authority_mismatch only when none of the specific checks applies. Do not copy event summaries, proposal text, player text, actor names, location names, provider text, or the free-form reason into failedChecks.",
     );
     expect(String(reviewOptions.prompt)).toContain(
       "Do not classify an ordinary location description or ordinary wayfinding as route_authority_missing unless the prose actually asserts a campaign route edge",
@@ -1825,11 +1826,20 @@ describe("Campaign Play Game Master", () => {
         affectedHandles: ["you", "here"],
       }],
     };
-    const generateObject = vi.fn(async (options: Parameters<typeof safeGenerateObject>[0]) => {
-      const schema = options.schema as typeof campaignPlayGameMasterProposalSchema;
-      expect(schema.safeParse(observationProposal).success).toBe(true);
-      return { object: observationProposal, trace: trace() };
-    });
+    const generateObject = vi.fn()
+      .mockImplementationOnce(async (options: Parameters<typeof safeGenerateObject>[0]) => {
+        const schema = options.schema as typeof campaignPlayGameMasterProposalSchema;
+        expect(schema.safeParse(observationProposal).success).toBe(true);
+        return { object: observationProposal, trace: trace() };
+      })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The discovery resolves the admitted inspection without inventing route mechanics.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
     const candidate = await createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).plan({
@@ -1837,7 +1847,7 @@ describe("Campaign Play Game Master", () => {
       model: model(), temperature: 0.2, budget,
     });
     expect(candidate.preflight.accepted).toBe(true);
-    expect(generateObject).toHaveBeenCalledTimes(1);
+    expect(generateObject).toHaveBeenCalledTimes(2);
   });
 
   it("binds every recorded player-action event to the player actor", () => {
@@ -2121,6 +2131,96 @@ describe("Campaign Play Game Master", () => {
       /REVIEW_OUTPUT_CONTRACT[\s\S]*Do not add, omit, default, or repair any key\.$/,
     );
     expect(reviewPrompt).not.toContain("routeAccessClaims");
+  });
+
+  it("rejects a successful scene that performs travel but drops the admitted delivery task", async () => {
+    const compoundRuling = ruling({
+      normalizedIntent: {
+        originalText: "Try to reach South Harbor: harness trunk 4 down to the brazier",
+        source: "suggested",
+        choiceHandle: "move-trunk",
+        kind: "attempt",
+        targets: [{ handle: "passage", kind: "route" }],
+        method: "Carry trunk 4 along the passage and deliver it to the brazier",
+        stakes: "Reach South Harbor with trunk 4 delivered",
+      },
+      movementRouteHandle: "passage",
+      citedVisibleFactHandles: ["passage", "south"],
+      elapsedBounds: { minimumMinutes: 5, maximumMinutes: 5 },
+      reason: "The route is open and the delivery can be attempted.",
+    });
+    const travelOnlyProposal = {
+      elapsedMinutes: 5,
+      effects: [
+        { kind: "move_actor" as const, actorHandle: null },
+        {
+          kind: "record_world_event" as const,
+          eventClass: "scene" as const,
+          performingActorHandle: null,
+          summary: "The player follows the passage and reaches South Harbor.",
+          affectedHandles: ["you", "passage", "south"],
+        },
+      ],
+    };
+    const rejectedFeedback = {
+      diagnostic: "game_master_semantic_validation_mismatch" as const,
+      failedChecks: [{
+        check: "mechanical_authority_rejected" as const,
+        reviewFailedChecks: ["player_intent_unfulfilled"] as const,
+      }],
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: travelOnlyProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "rejected",
+          reason: "The proposal completes the route but never delivers the named trunk.",
+          failedChecks: ["player_intent_unfulfilled"],
+        },
+        trace: trace(),
+      });
+    let thrown: unknown;
+    try {
+      await createCampaignPlayGameMaster({
+        generateObject: generateObject as unknown as typeof safeGenerateObject,
+      }).plan({
+        frame: frame(), ruling: compoundRuling, resolution, uncertaintyAuthority: null,
+        model: model(), temperature: 0.2, budget,
+      });
+    } catch (cause) {
+      thrown = cause;
+    }
+    expect(thrown).toMatchObject({
+      code: "model_contract_failed",
+      modelEvidence: expect.objectContaining({ errorCode: "mechanical_authority_rejected" }),
+    });
+    expect(getCampaignPlayGameMasterRecoveryFeedback(thrown)).toEqual(rejectedFeedback);
+    expect(generateObject).toHaveBeenCalledTimes(2);
+    const reviewPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    expect(reviewPrompt).toContain(travelOnlyProposal.effects[1].summary);
+    expect(reviewPrompt).toContain('"originalText":"Try to reach South Harbor: harness trunk 4 down to the brazier"');
+    expect(reviewPrompt).toContain('"result":"success"');
+    expect(reviewPrompt).toContain("travel while dropping an additional handling, delivery, contact, inspection, tool, target, or explicit exclusion");
+
+    const recoveryGenerateObject = vi.fn()
+      .mockResolvedValueOnce({ object: travelOnlyProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The replacement proposal covers the complete admitted action.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+    await createCampaignPlayGameMaster({
+      generateObject: recoveryGenerateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: compoundRuling, resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget, recoveryFeedback: rejectedFeedback,
+    });
+    expect(String(recoveryGenerateObject.mock.calls[0]![0].prompt)).toContain(
+      "For player_intent_unfulfilled, resolve every material part of PLAYER_INTENT under RESOLUTION.",
+    );
   });
 
   it("rejects route prose that contradicts code-owned route authority", async () => {
@@ -3857,7 +3957,15 @@ describe("Campaign Play Game Master", () => {
       .mockResolvedValueOnce({ object: {
         elapsedMinutes: 1,
         effects: [scopeDiscoveryEffect(["here"])],
-      }, trace: trace() });
+      }, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The discovery resolves the admitted inspection.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
     await createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).plan({
@@ -3877,10 +3985,21 @@ describe("Campaign Play Game Master", () => {
 
     let normalPrompt = "";
     const normalGenerate = vi.fn(async (input: { prompt?: unknown }) => {
-      normalPrompt = String(input.prompt);
+      const prompt = String(input.prompt);
+      if (prompt.includes("You are the Mechanical Authority Reviewer.")) {
+        return {
+          object: {
+            verdict: "accepted",
+            reason: "The discovery resolves the admitted inspection.",
+            failedChecks: [],
+          },
+          trace: trace(),
+        };
+      }
+      normalPrompt = prompt;
       return {
-      object: { elapsedMinutes: 1, effects: [scopeDiscoveryEffect(["here"])] },
-      trace: trace(),
+        object: { elapsedMinutes: 1, effects: [scopeDiscoveryEffect(["here"])] },
+        trace: trace(),
       };
     });
     await createCampaignPlayGameMaster({
