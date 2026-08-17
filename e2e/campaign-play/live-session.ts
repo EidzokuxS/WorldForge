@@ -10,6 +10,8 @@ import {
   openCampaignPlayDatabase,
   type CampaignPlayDatabaseHandle,
 } from "../../backend/src/campaign-play/campaign-play-database.js";
+import { hashCampaignPlayProjection } from "../../backend/src/campaign-play/campaign-play-projection.js";
+import { createCampaignPlayStateRepository } from "../../backend/src/campaign-play/campaign-play-state-repository.js";
 import { resolveRoleModel } from "../../backend/src/ai/resolve-role-model.js";
 import { loadSettings } from "../../backend/src/settings/index.js";
 import { isLocalProvider, type Settings } from "@worldforge/shared";
@@ -1076,6 +1078,18 @@ export async function prepareCampaignPlayLiveSession(input: {
   verifyTemplateWorldSource(config);
   const handle = openCampaignPlayDatabase(config.campaignId);
   try {
+    if (config.worldSource.kind === "generated") {
+      const stateRepository = createCampaignPlayStateRepository(handle);
+      if (!stateRepository.loadState()) {
+        stateRepository.createState({
+          eventId: `play-state:${hashCampaignPlayProjection({
+            domain: "campaign_play_state_creation",
+            campaignId: config.campaignId,
+          }).slice(0, 40)}`,
+          createdAt: input.startedAt,
+        });
+      }
+    }
     const captured = captureCampaignPlayReplay(handle);
     if (captured.report.authority.setupPhase !== "character_required") {
       throw new Error("Live evidence must freeze eligibility before character creation.");

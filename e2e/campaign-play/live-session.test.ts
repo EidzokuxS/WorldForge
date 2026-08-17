@@ -189,15 +189,6 @@ describe("Campaign Play live evidence session", () => {
     process.env.GSD_CAMPAIGNS_ROOT = root;
     const campaignId = "d16b0000-0000-4000-8000-000000000001";
     createSeededAcceptedCampaign(root, campaignId);
-    const handle = openCampaignPlayDatabase(campaignId);
-    try {
-      createCampaignPlayStateRepository(handle).createState({
-        eventId: "live-session-created",
-        createdAt: 1_000,
-      });
-    } finally {
-      handle.close();
-    }
     const outputRoot = path.join(root, "evidence");
     const config = liveConfig(outputRoot, campaignId, 2);
     const settings = createDefaultSettings();
@@ -224,6 +215,17 @@ describe("Campaign Play live evidence session", () => {
     });
     expect(sessionRoot).toBe(campaignPlayLiveSessionRoot(config));
     expect(fs.existsSync(path.join(sessionRoot, "probes", "eligibility-freeze.json"))).toBe(true);
+    const initialized = openCampaignPlayDatabase(campaignId);
+    try {
+      expect(createCampaignPlayStateRepository(initialized).loadState()).toMatchObject({
+        authority: {
+          setupPhase: "character_required",
+          runtimeRevision: 1,
+        },
+      });
+    } finally {
+      initialized.close();
+    }
     await expect(prepareCampaignPlayLiveSession({
       runConfig: config,
       commit: "0000000",
