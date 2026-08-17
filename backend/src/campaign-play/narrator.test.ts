@@ -3004,6 +3004,12 @@ END_RECOVERY_DIAGNOSTIC`);
       ...proposalFixture(),
       beats: proposalFixture().beats.slice(0, 2),
     };
+    const toolTransport = {
+      beats: toolProposal.beats,
+      intentSelections: {
+        intent0: { selected: true, detail: toolProposal.actionSelections[0]!.detail },
+      },
+    };
     const toolTrace = trace("tool_mode");
     toolTrace.requestedMode = "tool";
     toolTrace.primaryStrategy = "tool_mode";
@@ -3018,7 +3024,7 @@ END_RECOVERY_DIAGNOSTIC`);
       options: Parameters<typeof safeGenerateObject>[0],
     ) => {
       expect(options.mode).toBe("tool");
-      return { object: toolProposal, trace: toolTrace };
+      return { object: toolTransport, trace: toolTrace };
     });
     const narrator = createCampaignPlayNarrator({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
@@ -3038,7 +3044,7 @@ END_RECOVERY_DIAGNOSTIC`);
     expect(generateObject).toHaveBeenCalledOnce();
   });
 
-  it("uses an array-shaped tool schema and revalidates the r216 packet locally", async () => {
+  it("uses one code-keyed tool field per intent and revalidates the packet locally", async () => {
     const packet = r216RequiredReplyToolPacket();
     const validProposal = {
       beats: [
@@ -3063,7 +3069,13 @@ END_RECOVERY_DIAGNOSTIC`);
     const validTransport = {
       beats: validProposal.beats,
       requiredReplyDetail: validProposal.actionSelections[0]!.detail,
-      actionSelections: validProposal.actionSelections.slice(1),
+      intentSelections: {
+        intent0: { selected: true, detail: "harbor option 0" },
+        intent1: { selected: true, detail: "harbor option 1" },
+        intent2: { selected: true, detail: "harbor option 2" },
+        intent4: { selected: false, detail: "" },
+        intent5: { selected: false, detail: "" },
+      },
     };
     const toolTrace = trace("tool_mode");
     toolTrace.requestedMode = "tool";
@@ -3097,10 +3109,9 @@ END_RECOVERY_DIAGNOSTIC`);
     const providerSchema = z.toJSONSchema(options.schema) as unknown as {
       properties: {
         requiredReplyDetail: unknown;
-        actionSelections: {
-          items?: unknown;
-          minItems?: number;
-          maxItems?: number;
+        intentSelections: {
+          properties?: Record<string, unknown>;
+          additionalProperties?: boolean;
         };
       };
     };
@@ -3108,12 +3119,27 @@ END_RECOVERY_DIAGNOSTIC`);
     expect(providerSchemaText).not.toContain("prefixItems");
     expect(providerSchemaText).not.toContain("\"const\"");
     expect(providerSchemaText).not.toContain("oneOf");
-    expect(providerSchema.properties.actionSelections.items).toBeDefined();
+    expect(providerSchemaText).not.toContain("intentIndex");
     expect(providerSchema.properties.requiredReplyDetail).toBeDefined();
-    expect(providerSchema.properties.actionSelections.minItems).toBe(3);
-    expect(providerSchema.properties.actionSelections.maxItems).toBe(3);
+    expect(Object.keys(providerSchema.properties.intentSelections.properties ?? {})).toEqual([
+      "intent0",
+      "intent1",
+      "intent2",
+      "intent4",
+      "intent5",
+    ]);
+    expect(providerSchema.properties.intentSelections.additionalProperties).toBe(false);
     expect(options.schema.safeParse(validTransport).success).toBe(true);
     expect(options.schema.safeParse(validProposal).success).toBe(false);
+    expect(options.schema.safeParse({
+      beats: validTransport.beats,
+      requiredReplyDetail: validTransport.requiredReplyDetail,
+      actionSelections: [
+        { intentIndex: 5, detail: "harbor option 5" },
+        { intentIndex: 5, detail: "harbor option 5 again" },
+        { intentIndex: 0, detail: "harbor option 0" },
+      ],
+    }).success).toBe(false);
     const initialPrompt = String(options.prompt);
     expect(initialPrompt).toContain(
       "REQUIRED_REPLY_INTENT_INDEX=application-owned (absent from model output)",
@@ -3122,8 +3148,9 @@ END_RECOVERY_DIAGNOSTIC`);
       "requiredReplyDetail supplies only its wording",
     );
     expect(initialPrompt).toContain(
-      "actionSelections contains only the remaining choices and must not contain that required index",
+      "intentSelections is an application-keyed selection map",
     );
+    expect(initialPrompt).toContain("set selected=true");
     expect(initialPrompt).not.toContain("Put that exact index only in actionSelections[0]");
 
     const recoveryFeedback: CampaignPlayNarratorRecoveryFeedback = {
@@ -3139,10 +3166,10 @@ END_RECOVERY_DIAGNOSTIC`);
       "REQUIRED_REPLY_INTENT_INDEX=application-owned (absent from model output)",
     );
     expect(recoveryPrompt).toContain(
-      "The required reply index is application-owned and was absent from the prior output.",
+      "The required reply index is application-owned and absent from intentSelections.",
     );
     expect(recoveryPrompt).toContain(
-      "rebuild the remaining actionSelections without that index",
+      "Rebuild the complete intentSelections object",
     );
     expect(recoveryPrompt).toContain(
       "RECOVERY_DIAGNOSTIC",
@@ -3155,7 +3182,7 @@ END_RECOVERY_DIAGNOSTIC`);
     generatedProposal = {
       beats: validTransport.beats,
       requiredReplyDetail: "accept the uncertain share",
-      actionSelections: [],
+      intentSelections: {},
     };
     await expect(narrator.narrate({
       ...request("narration-r216-tool-one-required-reply"),
@@ -3163,10 +3190,9 @@ END_RECOVERY_DIAGNOSTIC`);
     })).resolves.toBeDefined();
     const oneIntentOptions = generateObject.mock.calls[2]![0] as Parameters<typeof safeGenerateObject>[0];
     const oneIntentProviderSchema = z.toJSONSchema(oneIntentOptions.schema) as unknown as {
-      properties: { actionSelections: { minItems?: number; maxItems?: number } };
+      properties: { intentSelections: { properties?: Record<string, unknown> } };
     };
-    expect(oneIntentProviderSchema.properties.actionSelections.minItems).toBe(0);
-    expect(oneIntentProviderSchema.properties.actionSelections.maxItems).toBe(0);
+    expect(oneIntentProviderSchema.properties.intentSelections.properties).toEqual({});
     expect(oneIntentOptions.schema.safeParse(generatedProposal).success).toBe(true);
 
     const invalidCases: Array<{
@@ -3175,24 +3201,35 @@ END_RECOVERY_DIAGNOSTIC`);
       diagnostic: "narrator_generation_schema_mismatch" | "narrator_packet_validation_mismatch";
     }> = [
       {
-        name: "wrong-required-reply-position",
+        name: "echoed-required-reply-index",
         transport: {
           ...validTransport,
-          actionSelections: [0, 3, 1].map((intentIndex) => ({
-            intentIndex,
-            detail: `harbor option ${intentIndex}`,
-          })),
+          intentSelections: {
+            ...validTransport.intentSelections,
+            intent3: { selected: true, detail: "accept the uncertain share" },
+          },
         },
         diagnostic: "narrator_generation_schema_mismatch",
       },
       {
-        name: "duplicate-trailing-reply",
+        name: "too-many-selected-intents",
         transport: {
           ...validTransport,
-          actionSelections: [3, 0, 1].map((intentIndex) => ({
-            intentIndex,
-            detail: intentIndex === 3 ? "accept the uncertain share" : `harbor option ${intentIndex}`,
-          })),
+          intentSelections: {
+            ...validTransport.intentSelections,
+            intent4: { selected: true, detail: "harbor option 4" },
+          },
+        },
+        diagnostic: "narrator_generation_schema_mismatch",
+      },
+      {
+        name: "unselected-intent-with-detail",
+        transport: {
+          ...validTransport,
+          intentSelections: {
+            ...validTransport.intentSelections,
+            intent5: { selected: false, detail: "harbor option 5" },
+          },
         },
         diagnostic: "narrator_generation_schema_mismatch",
       },
@@ -3271,10 +3308,16 @@ END_RECOVERY_DIAGNOSTIC`);
     expect(generateObject).toHaveBeenCalledTimes(3 + invalidCases.length);
   });
 
-  it("preserves the current tool shape when no required reply exists", async () => {
+  it("uses the same code-keyed tool transport when no required reply exists", async () => {
     const toolProposal = {
       ...proposalFixture(),
       beats: proposalFixture().beats.slice(0, 2),
+    };
+    const toolTransport = {
+      beats: toolProposal.beats,
+      intentSelections: {
+        intent0: { selected: true, detail: toolProposal.actionSelections[0]!.detail },
+      },
     };
     const toolTrace = trace("tool_mode");
     toolTrace.requestedMode = "tool";
@@ -3288,7 +3331,7 @@ END_RECOVERY_DIAGNOSTIC`);
     };
     const generateObject = vi.fn(async (
       _options: Parameters<typeof safeGenerateObject>[0],
-    ) => ({ object: toolProposal, trace: toolTrace }));
+    ) => ({ object: toolTransport, trace: toolTrace }));
     const narrator = createCampaignPlayNarrator({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     });
@@ -3306,21 +3349,16 @@ END_RECOVERY_DIAGNOSTIC`);
     const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
     const providerSchema = z.toJSONSchema(options.schema) as unknown as {
       properties: {
-        actionSelections: {
-          minItems?: number;
-          maxItems?: number;
-          items?: unknown;
-        };
+        intentSelections: { properties?: Record<string, unknown> };
         requiredReplyDetail?: unknown;
       };
     };
     expect(providerSchema.properties.requiredReplyDetail).toBeUndefined();
-    expect(providerSchema.properties.actionSelections.minItems).toBe(1);
-    expect(providerSchema.properties.actionSelections.maxItems).toBe(1);
-    expect(providerSchema.properties.actionSelections.items).toBeDefined();
-    expect(options.schema.safeParse(toolProposal).success).toBe(true);
+    expect(Object.keys(providerSchema.properties.intentSelections.properties ?? {})).toEqual(["intent0"]);
+    expect(options.schema.safeParse(toolTransport).success).toBe(true);
+    expect(options.schema.safeParse(toolProposal).success).toBe(false);
     expect(options.schema.safeParse({
-      ...toolProposal,
+      ...toolTransport,
       requiredReplyDetail: "should not be present",
     }).success).toBe(false);
     expect(generateObject).toHaveBeenCalledOnce();
