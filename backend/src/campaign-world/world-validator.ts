@@ -169,6 +169,57 @@ function hasStronglyConnectedConcreteRoutes(
   );
 }
 
+function hasOpeningSceneReadiness(
+  locations: readonly CampaignWorldLocation[],
+  routes: readonly CampaignWorldRoute[],
+  actors: readonly GeneratedWorldActor[],
+  placements: readonly ActorPlacement[],
+  pressures: readonly WorldPressure[],
+): boolean {
+  const startingMacros = locations.filter((location) =>
+    location.kind === "macro" && location.isStarting
+  );
+  if (startingMacros.length !== 1) return false;
+  const startingMacroId = startingMacros[0]!.id;
+  const concreteLocationIds = new Set(
+    locations
+      .filter((location) => location.kind === "persistent_sublocation")
+      .map((location) => location.id),
+  );
+  const startingMacroSceneIds = new Set(
+    locations
+      .filter((location) =>
+        location.kind === "persistent_sublocation" &&
+        location.parentLocationId === startingMacroId
+      )
+      .map((location) => location.id),
+  );
+  const supportActorIds = new Set(
+    actors
+      .filter((actor) => actor.controller === "agent" && actor.role === "support")
+      .map((actor) => actor.id),
+  );
+  const eligibleSceneIds = new Set(
+    placements
+      .filter((placement) =>
+        placement.placementKind === "present" &&
+        supportActorIds.has(placement.actorId) &&
+        startingMacroSceneIds.has(placement.locationId)
+      )
+      .map((placement) => placement.locationId),
+  );
+
+  return [...eligibleSceneIds].some((sceneId) =>
+    pressures.some((pressure) => pressure.locationIds.includes(sceneId)) &&
+    routes.some((route) =>
+      route.fromLocationId === sceneId &&
+      route.toLocationId !== sceneId &&
+      concreteLocationIds.has(route.toLocationId)
+    ) &&
+    reachesEveryConcreteLocation(sceneId, concreteLocationIds, routes)
+  );
+}
+
 export function validateCampaignWorldDraft(
   draft: CampaignWorldDraft,
 ): CampaignWorldDraft {
@@ -453,6 +504,20 @@ export function validateCampaignWorldDraft(
   }
   if (pressureAnchorSets.size < 2) {
     issues.push("at least two pressures require different anchor sets");
+  }
+
+  if (
+    !hasOpeningSceneReadiness(
+      draft.locations,
+      draft.routes,
+      draft.actors,
+      draft.placements,
+      draft.pressures,
+    )
+  ) {
+    issues.push(
+      "world requires one starting-macro persistent scene with a present support person, a pressure anchor, and an outgoing route to another reachable persistent scene",
+    );
   }
 
   if (issues.length > 0) {

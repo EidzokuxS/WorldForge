@@ -40,10 +40,68 @@ function snapshotDraft(): CampaignWorldDraft {
         tags: [],
         isStarting: false,
       },
+      {
+        id: "scene-a-dock",
+        name: "A Dock",
+        description: "A concrete dock in the starting region.",
+        kind: "persistent_sublocation",
+        parentLocationId: "location-a",
+        tags: ["start"],
+        isStarting: false,
+      },
+      {
+        id: "scene-a-office",
+        name: "A Office",
+        description: "A public office in the starting region.",
+        kind: "persistent_sublocation",
+        parentLocationId: "location-a",
+        tags: ["civic"],
+        isStarting: false,
+      },
+      {
+        id: "scene-b-dock",
+        name: "B Dock",
+        description: "A concrete dock in the second region.",
+        kind: "persistent_sublocation",
+        parentLocationId: "location-b",
+        tags: ["trade"],
+        isStarting: false,
+      },
+      {
+        id: "scene-b-market",
+        name: "B Market",
+        description: "A public market in the second region.",
+        kind: "persistent_sublocation",
+        parentLocationId: "location-b",
+        tags: ["trade"],
+        isStarting: false,
+      },
+      {
+        id: "scene-c-dock",
+        name: "C Dock",
+        description: "A concrete dock in the third region.",
+        kind: "persistent_sublocation",
+        parentLocationId: "location-c",
+        tags: ["coast"],
+        isStarting: false,
+      },
+      {
+        id: "scene-c-archive",
+        name: "C Archive",
+        description: "A public archive in the third region.",
+        kind: "persistent_sublocation",
+        parentLocationId: "location-c",
+        tags: ["records"],
+        isStarting: false,
+      },
     ],
     routes: [
-      { id: "route-b", fromLocationId: "location-b", toLocationId: "location-c", travelCost: 2 },
-      { id: "route-a", fromLocationId: "location-a", toLocationId: "location-b", travelCost: 1 },
+      { id: "route-a", fromLocationId: "scene-a-dock", toLocationId: "scene-a-office", travelCost: 1 },
+      { id: "route-b", fromLocationId: "scene-a-office", toLocationId: "scene-b-dock", travelCost: 2 },
+      { id: "route-c", fromLocationId: "scene-b-dock", toLocationId: "scene-b-market", travelCost: 2 },
+      { id: "route-d", fromLocationId: "scene-b-market", toLocationId: "scene-c-dock", travelCost: 2 },
+      { id: "route-e", fromLocationId: "scene-c-dock", toLocationId: "scene-c-archive", travelCost: 2 },
+      { id: "route-f", fromLocationId: "scene-c-archive", toLocationId: "scene-a-dock", travelCost: 2 },
     ],
     actors: [
       {
@@ -105,16 +163,16 @@ function snapshotDraft(): CampaignWorldDraft {
       { id: "relation-e", sourceActorId: "actor-e", targetActorId: "actor-f", relationType: "dependency", summary: "The medic needs a safe route.", intensity: 4 },
     ],
     placements: [
-      { id: "placement-d", actorId: "actor-d", locationId: "location-c", placementKind: "present" },
-      { id: "placement-a", actorId: "actor-a", locationId: "location-a", placementKind: "present" },
-      { id: "placement-b", actorId: "actor-b", locationId: "location-a", placementKind: "present" },
-      { id: "placement-c", actorId: "actor-c", locationId: "location-b", placementKind: "present" },
-      { id: "placement-e", actorId: "actor-e", locationId: "location-b", placementKind: "present" },
-      { id: "placement-f", actorId: "actor-f", locationId: "location-c", placementKind: "present" },
+      { id: "placement-d", actorId: "actor-d", locationId: "scene-c-dock", placementKind: "present" },
+      { id: "placement-a", actorId: "actor-a", locationId: "scene-a-dock", placementKind: "present" },
+      { id: "placement-b", actorId: "actor-b", locationId: "scene-b-dock", placementKind: "present" },
+      { id: "placement-c", actorId: "actor-c", locationId: "scene-a-office", placementKind: "present" },
+      { id: "placement-e", actorId: "actor-e", locationId: "scene-b-market", placementKind: "present" },
+      { id: "placement-f", actorId: "actor-f", locationId: "scene-c-archive", placementKind: "present" },
     ],
     pressures: [
-      { id: "pressure-b", name: "Bells", description: "Signals fail.", trajectory: "Trust declines.", urgency: 3, actorIds: ["actor-d", "actor-e"], locationIds: ["location-c"] },
-      { id: "pressure-a", name: "Routes", description: "Routes close.", trajectory: "Supply fails.", urgency: 5, actorIds: ["actor-b", "actor-a"], locationIds: ["location-a"] },
+      { id: "pressure-b", name: "Bells", description: "Signals fail.", trajectory: "Trust declines.", urgency: 3, actorIds: ["actor-d", "actor-e"], locationIds: ["scene-c-dock"] },
+      { id: "pressure-a", name: "Routes", description: "Routes close.", trajectory: "Supply fails.", urgency: 5, actorIds: ["actor-c", "actor-a"], locationIds: ["scene-a-office"] },
     ],
   };
 }
@@ -235,5 +293,34 @@ describe("Campaign World canonical snapshot", () => {
       JSON.stringify(playerSnapshot),
       expected,
     )).toThrow();
+  });
+
+  it("rejects a rebound accepted snapshot without opening-scene readiness", () => {
+    const review = acceptedReview();
+    const invalidReview = {
+      ...review,
+      pressures: review.pressures.map((pressure) =>
+        pressure.id === "pressure-a"
+          ? { ...pressure, locationIds: ["scene-b-market"] }
+          : pressure
+      ),
+    };
+    invalidReview.contentHash = calculateCampaignWorldContentHash(
+      invalidReview.sourceDigest,
+      invalidReview,
+    );
+    const expected = {
+      campaignId: invalidReview.campaignId,
+      acceptedWorldVersion: invalidReview.version,
+      acceptedContentHash: invalidReview.contentHash,
+      acceptedAt: invalidReview.acceptedAt as number,
+    };
+
+    expect(() => parseAcceptedCampaignWorldReview(
+      serializeAcceptedCampaignWorldReview(invalidReview),
+      expected,
+    )).toThrow(
+      "world requires one starting-macro persistent scene with a present support person, a pressure anchor, and an outgoing route to another reachable persistent scene",
+    );
   });
 });

@@ -85,8 +85,8 @@ function worldDraftFixture(): CampaignWorldDraft {
         description: "Safe sea lanes close earlier after every eclipse.",
         trajectory: "Dockworkers lose supply access within two route cycles.",
         urgency: 5,
-        actorIds: ["actor-mara", "actor-ilya"],
-        locationIds: ["north-dock"],
+        actorIds: ["actor-oren", "actor-mara"],
+        locationIds: ["signal-tower"],
       },
       {
         id: "pressure-bells",
@@ -111,6 +111,38 @@ describe("Campaign World deterministic validator", () => {
 
     expect(validateCampaignWorldDraft(draft)).toBe(draft);
     expect(draft.actors.every((actor) => actor.kind === "person")).toBe(true);
+  });
+
+  it("accepts a starting scene with support, pressure, and an outgoing route", () => {
+    expect(validateCampaignWorldDraft(worldDraftFixture())).toMatchObject({
+      locations: expect.arrayContaining([
+        expect.objectContaining({ id: "signal-tower", parentLocationId: "region-north" }),
+      ]),
+      placements: expect.arrayContaining([
+        expect.objectContaining({ actorId: "actor-oren", locationId: "signal-tower", placementKind: "present" }),
+      ]),
+      pressures: expect.arrayContaining([
+        expect.objectContaining({ locationIds: ["signal-tower"] }),
+      ]),
+    });
+  });
+
+  it.each([
+    ["support only in a sibling scene", (draft: CampaignWorldDraft) => {
+      draft.placements.find((placement) => placement.actorId === "actor-oren")!.locationId = "reef-market";
+    }],
+    ["pressure only in a different scene", (draft: CampaignWorldDraft) => {
+      draft.pressures[0]!.locationIds = ["north-dock"];
+    }],
+    ["no outgoing route from the eligible scene", (draft: CampaignWorldDraft) => {
+      draft.routes = draft.routes.filter((route) => route.fromLocationId !== "signal-tower");
+    }],
+  ])("rejects an opening scene missing %s", (_label, mutate) => {
+    const draft = worldDraftFixture();
+    mutate(draft);
+    expect(() => validateCampaignWorldDraft(draft)).toThrow(
+      "world requires one starting-macro persistent scene with a present support person, a pressure anchor, and an outgoing route to another reachable persistent scene",
+    );
   });
 
   it("accepts only person, human, player at the live human boundary", () => {

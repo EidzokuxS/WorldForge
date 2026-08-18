@@ -96,6 +96,17 @@ export function buildWorldCastPrompt(
   const allowedLocationRefs = frame.locations
     .filter((location) => location.kind === "persistent_sublocation")
     .map((location) => location.locationRef);
+  const startingMacros = frame.locations.filter((location) =>
+    location.kind === "macro" && location.isStarting
+  );
+  const startingMacro = startingMacros.length === 1 ? startingMacros[0] : null;
+  const startingMacroSceneRefs = frame.locations
+    .filter((location) =>
+      location.kind === "persistent_sublocation" &&
+      startingMacro !== null &&
+      location.parentLocationRef === startingMacro.locationRef
+    )
+    .map((location) => location.locationRef);
 
   return `You design the starting Campaign World cast.
 
@@ -115,11 +126,19 @@ ALLOWED_LOCATION_REFS
 ${JSON.stringify(allowedLocationRefs)}
 END_ALLOWED_LOCATION_REFS
 
+STARTING_MACRO_REF
+${JSON.stringify(startingMacro?.locationRef ?? null)}
+END_STARTING_MACRO_REF
+
+STARTING_MACRO_SCENE_REFS
+${JSON.stringify(startingMacroSceneRefs)}
+END_STARTING_MACRO_SCENE_REFS
+
 ${campaignWorldStringContract}
 
 Return one object matching the supplied world-cast schema. Create actorRef values such as actor:harbor-warden using lowercase letters, digits, and single hyphens. ALLOWED_LOCATION_REFS is the only valid source for every placements[].locationRef; copy one value character-for-character for each placement. Reuse each actors[].actorRef character-for-character in the matching goals[].actorRef and placements[].actorRef fields. Use actor and location names only in prose fields. Set every controller to agent and every goal status to active. Set every goal priority to an integer from 1 (lowest) through 5 (highest). Code assigns persistent IDs after validation.
 
-Create 6 to 16 people, including at least one key person, two support people, and two background people. Set every actors[].kind to person. Give every person one to three active goals, exactly one present placement, and at most one home placement. Present and home placements must name exact persistent sublocations, never macro regions. A present placement means the person is directly perceivable and identifiable by name whenever the player shares that exact scene. If a person should remain behind a door, in another wing, or otherwise offscreen, place them in a different persistent sublocation instead of the same scene. Spread the cast across at least two concrete scenes connected by the route graph. Do not create an organization, institution, crew, crowd, family, council, movement, or other group as an actor.`;
+Create 6 to 16 people, including at least one key person, two support people, and two background people. Set every actors[].kind to person. Give every person one to three active goals, exactly one present placement, and at most one home placement. Present and home placements must name exact persistent sublocations, never macro regions. A present placement means the person is directly perceivable and identifiable by name whenever the player shares that exact scene. If a person should remain behind a door, in another wing, or otherwise offscreen, place them in a different persistent sublocation instead of the same scene. At least one support person must have a present placement whose locationRef is copied from STARTING_MACRO_SCENE_REFS. This is a hard stage contract: the support person must be present in a persistent sublocation under the sole starting macro; placing support people only in sibling or non-starting scenes does not satisfy it. Spread the cast across at least two concrete scenes connected by the route graph. Do not create an organization, institution, crew, crowd, family, council, movement, or other group as an actor.`;
 }
 
 export function buildWorldConnectionsPrompt(
@@ -132,6 +151,31 @@ export function buildWorldConnectionsPrompt(
   const allowedLocationRefs = frame.locations
     .filter((location) => location.kind === "persistent_sublocation")
     .map((location) => location.locationRef);
+  const startingMacros = frame.locations.filter((location) =>
+    location.kind === "macro" && location.isStarting
+  );
+  const startingMacro = startingMacros.length === 1 ? startingMacros[0] : null;
+  const startingMacroSceneRefs = new Set(
+    frame.locations
+      .filter((location) =>
+        location.kind === "persistent_sublocation" &&
+        startingMacro !== null &&
+        location.parentLocationRef === startingMacro.locationRef
+      )
+      .map((location) => location.locationRef),
+  );
+  const supportActorRefs = new Set(
+    cast.actors
+      .filter((actor) => actor.role === "support")
+      .map((actor) => actor.actorRef),
+  );
+  const eligibleStartingSupportSceneRefs = cast.placements
+    .filter((placement) =>
+      placement.placementKind === "present" &&
+      supportActorRefs.has(placement.actorRef) &&
+      startingMacroSceneRefs.has(placement.locationRef)
+    )
+    .map((placement) => placement.locationRef);
 
   return `You design Campaign World relations and starting pressures.
 
@@ -163,9 +207,13 @@ ALLOWED_LOCATION_REFS
 ${JSON.stringify(allowedLocationRefs)}
 END_ALLOWED_LOCATION_REFS
 
+ELIGIBLE_STARTING_SUPPORT_SCENE_REFS
+${JSON.stringify(eligibleStartingSupportSceneRefs)}
+END_ELIGIBLE_STARTING_SUPPORT_SCENE_REFS
+
 ${campaignWorldStringContract}
 
 Return one object matching the supplied world-connections schema. ALLOWED_ACTOR_REFS is the only valid source for every relations[].sourceActorRef, relations[].targetActorRef, and pressures[].actorRefs[] value. ALLOWED_LOCATION_REFS is the only valid source for every pressures[].locationRefs[] value. Copy each reference character-for-character from its allowed list. Use actor and location names only in prose fields. Every value in REQUIRED_RELATION_ACTOR_REFS must appear as a sourceActorRef or targetActorRef in at least one relation. Code assigns persistent IDs after validation.
 
-Create 3 to 32 directed actor relations. Every person participates in at least one relation. Set each relation intensity to an integer from 1 for a faint link through 5 for a defining force. Create 2 to 6 pressures with different anchor sets across at least two pressures. Every pressure must name at least one person anchor and one exact persistent-sublocation anchor. A macro region cannot anchor a pressure. Person anchors are the concrete people driving, resisting, administering, or suffering that pressure; they do not stand in for a group actor. Set each pressure urgency to an integer from 1 for slow pressure through 5 for immediate pressure. A pressure may reference up to eight people and eight locations.`;
+Create 3 to 32 directed actor relations. Every person participates in at least one relation. Set each relation intensity to an integer from 1 for a faint link through 5 for a defining force. Create 2 to 6 pressures with different anchor sets across at least two pressures. Every pressure must name at least one person anchor and one exact persistent-sublocation anchor. A macro region cannot anchor a pressure. Person anchors are the concrete people driving, resisting, administering, or suffering that pressure; they do not stand in for a group actor. At least one pressure must copy one value from ELIGIBLE_STARTING_SUPPORT_SCENE_REFS into pressures[].locationRefs[]. This is a hard stage contract: the pressure must anchor the same persistent scene where a support person from the cast is present under the sole starting macro; anchoring only a sibling or non-starting scene does not satisfy it. Set each pressure urgency to an integer from 1 for slow pressure through 5 for immediate pressure. A pressure may reference up to eight people and eight locations.`;
 }

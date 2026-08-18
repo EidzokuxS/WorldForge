@@ -32,7 +32,7 @@ import {
 
 const BUILD_ID = "build-a";
 const ACCEPTED_SNAPSHOT_SHA256 =
-  "c34e1d8a334b6a5048d42ae6d06831c520ab5832b5338a143dbee15b53bc082e";
+  "fc877212e95d97392bfc43769d32322a9dd92ef2763d3e28feb0a1ee1baef369";
 
 let root = "";
 let previousCampaignsRoot: string | undefined;
@@ -114,7 +114,15 @@ describe("Campaign World repository", () => {
     advanceBuildToPersistence(repository, BUILD_ID);
 
     const candidate = candidateFixture(source);
-    const [startingLocation, parentLocation, childLocation] = candidate.draft.locations;
+    const startingLocation = candidate.draft.locations.find((location) =>
+      location.id === "region-a"
+    );
+    const parentLocation = candidate.draft.locations.find((location) =>
+      location.id === "region-b"
+    );
+    const childLocation = candidate.draft.locations.find((location) =>
+      location.id === "location-b-market"
+    );
     if (!startingLocation || !parentLocation || !childLocation) {
       throw new Error("Campaign World location fixture is incomplete.");
     }
@@ -126,6 +134,11 @@ describe("Campaign World repository", () => {
       },
       startingLocation,
       parentLocation,
+      ...candidate.draft.locations.filter((location) =>
+        location.id !== startingLocation.id &&
+        location.id !== parentLocation.id &&
+        location.id !== childLocation.id
+      ),
     ];
     candidate.contentHash = calculateCampaignWorldContentHash(
       source.sourceDigest,
@@ -176,8 +189,14 @@ describe("Campaign World repository", () => {
     });
     expect(review.locations.map((location) => location.id)).toEqual([
       "location-a",
+      "location-a-office",
       "location-b",
+      "location-b-market",
       "location-c",
+      "location-c-archive",
+      "region-a",
+      "region-b",
+      "region-c",
     ]);
     expect(repository.loadSourceStatus()).toBe("review");
     expect(repository.loadWorld()).toEqual(review);

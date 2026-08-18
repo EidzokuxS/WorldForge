@@ -80,6 +80,8 @@ describe("Campaign World prompts", () => {
     expect(prompt).toContain("Present and home placements must name exact persistent sublocations, never macro regions.");
     expect(prompt).toContain("A present placement means the person is directly perceivable and identifiable by name whenever the player shares that exact scene.");
     expect(prompt).toContain("place them in a different persistent sublocation instead of the same scene");
+    expect(prompt).toContain("At least one support person must have a present placement whose locationRef is copied from STARTING_MACRO_SCENE_REFS.");
+    expect(prompt).toContain("the support person must be present in a persistent sublocation under the sole starting macro");
     expect(prompt).toContain("Set every goal priority to an integer from 1 (lowest) through 5 (highest).");
   });
 
@@ -88,6 +90,8 @@ describe("Campaign World prompts", () => {
 
     expect(prompt).toContain("Every pressure must name at least one person anchor and one exact persistent-sublocation anchor.");
     expect(prompt).toContain("A macro region cannot anchor a pressure.");
+    expect(prompt).toContain("At least one pressure must copy one value from ELIGIBLE_STARTING_SUPPORT_SCENE_REFS into pressures[].locationRefs[].");
+    expect(prompt).toContain("the pressure must anchor the same persistent scene where a support person from the cast is present under the sole starting macro");
     expect(prompt).toContain("[\"location:signal-yard\"]");
   });
 });

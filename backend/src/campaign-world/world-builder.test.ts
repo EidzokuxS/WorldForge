@@ -234,7 +234,7 @@ function castPacket(): WorldCastPacket {
     ],
     placements: [
       { actorRef: "actor:mara-venn", locationRef: "location:north-pier", placementKind: "present" },
-      { actorRef: "actor:oren-tide", locationRef: "location:glass-dock", placementKind: "present" },
+      { actorRef: "actor:oren-tide", locationRef: "location:north-pier", placementKind: "present" },
       { actorRef: "actor:sel-bell", locationRef: "location:bell-quay", placementKind: "present" },
       { actorRef: "actor:ilya-venn", locationRef: "location:north-market", placementKind: "present" },
       { actorRef: "actor:niko-salt", locationRef: "location:glass-garden", placementKind: "present" },

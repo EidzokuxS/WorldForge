@@ -120,8 +120,8 @@ function connectionsFixture(): WorldConnectionsPacket {
         description: "Safe sea lanes close earlier after every eclipse.",
         trajectory: "Dockworkers lose supply access within two route cycles.",
         urgency: 5,
-        actorRefs: ["actor:mara-venn", "actor:ilya-venn"],
-        locationRefs: ["location:north-dock"],
+        actorRefs: ["actor:oren-tide", "actor:mara-venn"],
+        locationRefs: ["location:signal-tower"],
       },
       {
         name: "False Bells",
@@ -147,6 +147,49 @@ describe("Campaign World model contracts", () => {
     expect(frame.locations.filter((location) => location.kind === "persistent_sublocation")).toHaveLength(6);
     expect(cast.placements.every((placement) => placement.locationRef !== "location:north-harbor")).toBe(true);
     expect(connections.pressures).toHaveLength(2);
+  });
+
+  it("requires a present support person under the starting macro", () => {
+    const frame = frameFixture();
+    const cast = castFixture();
+    const result = createWorldCastPacketSchema(frame).safeParse({
+      ...cast,
+      placements: cast.placements.map((placement) =>
+        placement.actorRef === "actor:oren-tide"
+          ? { ...placement, locationRef: "location:reef-market" }
+          : placement
+      ),
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toContainEqual(expect.objectContaining({
+        path: ["placements"],
+        message: "The cast requires a present support person in a persistent sublocation under the starting macro.",
+      }));
+    }
+  });
+
+  it("requires a pressure anchored to the eligible starting support scene", () => {
+    const frame = frameFixture();
+    const cast = createWorldCastPacketSchema(frame).parse(castFixture());
+    const connections = connectionsFixture();
+    const result = createWorldConnectionsPacketSchema(frame, cast).safeParse({
+      ...connections,
+      pressures: connections.pressures.map((pressure) =>
+        pressure.locationRefs.includes("location:signal-tower")
+          ? { ...pressure, locationRefs: ["location:reef-market"] }
+          : pressure
+      ),
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toContainEqual(expect.objectContaining({
+        path: ["pressures"],
+        message: "At least one pressure must anchor a persistent support scene under the starting macro.",
+      }));
+    }
   });
 
   it("requires the concrete frame shape and direct macro children", () => {

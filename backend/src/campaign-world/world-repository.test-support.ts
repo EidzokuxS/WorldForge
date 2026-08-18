@@ -292,7 +292,7 @@ export function worldDraftFixture(): CampaignWorldDraft {
       {
         id: "placement-b",
         actorId: "actor-b",
-        locationId: "location-b",
+        locationId: "location-a-office",
         placementKind: "present",
       },
       {
@@ -327,8 +327,8 @@ export function worldDraftFixture(): CampaignWorldDraft {
         description: "Safe sea lanes close earlier after every eclipse.",
         trajectory: "North Harbor loses supply access within two route cycles.",
         urgency: 5,
-        actorIds: ["actor-a", "actor-d", "actor-f"],
-        locationIds: ["location-a"],
+        actorIds: ["actor-b", "actor-a", "actor-f"],
+        locationIds: ["location-a-office"],
       },
       {
         id: "pressure-b",

@@ -352,6 +352,20 @@ export function createWorldCastPacketSchema(
       .filter((location) => location.kind === "persistent_sublocation")
       .map((location) => location.locationRef),
   );
+  const startingMacros = frame.locations.filter((location) =>
+    location.kind === "macro" && location.isStarting
+  );
+  const startingMacro = startingMacros.length === 1 ? startingMacros[0] : null;
+  const startingMacroSceneRefs = new Set(
+    startingMacro === null
+      ? []
+      : frame.locations
+        .filter((location) =>
+          location.kind === "persistent_sublocation" &&
+          location.parentLocationRef === startingMacro.locationRef
+        )
+        .map((location) => location.locationRef),
+  );
 
   return worldCastPacketBaseSchema.superRefine((packet, context) => {
     const actorRefs = new Set(packet.actors.map((actor) => actor.actorRef));
@@ -491,6 +505,28 @@ export function createWorldCastPacketSchema(
         message: "The cast requires present placements across at least two locations.",
       });
     }
+
+    const supportActorRefs = new Set(
+      packet.actors
+        .filter((actor) => actor.role === "support")
+        .map((actor) => actor.actorRef),
+    );
+    const presentStartingSupportSceneRefs = new Set(
+      packet.placements
+        .filter((placement) =>
+          placement.placementKind === "present" &&
+          supportActorRefs.has(placement.actorRef) &&
+          startingMacroSceneRefs.has(placement.locationRef)
+        )
+        .map((placement) => placement.locationRef),
+    );
+    if (presentStartingSupportSceneRefs.size === 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["placements"],
+        message: "The cast requires a present support person in a persistent sublocation under the starting macro.",
+      });
+    }
   });
 }
 
@@ -522,7 +558,7 @@ export type WorldConnectionsPacket = z.infer<
 
 export function createWorldConnectionsPacketSchema(
   frame: Pick<WorldFramePacket, "locations">,
-  cast: Pick<WorldCastPacket, "actors">,
+  cast: Pick<WorldCastPacket, "actors" | "placements">,
 ): z.ZodType<WorldConnectionsPacket> {
   const locationRefs = new Set(
     frame.locations.map((location) => location.locationRef),
@@ -533,6 +569,34 @@ export function createWorldConnectionsPacketSchema(
       .map((location) => location.locationRef),
   );
   const actorRefs = new Set(cast.actors.map((actor) => actor.actorRef));
+  const startingMacros = frame.locations.filter((location) =>
+    location.kind === "macro" && location.isStarting
+  );
+  const startingMacro = startingMacros.length === 1 ? startingMacros[0] : null;
+  const startingMacroSceneRefs = new Set(
+    startingMacro === null
+      ? []
+      : frame.locations
+        .filter((location) =>
+          location.kind === "persistent_sublocation" &&
+          location.parentLocationRef === startingMacro.locationRef
+        )
+        .map((location) => location.locationRef),
+  );
+  const supportActorRefs = new Set(
+    cast.actors
+      .filter((actor) => actor.role === "support")
+      .map((actor) => actor.actorRef),
+  );
+  const eligibleStartingSupportSceneRefs = new Set(
+    cast.placements
+      .filter((placement) =>
+        placement.placementKind === "present" &&
+        supportActorRefs.has(placement.actorRef) &&
+        startingMacroSceneRefs.has(placement.locationRef)
+      )
+      .map((placement) => placement.locationRef),
+  );
 
   return worldConnectionsPacketBaseSchema.superRefine((packet, context) => {
     const relationKeys: string[] = [];
@@ -634,6 +698,20 @@ export function createWorldConnectionsPacketSchema(
         code: "custom",
         path: ["pressures"],
         message: "At least two pressures require different anchor sets.",
+      });
+    }
+    if (
+      eligibleStartingSupportSceneRefs.size === 0 ||
+      !packet.pressures.some((pressure) =>
+        pressure.locationRefs.some((locationRef) =>
+          eligibleStartingSupportSceneRefs.has(locationRef)
+        )
+      )
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["pressures"],
+        message: "At least one pressure must anchor a persistent support scene under the starting macro.",
       });
     }
   });
