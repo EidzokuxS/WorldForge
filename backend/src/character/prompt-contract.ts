@@ -84,7 +84,7 @@ export function buildPowerStatsPromptContract(
     "Speed tiers: " + SPEED_TIER_LIST,
     "Intelligence tiers: " + INTELLIGENCE_TIER_LIST,
     "Rank within tier: Low = 1-3, Mid = 4-7, High = 8-10.",
-    "Minimal valid output example: { \"attackPotency\": { \"tier\": \"Street\", \"rank\": 5 }, \"speed\": { \"tier\": \"Athletic Human\", \"rank\": 5 }, \"durability\": { \"tier\": \"Street\", \"rank\": 5 }, \"intelligence\": { \"tier\": \"Average\", \"rank\": 5 }, \"hax\": [], \"vulnerabilities\": [] }.",
+    "Minimal valid output example: { \"attackPotency\": { \"tier\": \"Street\", \"rank\": 5 }, \"speed\": { \"tier\": \"Human\", \"rank\": 5 }, \"durability\": { \"tier\": \"Street\", \"rank\": 5 }, \"intelligence\": { \"tier\": \"Average\", \"rank\": 5 }, \"hax\": [], \"vulnerabilities\": [] }.",
     "Invalid example: { \"attackPotency\": \"godlike\", \"speed\": \"fast\", \"durability\": {}, \"intelligence\": \"unknown\", \"hax\": \"many\" }.",
     "Do not return vague labels like \"strong\", \"godlike\", or \"unknown\". Do not omit any of the four axes.",
     `Use only facts from the ${evidenceLabel}. Do not invent feats, tiers, source roles, or canonical facts to satisfy the schema.`,

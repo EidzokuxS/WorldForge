@@ -121,6 +121,8 @@ describe("enrichKnownIpWorldgenNpcDraft", () => {
     expect(contract).toContain("Rank within tier: Low = 1-3, Mid = 4-7, High = 8-10");
     expect(contract).toContain("Minimal valid output");
     expect(contract).toContain('"attackPotency": { "tier": "Street", "rank": 5 }');
+    expect(contract).toContain('"speed": { "tier": "Human", "rank": 5 }');
+    expect(contract).not.toContain("Athletic Human");
     expect(contract).toContain("Invalid example");
     expect(contract).toContain("Do not return vague labels like \"strong\", \"godlike\", or \"unknown\"");
     expect(contract).toContain("Do not invent feats, tiers, source roles, or canonical facts");
@@ -462,6 +464,14 @@ describe("powerStatsGenerationSchema", () => {
     }).success).toBe(false);
     expect(powerStatsGenerationSchema.safeParse({
       ...validGenerationOutput(),
+      speed: { tier: "Athletic Human", rank: 5 },
+    }).success).toBe(false);
+    expect(powerStatsGenerationSchema.safeParse({
+      ...validGenerationOutput(),
+      attackPotency: { tier: "Street", rank: 0 },
+    }).success).toBe(false);
+    expect(powerStatsGenerationSchema.safeParse({
+      ...validGenerationOutput(),
       intelligence: { tier: "Brilliant", rank: 5 },
     }).success).toBe(false);
     expect(powerStatsGenerationSchema.safeParse({
@@ -477,6 +487,35 @@ describe("powerStatsGenerationSchema", () => {
         limitations: [],
         extra: "not allowed",
       }],
+    }).success).toBe(false);
+    expect(powerStatsGenerationSchema.safeParse({
+      ...validGenerationOutput(),
+      hax: [{
+        name: "Phase shift",
+        type: "mobility",
+        bypassTier: "Athletic Human",
+        limitations: [],
+      }],
+    }).success).toBe(false);
+    expect(powerStatsGenerationSchema.safeParse({
+      ...validGenerationOutput(),
+      hax: [{
+        name: "Phase shift",
+        type: "mobility",
+        bypassTier: null,
+      }],
+    }).success).toBe(false);
+    expect(powerStatsGenerationSchema.safeParse({
+      ...validGenerationOutput(),
+      vulnerabilities: [{ description: "Exhaustion", severity: "moderate" }],
+    }).success).toBe(false);
+    expect(powerStatsGenerationSchema.safeParse({
+      ...validGenerationOutput(),
+      vulnerabilities: [{ severity: "minor" }],
+    }).success).toBe(false);
+    expect(powerStatsGenerationSchema.safeParse({
+      ...validGenerationOutput(),
+      vulnerabilities: [{ description: "Exhaustion", severity: "minor", extra: true }],
     }).success).toBe(false);
   });
 });

@@ -1,16 +1,10 @@
-import { z } from "zod";
 import { safeGenerateObject as generateObject } from "../../ai/generate-object-safe.js";
 import { createModel } from "../../ai/index.js";
 import {
-  loosePowerStatsSchema,
   powerStatsGenerationSchema,
-  normalizeLlmPowerStats,
-  repairPowerStats,
   AP_DUR_TIER_LIST,
   SPEED_TIER_LIST,
   INTELLIGENCE_TIER_LIST,
-  describeZodIssues,
-  recordFromUnknown,
 } from "../known-ip-worldgen-research.js";
 import { clampTokens } from "../../lib/clamp.js";
 import { createLogger } from "../../lib/index.js";
@@ -28,9 +22,8 @@ const log = createLogger("assess-original-powerstats");
 /**
  * Stage 4 (original branch) — LLM-only PowerStats inference for ORIGINAL or
  * IMPORTED characters. No web search. LLM infers tiers from draft persona,
- * card text, and user override. Uses the same loose-schema +
- * normalizeLlmPowerStats + repairPowerStats loop as the canon branch to
- * avoid divergent coercion code.
+ * card text, and user override. Both paths use the same strict generation
+ * contract and fail closed on malformed provider output.
  *
  * Default expectation: most original characters are Human or Street tier —
  * the prompt explicitly discourages tier inflation.
@@ -95,67 +88,38 @@ GROUNDING RULES:
 - If the character has clearly mundane skills, intelligence is typically Average or Above Average.
 - Do not invent hax abilities that no source supports.`;
 
+  const model = createModel(role.provider, { role: "generator", reasoningMode: "bypass" });
+  const generationOptions = {
+    model,
+    schema: powerStatsGenerationSchema,
+    prompt,
+    temperature: Math.min(role.temperature, 0.3),
+    maxOutputTokens: clampTokens(role.maxTokens),
+    mode: "tool" as const,
+    retries: 1,
+    allowTextFallback: false,
+    allowRepair: false,
+    strictSchema: true,
+  };
+
   const powerStats: PowerStats = await withPipelineRetry("power_assess", async () => {
     log.info("assess-original: generating PowerStats", {
       displayName: draft.identity.displayName,
       hasCard: !!cardText,
       hasOverride: !!overrideText,
     });
-    const generationOptions = {
-      model: isImportedCharacter
-        ? createModel(role.provider, { role: "generator", reasoningMode: "bypass" })
-        : createModel(role.provider),
-      schema: isImportedCharacter ? powerStatsGenerationSchema : loosePowerStatsSchema,
-      prompt,
-      temperature: Math.min(role.temperature, 0.3),
-      maxOutputTokens: clampTokens(role.maxTokens),
-      retries: 1,
-      ...(isImportedCharacter
-        ? {
-            allowTextFallback: false,
-            allowRepair: false,
-            strictSchema: true,
-          }
-        : {}),
-    };
-    const { object: rawObject } = isImportedCharacter
-      ? await withImportedGenerationBudget("power_assess", (abortSignal) =>
-          generateObject({
-            ...generationOptions,
-            timeout: { totalMs: IMPORT_GENERATION_OPERATION_BUDGET_MS },
-            abortSignal,
-          }),
-        )
-      : await generateObject({
-          ...generationOptions,
-          timeout: undefined,
-        });
+    const { object } = await withImportedGenerationBudget("power_assess", (abortSignal) =>
+      generateObject({
+        ...generationOptions,
+        timeout: { totalMs: IMPORT_GENERATION_OPERATION_BUDGET_MS },
+        abortSignal,
+      }),
+    );
 
-    const parsedObject = recordFromUnknown(rawObject);
-    if (isImportedCharacter) {
-      // The imported path is intentionally one-call and fail-closed.  The
-      // strict generation schema has already rejected malformed tool input;
-      // this final shared normalizer preserves the canonical PowerStats type.
-      return normalizeLlmPowerStats(parsedObject);
-    }
-
-    try {
-      return normalizeLlmPowerStats(parsedObject);
-    } catch (error) {
-      if (!(error instanceof z.ZodError)) throw error;
-      return await repairPowerStats({
-        rawObject: parsedObject,
-        failures: describeZodIssues(error),
-        draft,
-        franchise: "Original",
-        role,
-        premise,
-        premiseDivergence: null,
-        searchDigest: cardText ?? "(no card text)",
-        overrideText,
-      });
-    }
-  }, { maxAttempts: isImportedCharacter ? 1 : undefined });
+    // Keep the exact domain PowerStats parse authoritative even when a test
+    // adapter or provider wrapper returns an unvalidated object.
+    return powerStatsGenerationSchema.parse(object) as PowerStats;
+  }, { maxAttempts: isImportedCharacter ? 1 : 3 });
 
   return { ...draft, powerStats };
 }

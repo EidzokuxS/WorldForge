@@ -15,15 +15,14 @@ const humanStats = {
 const {
   mockGenerateObject,
   mockCreateModel,
-  mockNormalizeLlmPowerStats,
-  mockRepairPowerStats,
   mockPowerStatsGenerationSchema,
 } = vi.hoisted(() => ({
   mockGenerateObject: vi.fn(),
   mockCreateModel: vi.fn(() => ({ modelId: "mock" })),
-  mockNormalizeLlmPowerStats: vi.fn((raw: any) => raw),
-  mockRepairPowerStats: vi.fn(async () => humanStats),
-  mockPowerStatsGenerationSchema: { name: "strict-power-stats-generation-schema" },
+  mockPowerStatsGenerationSchema: {
+    name: "strict-power-stats-generation-schema",
+    parse: vi.fn((raw: any) => raw),
+  },
 }));
 
 vi.mock("../../../ai/generate-object-safe.js", () => ({
@@ -35,15 +34,10 @@ vi.mock("../../../lib/index.js", () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), event: vi.fn() }),
 }));
 vi.mock("../../known-ip-worldgen-research.js", () => ({
-  loosePowerStatsSchema: {},
   powerStatsGenerationSchema: mockPowerStatsGenerationSchema,
-  normalizeLlmPowerStats: mockNormalizeLlmPowerStats,
-  repairPowerStats: mockRepairPowerStats,
   AP_DUR_TIER_LIST: "Human, Street, …",
   SPEED_TIER_LIST: "Human, Superhuman, …",
   INTELLIGENCE_TIER_LIST: "Average, Above Average, …",
-  describeZodIssues: (_e: any) => ["issue"],
-  recordFromUnknown: (v: any) => v,
 }));
 
 import { assessOriginalCharacterPowerStats } from "../assess-original.js";
@@ -53,10 +47,8 @@ beforeEach(() => {
   captured.prompt = undefined;
   mockGenerateObject.mockReset();
   mockCreateModel.mockClear();
-  mockNormalizeLlmPowerStats.mockReset();
-  mockNormalizeLlmPowerStats.mockImplementation((raw: any) => raw);
-  mockRepairPowerStats.mockReset();
-  mockRepairPowerStats.mockResolvedValue(humanStats);
+  mockPowerStatsGenerationSchema.parse.mockReset();
+  mockPowerStatsGenerationSchema.parse.mockImplementation((raw: any) => raw);
   mockGenerateObject.mockImplementation(async (opts: any) => {
     captured.prompt = opts.prompt;
     return { object: humanStats };
@@ -76,9 +68,14 @@ describe("assessOriginalCharacterPowerStats", () => {
     expect(Array.isArray(out.powerStats!.hax)).toBe(true);
     expect(mockGenerateObject.mock.calls[0]?.[0]).toMatchObject({
       retries: 1,
-      timeout: undefined,
+      timeout: { totalMs: 90_000 },
+      mode: "tool",
+      allowTextFallback: false,
+      allowRepair: false,
+      strictSchema: true,
     });
-    expect(mockGenerateObject.mock.calls[0]?.[0]).not.toHaveProperty("abortSignal");
+    expect(mockGenerateObject.mock.calls[0]?.[0].schema).toBe(mockPowerStatsGenerationSchema);
+    expect(mockGenerateObject.mock.calls[0]?.[0].abortSignal).toBeInstanceOf(AbortSignal);
   });
 
   it("bounds imported-card assessment with bypass reasoning and one provider attempt", async () => {
@@ -97,6 +94,7 @@ describe("assessOriginalCharacterPowerStats", () => {
     expect(mockGenerateObject.mock.calls[0]?.[0]).toMatchObject({
       retries: 1,
       timeout: { totalMs: 90_000 },
+      mode: "tool",
       allowTextFallback: false,
       allowRepair: false,
       strictSchema: true,
@@ -112,12 +110,12 @@ describe("assessOriginalCharacterPowerStats", () => {
 
     expect(assessed.powerStats).toEqual(humanStats);
     expect(mockGenerateObject).toHaveBeenCalledTimes(1);
-    expect(mockRepairPowerStats).not.toHaveBeenCalled();
+    expect(mockPowerStatsGenerationSchema.parse).toHaveBeenCalledTimes(1);
   });
 
   it("fails malformed imported output without a repair or fallback call", async () => {
     mockGenerateObject.mockResolvedValueOnce({ object: {} });
-    mockNormalizeLlmPowerStats.mockImplementationOnce(() => {
+    mockPowerStatsGenerationSchema.parse.mockImplementationOnce(() => {
       throw new Error("strict PowerStats validation failed");
     });
 
@@ -125,8 +123,66 @@ describe("assessOriginalCharacterPowerStats", () => {
       .rejects.toThrow(IngestionPipelineError);
 
     expect(mockGenerateObject).toHaveBeenCalledTimes(1);
-    expect(mockRepairPowerStats).not.toHaveBeenCalled();
+    expect(mockPowerStatsGenerationSchema.parse).toHaveBeenCalledTimes(1);
   });
+
+  it("retries original output with the same strict request identity and caps at three attempts", async () => {
+    const requests: any[] = [];
+    mockGenerateObject
+      .mockImplementationOnce(async (opts: any) => {
+        requests.push(opts);
+        throw new Error("invalid structured output");
+      })
+      .mockImplementationOnce(async (opts: any) => {
+        requests.push(opts);
+        return { object: humanStats };
+      });
+
+    const assessed = await assessOriginalCharacterPowerStats({
+      draft: rogueDraft as unknown as CharacterDraft,
+      role,
+      premise: "A port city",
+    });
+
+    expect(assessed.powerStats).toEqual(humanStats);
+    expect(mockGenerateObject).toHaveBeenCalledTimes(2);
+    expect(mockCreateModel).toHaveBeenCalledTimes(1);
+    expect(requests[0].model).toBe(requests[1].model);
+    expect(requests[0].schema).toBe(requests[1].schema);
+    expect(requests[0].prompt).toBe(requests[1].prompt);
+    expect(requests[0]).toMatchObject({
+      mode: "tool",
+      retries: 1,
+      timeout: { totalMs: 90_000 },
+      allowTextFallback: false,
+      allowRepair: false,
+      strictSchema: true,
+    });
+    expect(requests[1]).toMatchObject({
+      mode: "tool",
+      retries: 1,
+      timeout: { totalMs: 90_000 },
+      allowTextFallback: false,
+      allowRepair: false,
+      strictSchema: true,
+    });
+  });
+
+  it("fails malformed original output after three strict attempts without normalization or repair", async () => {
+    mockGenerateObject.mockResolvedValue({ object: {} });
+    mockPowerStatsGenerationSchema.parse.mockImplementation(() => {
+      throw new Error("strict PowerStats validation failed");
+    });
+
+    await expect(assessOriginalCharacterPowerStats({
+      draft: rogueDraft as unknown as CharacterDraft,
+      role,
+      premise: "A port city",
+    })).rejects.toThrow(IngestionPipelineError);
+
+    expect(mockGenerateObject).toHaveBeenCalledTimes(3);
+    expect(mockPowerStatsGenerationSchema.parse).toHaveBeenCalledTimes(3);
+  }, 30000);
 
   it("accepts an imported power response after 45 seconds within the shared budget", async () => {
     vi.useFakeTimers();
@@ -274,6 +330,8 @@ describe("assessOriginalCharacterPowerStats", () => {
     });
     expect(captured.prompt).toContain("STRUCTURED_OUTPUT_CONTRACT: original-power-assessment.v1");
     expect(captured.prompt).toContain("Minimal valid output");
+    expect(captured.prompt).toContain('"speed": { "tier": "Human", "rank": 5 }');
+    expect(captured.prompt).not.toContain("Athletic Human");
     expect(captured.prompt).toContain("Invalid example");
     expect(captured.prompt).toContain("Do not invent feats, tiers, source roles, or canonical facts");
     expect(captured.prompt).toContain("Human");
@@ -299,6 +357,9 @@ describe("assessOriginalCharacterPowerStats", () => {
     expect(src).not.toMatch(/webSearch/);
     expect(src).not.toMatch(/withMcpClient/);
     expect(src).not.toMatch(/withSearchMcp/);
+    expect(src).not.toMatch(/loosePowerStatsSchema/);
+    expect(src).not.toMatch(/normalizeLlmPowerStats/);
+    expect(src).not.toMatch(/repairPowerStats/);
   });
 
   it("throws IngestionPipelineError on repeated LLM failure", async () => {
@@ -311,6 +372,7 @@ describe("assessOriginalCharacterPowerStats", () => {
         role, premise: "A port city",
       })
     ).rejects.toThrow(IngestionPipelineError);
+    expect(mockGenerateObject).toHaveBeenCalledTimes(3);
   }, 30000);
 
   it("does not retry a failed imported-card power assessment", async () => {
