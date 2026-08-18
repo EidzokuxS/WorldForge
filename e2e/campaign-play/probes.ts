@@ -211,12 +211,6 @@ export function validateCampaignPlayBundle(bundleRoot: string): CampaignPlayBund
       issues.push("Manifest and scorecard action counts differ.");
     }
     verifyInventory(bundleRoot, inventory, issues);
-    if (budget.actualInputTokens > budget.maximumInputTokens) {
-      issues.push("Input token budget was exceeded.");
-    }
-    if (budget.actualOutputTokens > budget.maximumOutputTokens) {
-      issues.push("Output token budget was exceeded.");
-    }
     if (budget.billingKind === "metered" && budget.actualCostMicros > budget.maximumCostMicros) {
       issues.push("Cost budget was exceeded.");
     }
@@ -234,6 +228,44 @@ export function validateCampaignPlayBundle(bundleRoot: string): CampaignPlayBund
     const modelStages = ledgers["model-stages.jsonl"] as Array<z.infer<typeof campaignPlayModelStageEvidenceSchema>>;
     const runtimeEvents = ledgers["runtime-events.jsonl"] as Array<z.infer<typeof campaignPlayRuntimeEventEvidenceSchema>>;
     const liveLane = ["first-playable", "causal-20", "diagnostic-30", "pristine-60", "provenance-60", "soak-300", "longplay-600"].includes(manifest.lane);
+
+    const actualInputTokens = modelStages.reduce((total, stage) => total + stage.inputTokens, 0);
+    const actualOutputTokens = modelStages.reduce((total, stage) => total + stage.outputTokens, 0);
+    if (budget.actualInputTokens !== actualInputTokens) {
+      issues.push(
+        `Budget actualInputTokens (${budget.actualInputTokens}) does not match the model-stages.jsonl sum (${actualInputTokens}).`,
+      );
+    }
+    if (budget.actualOutputTokens !== actualOutputTokens) {
+      issues.push(
+        `Budget actualOutputTokens (${budget.actualOutputTokens}) does not match the model-stages.jsonl sum (${actualOutputTokens}).`,
+      );
+    }
+    if (runConfig.execution.kind === "live") {
+      if (budget.maximumInputTokens !== runConfig.execution.maximumInputTokens) {
+        issues.push(
+          `Budget maximumInputTokens (${budget.maximumInputTokens}) does not match the frozen live run config (${runConfig.execution.maximumInputTokens}).`,
+        );
+      }
+      if (budget.maximumOutputTokens !== runConfig.execution.maximumOutputTokens) {
+        issues.push(
+          `Budget maximumOutputTokens (${budget.maximumOutputTokens}) does not match the frozen live run config (${runConfig.execution.maximumOutputTokens}).`,
+        );
+      }
+      for (const stage of modelStages) {
+        const stageIdentity = `${stage.stage} (${stage.turnId}, worker epoch ${stage.workerEpoch})`;
+        if (stage.inputTokens > runConfig.execution.maximumInputTokens) {
+          issues.push(
+            `Model stage ${stageIdentity} exceeded the frozen input token ceiling: ${stage.inputTokens} > ${runConfig.execution.maximumInputTokens}.`,
+          );
+        }
+        if (stage.outputTokens > runConfig.execution.maximumOutputTokens) {
+          issues.push(
+            `Model stage ${stageIdentity} exceeded the frozen output token ceiling: ${stage.outputTokens} > ${runConfig.execution.maximumOutputTokens}.`,
+          );
+        }
+      }
+    }
 
     const checkpointFiles = fs.readdirSync(path.join(bundleRoot, "checkpoints"), { withFileTypes: true });
     const checkpoints = checkpointFiles.map((entry) => {

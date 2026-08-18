@@ -42,6 +42,73 @@ function refreshInventory(): void {
   writeJson("inventory.json", createCampaignPlayInventory(root, RUN_ID));
 }
 
+function createLiveTokenBundle(
+  inputTokens: number[] = [10],
+  outputTokens: number[] = [10],
+): void {
+  createCompleteBundle();
+  const runConfig = JSON.parse(
+    fs.readFileSync(path.join(root, "build", "run-config.json"), "utf8"),
+  ) as Record<string, unknown> & { worldSource: unknown; execution: unknown };
+  runConfig.worldSource = { kind: "generated" };
+  runConfig.execution = {
+    kind: "live",
+    providerId: "fixture-provider",
+    models: { generator: "fixture-generator", judge: "fixture-judge", storyteller: "fixture-storyteller" },
+    billing: {
+      kind: "metered",
+      pricing: {
+        generator: { currency: "USD", tokenUnit: 1_000_000, inputCostMicros: 0, outputCostMicros: 0 },
+        judge: { currency: "USD", tokenUnit: 1_000_000, inputCostMicros: 0, outputCostMicros: 0 },
+        storyteller: { currency: "USD", tokenUnit: 1_000_000, inputCostMicros: 0, outputCostMicros: 0 },
+      },
+      maximumCostMicros: 1,
+    },
+    maximumInputTokens: 100,
+    maximumOutputTokens: 32_768,
+    maximumTurnDurationMs: 1_000,
+  };
+  writeJson("build/run-config.json", runConfig);
+
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(root, "manifest.json"), "utf8"),
+  ) as Record<string, unknown>;
+  manifest.worldSource = { kind: "generated" };
+  writeJson("manifest.json", manifest);
+
+  const stages = inputTokens.map((input, index) => ({
+    runId: RUN_ID,
+    campaignId: CAMPAIGN_ID,
+    turnId: "turn-action-1",
+    stage: ["judge", "storyteller", "generator"][index % 3],
+    workerEpoch: index + 1,
+    providerId: "fixture-provider",
+    model: "fixture-model",
+    strategy: "strict_object",
+    attempts: 1,
+    retryUsed: false,
+    textFallbackUsed: false,
+    inputTokens: input,
+    outputTokens: outputTokens[index] ?? outputTokens[outputTokens.length - 1] ?? 0,
+    costMicros: 0,
+    durationMs: 1,
+    artifactHash: HASH_A,
+  }));
+  writeJsonLines("model-stages.jsonl", stages);
+  const budget = JSON.parse(
+    fs.readFileSync(path.join(root, "budget.json"), "utf8"),
+  ) as Record<string, unknown>;
+  budget.maximumInputTokens = 100;
+  budget.maximumOutputTokens = 32_768;
+  budget.actualInputTokens = inputTokens.reduce((total, value) => total + value, 0);
+  budget.actualOutputTokens = stages.reduce(
+    (total, stage) => total + stage.outputTokens,
+    0,
+  );
+  writeJson("budget.json", budget);
+  refreshInventory();
+}
+
 function createCompleteBundle(): void {
   for (const directory of ["build", "checkpoints", "probes", "screenshots"]) {
     fs.mkdirSync(path.join(root, directory));
@@ -230,19 +297,66 @@ describe("Campaign Play evidence probes", () => {
     });
   });
 
-  it("preserves an over-budget bundle and reports it as ineligible evidence", () => {
-    createCompleteBundle();
-    const budgetPath = path.join(root, "budget.json");
-    const budget = JSON.parse(fs.readFileSync(budgetPath, "utf8")) as Record<string, unknown>;
-    budget.actualOutputTokens = 101;
-    writeJson("budget.json", budget);
-    refreshInventory();
+  it("rejects a live bundle when one model stage exceeds the output ceiling", () => {
+    createLiveTokenBundle([10], [32_769]);
 
     expect(validateCampaignPlayBundle(root)).toMatchObject({
       valid: false,
       promotionEligible: false,
-      issues: ["Output token budget was exceeded."],
+      issues: [
+        "Model stage judge (turn-action-1, worker epoch 1) exceeded the frozen output token ceiling: 32769 > 32768.",
+      ],
     });
+  });
+
+  it("accepts aggregate token totals above the ceiling when every stage is within it", () => {
+    createLiveTokenBundle([60, 60], [20_000, 20_000]);
+
+    expect(validateCampaignPlayBundle(root)).toMatchObject({
+      valid: true,
+      promotionEligible: true,
+      issues: [],
+    });
+  });
+
+  it("rejects a live bundle when one model stage exceeds the input ceiling", () => {
+    createLiveTokenBundle([101], [10]);
+
+    expect(validateCampaignPlayBundle(root).issues).toContain(
+      "Model stage judge (turn-action-1, worker epoch 1) exceeded the frozen input token ceiling: 101 > 100.",
+    );
+  });
+
+  it("rejects live budget maxima that differ from the frozen run config", () => {
+    createLiveTokenBundle();
+    const budget = JSON.parse(
+      fs.readFileSync(path.join(root, "budget.json"), "utf8"),
+    ) as Record<string, unknown>;
+    budget.maximumInputTokens = 99;
+    budget.maximumOutputTokens = 32_767;
+    writeJson("budget.json", budget);
+    refreshInventory();
+
+    expect(validateCampaignPlayBundle(root).issues).toEqual(expect.arrayContaining([
+      "Budget maximumInputTokens (99) does not match the frozen live run config (100).",
+      "Budget maximumOutputTokens (32767) does not match the frozen live run config (32768).",
+    ]));
+  });
+
+  it("rejects aggregate budget actuals that differ from the model-stage ledger", () => {
+    createLiveTokenBundle([10, 20], [30, 40]);
+    const budget = JSON.parse(
+      fs.readFileSync(path.join(root, "budget.json"), "utf8"),
+    ) as Record<string, unknown>;
+    budget.actualInputTokens = 999;
+    budget.actualOutputTokens = 998;
+    writeJson("budget.json", budget);
+    refreshInventory();
+
+    expect(validateCampaignPlayBundle(root).issues).toEqual(expect.arrayContaining([
+      "Budget actualInputTokens (999) does not match the model-stages.jsonl sum (30).",
+      "Budget actualOutputTokens (998) does not match the model-stages.jsonl sum (70).",
+    ]));
   });
 
   it("rejects displaced gameplay requests even when the inventory is current", () => {
