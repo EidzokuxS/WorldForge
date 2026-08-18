@@ -327,6 +327,16 @@ function toolHandleSchema(handles: readonly string[]) {
     : z.string().min(1).max(CAMPAIGN_PLAY_LIMITS.handle);
 }
 
+function toolNullableHandleSchema(handles: readonly string[]) {
+  return handles.length > 0
+    ? toolEnum(["", ...handles] as [string, ...string[]])
+    : z.string().max(CAMPAIGN_PLAY_LIMITS.handle);
+}
+
+function toolNullableNameSchema() {
+  return z.string().max(CAMPAIGN_PLAY_LIMITS.name);
+}
+
 function createToolExposureSchema(allHandles: readonly string[]) {
   const predicate = z.object({
     channel: toolEnum(["direct_perception", "local_aftermath", "route_state", "witness_report"] as const),
@@ -369,8 +379,8 @@ function createToolProposalSchema(
   const effectSchema = z.object({
     kind: effectKindSchema,
     exposure: exposureSchema.optional(),
-    actorHandle: toolHandleSchema(actorHandles).optional(),
-    name: stringValue.max(CAMPAIGN_PLAY_LIMITS.name).optional(),
+    actorHandle: toolNullableHandleSchema(actorHandles).optional(),
+    name: toolNullableNameSchema().optional(),
     description: stringValue.max(CAMPAIGN_PLAY_LIMITS.text).optional(),
     routeHandle: toolHandleSchema(handlesByKind("route")).optional(),
     state: toolEnum(CAMPAIGN_PLAY_ROUTE_STATE_VALUES).optional(),
@@ -385,7 +395,7 @@ function createToolProposalSchema(
     pressureHandle: toolHandleSchema(handlesByKind("pressure")).optional(),
     amount: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity).optional(),
     resultStatus: toolEnum(CAMPAIGN_PLAY_PRESSURE_STATUS_VALUES).optional(),
-    possessionHandle: toolHandleSchema(handlesByKind("possession")).optional(),
+    possessionHandle: toolNullableHandleSchema(handlesByKind("possession")).optional(),
     quantity: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity).optional(),
     affectedHandles: z.array(toolHandleSchema(allHandles)).max(CAMPAIGN_PLAY_LIMITS.affectedRefs).optional(),
     goal: stringValue.max(CAMPAIGN_PLAY_LIMITS.shortText).optional(),
@@ -400,8 +410,25 @@ function createToolProposalSchema(
     obligationHandle: toolHandleSchema(handlesByKind("obligation")).optional(),
     paymentPossessionHandle: toolHandleSchema(handlesByKind("possession")).optional(),
     eventClass: toolEnum(["dialogue", "interaction", "discovery", "scene"] as const).optional(),
-    performingActorHandle: toolHandleSchema(worldEventPerformerHandles).optional(),
-  }).strict();
+    performingActorHandle: toolNullableHandleSchema(worldEventPerformerHandles).optional(),
+  }).strict().superRefine((effect, context) => {
+    const requiredFields = effect.kind === "move_actor"
+      ? ["actorHandle"]
+      : effect.kind === "adjust_actor_possession"
+        ? ["possessionHandle", "name"]
+        : effect.kind === "record_world_event"
+          ? ["performingActorHandle"]
+          : [];
+    for (const field of requiredFields) {
+      if (!Object.prototype.hasOwnProperty.call(effect, field)) {
+        context.addIssue({
+          code: "custom",
+          path: [field],
+          message: "The owning transport-null field is required; use the empty string for a domain null.",
+        });
+      }
+    }
+  });
   return z.object({
     elapsedMinutes: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes),
     effects: z.array(effectSchema).min(1).max(CAMPAIGN_PLAY_LIMITS.commandsPerBatch - 1),
@@ -432,6 +459,12 @@ function hasToolField(value: Record<string, unknown>, field: string): boolean {
 function requireToolField<T>(value: Record<string, unknown>, field: string): T {
   if (!hasToolField(value, field)) toolContractFailure();
   return value[field] as T;
+}
+
+function decodeToolNullableString(value: Record<string, unknown>, field: string): string | null {
+  const encoded = requireToolField<unknown>(value, field);
+  if (typeof encoded !== "string") toolContractFailure();
+  return encoded === "" ? null : encoded;
 }
 
 function requireToolKeys(value: Record<string, unknown>, allowed: readonly string[]): void {
@@ -491,7 +524,7 @@ function decodeToolEffect(value: Record<string, unknown>): Record<string, unknow
   switch (kind) {
     case "move_actor":
       requireToolKeys(value, ["kind", "actorHandle"]);
-      return { kind, actorHandle: hasToolField(value, "actorHandle") ? value.actorHandle : null };
+      return { kind, actorHandle: decodeToolNullableString(value, "actorHandle") };
     case "enter_local_scene":
       requireToolKeys(value, ["kind", "name", "description"]);
       return {
@@ -553,8 +586,8 @@ function decodeToolEffect(value: Record<string, unknown>): Record<string, unknow
         kind,
         operation: requireToolField<string>(value, "operation"),
         actorHandle: requireToolField<string>(value, "actorHandle"),
-        possessionHandle: hasToolField(value, "possessionHandle") ? value.possessionHandle : null,
-        name: hasToolField(value, "name") ? value.name : null,
+        possessionHandle: decodeToolNullableString(value, "possessionHandle"),
+        name: decodeToolNullableString(value, "name"),
         quantity: requireToolField<number>(value, "quantity"),
         summary: requireToolField<string>(value, "summary"),
         affectedHandles: requireToolField<string[]>(value, "affectedHandles"),
@@ -610,7 +643,7 @@ function decodeToolEffect(value: Record<string, unknown>): Record<string, unknow
       return {
         kind,
         eventClass: requireToolField<string>(value, "eventClass"),
-        performingActorHandle: hasToolField(value, "performingActorHandle") ? value.performingActorHandle : null,
+        performingActorHandle: decodeToolNullableString(value, "performingActorHandle"),
         summary: requireToolField<string>(value, "summary"),
         affectedHandles: requireToolField<string[]>(value, "affectedHandles"),
       };
@@ -2422,7 +2455,8 @@ function prompt(
     instructions.push([
       "TOOL_MODE_OUTPUT_CONTRACT",
       "Return one strict object with elapsedMinutes and an ordered effects array of flat effect envelopes. Every envelope has kind and only fields for that kind; use the exact field names and bounds in the effect instructions above, with no unknown or irrelevant fields.",
-      "For transport-null fields move_actor.actorHandle, adjust_actor_possession.possessionHandle/name, and record_world_event.performingActorHandle, omit the field to mean null; do not emit null. For exposure, protected omits predicates and projectable requires its non-empty channel-specific predicates. Preserve effect order and return no prose.",
+      "For move_actor.actorHandle, adjust_actor_possession.possessionHandle and name, and record_world_event.performingActorHandle, include the field whenever that effect kind owns it. Return the empty string \"\" when the domain value is null. Never omit the field and never emit JSON null. Omit these fields from effect kinds that do not own them.",
+      "For exposure, protected omits predicates and projectable requires its non-empty channel-specific predicates. Preserve effect order and return no prose.",
     ].join("\n"));
   }
   return instructions.filter((instruction) => instruction.length > 0).join("\n");
