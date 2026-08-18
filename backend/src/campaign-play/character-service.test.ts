@@ -11,6 +11,7 @@ import {
   CampaignPlayCharacterServiceError,
   createCampaignPlayCharacterService,
 } from "./character-service.js";
+import { canonicalizeCampaignPlayProjection } from "./campaign-play-projection.js";
 
 const CAMPAIGN_ID = "campaign-character-intake";
 const ACTOR_ID = "player-character";
@@ -248,6 +249,14 @@ function makeV2Card() {
   };
 }
 
+function expectedWorldContextPremise(world: CampaignWorldReview): string {
+  return canonicalizeCampaignPlayProjection({
+    premise: world.source.premise,
+    dna: world.source.dna,
+    worldSummary: world.worldSummary,
+  });
+}
+
 function makeService() {
   const ingest = vi.fn<IngestDependency>(async () => makeDonorDraft());
   const research = vi.fn<ResearchDependency>(
@@ -299,7 +308,7 @@ describe("Campaign Play character intake", () => {
     expect(donorContext.locationNames).toEqual(["Archive Steps", "Zinc Market"]);
     expect(donorContext.factionNames).toEqual([]);
     expect(donorContext.campaign.ipContext).toBeNull();
-    expect(donorContext.campaign.premise).toContain("worldSummary");
+    expect(donorContext.campaign.premise).toBe(expectedWorldContextPremise(makeWorld()));
 
     const serializedInput = JSON.stringify(input);
     for (const privateValue of [
@@ -375,6 +384,93 @@ describe("Campaign Play character intake", () => {
     expect(donorInput).toMatchObject({ mode: "parse", role: "player" });
     expect(JSON.stringify(donorInput)).toContain("Historical acoustic instruments");
     expect(JSON.stringify(donorInput)).not.toContain("UNTRUSTED_SOURCE_EXCERPT");
+    expect(ingest.mock.calls[0]![1].campaign.premise).toBe(
+      expectedWorldContextPremise(makeWorld()),
+    );
+  });
+
+  it("isolates imported ingestion from oversized research and provenance context", async () => {
+    const oversizedResearch = `RESEARCH_ONLY_SENTINEL:${"r".repeat(9_000)}`;
+    const oversizedReferences = Array.from({ length: 5 }, (_, index) => ({
+      id: `REFERENCE_ONLY_SENTINEL_${index}`,
+      label: `Reference ${"l".repeat(1_500)}`,
+      sourceType: "user",
+    }));
+    const acceptedWorld = makeWorld({
+      worldSummary: "Playable world summary with an exact canonical boundary.",
+      source: {
+        premise: "Playable premise preserves its full semantic wording.",
+        dna: {
+          geography: "Tide-cut harbor",
+          politicalStructure: "Rotating dock council",
+          centralConflict: "The storm changes the harbor's rules",
+          culturalFlavor: "Bell codes and salt oaths",
+          environment: "Rain over copper roofs",
+          wildcard: "A lighthouse answers back",
+        },
+        researchSummary: oversizedResearch,
+        sourceReferences: oversizedReferences,
+      },
+    });
+    const oldProjection = canonicalizeCampaignPlayProjection({
+      premise: acceptedWorld.source.premise,
+      dna: acceptedWorld.source.dna,
+      researchSummary: acceptedWorld.source.researchSummary,
+      sourceReferences: acceptedWorld.source.sourceReferences,
+      worldSummary: acceptedWorld.worldSummary,
+    });
+    expect(Buffer.byteLength(oldProjection, "utf-8")).toBeGreaterThan(16_384);
+
+    const { service, ingest } = makeService();
+    await service.parsePlayerCard(
+      CAMPAIGN_ID,
+      { cardJson: JSON.stringify(makeV2Card()), importMode: "outsider" },
+      { acceptedWorld, generator, settings },
+    );
+
+    expect(ingest).toHaveBeenCalledOnce();
+    const donorContext = ingest.mock.calls[0]![1];
+    expect(donorContext.campaign.premise).toBe(expectedWorldContextPremise(acceptedWorld));
+    expect(donorContext.campaign.premise).toContain("Playable premise preserves its full semantic wording.");
+    expect(donorContext.campaign.premise).toContain("Tide-cut harbor");
+    expect(donorContext.campaign.premise).toContain("Playable world summary with an exact canonical boundary.");
+    expect(donorContext.campaign.premise).not.toContain("RESEARCH_ONLY_SENTINEL");
+    expect(donorContext.campaign.premise).not.toContain("REFERENCE_ONLY_SENTINEL");
+  });
+
+  it("uses the same semantic world projection for generated ingestion", async () => {
+    const acceptedWorld = makeWorld({
+      worldSummary: "Generated path world summary.",
+      source: {
+        premise: "Generated path premise with preserved spacing.  ",
+        dna: {
+          geography: "Terraced coast",
+          politicalStructure: "Three-house compact",
+          centralConflict: "A disputed signal crosses the bay",
+          culturalFlavor: "Lantern processions",
+          environment: "Wind-scoured cliffs",
+          wildcard: "The tide reveals a door",
+        },
+        researchSummary: "GENERATED_RESEARCH_ONLY",
+        sourceReferences: [{
+          id: "GENERATED_REFERENCE_ONLY",
+          label: "Generated source",
+          sourceType: "user",
+        }],
+      },
+    });
+    const { service, ingest } = makeService();
+    await service.generatePlayerDraft(
+      CAMPAIGN_ID,
+      { prompt: "A signal cartographer.", research: null },
+      { acceptedWorld, generator, settings },
+    );
+
+    expect(ingest).toHaveBeenCalledOnce();
+    const donorContext = ingest.mock.calls[0]![1];
+    expect(donorContext.campaign.premise).toBe(expectedWorldContextPremise(acceptedWorld));
+    expect(donorContext.campaign.premise).not.toContain("GENERATED_RESEARCH_ONLY");
+    expect(donorContext.campaign.premise).not.toContain("GENERATED_REFERENCE_ONLY");
   });
 
   it("marks generation without research as generated", async () => {
@@ -563,6 +659,34 @@ describe("Campaign Play character intake", () => {
       { prompt: "A retired cartographer.", research: null },
       { acceptedWorld, generator, settings },
     )).rejects.toMatchObject({ code: "accepted_world_context_invalid" });
+    expect(ingest).not.toHaveBeenCalled();
+  });
+
+  it("rejects semantic world context overflow before imported ingestion", async () => {
+    const acceptedWorld = makeWorld({
+      worldSummary: `SEMANTIC_WORLD_OVERFLOW:${"w".repeat(16_500)}`,
+      source: {
+        ...makeWorld().source,
+        researchSummary: "small research summary",
+        sourceReferences: [{
+          id: "small-reference",
+          label: "Small reference",
+          sourceType: "user",
+        }],
+      },
+    });
+    const semanticProjection = expectedWorldContextPremise(acceptedWorld);
+    expect(Buffer.byteLength(semanticProjection, "utf-8")).toBeGreaterThan(16_384);
+
+    const { service, ingest } = makeService();
+    await expect(service.parsePlayerCard(
+      CAMPAIGN_ID,
+      { cardJson: JSON.stringify(makeV2Card()), importMode: "native" },
+      { acceptedWorld, generator, settings },
+    )).rejects.toMatchObject({
+      code: "accepted_world_context_invalid",
+      publicCode: "invalid_character",
+    });
     expect(ingest).not.toHaveBeenCalled();
   });
 

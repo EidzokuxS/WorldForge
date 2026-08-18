@@ -229,8 +229,6 @@ function buildAcceptedWorldContext(
   const premise = canonicalizeCampaignPlayProjection({
     premise: world.source.premise,
     dna: world.source.dna,
-    researchSummary: world.source.researchSummary,
-    sourceReferences: world.source.sourceReferences,
     worldSummary: world.worldSummary,
   });
   if (Buffer.byteLength(premise, "utf-8") > CHARACTER_CONTEXT_BYTE_LIMIT) {
