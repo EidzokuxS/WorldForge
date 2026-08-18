@@ -56,7 +56,16 @@ function sourceContext(source: CampaignWorldSource): string {
   });
 }
 
-export function buildWorldFramePrompt(source: CampaignWorldSource): string {
+export function buildWorldFramePrompt(
+  source: CampaignWorldSource,
+  toolMode = false,
+): string {
+  const frameOutputContract = toolMode
+    ? `Return one object matching the supplied provider-safe world-frame transport schema. Return locationKey as lowercase kebab-case without the location: prefix. Return exactly three macroLocations, then six or seven persistentLocations. startingMacroIndex selects one macroLocations row. Each persistentLocations row uses parentMacroIndex to index macroLocations. Each route uses required fromPersistentIndex and toPersistentIndex values that index persistentLocations; the two indices must differ. Do not return kind, isStarting, parentLocationRef, fromLocationRef, or toLocationRef in tool mode. Return every required key once and no extra keys. Each local name uses lowercase letters, digits, and single hyphens.`
+    : `Return one object matching the supplied world-frame schema. Every locationRef value must be a full identifier in the exact form location:<lowercase-kebab-case>, such as location:north-harbor; never return a bare slug or display name. Every non-null parentLocationRef, fromLocationRef, and toLocationRef must repeat one of those full location:<lowercase-kebab-case> identifiers exactly. Each local name uses lowercase letters, digits, and single hyphens.`;
+  const parentContract = toolMode
+    ? "startingMacroIndex selects exactly one macro region. For each persistent sublocation, copy the zero-based index of an existing macro region into parentMacroIndex."
+    : "Set parentLocationRef to null for each macro region. Give every persistent sublocation an existing macro region as its parent.";
   return `You design the Campaign World frame.
 
 Create a world-owned summary, persistent locations, and directed travel routes. The world exists on its own terms before a player character enters it. Use the same language as the campaign premise for generated names and prose.
@@ -69,11 +78,11 @@ END_CAMPAIGN_SOURCE
 
 ${campaignWorldStringContract}
 
-Return one object matching the supplied world-frame schema. Every locationRef value must be a full identifier in the exact form location:<lowercase-kebab-case>, such as location:north-harbor; never return a bare slug or display name. Every non-null parentLocationRef, fromLocationRef, and toLocationRef must repeat one of those full location:<lowercase-kebab-case> identifiers exactly. Each local name uses lowercase letters, digits, and single hyphens.
+${frameOutputContract}
 
 Create exactly three macro regions and six or seven persistent sublocations, for nine or ten locations total. A macro region groups and selects scenes. It is not a place anyone can occupy or visit. Every persistent sublocation is one concrete, directly perceivable scene, not an entire building, district, or site with offscreen rooms. Its description is shown verbatim to the player whenever that scene is current. Write only stable sensory details and publicly obvious context that an arriving person can perceive or already know. The campaign source may explicitly state a secret, concealed discovery, private motive, disputed hidden cause, future event, or another actor's private knowledge. Do not copy, paraphrase, confirm, or imply that protected truth in any location description. Describe only its publicly perceivable surface; later cast goals, relations, and pressures own the protected claim.
 
-Set parentLocationRef to null for each macro region. Give every persistent sublocation an existing macro region as its parent. Each macro region needs at least two direct persistent sublocations. Choose exactly one starting macro region. Persistent sublocations cannot be starting locations.
+${parentContract} Each macro region needs at least two direct persistent sublocations. Choose exactly one starting macro region. Persistent sublocations cannot be starting locations.
 
 Create 2 to 30 directed routes. Every route connects persistent sublocations directly, never macro regions. The directed graph of persistent sublocations must be strongly connected, so every concrete scene can reach every other concrete scene. Cross-region routes connect concrete scenes directly. Use travel costs from 1 to 10.
 

@@ -47,6 +47,31 @@ describe("Campaign World prompts", () => {
     expect(prompt).toContain("The directed graph of persistent sublocations must be strongly connected");
   });
 
+  it("uses structural indexed rows only in the tool-mode frame contract", () => {
+    const prompt = buildWorldFramePrompt(source, true);
+
+    expect(prompt).toContain(
+      "Return locationKey as lowercase kebab-case without the location: prefix.",
+    );
+    expect(prompt).toContain(
+      "Return exactly three macroLocations, then six or seven persistentLocations.",
+    );
+    expect(prompt).toContain(
+      "startingMacroIndex selects one macroLocations row.",
+    );
+    expect(prompt).toContain(
+      "Each persistentLocations row uses parentMacroIndex to index macroLocations.",
+    );
+    expect(prompt).toContain(
+      "Each route uses required fromPersistentIndex and toPersistentIndex values that index persistentLocations; the two indices must differ.",
+    );
+    expect(prompt).toContain(
+      "Do not return kind, isStarting, parentLocationRef, fromLocationRef, or toLocationRef in tool mode.",
+    );
+    expect(prompt).toContain("Return every required key once and no extra keys.");
+    expect(prompt).not.toContain("Every locationRef value must be a full identifier");
+  });
+
   it("allows cast placements only at exact concrete scenes", () => {
     const prompt = buildWorldCastPrompt(source, frame);
 
