@@ -233,7 +233,7 @@ const actorEligibilitySchema = z.object({
   role: z.enum(["key", "support", "background"]),
   placementId: identifierSchema,
   goalIds: z.array(identifierSchema).min(1),
-  planId: identifierSchema,
+  planId: identifierSchema.nullable(),
   scheduleId: identifierSchema,
 }).strict();
 
@@ -250,7 +250,7 @@ export const campaignPlayEligibilitySchema = z.object({
   pressureAnchorIds: z.array(identifierSchema).min(2),
   openingCandidateIds: z.array(identifierSchema).min(1),
   exposurePathIds: z.array(identifierSchema).min(1),
-  planIds: z.array(identifierSchema).min(6),
+  planIds: z.array(identifierSchema),
   scheduleIds: z.array(identifierSchema).min(6),
 }).strict().superRefine((value, context) => {
   const roleCounts = value.activeActors.reduce((counts, actor) => {
@@ -264,11 +264,14 @@ export const campaignPlayEligibilitySchema = z.object({
     context.addIssue({ code: "custom", path: ["activeActors"], message: "Eligibility requires one entry per person." });
   }
   value.activeActors.forEach((actor, index) => {
-    if (!value.planIds.includes(actor.planId) || !value.scheduleIds.includes(actor.scheduleId)) {
+    if (
+      !value.scheduleIds.includes(actor.scheduleId)
+      || actor.planId !== null && !value.planIds.includes(actor.planId)
+    ) {
       context.addIssue({
         code: "custom",
         path: ["activeActors", index],
-        message: "Every person requires a persisted plan and schedule.",
+        message: "Every person requires a persisted schedule and any non-null plan must be persisted.",
       });
     }
   });

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { CAMPAIGN_PLAY_EVIDENCE_VERSION, type CampaignPlayRunConfig } from "./contracts.js";
 import { createCampaignPlayInventory, validateCampaignPlayBundle } from "./probes.js";
+import type { CampaignPlayCanonicalReport } from "./replay-report.js";
 import { runSeededCampaignPlayReplay } from "./seeded-replay.js";
 import { writeCampaignPlayBundle } from "./bundle-writer.js";
 
@@ -17,6 +18,99 @@ afterEach(() => {
 });
 
 describe("Campaign Play evidence bundle writer", () => {
+  it("serializes nine actor schedules and four plans with truthful lazy nulls", () => {
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "worldforge-lazy-bundle-"));
+    roots.push(outputRoot);
+    const bundleRoot = path.join(outputRoot, "lazy-schedules-one");
+    const actorRows = [
+      { id: "actor-a", kind: "person" as const, role: "key" as const },
+      { id: "actor-b", kind: "person" as const, role: "support" as const },
+      { id: "actor-c", kind: "person" as const, role: "support" as const },
+      { id: "actor-d", kind: "person" as const, role: "background" as const },
+      { id: "actor-e", kind: "person" as const, role: "background" as const },
+      { id: "actor-f", kind: "person" as const, role: "key" as const },
+      { id: "actor-g", kind: "person" as const, role: "support" as const },
+      { id: "actor-h", kind: "person" as const, role: "background" as const },
+      { id: "actor-i", kind: "person" as const, role: "background" as const },
+    ];
+    const planRows = ["plan-a", "plan-b", "plan-c", "plan-d"]
+      .map((planId) => ({ plan_id: planId }));
+    const scheduleRows = actorRows.map((actor, index) => ({
+      actor_id: actor.id,
+      schedule_id: `schedule-${index + 1}`,
+      plan_id: index < planRows.length ? planRows[index]!.plan_id : null,
+    }));
+    const acceptedSnapshot = {
+      locations: ["location-a", "location-b", "location-c"].map((id) => ({ id, kind: "macro" })),
+      actors: actorRows,
+      goals: actorRows.map((actor, index) => ({ id: `goal-${index + 1}`, actorId: actor.id })),
+      placements: actorRows.map((actor, index) => ({ id: `placement-${index + 1}`, actorId: actor.id })),
+      pressures: [{ id: "pressure-a" }, { id: "pressure-b" }],
+    };
+    const emptyTables = {
+      runtimeEvents: [], turns: [], turnResults: [], turnEvents: [], modelStages: [], narrations: [],
+      commands: [], receipts: [], worldEvents: [], exposures: [{ exposure_id: "exposure-a", channel: "direct" }],
+      routeStates: [], actorConditions: [], pressureStates: [], plans: planRows, schedules: scheduleRows,
+      dueSets: [], jobs: [], proposals: [], knowledge: [], observations: [],
+    };
+    const report = {
+      campaignId: "campaign-one",
+      acceptedSnapshotJson: JSON.stringify(acceptedSnapshot),
+      acceptedSnapshotHash: "a".repeat(64),
+      acceptedContentHash: "b".repeat(64),
+      authority: { acceptedWorldVersion: 1, worldVersion: 1, runtimeRevision: 0, worldHash: "c".repeat(64), runtimeHash: "d".repeat(64) },
+      eligibility: { hash: "e".repeat(64) },
+      mechanical: { projection: { human: { actorId: "player-one" } } },
+      publicState: { hash: "f".repeat(64) },
+      protectedAudit: { hash: "1".repeat(64) },
+      tables: emptyTables,
+      integrity: "ok",
+      foreignKeyViolations: 0,
+    } as unknown as CampaignPlayCanonicalReport;
+    const runConfig: CampaignPlayRunConfig = {
+      evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
+      runId: "lazy-schedules-one",
+      lane: "deterministic-10",
+      campaignId: "campaign-one",
+      worldSource: { kind: "fixture" },
+      expectedPlayerActions: 0,
+      outputRoot,
+      execution: { kind: "deterministic", fixtureId: "bell-island", seed: "campaign-play-v1" },
+      restartAfterPlayerActions: [],
+      operators: { runner: "vitest", player: null, auditor: "campaign-play-validator" },
+    };
+
+    writeCampaignPlayBundle({
+      bundleRoot,
+      runConfig,
+      replay: {
+        campaignId: "campaign-one",
+        completedPlayerActions: 0,
+        canonicalBytes: "{}",
+        replayHash: "2".repeat(64),
+        restartProjectionMatches: true,
+        unboundObservationHandles: [],
+        report,
+      },
+      commit: "0000000",
+      dirty: true,
+      startedAt: 1_000,
+      completedAt: 2_000,
+    });
+
+    const eligibility = JSON.parse(fs.readFileSync(path.join(bundleRoot, "eligibility.json"), "utf8")) as {
+      activeActors: Array<{ planId: string | null; scheduleId: string }>;
+      planIds: string[];
+      scheduleIds: string[];
+    };
+    expect(eligibility.planIds).toHaveLength(4);
+    expect(eligibility.scheduleIds).toHaveLength(9);
+    expect(eligibility.activeActors.map((actor) => actor.planId)).toEqual([
+      "plan-a", "plan-b", "plan-c", "plan-d", null, null, null, null, null,
+    ]);
+    expect(JSON.stringify(eligibility)).not.toContain("missing:");
+  });
+
   it("writes a promotion-eligible deterministic bundle and detects later tampering", async () => {
     const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "worldforge-play-bundle-"));
     roots.push(outputRoot);

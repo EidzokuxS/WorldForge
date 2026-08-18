@@ -244,7 +244,7 @@ export function writeCampaignPlayBundle(input: WriteCampaignPlayBundleInput): vo
     value<string>(row, "actor_id"),
     {
       scheduleId: value<string>(row, "schedule_id"),
-      planId: value<string>(row, "plan_id"),
+      planId: value<string | null>(row, "plan_id"),
     },
   ]));
   const activeActors = accepted.actors
@@ -256,7 +256,7 @@ export function writeCampaignPlayBundle(input: WriteCampaignPlayBundleInput): vo
         role: actor.role,
         placementId: placementByActor.get(actor.id) ?? `missing:${actor.id}`,
         goalIds: goalsByActor.get(actor.id) ?? [],
-        planId: schedule?.planId ?? `missing:${actor.id}`,
+        planId: schedule?.planId ?? null,
         scheduleId: schedule?.scheduleId ?? `missing:${actor.id}`,
       };
     });

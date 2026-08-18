@@ -219,6 +219,85 @@ describe("Campaign Play evidence contracts", () => {
     })).not.toThrow();
   });
 
+  it("accepts lazy schedules without plans and mixed planned/lazy schedules", () => {
+    const base = {
+      evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
+      campaignId: "campaign-one",
+      frozenAt: 1,
+      acceptedWorldVersion: 1,
+      acceptedSnapshotHash: HASH,
+      acceptedContentHash: HASH,
+      topologyHash: HASH,
+      reachableLocationIds: ["location-a", "location-b", "location-c"],
+      pressureAnchorIds: ["pressure-a", "pressure-b"],
+      openingCandidateIds: ["location-a"],
+      exposurePathIds: ["path-a"],
+      scheduleIds: ["schedule-a", "schedule-b", "schedule-c", "schedule-d", "schedule-e", "schedule-f"],
+    };
+    const lazyActors = [
+      { actorId: "actor-a", kind: "person", role: "key", placementId: "placement-a", goalIds: ["goal-a"], planId: null, scheduleId: "schedule-a" },
+      { actorId: "actor-b", kind: "person", role: "support", placementId: "placement-b", goalIds: ["goal-b"], planId: null, scheduleId: "schedule-b" },
+      { actorId: "actor-c", kind: "person", role: "support", placementId: "placement-c", goalIds: ["goal-c"], planId: null, scheduleId: "schedule-c" },
+      { actorId: "actor-d", kind: "person", role: "background", placementId: "placement-d", goalIds: ["goal-d"], planId: null, scheduleId: "schedule-d" },
+      { actorId: "actor-e", kind: "person", role: "background", placementId: "placement-e", goalIds: ["goal-e"], planId: null, scheduleId: "schedule-e" },
+      { actorId: "actor-f", kind: "person", role: "key", placementId: "placement-f", goalIds: ["goal-f"], planId: null, scheduleId: "schedule-f" },
+    ] as const;
+
+    expect(() => campaignPlayEligibilitySchema.parse({
+      ...base,
+      activeActors: lazyActors,
+      planIds: [],
+    })).not.toThrow();
+
+    expect(() => campaignPlayEligibilitySchema.parse({
+      ...base,
+      activeActors: lazyActors.map((actor) => actor.actorId === "actor-a"
+        ? { ...actor, planId: "plan-a" }
+        : actor),
+      planIds: ["plan-a"],
+    })).not.toThrow();
+  });
+
+  it("rejects dangling plans and missing actor schedules", () => {
+    const base = {
+      evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
+      campaignId: "campaign-one",
+      frozenAt: 1,
+      acceptedWorldVersion: 1,
+      acceptedSnapshotHash: HASH,
+      acceptedContentHash: HASH,
+      topologyHash: HASH,
+      reachableLocationIds: ["location-a", "location-b", "location-c"],
+      pressureAnchorIds: ["pressure-a", "pressure-b"],
+      openingCandidateIds: ["location-a"],
+      exposurePathIds: ["path-a"],
+      planIds: ["plan-a"],
+      scheduleIds: ["schedule-a", "schedule-b", "schedule-c", "schedule-d", "schedule-e", "schedule-f"],
+    };
+    const actors = [
+      { actorId: "actor-a", kind: "person", role: "key", placementId: "placement-a", goalIds: ["goal-a"], planId: "plan-a", scheduleId: "schedule-a" },
+      { actorId: "actor-b", kind: "person", role: "support", placementId: "placement-b", goalIds: ["goal-b"], planId: null, scheduleId: "schedule-b" },
+      { actorId: "actor-c", kind: "person", role: "support", placementId: "placement-c", goalIds: ["goal-c"], planId: null, scheduleId: "schedule-c" },
+      { actorId: "actor-d", kind: "person", role: "background", placementId: "placement-d", goalIds: ["goal-d"], planId: null, scheduleId: "schedule-d" },
+      { actorId: "actor-e", kind: "person", role: "background", placementId: "placement-e", goalIds: ["goal-e"], planId: null, scheduleId: "schedule-e" },
+      { actorId: "actor-f", kind: "person", role: "key", placementId: "placement-f", goalIds: ["goal-f"], planId: null, scheduleId: "schedule-f" },
+    ] as const;
+
+    expect(() => campaignPlayEligibilitySchema.parse({
+      ...base,
+      activeActors: actors.map((actor) => actor.actorId === "actor-a"
+        ? { ...actor, planId: "plan-missing" }
+        : actor),
+    })).toThrow("Every person requires a persisted schedule and any non-null plan must be persisted.");
+
+    expect(() => campaignPlayEligibilitySchema.parse({
+      ...base,
+      activeActors: actors.map((actor) => actor.actorId === "actor-f"
+        ? { ...actor, scheduleId: "schedule-missing" }
+        : actor),
+    })).toThrow("Every person requires a persisted schedule and any non-null plan must be persisted.");
+  });
+
   it("rejects a scorecard that claims promotion with a hard failure", () => {
     const hardFailures = {
       replayDivergence: 1,
