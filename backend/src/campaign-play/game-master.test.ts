@@ -257,6 +257,44 @@ const guardResponseEffect = {
   affectedHandles: ["you", "guard"],
 };
 
+const toolEffectKinds = [
+  "move_actor",
+  "enter_local_scene",
+  "set_route_state",
+  "set_actor_condition",
+  "update_actor_relation",
+  "update_actor_goal",
+  "advance_pressure",
+  "adjust_actor_possession",
+  "materialize_support_actor",
+  "incur_actor_obligation",
+  "pay_actor_obligation",
+  "record_world_event",
+] as const;
+
+function toolTransport(
+  elapsedMinutes: number,
+  effects: readonly Record<string, unknown>[],
+): Record<string, unknown> {
+  const transport: Record<string, unknown> = {
+    elapsedMinutes,
+    effectOrder: [],
+  };
+  for (const kind of toolEffectKinds) transport[kind] = [];
+  for (const effect of effects) {
+    const kind = effect.kind;
+    if (typeof kind !== "string" || !toolEffectKinds.includes(kind as typeof toolEffectKinds[number])) {
+      throw new Error(`Unsupported tool effect kind: ${String(kind)}`);
+    }
+    const items = transport[kind] as Record<string, unknown>[];
+    const { kind: _kind, ...item } = effect;
+    const index = items.length;
+    items.push(item);
+    (transport.effectOrder as Array<{ kind: string; index: number }>).push({ kind, index });
+  }
+  return transport;
+}
+
 function receivableCollectionFrame(): CampaignPlayGameMasterFrame {
   const value = frame();
   const obligationId = deriveCampaignPlayObligationId(
@@ -1665,7 +1703,10 @@ describe("Campaign Play Game Master", () => {
 
   it("uses the requested strict tool mode for the proposal and authority review", async () => {
     const generateObject = vi.fn()
-      .mockResolvedValueOnce({ object: proposal, trace: trace("tool_mode", undefined, "tool") })
+      .mockResolvedValueOnce({
+        object: toolTransport(proposal.elapsedMinutes, proposal.effects),
+        trace: trace("tool_mode", undefined, "tool"),
+      })
       .mockResolvedValueOnce({
         object: {
           verdict: "accepted",
@@ -1704,59 +1745,67 @@ describe("Campaign Play Game Master", () => {
         items?: { properties?: Record<string, { enum?: string[] }> };
       }>;
     };
-    expect(proposalJson.required).toEqual(expect.arrayContaining(["elapsedMinutes", "effects"]));
-    expect(proposalJson.properties?.effects?.items?.properties?.kind?.enum).toEqual(expect.arrayContaining([
-      "record_world_event",
+    expect(proposalJson.required).toEqual(expect.arrayContaining([
+      "elapsedMinutes",
+      "effectOrder",
+      ...toolEffectKinds,
     ]));
+    expect(proposalJson.properties?.record_world_event?.items?.properties?.eventClass?.enum)
+      .toEqual(expect.arrayContaining(["dialogue", "discovery"]));
     expect(proposalSchema.safeParse({
-      ...proposal,
-      effects: [{ ...proposal.effects[0], performingActorHandle: "you" }],
+      ...toolTransport(proposal.elapsedMinutes, [{ ...proposal.effects[0], performingActorHandle: "you" }]),
     }).success).toBe(false);
     expect(proposalSchema.safeParse({
-      ...proposal,
-      effects: [{
+      ...toolTransport(proposal.elapsedMinutes, [{
         ...proposal.effects[0],
         performingActorHandle: "introduced-support-actor",
         affectedHandles: ["you", "introduced-support-actor"],
-      }],
+      }]),
     }).success).toBe(true);
     expect(proposalSchema.safeParse({
-      ...proposal,
-      effects: [{ ...proposal.effects[0], performingActorHandle: "" }],
+      ...toolTransport(proposal.elapsedMinutes, [{ ...proposal.effects[0], performingActorHandle: "" }]),
     }).success).toBe(true);
     expect(proposalSchema.safeParse({
-      ...proposal,
-      effects: [{ ...proposal.effects[0], performingActorHandle: null }],
+      ...toolTransport(proposal.elapsedMinutes, [{ ...proposal.effects[0], performingActorHandle: null }]),
     }).success).toBe(false);
     const missingPerformer = { ...proposal.effects[0] } as Record<string, unknown>;
     delete missingPerformer.performingActorHandle;
     expect(proposalSchema.safeParse({
-      ...proposal,
-      effects: [missingPerformer],
+      ...toolTransport(proposal.elapsedMinutes, [missingPerformer]),
     }).success).toBe(false);
     expect(proposalSchema.safeParse({
-      elapsedMinutes: 5,
-      effects: [{ kind: "move_actor", actorHandle: "" }],
+      ...toolTransport(5, [{ kind: "move_actor", actorHandle: "" }]),
     }).success).toBe(true);
     expect(proposalSchema.safeParse({
-      elapsedMinutes: 5,
-      effects: [{ kind: "move_actor", actorHandle: null }],
+      ...toolTransport(5, [{ kind: "move_actor", actorHandle: null }]),
     }).success).toBe(false);
     expect(proposalSchema.safeParse({
-      elapsedMinutes: 5,
-      effects: [{ kind: "move_actor" }],
+      ...toolTransport(5, [{ kind: "move_actor" }]),
     }).success).toBe(false);
     expect(proposalSchemaJson).toContain('""');
     const sentinelInstruction =
-      'For move_actor.actorHandle, adjust_actor_possession.possessionHandle and name, and record_world_event.performingActorHandle, include the field whenever that effect kind owns it. Return the empty string "" when the domain value is null. Never omit the field and never emit JSON null. Omit these fields from effect kinds that do not own them.';
+      'For move_actor.actorHandle and record_world_event.performingActorHandle, include the required field and return the empty string "" when the domain value is null. For materialize_support_actor.nextAction, include the required string and return the empty string "" when the domain value is omitted. Never emit JSON null or omit a required field.';
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(sentinelInstruction);
+    expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
+      "The named effect arrays in TOOL_MODE_OUTPUT_CONTRACT are the complete transport surface; do not emit a flat effects array.",
+    );
+    expect(String(generateObject.mock.calls[0]![0].prompt)).not.toContain("effects[].kind accepts exactly:");
+    expect(String(generateObject.mock.calls[0]![0].prompt)).not.toContain(
+      "set_actor_condition has exactly these fields: kind,",
+    );
+    expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
+      "nextAction is a required string; return the empty string when the domain action is omitted.",
+    );
     const reviewerJson = z.toJSONSchema(reviewerSchema) as { required?: string[] };
     expect(reviewerJson.required).toEqual(expect.arrayContaining(["verdict", "reason", "failedChecks"]));
   });
 
   it("keeps the null-sentinel contract in a recovered tool-mode attempt", async () => {
     const generateObject = vi.fn()
-      .mockResolvedValueOnce({ object: proposal, trace: trace("tool_mode", undefined, "tool") })
+      .mockResolvedValueOnce({
+        object: toolTransport(proposal.elapsedMinutes, proposal.effects),
+        trace: trace("tool_mode", undefined, "tool"),
+      })
       .mockResolvedValueOnce({
         object: { verdict: "accepted", reason: "The corrected dialogue remains grounded.", failedChecks: [] },
         trace: trace("tool_mode", undefined, "tool"),
@@ -1776,8 +1825,127 @@ describe("Campaign Play Game Master", () => {
     });
     const recoveryPrompt = String(generateObject.mock.calls[0]![0].prompt);
     expect(recoveryPrompt).toContain(
-      'For move_actor.actorHandle, adjust_actor_possession.possessionHandle and name, and record_world_event.performingActorHandle, include the field whenever that effect kind owns it. Return the empty string "" when the domain value is null. Never omit the field and never emit JSON null. Omit these fields from effect kinds that do not own them.',
+      'For move_actor.actorHandle and record_world_event.performingActorHandle, include the required field and return the empty string "" when the domain value is null. For materialize_support_actor.nextAction, include the required string and return the empty string "" when the domain value is omitted. Never emit JSON null or omit a required field.',
     );
+  });
+
+  it("keeps every non-resource tool array strict and decodes the required empty nextAction sentinel", async () => {
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({
+        object: toolTransport(proposal.elapsedMinutes, [proposal.effects[0]]),
+        trace: trace("tool_mode", undefined, "tool"),
+      })
+      .mockResolvedValueOnce({
+        object: { verdict: "accepted", reason: "The event is grounded.", failedChecks: [] },
+        trace: trace("tool_mode", undefined, "tool"),
+      });
+    await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget, structuredOutputMode: "tool",
+    });
+    const proposalSchema = generateObject.mock.calls[0]![0].schema as z.ZodType<unknown>;
+    const fixtures: Record<string, Record<string, unknown>> = {
+      move_actor: { actorHandle: "" },
+      enter_local_scene: { name: "Gatehouse alcove", description: "A narrow alcove by the latch." },
+      set_route_state: { exposure: { mode: "protected" }, routeHandle: "passage", state: "open", reason: "The route remains open." },
+      set_actor_condition: { exposure: { mode: "protected" }, actorHandle: "guard", condition: "strained", operation: "set", summary: "The guard looks strained." },
+      update_actor_relation: { exposure: { mode: "protected" }, relationHandle: "trust", intensity: 2, summary: "Trust rises slightly." },
+      update_actor_goal: { exposure: { mode: "protected" }, goalHandle: "guard-goal", status: "active", summary: "The guard keeps the route orderly." },
+      advance_pressure: { exposure: { mode: "protected" }, pressureHandle: "delay", amount: 1, resultStatus: "active" },
+      materialize_support_actor: {
+        actorHandle: "introduced-support-actor", name: "Sella Rook", summary: "A rope mender pauses nearby.",
+        goal: "Find a dry place before rain.", motivation: "Protect the workshop tools.", nextIntentKind: "observe",
+        nextAction: "", observableTrace: "Waxed thread catches the light.", cadenceMinutes: 30,
+      },
+      record_world_event: { eventClass: "dialogue", performingActorHandle: "guard", summary: "The guard answers plainly.", affectedHandles: ["you", "guard"] },
+    };
+    for (const [kind, item] of Object.entries(fixtures)) {
+      const valid = toolTransport(1, [{ kind, ...item }]);
+      expect(proposalSchema.safeParse(valid).success, kind).toBe(true);
+      const row = (valid[kind] as Record<string, unknown>[])[0]!;
+      expect(row).not.toHaveProperty("kind");
+      const withKind = structuredClone(valid);
+      ((withKind[kind] as Record<string, unknown>[])[0]!).kind = kind;
+      expect(proposalSchema.safeParse(withKind).success, `${kind} rejects kind`).toBe(false);
+    }
+    const omittedNextAction = toolTransport(1, [{
+      kind: "materialize_support_actor",
+      ...fixtures.materialize_support_actor,
+    }]);
+    delete (omittedNextAction.materialize_support_actor as Record<string, unknown>[])[0]!.nextAction;
+    expect(proposalSchema.safeParse(omittedNextAction).success).toBe(false);
+  });
+
+  it("reconstructs indexed tool order and rejects duplicate, missing, out-of-range, and wrong-kind entries", async () => {
+    const firstEvent = {
+      kind: "record_world_event" as const,
+      eventClass: "dialogue" as const,
+      performingActorHandle: "guard",
+      summary: "The guard answers the first part of the question.",
+      affectedHandles: ["you", "guard"],
+    };
+    const secondEvent = {
+      ...firstEvent,
+      summary: "The guard adds the second part of the answer.",
+    };
+    const orderedTransport = toolTransport(1, [firstEvent, secondEvent]);
+    const orderedItems = orderedTransport.record_world_event as Record<string, unknown>[];
+    orderedTransport.record_world_event = [orderedItems[1], orderedItems[0]];
+    orderedTransport.effectOrder = [
+      { kind: "record_world_event", index: 1 },
+      { kind: "record_world_event", index: 0 },
+    ];
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: orderedTransport, trace: trace("tool_mode", undefined, "tool") })
+      .mockResolvedValueOnce({
+        object: { verdict: "accepted", reason: "Both ordered responses are grounded.", failedChecks: [] },
+        trace: trace("tool_mode", undefined, "tool"),
+      });
+    const orderedCandidate = await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget, structuredOutputMode: "tool",
+    });
+    const orderedSummaries = orderedCandidate.batch.commands
+      .filter((command) => command.kind === "record_world_event")
+      .map((command) => command.summary);
+    expect(orderedSummaries).toEqual([
+      firstEvent.summary,
+      secondEvent.summary,
+    ]);
+
+    const malformedCases: Array<{ label: string; transport: Record<string, unknown> }> = [];
+    const duplicate = toolTransport(1, [firstEvent, secondEvent]);
+    duplicate.effectOrder = [
+      { kind: "record_world_event", index: 0 },
+      { kind: "record_world_event", index: 0 },
+    ];
+    malformedCases.push({ label: "duplicate", transport: duplicate });
+    const missing = toolTransport(1, [firstEvent, secondEvent]);
+    missing.effectOrder = [{ kind: "record_world_event", index: 0 }];
+    malformedCases.push({ label: "missing", transport: missing });
+    const outOfRange = toolTransport(1, [firstEvent]);
+    outOfRange.effectOrder = [{ kind: "record_world_event", index: 1 }];
+    malformedCases.push({ label: "out-of-range", transport: outOfRange });
+    const wrongKind = toolTransport(1, [firstEvent]);
+    wrongKind.effectOrder = [{ kind: "move_actor", index: 0 }];
+    malformedCases.push({ label: "wrong-kind", transport: wrongKind });
+    for (const malformedCase of malformedCases) {
+      const malformedGenerateObject = vi.fn().mockResolvedValue({
+        object: malformedCase.transport,
+        trace: trace("tool_mode", undefined, "tool"),
+      });
+      await expect(createCampaignPlayGameMaster({
+        generateObject: malformedGenerateObject as unknown as typeof safeGenerateObject,
+      }).plan({
+        frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+        model: model(), temperature: 0.2, budget, structuredOutputMode: "tool",
+      })).rejects.toMatchObject({ code: "model_contract_failed" });
+      expect(malformedGenerateObject, malformedCase.label).toHaveBeenCalledTimes(1);
+    }
   });
 
   it("decodes empty-string sentinels to exact domain nulls for movement, possession, and actorless events", async () => {
@@ -1793,7 +1961,7 @@ describe("Campaign Play Game Master", () => {
     });
     const moveGenerateObject = vi.fn()
       .mockResolvedValueOnce({
-        object: { elapsedMinutes: 5, effects: [{ kind: "move_actor", actorHandle: "" }] },
+        object: toolTransport(5, [{ kind: "move_actor", actorHandle: "" }]),
         trace: trace("tool_mode", undefined, "tool"),
       });
     const moveCandidate = await createCampaignPlayGameMaster({
@@ -1804,19 +1972,15 @@ describe("Campaign Play Game Master", () => {
     });
     expect(moveCandidate.batch.commands[1]).toMatchObject({ kind: "move_actor", actorId: PLAYER_ID });
 
-    const acquisitionProposal = {
-      elapsedMinutes: 1,
-      effects: [{
-        kind: "adjust_actor_possession" as const,
-        operation: "acquire" as const,
-        actorHandle: "you",
-        possessionHandle: "",
+    const acquisitionProposal = toolTransport(1, [
+      {
+        kind: "adjust_actor_possession",
         name: "Copper chit",
-        quantity: 2,
         summary: "Oren hands over two copper chits for the copied manifests.",
         affectedHandles: ["you", "guard"],
-      }, guardResponseEffect],
-    };
+      },
+      guardResponseEffect,
+    ]);
     const acquisitionGenerateObject = vi.fn()
       .mockResolvedValueOnce({ object: acquisitionProposal, trace: trace("tool_mode", undefined, "tool") })
       .mockResolvedValueOnce({
@@ -1846,39 +2010,41 @@ describe("Campaign Play Game Master", () => {
     expect(acquisitionSchema.safeParse(acquisitionProposal).success).toBe(true);
     expect(acquisitionSchema.safeParse({
       ...acquisitionProposal,
-      effects: [{ ...acquisitionProposal.effects[0], possessionHandle: null }],
+      adjust_actor_possession: [{
+        ...(acquisitionProposal.adjust_actor_possession as Record<string, unknown>[])[0],
+        operation: "acquire",
+      }],
     }).success).toBe(false);
-    const missingPossessionHandle = { ...acquisitionProposal.effects[0] } as Record<string, unknown>;
-    delete missingPossessionHandle.possessionHandle;
-    expect(acquisitionSchema.safeParse({
-      ...acquisitionProposal,
-      effects: [missingPossessionHandle],
-    }).success).toBe(false);
-    expect(acquisitionSchema.safeParse({
-      ...acquisitionProposal,
-      effects: [{ ...acquisitionProposal.effects[0], name: null }],
-    }).success).toBe(false);
-    const missingPossessionName = { ...acquisitionProposal.effects[0] } as Record<string, unknown>;
+    const missingPossessionName = {
+      ...(acquisitionProposal.adjust_actor_possession as Record<string, unknown>[])[0],
+    };
     delete missingPossessionName.name;
     expect(acquisitionSchema.safeParse({
       ...acquisitionProposal,
-      effects: [missingPossessionName],
+      adjust_actor_possession: [missingPossessionName],
+    }).success).toBe(true);
+    expect(acquisitionSchema.safeParse({
+      ...acquisitionProposal,
+      adjust_actor_possession: [{
+        ...(acquisitionProposal.adjust_actor_possession as Record<string, unknown>[])[0],
+        name: null,
+      }],
     }).success).toBe(false);
     expect(acquisitionSchema.safeParse({
       ...acquisitionProposal,
-      effects: [{ ...acquisitionProposal.effects[0], name: "" }],
-    }).success).toBe(true);
+      adjust_actor_possession: [{
+        ...(acquisitionProposal.adjust_actor_possession as Record<string, unknown>[])[0],
+        name: "",
+      }],
+    }).success).toBe(false);
 
-    const actorlessProposal = {
-      elapsedMinutes: 1,
-      effects: [{
+    const actorlessProposal = toolTransport(1, [{
         kind: "record_world_event" as const,
         eventClass: "discovery" as const,
         performingActorHandle: "",
         summary: "The gate shows visible wear.",
         affectedHandles: ["here"],
-      }],
-    };
+      }]);
     const actorlessGenerateObject = vi.fn()
       .mockResolvedValueOnce({ object: actorlessProposal, trace: trace("tool_mode", undefined, "tool") })
       .mockResolvedValueOnce({
@@ -1895,12 +2061,9 @@ describe("Campaign Play Game Master", () => {
       .toMatchObject({ kind: "record_world_event", performingActorId: null });
   });
 
-  it("rejects irrelevant flat tool fields before any reviewer call", async () => {
+  it("rejects irrelevant partition fields before any reviewer call", async () => {
     const generateObject = vi.fn().mockResolvedValue({
-      object: {
-        ...proposal,
-        effects: [{ ...proposal.effects[0], actorHandle: "guard" }],
-      },
+      object: toolTransport(proposal.elapsedMinutes, [{ ...proposal.effects[0], actorHandle: "guard" }]),
       trace: trace("tool_mode", undefined, "tool"),
     });
     const gameMaster = createCampaignPlayGameMaster({
@@ -1918,6 +2081,142 @@ describe("Campaign Play Game Master", () => {
       structuredOutputMode: "tool",
     })).rejects.toMatchObject({ code: "model_contract_failed" });
     expect(generateObject).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects duplicate and unmatched resource rows in native and partitioned transports", async () => {
+    const requiredPossessionRuling = ruling({
+      possessionEffectAuthority: {
+        kind: "adjust_actor_possession", enforcement: "required", operation: "acquire",
+        possessionHandle: null, quantity: 2, minimumResult: "success",
+      },
+    });
+    const requiredIncurRuling = ruling({
+      requiredObligationEffect: {
+        kind: "incur_actor_obligation", debtorHandle: "you", creditorHandle: "guard",
+        unitKey: "copper", amount: 8, minimumResult: "success",
+      },
+    });
+    const requiredPayRuling = ruling({
+      requiredObligationEffect: {
+        kind: "pay_actor_obligation", debtorHandle: "you", creditorHandle: "guard",
+        obligationHandle: "guard-debt", paymentPossessionHandle: "coins", unitKey: "copper",
+        amount: 2, minimumResult: "success",
+      },
+    });
+    const nativeAdjust = {
+      kind: "adjust_actor_possession",
+      operation: "acquire",
+      actorHandle: "you",
+      possessionHandle: null,
+      name: "Copper chit",
+      quantity: 2,
+      summary: "Oren hands over two copper chits.",
+      affectedHandles: ["you", "guard"],
+    };
+    const toolAdjust = {
+      kind: "adjust_actor_possession",
+      summary: "Oren hands over two copper chits.",
+      affectedHandles: ["you", "guard"],
+      name: "Copper chit",
+    };
+    const nativeIncur = {
+      kind: "incur_actor_obligation",
+      debtorActorHandle: "you",
+      creditorActorHandle: "guard",
+      unitKey: "copper",
+      amount: 8,
+      summary: "You owe Oren eight copper.",
+      affectedHandles: ["you", "guard"],
+    };
+    const toolIncur = {
+      kind: "incur_actor_obligation",
+      summary: "You owe Oren eight copper.",
+      affectedHandles: ["you", "guard"],
+    };
+    const nativePay = {
+      kind: "pay_actor_obligation",
+      debtorActorHandle: "you",
+      creditorActorHandle: "guard",
+      obligationHandle: "guard-debt",
+      paymentPossessionHandle: "coins",
+      unitKey: "copper",
+      amount: 2,
+      summary: "You pay Oren two copper.",
+      affectedHandles: ["you", "guard", "guard-debt", "coins"],
+    };
+    const toolPay = {
+      kind: "pay_actor_obligation",
+      summary: "You pay Oren two copper.",
+      affectedHandles: ["you", "guard", "guard-debt", "coins"],
+    };
+    const cases: Array<{
+      label: string;
+      ruling: CampaignPlayJudgeRuling;
+      nativeEffects: Record<string, unknown>[];
+      toolEffects: Record<string, unknown>[];
+    }> = [
+      {
+        label: "two matching adjust rows",
+        ruling: requiredPossessionRuling,
+        nativeEffects: [nativeAdjust, nativeAdjust, guardResponseEffect],
+        toolEffects: [toolAdjust, toolAdjust, guardResponseEffect],
+      },
+      {
+        label: "two matching incur rows",
+        ruling: requiredIncurRuling,
+        nativeEffects: [nativeIncur, nativeIncur, guardResponseEffect],
+        toolEffects: [toolIncur, toolIncur, guardResponseEffect],
+      },
+      {
+        label: "two matching pay rows",
+        ruling: requiredPayRuling,
+        nativeEffects: [nativePay, nativePay, guardResponseEffect],
+        toolEffects: [toolPay, toolPay, guardResponseEffect],
+      },
+      {
+        label: "matching possession plus unmatched obligation",
+        ruling: requiredPossessionRuling,
+        nativeEffects: [nativeAdjust, nativeIncur, guardResponseEffect],
+        toolEffects: [toolAdjust, toolIncur, guardResponseEffect],
+      },
+      {
+        label: "matching incur plus unmatched payment",
+        ruling: requiredIncurRuling,
+        nativeEffects: [nativeIncur, nativePay, guardResponseEffect],
+        toolEffects: [toolIncur, toolPay, guardResponseEffect],
+      },
+      {
+        label: "matching payment plus unmatched incur",
+        ruling: requiredPayRuling,
+        nativeEffects: [nativePay, nativeIncur, guardResponseEffect],
+        toolEffects: [toolPay, toolIncur, guardResponseEffect],
+      },
+    ];
+    for (const testCase of cases) {
+      for (const mode of ["native", "tool"] as const) {
+        const toolMode = mode === "tool";
+        const generatedObject = toolMode
+          ? toolTransport(1, testCase.toolEffects)
+          : { elapsedMinutes: 1, effects: testCase.nativeEffects };
+        const generateObject = vi.fn().mockResolvedValue({
+          object: generatedObject,
+          trace: trace(toolMode ? "tool_mode" : "native_schema", undefined, toolMode ? "tool" : "auto"),
+        });
+        await expect(createCampaignPlayGameMaster({
+          generateObject: generateObject as unknown as typeof safeGenerateObject,
+        }).plan({
+          frame: frame(),
+          ruling: testCase.ruling,
+          resolution,
+          uncertaintyAuthority: null,
+          model: model(),
+          temperature: 0.2,
+          budget,
+          structuredOutputMode: toolMode ? "tool" : "auto",
+        })).rejects.toMatchObject({ code: "model_contract_failed" });
+        expect(generateObject, testCase.label + ` (${mode})`).toHaveBeenCalledTimes(1);
+      }
+    }
   });
 
   it("rejects a verbatim repeat of the performing actor's recent dialogue", () => {
