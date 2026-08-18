@@ -127,7 +127,7 @@ function acceptWorld(): void {
       ...candidate.draft,
       placements: candidate.draft.placements.map((placement) =>
         placement.id === "placement-b"
-          ? { ...placement, locationId: "location-a" }
+          ? { ...placement, locationId: "location-a-office" }
           : placement),
     };
     const review = repository.completeBuild({
@@ -317,15 +317,17 @@ function narratorActionSelections(packet: CampaignPlayNarratorPacket) {
     : packet.availableIntents.findIndex((intent) => intent.kind === "contact"
       && intent.targets.some((target) => target.kind === "actor"
         && target.handle === latestVisiblePerformer));
+  const expectedActionCount = Math.min(
+    CAMPAIGN_PLAY_LIMITS.suggestedActions,
+    packet.availableIntents.length,
+  );
   const indexes = packet.availableIntents.map((_intent, intentIndex) => intentIndex);
   const orderedIndexes = requiredReplyIndex < 0
     ? indexes
     : [requiredReplyIndex, ...indexes.filter((intentIndex) => intentIndex !== requiredReplyIndex)];
-  return orderedIndexes.slice(0, CAMPAIGN_PLAY_LIMITS.suggestedActions).map((intentIndex) => ({
+  return orderedIndexes.slice(0, expectedActionCount).map((intentIndex) => ({
     intentIndex,
-    detail: packet.availableIntents[intentIndex]?.kind === "move"
-      ? null
-      : "the immediate situation",
+    detail: intentIndex === requiredReplyIndex ? "the immediate situation" : null,
   }));
 }
 

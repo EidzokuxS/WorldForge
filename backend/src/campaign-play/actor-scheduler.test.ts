@@ -74,7 +74,7 @@ function buildAcceptedCampaign(): void {
     const draft = {
       ...candidate.draft,
       placements: candidate.draft.placements.map((placement) =>
-        placement.id === "placement-b" ? { ...placement, locationId: "location-a" } : placement),
+        placement.id === "placement-b" ? { ...placement, locationId: "location-a-office" } : placement),
     };
     const review = repository.completeBuild({
       buildId,
@@ -113,7 +113,7 @@ function planJson(actorId: string, goalId: string, withLocationPrecondition: boo
   return {
     intentJson: canonicalizeCampaignPlayProjection(intent),
     preconditionsJson: canonicalizeCampaignPlayProjection(withLocationPrecondition
-      ? [{ kind: "actor_at_location", actorId, locationId: "location-a" }]
+      ? [{ kind: "actor_at_location", actorId, locationId: "location-a-office" }]
       : []),
     stepsJson: canonicalizeCampaignPlayProjection([
       { stepId: `step-${actorId}-one`, order: 0, intent,

@@ -93,7 +93,7 @@ function buildAcceptedCampaign(): void {
     const draft = {
       ...candidate.draft,
       placements: candidate.draft.placements.map((placement) =>
-        placement.id === "placement-b" ? { ...placement, locationId: "location-a" } : placement),
+        placement.id === "placement-b" ? { ...placement, locationId: "location-a-office" } : placement),
     };
     const review = repository.completeBuild({
       buildId: "build-actor-proposals",
@@ -125,7 +125,7 @@ function modelEvidence(actualModel: string) {
 function planJson(
   actorId: string,
   goalId: string,
-  actorBRouteId = "route-a",
+  actorBRouteId = "route-office-a",
   actorBIntent: "move" | "wait" | "remote_wait" = "move",
   actorAAcquire = false,
 ) {
@@ -146,7 +146,7 @@ function planJson(
       ? {
           kind: "wait" as const,
           targets: [
-            { kind: "location" as const, id: actorBIntent === "remote_wait" ? "location-b" : "location-a" },
+            { kind: "location" as const, id: actorBIntent === "remote_wait" ? "location-b" : "location-a-office" },
             { kind: "goal" as const, id: goalId },
           ],
           method: "Wait beside the reef ledger office for the clerk to return",
@@ -187,7 +187,7 @@ function planJson(
 
 function createReadyFixture(
   playerLocationId = "location-c",
-  actorBRouteId = "route-a",
+  actorBRouteId = "route-office-a",
   actorBPlanVersion = 1,
   actorBIntent: "move" | "wait" | "remote_wait" = "move",
   actorAAcquire = false,
@@ -477,7 +477,7 @@ describe("Campaign Play actor proposal service", () => {
         mode: "projectable",
         predicates: [{
           channel: "local_aftermath",
-          locationId: "location-a",
+          locationId: "location-a-office",
           validUntilWorldTimeMinutes: 1_440,
         }],
       },
@@ -647,7 +647,7 @@ describe("Campaign Play actor proposal service", () => {
 
     expect(outcomes[0]).toMatchObject({ kind: "rejected", reason: "stale_world_version" });
     expect(handle.sqlite.prepare(`SELECT location_id AS locationId FROM actor_placements
-      WHERE actor_id = 'actor-b' AND placement_kind = 'present'`).get()).toEqual({ locationId: "location-a" });
+      WHERE actor_id = 'actor-b' AND placement_kind = 'present'`).get()).toEqual({ locationId: "location-a-office" });
     expect(handle.sqlite.prepare(`SELECT agency_debt AS agencyDebt,
       next_act_at_world_time_minutes AS nextAt FROM campaign_play_actor_schedules
       WHERE actor_id = 'actor-b'`).get()).toEqual({ agencyDebt: 1, nextAt: settledClock + 30 });

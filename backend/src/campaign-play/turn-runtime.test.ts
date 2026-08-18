@@ -182,7 +182,7 @@ function acceptWorld(): void {
       ...candidate.draft,
       placements: candidate.draft.placements.map((placement) =>
         placement.id === "placement-b"
-          ? { ...placement, locationId: "location-a" }
+          ? { ...placement, locationId: "location-a-office" }
           : placement),
     };
     const review = repository.completeBuild({

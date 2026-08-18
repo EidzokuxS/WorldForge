@@ -79,7 +79,7 @@ function createOpeningReadyCampaign() {
     const draft = {
       ...candidate.draft,
       placements: candidate.draft.placements.map((placement) =>
-        placement.id === "placement-b" ? { ...placement, locationId: "location-a" } : placement),
+        placement.id === "placement-b" ? { ...placement, locationId: "location-a-office" } : placement),
     };
     const review = repository.completeBuild({
       buildId: "build-one",

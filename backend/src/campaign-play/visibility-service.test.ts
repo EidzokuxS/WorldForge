@@ -104,9 +104,7 @@ function acceptPlayableWorld(): void {
       ...candidate.draft,
       placements: candidate.draft.placements.map((placement) =>
         placement.id === "placement-b"
-          ? { ...placement, locationId: "location-a" }
-          : placement.id === "placement-d"
-            ? { ...placement, locationId: "location-c" }
+          ? { ...placement, locationId: "location-a-office" }
             : placement),
     };
     const review = repository.completeBuild({
@@ -558,7 +556,7 @@ function createVisibilityFixture(
           },
           eventClass: "dialogue",
           performingActorId: "actor-a",
-          summary: "Mara Venn says the signal lantern has failed while Oren Tide listens nearby.",
+          summary: "Mara Venn says the signal lantern has failed while Ilya Venn listens nearby.",
           observableTrace: null,
           affectedRefs: [
             { kind: "actor", id: "actor-player" },
@@ -927,7 +925,7 @@ describe("Campaign Play visibility service", () => {
       locationId: "location-a",
     });
     expect(stored?.payloadJson).toContain(
-      "Mara Venn says the signal lantern has failed while Oren Tide listens nearby.",
+      "Mara Venn says the signal lantern has failed while Ilya Venn listens nearby.",
     );
   });
 
@@ -935,7 +933,7 @@ describe("Campaign Play visibility service", () => {
     const fixture = createVisibilityFixture(["inspect"], false, "payable");
     expect(fixture.handle.sqlite.prepare(`SELECT location_id AS locationId
       FROM actor_placements WHERE campaign_id = ? AND actor_id = 'actor-d'`)
-      .get(CAMPAIGN_ID)).toEqual({ locationId: "location-c" });
+      .get(CAMPAIGN_ID)).toEqual({ locationId: "location-a" });
     const before = fixture.states.loadState()!;
     const result = createCampaignPlayVisibilityService(fixture.handle).projectTurn({
       token: fixture.visibilityToken,
@@ -965,7 +963,7 @@ describe("Campaign Play visibility service", () => {
       "The signal keeper asks Mara what she has learned about the impossible signal.",
     );
     expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
-      "Mara Venn says the signal lantern has failed while Oren Tide listens nearby.",
+      "Mara Venn says the signal lantern has failed while Ilya Venn listens nearby.",
     );
     expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
       "Mara Venn left for Glass Reef Quay.",
@@ -993,10 +991,10 @@ describe("Campaign Play visibility service", () => {
     expect(chronologicalTexts.indexOf(
       "Fresh scuff marks and a snapped seal remain beside the route board.",
     )).toBeLessThan(chronologicalTexts.indexOf(
-      "Mara Venn says the signal lantern has failed while Oren Tide listens nearby.",
+      "Mara Venn says the signal lantern has failed while Ilya Venn listens nearby.",
     ));
     expect(chronologicalTexts.indexOf(
-      "Mara Venn says the signal lantern has failed while Oren Tide listens nearby.",
+      "Mara Venn says the signal lantern has failed while Ilya Venn listens nearby.",
     )).toBeLessThan(chronologicalTexts.indexOf(
       "Mara Venn left for Glass Reef Quay.",
     ));
@@ -1015,7 +1013,7 @@ describe("Campaign Play visibility service", () => {
     expect(result.packet.consequences.filter((entry) => entry.causalCue === "direct_perception"))
       .toHaveLength(2);
     const performed = result.packet.consequences.find((entry) =>
-      entry.whatChanged === "Mara Venn says the signal lantern has failed while Oren Tide listens nearby.");
+      entry.whatChanged === "Mara Venn says the signal lantern has failed while Ilya Venn listens nearby.");
     expect(performed).toMatchObject({
       performingActorHandle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-a"),
       performingActorName: "Mara Venn",
@@ -1024,8 +1022,8 @@ describe("Campaign Play visibility service", () => {
       binding.observationHandle === performed?.observationHandle)).toEqual({
         observationHandle: performed?.observationHandle,
         actors: [{
-          handle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-b"),
-          name: "Oren Tide",
+          handle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-d"),
+          name: "Ilya Venn",
         }],
       });
     const premise = result.packet.consequences.find((entry) =>
