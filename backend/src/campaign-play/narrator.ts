@@ -723,7 +723,7 @@ interface ActionSelectionIndexFrame {
 }
 
 interface ToolIntentSelectionFrameEntry {
-  field: string;
+  key: string;
   intentIndex: number;
   kind: CampaignPlayNarratorPacket["availableIntents"][number]["kind"];
 }
@@ -761,7 +761,7 @@ function buildActionSelectionIndexFrame(
   };
 }
 
-function toolIntentSelectionField(intentIndex: number): string {
+function toolIntentSelectionKey(intentIndex: number): string {
   return `intent${intentIndex}`;
 }
 
@@ -781,7 +781,7 @@ function buildToolIntentSelectionFrame(
       intentIndex === requiredIntentIndex
         ? []
         : [{
-            field: toolIntentSelectionField(intentIndex),
+            key: toolIntentSelectionKey(intentIndex),
             intentIndex,
             kind: intent.kind,
           }]),
@@ -892,25 +892,22 @@ function narratorToolSchemaForPacket(packet: CampaignPlayNarratorPacket) {
     observationIndexes: observationIndexSchema,
   })).min(1).max(maximumBeats);
   const requiredIntentIndex = requiredReplyIntentIndex(packet);
-  const intentSelectionShape = Object.fromEntries(
-    packet.availableIntents.flatMap((_intent, intentIndex) =>
-      intentIndex === requiredIntentIndex
-        ? []
-        : [[toolIntentSelectionField(intentIndex), z.object({
-            selected: z.boolean(),
-          }).strict()]]),
-  ) as Record<string, z.ZodTypeAny>;
-  const intentSelections = z.object(intentSelectionShape).strict();
+  const selectionFrame = buildToolIntentSelectionFrame(packet);
+  const selectedIntentKeySchema = selectionFrame.entries.length === 0
+    ? z.array(z.string()).length(selectionFrame.expectedSelectedCount)
+    : z.array(z.enum(
+      selectionFrame.entries.map(({ key }) => key) as [string, ...string[]],
+    )).length(selectionFrame.expectedSelectedCount);
   if (requiredIntentIndex !== null) {
     return z.object({
       beats,
       requiredReplyDetail: requiredReplyDetailSchema(packet, requiredIntentIndex),
-      intentSelections,
+      selectedIntentKeys: selectedIntentKeySchema,
     }).strict();
   }
   return z.object({
     beats,
-    intentSelections,
+    selectedIntentKeys: selectedIntentKeySchema,
   }).strict();
 }
 
@@ -920,20 +917,28 @@ function decodeNarratorToolResult(
 ): CampaignPlayNarratorProposal {
   const transport = narratorToolSchemaForPacket(packet).parse(value) as {
     beats: CampaignPlayNarratorProposal["beats"];
-    intentSelections: Record<string, { selected: boolean }>;
+    selectedIntentKeys: string[];
     requiredReplyDetail?: string;
   };
   const requiredIntentIndex = requiredReplyIntentIndex(packet);
-  const selectedActions: CampaignPlayNarratorProposal["actionSelections"] = [];
-  packet.availableIntents.forEach((intent, intentIndex) => {
-    if (intentIndex === requiredIntentIndex) return;
-    const selection = transport.intentSelections[toolIntentSelectionField(intentIndex)];
-    if (selection === undefined) {
-      throw new Error(`Missing tool intent selection for intent ${intentIndex}.`);
+  const selectionFrame = buildToolIntentSelectionFrame(packet);
+  const intentIndexByKey = new Map(
+    selectionFrame.entries.map(({ key, intentIndex }) => [key, intentIndex]),
+  );
+  const seenKeys = new Set<string>();
+  const selectedIntentIndexes = transport.selectedIntentKeys.map((key) => {
+    if (seenKeys.has(key)) {
+      throw new Error(`Duplicate tool intent selection key: ${key}.`);
     }
-    if (!selection.selected) return;
-    selectedActions.push({ intentIndex, detail: null });
-  });
+    seenKeys.add(key);
+    const intentIndex = intentIndexByKey.get(key);
+    if (intentIndex === undefined) {
+      throw new Error(`Unknown tool intent selection key: ${key}.`);
+    }
+    return intentIndex;
+  }).sort((left, right) => left - right);
+  const selectedActions: CampaignPlayNarratorProposal["actionSelections"] =
+    selectedIntentIndexes.map((intentIndex) => ({ intentIndex, detail: null }));
   if (requiredIntentIndex === null) {
     return narratorProposalSchemaForPacket(packet).parse({
       beats: transport.beats,
@@ -984,8 +989,8 @@ END_ACTOR_SCOPE_REPAIR_FRAME`;
     "narrator_generation_schema_mismatch" ? `
 NARRATOR_GENERATION_RECOVERY
 The prior response did not match the provider-facing schema. Regenerate a fresh object. ${toolMode
-    ? `${toolRequiredReply ? "The required reply index is application-owned and absent from intentSelections. Return its wording only in requiredReplyDetail. " : ""}Rebuild the complete intentSelections object from TOOL_INTENT_SELECTION_FRAME. Return every listed field exactly once and set selected=true for exactly expectedSelectedCount fields.`
-    : "Rebuild actionSelections from ACTION_SELECTION_INDEX_FRAME: at each actionSelectionIndex, set intentIndex to one integer from allowedIntentIndexes, and use each selected index once."} Keep every other schema, packet, grounding, visibility, and narration rule unchanged.
+    ? `Rebuild selectedIntentKeys from TOOL_INTENT_SELECTION_FRAME. Return exactly expectedSelectedCount distinct listed keys. Do not reuse a key. Keep every other schema, packet, grounding, visibility, and narration rule unchanged.${toolRequiredReply ? " The required reply key is application-owned and absent from selectedIntentKeys. requiredReplyDetail supplies only that immediate reply as one non-empty single-line detail." : ""}`
+    : "Rebuild actionSelections from ACTION_SELECTION_INDEX_FRAME: at each actionSelectionIndex, set intentIndex to one integer from allowedIntentIndexes, and use each selected index once. Keep every other schema, packet, grounding, visibility, and narration rule unchanged."}
 ${toolMode ? `TOOL_INTENT_SELECTION_FRAME
 ${canonicalizeCampaignPlayProjection(buildToolIntentSelectionFrame(packet))}
 END_TOOL_INTENT_SELECTION_FRAME` : `ACTION_SELECTION_INDEX_FRAME
@@ -1000,13 +1005,13 @@ END_OBSERVATION_COVERAGE_REPAIR_FRAME` : "";
     : `REQUIRED_REPLY_INTENT_INDEX=${JSON.stringify(requiredIntentIndex)}`;
   const toolIntentSelectionContract = toolMode ? `
 TOOL_INTENT_SELECTION_CONTRACT
-intentSelections is an application-keyed selection map, not an action array. Return every field from TOOL_INTENT_SELECTION_FRAME exactly once. Each field contains only selected. For exactly expectedSelectedCount fields, set selected=true; set selected=false for every other field. The application owns the complete wording and derives each intentIndex from the field, so never emit intentIndex or action wording yourself.${toolRequiredReply ? " The required reply index is application-owned and absent from intentSelections. requiredReplyDetail supplies only that immediate reply as one non-empty single-line detail." : ""}
+selectedIntentKeys is a fixed-length array of application-owned keys from TOOL_INTENT_SELECTION_FRAME. Return exactly expectedSelectedCount distinct keys. Copy each key exactly and do not emit intentIndex or action wording. The application resolves the keys and publishes the selected intents in canonical intent-index order.${toolRequiredReply ? " The required reply key is application-owned and absent from selectedIntentKeys. requiredReplyDetail supplies only that immediate reply as one non-empty single-line detail." : ""}
 TOOL_INTENT_SELECTION_FRAME
 ${canonicalizeCampaignPlayProjection(buildToolIntentSelectionFrame(packet))}
 END_TOOL_INTENT_SELECTION_FRAME
 END_TOOL_INTENT_SELECTION_CONTRACT` : "";
   const actionSelectionOutputInstruction = toolMode
-    ? `Select exactly ${outputActionSelectionCount} intents through intentSelections. The application decodes selected fields in canonical intent-index order.${toolRequiredReply ? " It injects the required reply as the first published action." : ""}`
+    ? `Select exactly ${outputActionSelectionCount} keys through selectedIntentKeys. The application decodes selected keys in canonical intent-index order.${toolRequiredReply ? " It injects the required reply as the first published action." : ""}`
     : `Return exactly ${outputActionSelectionCount} actionSelections. Every selection must copy one exact, unique intentIndex from availableIntents. Set detail=null for every application-owned optional intent.`;
   const nativeRequiredReplyInstruction = !toolRequiredReply && requiredIntentIndex !== null
     ? " When REQUIRED_REPLY_INTENT_INDEX is a number, the actor bound to that contact intent just performed a visible consequence. Put that exact index only in actionSelections[0] so the player can answer, accept, refuse, or continue the exchange. Do not select that index again; every later actionSelection must use a different intentIndex."
@@ -1044,7 +1049,7 @@ An ordinary move to a different location with no stated purpose in actionContext
 Return exactly one object matching the supplied schema. Output only that object.
 
 ${toolIntentSelectionContract}
-Propose beats and ${toolMode ? "intentSelections" : "actionSelections"} only.${toolRequiredReply ? " Include requiredReplyDetail." : ""} Each beat carries purpose, text, and observationIndexes. ${toolMode ? "Each intentSelections field contains exactly selected." : "Each actionSelection contains exactly intentIndex and detail. Set detail=null for every optional intent. Only the application-owned required reply uses a non-null detail."} includesTravel belongs only to the input catalog and must never appear in model output. Choose purpose only from orientation, moment, consequence, and action_handoff. Purposes label a beat's work. Do not emit one beat for every purpose. Prefer one beat. Add another only when it reveals a separate supported observation or carries a necessary unresolved reply. For travel or observation, combine the action result and its immediately visible aftermath in one beat when they are understandable together. A later beat must not repeat the arrival, setting description, visible actors, action result, or any sentence-level fact already stated by an earlier beat. If removing a beat loses no supported information, omit it. Never add a moment beat to repeat sourceMoment, currentLocation, visible actors, or visible routes.
+Propose beats and ${toolMode ? "selectedIntentKeys" : "actionSelections"} only.${toolRequiredReply ? " Include requiredReplyDetail." : ""} Each beat carries purpose, text, and observationIndexes. ${toolMode ? "selectedIntentKeys contains exactly the distinct application-owned keys required by the schema." : "Each actionSelection contains exactly intentIndex and detail. Set detail=null for every optional intent. Only the application-owned required reply uses a non-null detail."} includesTravel belongs only to the input catalog and must never appear in model output. Choose purpose only from orientation, moment, consequence, and action_handoff. Purposes label a beat's work. Do not emit one beat for every purpose. Prefer one beat. Add another only when it reveals a separate supported observation or carries a necessary unresolved reply. For travel or observation, combine the action result and its immediately visible aftermath in one beat when they are understandable together. A later beat must not repeat the arrival, setting description, visible actors, action result, or any sentence-level fact already stated by an earlier beat. If removing a beat loses no supported information, omit it. Never add a moment beat to repeat sourceMoment, currentLocation, visible actors, or visible routes.
 
 newObservations contains accepted consequences visible to the player in chronological packet order. Index its entries from zero. Assign each index to observationIndexes of exactly one beat whose text incorporates that observation; use [] when a beat incorporates none. When observations describe successive states of the same actor, object, or place, preserve their causal order. The latest observation defines the narrated current state. When a later current-turn observation attributes visible action to an actor, it supersedes an earlier statement that the actor stayed still or that nothing changed during the player's wait. Narrate the later action; do not retain the stale absence claim.
 

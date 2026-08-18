@@ -2918,9 +2918,7 @@ END_RECOVERY_DIAGNOSTIC`);
     };
     const toolTransport = {
       beats: toolProposal.beats,
-      intentSelections: {
-        intent0: { selected: true },
-      },
+      selectedIntentKeys: ["intent0"],
     };
     const toolTrace = trace("tool_mode");
     toolTrace.requestedMode = "tool";
@@ -2956,7 +2954,7 @@ END_RECOVERY_DIAGNOSTIC`);
     expect(generateObject).toHaveBeenCalledOnce();
   });
 
-  it("uses one code-keyed tool field per intent and revalidates the packet locally", async () => {
+  it("uses provider-safe fixed-cardinality tool keys and revalidates the packet locally", async () => {
     const packet = r216RequiredReplyToolPacket();
     const validProposal = {
       beats: [
@@ -2979,13 +2977,7 @@ END_RECOVERY_DIAGNOSTIC`);
     const validTransport = {
       beats: validProposal.beats,
       requiredReplyDetail: validProposal.actionSelections[0]!.detail,
-      intentSelections: {
-        intent0: { selected: true },
-        intent1: { selected: true },
-        intent2: { selected: true },
-        intent4: { selected: false },
-        intent5: { selected: false },
-      },
+      selectedIntentKeys: ["intent2", "intent0", "intent1"],
     };
     const toolTrace = trace("tool_mode");
     toolTrace.requestedMode = "tool";
@@ -3014,14 +3006,21 @@ END_RECOVERY_DIAGNOSTIC`);
       structuredOutputMode: "tool" as const,
     });
 
-    await expect(narrator.narrate(request("narration-r216-tool-valid"))).resolves.toBeDefined();
+    const validResult = await narrator.narrate(request("narration-r216-tool-valid"));
+    expect(validResult.narration.suggestedActions.map(({ choiceHandle }) => choiceHandle)).toEqual([
+      "choice_r216_3",
+      "choice_r216_0",
+      "choice_r216_1",
+      "choice_r216_2",
+    ]);
     const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
     const providerSchema = z.toJSONSchema(options.schema) as unknown as {
       properties: {
         requiredReplyDetail: unknown;
-        intentSelections: {
-          properties?: Record<string, unknown>;
-          additionalProperties?: boolean;
+        selectedIntentKeys: {
+          items?: { enum?: string[] };
+          minItems?: number;
+          maxItems?: number;
         };
       };
     };
@@ -3029,16 +3028,21 @@ END_RECOVERY_DIAGNOSTIC`);
     expect(providerSchemaText).not.toContain("prefixItems");
     expect(providerSchemaText).not.toContain("\"const\"");
     expect(providerSchemaText).not.toContain("oneOf");
+    expect(providerSchemaText).not.toContain("anyOf");
+    expect(providerSchemaText).not.toContain("nullable");
     expect(providerSchemaText).not.toContain("intentIndex");
     expect(providerSchema.properties.requiredReplyDetail).toBeDefined();
-    expect(Object.keys(providerSchema.properties.intentSelections.properties ?? {})).toEqual([
+    expect(providerSchema.properties.selectedIntentKeys).toMatchObject({
+      minItems: 3,
+      maxItems: 3,
+    });
+    expect(providerSchema.properties.selectedIntentKeys.items?.enum).toEqual([
       "intent0",
       "intent1",
       "intent2",
       "intent4",
       "intent5",
     ]);
-    expect(providerSchema.properties.intentSelections.additionalProperties).toBe(false);
     expect(options.schema.safeParse(validTransport).success).toBe(true);
     const requiredReplyPrefix = "Talk to Mara Venn: ";
     const maximumRequiredReplyDetail = "a".repeat(
@@ -3084,9 +3088,12 @@ END_RECOVERY_DIAGNOSTIC`);
       "requiredReplyDetail supplies only that immediate reply",
     );
     expect(initialPrompt).toContain(
-      "intentSelections is an application-keyed selection map",
+      "selectedIntentKeys is a fixed-length array of application-owned keys from TOOL_INTENT_SELECTION_FRAME",
     );
-    expect(initialPrompt).toContain("set selected=true");
+    expect(initialPrompt).toContain(
+      "Return exactly expectedSelectedCount distinct keys. Copy each key exactly and do not emit intentIndex or action wording.",
+    );
+    expect(initialPrompt).not.toContain("intentSelections");
     expect(initialPrompt).not.toContain("Put that exact index only in actionSelections[0]");
 
     const recoveryFeedback: CampaignPlayNarratorRecoveryFeedback = {
@@ -3102,10 +3109,10 @@ END_RECOVERY_DIAGNOSTIC`);
       "REQUIRED_REPLY_INTENT_INDEX=application-owned (absent from model output)",
     );
     expect(recoveryPrompt).toContain(
-      "The required reply index is application-owned and absent from intentSelections.",
+      "The required reply key is application-owned and absent from selectedIntentKeys.",
     );
     expect(recoveryPrompt).toContain(
-      "Rebuild the complete intentSelections object",
+      "Rebuild selectedIntentKeys from TOOL_INTENT_SELECTION_FRAME. Return exactly expectedSelectedCount distinct listed keys. Do not reuse a key.",
     );
     expect(recoveryPrompt).toContain(
       "RECOVERY_DIAGNOSTIC",
@@ -3118,7 +3125,7 @@ END_RECOVERY_DIAGNOSTIC`);
     generatedProposal = {
       beats: validTransport.beats,
       requiredReplyDetail: "accept the uncertain share",
-      intentSelections: {},
+      selectedIntentKeys: [],
     };
     await expect(narrator.narrate({
       ...request("narration-r216-tool-one-required-reply"),
@@ -3126,9 +3133,12 @@ END_RECOVERY_DIAGNOSTIC`);
     })).resolves.toBeDefined();
     const oneIntentOptions = generateObject.mock.calls[3]![0] as Parameters<typeof safeGenerateObject>[0];
     const oneIntentProviderSchema = z.toJSONSchema(oneIntentOptions.schema) as unknown as {
-      properties: { intentSelections: { properties?: Record<string, unknown> } };
+      properties: { selectedIntentKeys: { items?: unknown; minItems?: number; maxItems?: number } };
     };
-    expect(oneIntentProviderSchema.properties.intentSelections.properties).toEqual({});
+    expect(oneIntentProviderSchema.properties.selectedIntentKeys).toMatchObject({
+      minItems: 0,
+      maxItems: 0,
+    });
     expect(oneIntentOptions.schema.safeParse(generatedProposal).success).toBe(true);
 
     const invalidCases: Array<{
@@ -3137,35 +3147,34 @@ END_RECOVERY_DIAGNOSTIC`);
       diagnostic: "narrator_generation_schema_mismatch" | "narrator_packet_validation_mismatch";
     }> = [
       {
-        name: "echoed-required-reply-index",
+        name: "unknown-key",
         transport: {
           ...validTransport,
-          intentSelections: {
-            ...validTransport.intentSelections,
-            intent3: { selected: true },
-          },
+          selectedIntentKeys: ["intent0", "intent1", "intent3"],
         },
         diagnostic: "narrator_generation_schema_mismatch",
       },
       {
-        name: "too-many-selected-intents",
+        name: "duplicate-key",
         transport: {
           ...validTransport,
-          intentSelections: {
-            ...validTransport.intentSelections,
-            intent4: { selected: true },
-          },
+          selectedIntentKeys: ["intent0", "intent0", "intent1"],
         },
         diagnostic: "narrator_generation_schema_mismatch",
       },
       {
-        name: "unselected-intent-with-detail",
+        name: "missing-key",
         transport: {
           ...validTransport,
-          intentSelections: {
-            ...validTransport.intentSelections,
-            intent5: { selected: false, detail: "harbor option 5" },
-          },
+          selectedIntentKeys: ["intent0", "intent1"],
+        },
+        diagnostic: "narrator_generation_schema_mismatch",
+      },
+      {
+        name: "extra-key",
+        transport: {
+          ...validTransport,
+          selectedIntentKeys: ["intent0", "intent1", "intent2", "intent4"],
         },
         diagnostic: "narrator_generation_schema_mismatch",
       },
@@ -3244,16 +3253,14 @@ END_RECOVERY_DIAGNOSTIC`);
     expect(generateObject).toHaveBeenCalledTimes(4 + invalidCases.length);
   });
 
-  it("uses the same code-keyed tool transport when no required reply exists", async () => {
+  it("uses the same fixed-cardinality tool transport when no required reply exists", async () => {
     const toolProposal = {
       ...proposalFixture(),
       beats: proposalFixture().beats.slice(0, 2),
     };
     const toolTransport = {
       beats: toolProposal.beats,
-      intentSelections: {
-        intent0: { selected: true },
-      },
+      selectedIntentKeys: ["intent0"],
     };
     const toolTrace = trace("tool_mode");
     toolTrace.requestedMode = "tool";
@@ -3285,12 +3292,13 @@ END_RECOVERY_DIAGNOSTIC`);
     const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
     const providerSchema = z.toJSONSchema(options.schema) as unknown as {
       properties: {
-        intentSelections: { properties?: Record<string, unknown> };
+        selectedIntentKeys: { items?: { enum?: string[] }; minItems?: number; maxItems?: number };
         requiredReplyDetail?: unknown;
       };
     };
     expect(providerSchema.properties.requiredReplyDetail).toBeUndefined();
-    expect(Object.keys(providerSchema.properties.intentSelections.properties ?? {})).toEqual(["intent0"]);
+    expect(providerSchema.properties.selectedIntentKeys.items?.enum).toEqual(["intent0"]);
+    expect(providerSchema.properties.selectedIntentKeys).toMatchObject({ minItems: 1, maxItems: 1 });
     expect(options.schema.safeParse(toolTransport).success).toBe(true);
     expect(options.schema.safeParse(toolProposal).success).toBe(false);
     expect(options.schema.safeParse({
