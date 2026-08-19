@@ -340,13 +340,13 @@ function toolNullableNameSchema() {
 function createToolExposureSchema(allHandles: readonly string[]) {
   const predicate = z.object({
     channel: toolEnum(["direct_perception", "local_aftermath", "route_state", "witness_report"] as const),
-    anchorHandle: toolHandleSchema(allHandles).optional(),
-    visibleForMinutes: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes).optional(),
-    triggers: z.array(toolEnum(["inspect", "attempt", "traverse"] as const)).min(1).max(3).optional(),
+    anchorHandle: toolHandleSchema(allHandles),
+    visibleForMinutes: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes),
+    triggers: z.array(toolEnum(["inspect", "attempt", "traverse"] as const)).max(3),
   }).strict();
   return z.object({
     mode: toolEnum(["protected", "projectable"] as const),
-    predicates: z.array(predicate).min(1).max(CAMPAIGN_PLAY_LIMITS.exposuresPerEvent).optional(),
+    predicates: z.array(predicate).max(CAMPAIGN_PLAY_LIMITS.exposuresPerEvent),
   }).strict();
 }
 
@@ -452,6 +452,18 @@ function createToolProposalSchema(
   const affectedHandlesSchema = z.array(toolHandleSchema(allHandles))
     .max(CAMPAIGN_PLAY_LIMITS.affectedRefs)
     .refine((values) => new Set(values).size === values.length);
+  const possessionItemSchema = resourceAuthority.possession !== null
+    && (resourceAuthority.possession.operation === "transform"
+      || resourceAuthority.possession.possessionHandle === null)
+    ? z.object({
+        name: stringValue.max(CAMPAIGN_PLAY_LIMITS.name),
+        summary: stringValue.max(CAMPAIGN_PLAY_LIMITS.text),
+        affectedHandles: affectedHandlesSchema,
+      }).strict()
+    : z.object({
+        summary: stringValue.max(CAMPAIGN_PLAY_LIMITS.text),
+        affectedHandles: affectedHandlesSchema,
+      }).strict();
   const arrays = {
     move_actor: z.array(z.object({
       actorHandle: toolNullableHandleSchema(actorHandles),
@@ -491,11 +503,7 @@ function createToolProposalSchema(
       amount: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
       resultStatus: toolEnum(CAMPAIGN_PLAY_PRESSURE_STATUS_VALUES),
     }).strict()),
-    adjust_actor_possession: z.array(z.object({
-      name: stringValue.max(CAMPAIGN_PLAY_LIMITS.name).optional(),
-      summary: stringValue.max(CAMPAIGN_PLAY_LIMITS.text),
-      affectedHandles: affectedHandlesSchema,
-    }).strict()),
+    adjust_actor_possession: z.array(possessionItemSchema),
     materialize_support_actor: z.array(z.object({
       actorHandle: toolEnum([NEW_SUPPORT_ACTOR_HANDLE] as const),
       name: stringValue.max(CAMPAIGN_PLAY_LIMITS.name),
@@ -565,16 +573,69 @@ function createToolMechanicalAuthorityReviewSchema() {
     verdict: toolEnum(["accepted", "rejected"] as const),
     reason: line(CAMPAIGN_PLAY_LIMITS.text),
     failedChecks: z.array(mechanicalAuthorityFailedCheckSchema).min(0).max(5),
-  }).strict();
+  }).strict().superRefine((review, context) => {
+    const expectsFailedChecks = review.verdict === "rejected";
+    if (expectsFailedChecks !== (review.failedChecks.length > 0)) {
+      context.addIssue({
+        code: "custom",
+        path: ["failedChecks"],
+        message: "accepted requires failedChecks=[]; rejected requires one to five failedChecks.",
+      });
+    }
+  });
 }
 
-function toolContractFailure(cause?: unknown): never {
-  throw new CampaignPlayGameMasterError(
-    "model_contract_failed",
-    null,
-    null,
-    cause === undefined ? undefined : { cause },
-  );
+type CampaignPlayGameMasterContractDiagnosticPhase =
+  | "provider_extraction"
+  | "private_decode"
+  | "domain_mismatch";
+
+export interface CampaignPlayGameMasterContractDiagnostic {
+  readonly phase: CampaignPlayGameMasterContractDiagnosticPhase;
+  readonly coordinate: string;
+}
+
+const gameMasterContractDiagnosticByError = new WeakMap<
+  CampaignPlayGameMasterError,
+  CampaignPlayGameMasterContractDiagnostic
+>();
+
+function rememberCampaignPlayGameMasterContractDiagnostic(
+  error: CampaignPlayGameMasterError,
+  diagnostic: CampaignPlayGameMasterContractDiagnostic | undefined,
+): void {
+  if (diagnostic !== undefined) gameMasterContractDiagnosticByError.set(error, diagnostic);
+}
+
+export function getCampaignPlayGameMasterContractDiagnostic(
+  error: unknown,
+): CampaignPlayGameMasterContractDiagnostic | undefined {
+  return error instanceof CampaignPlayGameMasterError
+    ? gameMasterContractDiagnosticByError.get(error)
+    : undefined;
+}
+
+function toolContractFailure(
+  diagnostic: CampaignPlayGameMasterContractDiagnostic = {
+    phase: "private_decode",
+    coordinate: "tool.contract",
+  },
+): never {
+  const error = new CampaignPlayGameMasterError("model_contract_failed", null);
+  rememberCampaignPlayGameMasterContractDiagnostic(error, diagnostic);
+  throw error;
+}
+
+function sanitizeToolProviderCoordinate(path: readonly PropertyKey[]): string {
+  const roots = new Set(path.filter((part): part is string => typeof part === "string"));
+  if (roots.has("adjust_actor_possession")) {
+    return roots.has("name")
+      ? "adjust_actor_possession.name"
+      : "adjust_actor_possession";
+  }
+  if (roots.has("exposure")) return "exposure.predicates";
+  if (roots.has("effectOrder")) return "effectOrder";
+  return "proposal.schema";
 }
 
 function hasToolField(value: Record<string, unknown>, field: string): boolean {
@@ -597,47 +658,83 @@ function requireToolKeys(value: Record<string, unknown>, allowed: readonly strin
   if (Object.keys(value).some((key) => !allowedSet.has(key))) toolContractFailure();
 }
 
-function decodeToolExposure(value: Record<string, unknown>): z.infer<typeof exposureProposalSchema> {
+function decodeToolExposure(
+  value: Record<string, unknown>,
+  map: ReadonlyMap<string, CampaignPlayEntityRef>,
+): z.infer<typeof exposureProposalSchema> {
   const mode = requireToolField<string>(value, "mode");
+  requireToolKeys(value, ["mode", "predicates"]);
+  const predicatesValue = requireToolField<unknown[]>(value, "predicates");
   if (mode === "protected") {
-    requireToolKeys(value, ["mode"]);
+    if (predicatesValue.length !== 0) {
+      toolContractFailure({ phase: "private_decode", coordinate: "exposure.protected.predicates" });
+    }
     return { mode };
   }
   if (mode !== "projectable") toolContractFailure();
-  requireToolKeys(value, ["mode", "predicates"]);
-  const predicatesValue = requireToolField<unknown[]>(value, "predicates");
+  if (predicatesValue.length < 1 || predicatesValue.length > CAMPAIGN_PLAY_LIMITS.exposuresPerEvent) {
+    toolContractFailure({ phase: "private_decode", coordinate: "exposure.predicates.cardinality" });
+  }
   return {
     mode,
-    predicates: predicatesValue.map((rawPredicate) => {
+    predicates: predicatesValue.map((rawPredicate, index) => {
       const predicate = rawPredicate as Record<string, unknown>;
+      if (predicate === null || typeof predicate !== "object" || Array.isArray(predicate)) {
+        toolContractFailure({ phase: "private_decode", coordinate: `exposure.predicates[${index}]` });
+      }
+      requireToolKeys(predicate, ["channel", "anchorHandle", "visibleForMinutes", "triggers"]);
       const channel = requireToolField<string>(predicate, "channel");
+      const anchorHandle = requireToolField<string>(predicate, "anchorHandle");
+      const anchorReference = map.get(anchorHandle);
       switch (channel) {
         case "direct_perception":
-        case "witness_report":
-          requireToolKeys(predicate, ["channel", "anchorHandle"]);
+          if (anchorReference?.kind !== "location"
+            || requireToolField<number>(predicate, "visibleForMinutes") !== 0
+            || requireToolField<unknown[]>(predicate, "triggers").length !== 0) {
+            toolContractFailure({ phase: "private_decode", coordinate: `exposure.predicates[${index}].direct_perception` });
+          }
           return {
             channel,
-            anchorHandle: requireToolField<string>(predicate, "anchorHandle"),
+            anchorHandle,
           };
         case "local_aftermath":
-          requireToolKeys(predicate, ["channel", "anchorHandle", "visibleForMinutes"]);
+          if (anchorReference?.kind !== "location"
+            || requireToolField<unknown[]>(predicate, "triggers").length !== 0) {
+            toolContractFailure({ phase: "private_decode", coordinate: `exposure.predicates[${index}].local_aftermath` });
+          }
           return {
             channel,
-            anchorHandle: requireToolField<string>(predicate, "anchorHandle"),
+            anchorHandle,
             visibleForMinutes: requireToolField<number>(predicate, "visibleForMinutes"),
           };
         case "route_state": {
-          requireToolKeys(predicate, ["channel", "anchorHandle", "triggers"]);
+          if (anchorReference?.kind !== "route"
+            || requireToolField<number>(predicate, "visibleForMinutes") !== 0) {
+            toolContractFailure({ phase: "private_decode", coordinate: `exposure.predicates[${index}].route_state` });
+          }
           const triggers = requireToolField<Array<"inspect" | "attempt" | "traverse">>(predicate, "triggers");
-          if (new Set(triggers).size !== triggers.length) toolContractFailure();
+          if (triggers.length < 1 || triggers.length > 3
+            || new Set(triggers).size !== triggers.length) {
+            toolContractFailure({ phase: "private_decode", coordinate: `exposure.predicates[${index}].route_state.triggers` });
+          }
           return {
             channel,
-            anchorHandle: requireToolField<string>(predicate, "anchorHandle"),
+            anchorHandle,
             triggers,
           };
         }
+        case "witness_report":
+          if (anchorReference?.kind !== "actor"
+            || requireToolField<number>(predicate, "visibleForMinutes") !== 0
+            || requireToolField<unknown[]>(predicate, "triggers").length !== 0) {
+            toolContractFailure({ phase: "private_decode", coordinate: `exposure.predicates[${index}].witness_report` });
+          }
+          return {
+            channel,
+            anchorHandle,
+          };
         default:
-          toolContractFailure();
+          toolContractFailure({ phase: "private_decode", coordinate: `exposure.predicates[${index}].channel` });
       }
     }),
   };
@@ -646,9 +743,13 @@ function decodeToolExposure(value: Record<string, unknown>): z.infer<typeof expo
 function decodeToolEffect(
   kind: ToolEffectKind,
   value: Record<string, unknown>,
+  map: ReadonlyMap<string, CampaignPlayEntityRef>,
   resourceAuthority: ToolResourceAuthority,
 ): Record<string, unknown> {
-  const exposure = () => decodeToolExposure(requireToolField<Record<string, unknown>>(value, "exposure"));
+  const exposure = () => decodeToolExposure(
+    requireToolField<Record<string, unknown>>(value, "exposure"),
+    map,
+  );
   switch (kind) {
     case "move_actor":
       requireToolKeys(value, ["actorHandle"]);
@@ -707,17 +808,24 @@ function decodeToolEffect(
         resultStatus: requireToolField<string>(value, "resultStatus"),
       };
     case "adjust_actor_possession":
-      requireToolKeys(value, ["name", "summary", "affectedHandles"]);
       if (resourceAuthority.possession === null) toolContractFailure();
       const possessionAuthority = resourceAuthority.possession;
       const needsName = possessionAuthority.operation === "transform"
         || possessionAuthority.possessionHandle === null;
+      requireToolKeys(
+        value,
+        needsName ? ["name", "summary", "affectedHandles"] : ["summary", "affectedHandles"],
+      );
       const hasName = hasToolField(value, "name");
-      if (needsName !== hasName) toolContractFailure();
+      if (needsName !== hasName) {
+        toolContractFailure({ phase: "private_decode", coordinate: "adjust_actor_possession.name" });
+      }
       const name = needsName
         ? requireToolField<string>(value, "name")
         : null;
-      if (name !== null && name.length === 0) toolContractFailure();
+      if (name !== null && name.length === 0) {
+        toolContractFailure({ phase: "private_decode", coordinate: "adjust_actor_possession.name" });
+      }
       return {
         kind,
         operation: possessionAuthority.operation,
@@ -802,32 +910,49 @@ function decodeToolProposal(
     worldEventPerformerHandles,
     resourceAuthority,
   ).safeParse(rawProposal);
-  if (!providerParsed.success) toolContractFailure(providerParsed.error);
+  if (!providerParsed.success) {
+    toolContractFailure({
+      phase: "provider_extraction",
+      coordinate: sanitizeToolProviderCoordinate(providerParsed.error.issues[0]?.path ?? []),
+    });
+  }
   type ToolTransport = {
     elapsedMinutes: number;
     effectOrder: Array<{ kind: ToolEffectKind; index: number }>;
   } & { [kind in ToolEffectKind]: Array<Record<string, unknown>> };
   const transport = providerParsed.data as unknown as ToolTransport;
   const total = TOOL_EFFECT_KINDS.reduce((count, kind) => count + transport[kind].length, 0);
-  if (transport.effectOrder.length !== total || total < 1) toolContractFailure();
+  if (transport.effectOrder.length !== total || total < 1) {
+    toolContractFailure({ phase: "private_decode", coordinate: "effectOrder.cardinality" });
+  }
   const covered = new Set<string>();
   const effects = transport.effectOrder.map(({ kind, index }) => {
     const items = transport[kind];
-    if (!Number.isInteger(index) || index < 0 || index >= items.length) toolContractFailure();
+    if (!Number.isInteger(index) || index < 0 || index >= items.length) {
+      toolContractFailure({ phase: "private_decode", coordinate: "effectOrder.index" });
+    }
     const key = `${kind}:${index}`;
-    if (covered.has(key)) toolContractFailure();
+    if (covered.has(key)) {
+      toolContractFailure({ phase: "private_decode", coordinate: "effectOrder.duplicate" });
+    }
     covered.add(key);
     const item = items[index];
-    if (item === undefined) toolContractFailure();
-    return decodeToolEffect(kind, item, resourceAuthority);
+    if (item === undefined) {
+      toolContractFailure({ phase: "private_decode", coordinate: "effectOrder.item" });
+    }
+    return decodeToolEffect(kind, item, map, resourceAuthority);
   });
-  if (covered.size !== total) toolContractFailure();
+  if (covered.size !== total) {
+    toolContractFailure({ phase: "private_decode", coordinate: "effectOrder.coverage" });
+  }
   const decoded = {
     elapsedMinutes: transport.elapsedMinutes,
     effects,
   };
   const exactParsed = constrainedProposalSchema(map, permittedResourceEffectKinds).safeParse(decoded);
-  if (!exactParsed.success) toolContractFailure(exactParsed.error);
+  if (!exactParsed.success) {
+    toolContractFailure({ phase: "domain_mismatch", coordinate: "proposal.domain" });
+  }
   return exactParsed.data;
 }
 
@@ -922,6 +1047,7 @@ export type CampaignPlayGameMasterRecoveryCheck =
 export interface CampaignPlayGameMasterRecoveryFeedback {
   readonly diagnostic: "game_master_semantic_validation_mismatch";
   readonly failedChecks: readonly CampaignPlayGameMasterRecoveryCheck[];
+  readonly contractDiagnostic?: CampaignPlayGameMasterContractDiagnostic;
 }
 
 const gameMasterRecoveryFeedbackByError = new WeakMap<
@@ -980,6 +1106,8 @@ function emitCampaignPlayGameMasterContractRejected(
   safeGenerationCode: string | null,
 ): void {
   const recoveryFeedback = getCampaignPlayGameMasterRecoveryFeedback(error);
+  const contractDiagnostic = getCampaignPlayGameMasterContractDiagnostic(error)
+    ?? recoveryFeedback?.contractDiagnostic;
   try {
     log.event("game_master.contract_rejected", {
       phase,
@@ -989,6 +1117,12 @@ function emitCampaignPlayGameMasterContractRejected(
       recoveryDiagnostic: recoveryFeedback?.diagnostic ?? null,
       failedChecks: recoveryFeedback?.failedChecks ?? [],
       reviewFailedChecks: mechanicalAuthorityReviewFailedChecksByError.get(error) ?? [],
+      ...(contractDiagnostic === undefined
+        ? {}
+        : {
+            contractDiagnosticPhase: contractDiagnostic.phase,
+            contractDiagnosticCoordinate: contractDiagnostic.coordinate,
+          }),
       denial: error.denial === null ? null : {
         code: error.denial.code,
         commandIndex: error.denial.commandIndex,
@@ -2460,7 +2594,9 @@ function prompt(
     "When PLAYER_INTENT loads, unloads, fastens, joins, inserts, removes, or otherwise changes an object's relation to a container or fixed fixture, include the necessary physical handling and commit one unambiguous final relation in the summary. If SOURCE_MOMENT places the object outside a container and the result fastens it to a fixture inside that container, state whether it was first put inside. On a setback, choose the final position that actually remains. Never describe an object as attached to a fixture while silently leaving it in its prior place, and never defer that spatial decision to a later stage.",
     "Copy every handle-valued field character-for-character from ALLOWED_HANDLES. This includes performingActorHandle, affectedHandles, and every model-authored exposure predicate anchorHandle. affectedHandles must not repeat a handle. Never put a name, ID, description, or newly invented token in a handle field.",
     "Match each handle to the field's required kind in HANDLES_BY_KIND. direct_perception and local_aftermath anchorHandle require location; route_state anchorHandle requires route; witness_report anchorHandle requires actor. actorHandle, debtorActorHandle, and creditorActorHandle require actor; routeHandle requires route; fromLocationHandle and toLocationHandle require location; relationHandle requires relation; goalHandle requires goal; pressureHandle requires pressure; obligationHandle requires obligation; and paymentPossessionHandle requires possession.",
-    "Every exposure field is one object, never an array. It is exactly {\"mode\":\"protected\"} or {\"mode\":\"projectable\",\"predicates\":[...]}; predicates is the only array. Use the exact predicate fields for its channel: direct_perception has only channel and anchorHandle; local_aftermath has exactly channel, anchorHandle, and the required integer visibleForMinutes; route_state has exactly channel, anchorHandle, and the required non-empty triggers array; witness_report has only channel and anchorHandle. Never omit a required field or add one from another channel.",
+    toolMode
+      ? "Every exposure field is one fixed-key object, never an array: it has exactly mode and predicates. protected uses predicates=[]; projectable uses one to three predicates. Every provider predicate has exactly channel, anchorHandle, visibleForMinutes, and triggers. Use visibleForMinutes=0 and triggers=[] for direct_perception and witness_report, use triggers=[] for local_aftermath, and use visibleForMinutes=0 plus one to three unique triggers for route_state. The private decoder removes sentinels and restores the exact domain exposure. Never omit a required field or add one from another channel."
+      : "Every exposure field is one object, never an array. It is exactly {\"mode\":\"protected\"} or {\"mode\":\"projectable\",\"predicates\":[...]}; predicates is the only array. Use the exact predicate fields for its channel: direct_perception has only channel and anchorHandle; local_aftermath has exactly channel, anchorHandle, and the required integer visibleForMinutes; route_state has exactly channel, anchorHandle, and the required non-empty triggers array; witness_report has only channel and anchorHandle. Never omit a required field or add one from another channel.",
     toolMode
       ? "The named effect arrays in TOOL_MODE_OUTPUT_CONTRACT are the complete transport surface; do not emit a flat effects array."
       : `effects[].kind accepts exactly: ${permittedEffectKinds.join(", ")}. Never return inspect, observe, discover, discovery, reveal, describe, dialogue, interaction, scene, or any other token as an effect kind. Code owns IDs, scopes, versions, causal links, rolls, and Rulebook authority.`,
@@ -2573,6 +2709,7 @@ function prompt(
     `PERMITTED_RESOURCE_EFFECT_KINDS=${JSON.stringify([...resourceEffectKinds])}`,
   ];
   if (recoveryFeedback !== undefined) {
+    const contractDiagnostic = recoveryFeedback.contractDiagnostic;
     const hasTargetedActorResponseMissing = recoveryFeedback.failedChecks.some(
       (check) => check.check === "targeted_actor_response_missing",
     );
@@ -2597,6 +2734,9 @@ function prompt(
     );
     const recoveryInstruction = [
       "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. For mechanical_authority_rejected, make every mechanically durable claim in each event summary agree with the typed resource effects and ROUTE_AUTHORITY. If no typed authority changes a possession, obligation, or route, keep the event summary non-mechanical.",
+      ...(contractDiagnostic === undefined
+        ? []
+        : [`The previous tool response failed the ${contractDiagnostic.phase} contract at ${contractDiagnostic.coordinate}. Return the same fixed object shape with that coordinate corrected. Do not add prose or change any code-owned field.`]),
       ...(hasPlayerIntentUnfulfilled
         ? ["For player_intent_unfulfilled, resolve every material part of PLAYER_INTENT under RESOLUTION. A successful proposal must state the completed outcome of each named task, target, tool, delivery, contact, inspection, and explicit exclusion; travel alone cannot satisfy an additional task. A limited result or setback must state the concrete outcome of each part instead of dropping it. Use only existing authority and do not invent a replacement action."]
         : []),
@@ -2630,9 +2770,9 @@ function prompt(
       "TOOL_MODE_OUTPUT_CONTRACT",
       "Return one strict object with elapsedMinutes, effectOrder, and one required array for every effect kind: move_actor, enter_local_scene, set_route_state, set_actor_condition, update_actor_relation, update_actor_goal, advance_pressure, adjust_actor_possession, materialize_support_actor, incur_actor_obligation, pay_actor_obligation, and record_world_event.",
       "Each array item contains only the fields owned by that kind and never contains kind or fields from another kind. effectOrder contains exactly one {kind,index} entry for every supplied array item, uses zero-based indices, and gives the chronological order; the application restores kind and order. Do not duplicate, omit, or invent an entry.",
-      "Resource mechanics are code-owned and must not be echoed. For adjust_actor_possession, supply only the model-owned name when needed, summary, and affectedHandles. For incur_actor_obligation and pay_actor_obligation, supply only summary and affectedHandles.",
+      "Resource mechanics are code-owned and must not be echoed. For adjust_actor_possession, supply summary and affectedHandles, plus a non-empty name exactly for acquire with possessionHandle=null or transform; omit name for existing-stack acquire and spend. For incur_actor_obligation and pay_actor_obligation, supply only summary and affectedHandles.",
       "For move_actor.actorHandle and record_world_event.performingActorHandle, include the required field and return the empty string \"\" when the domain value is null. For materialize_support_actor.nextAction, include the required string and return the empty string \"\" when the domain value is omitted. Never emit JSON null or omit a required field.",
-      "For exposure, protected omits predicates and projectable requires its non-empty channel-specific predicates. Preserve effect order and return no prose.",
+      "For exposure, always include predicates: use [] for protected, and use non-empty channel-specific predicates for projectable. Every predicate always includes channel, anchorHandle, visibleForMinutes, and triggers. Use visibleForMinutes=0 except for local_aftermath, and use triggers=[] except for route_state, which requires one to three unique triggers. Preserve effect order and return no prose.",
     ].join("\n"));
   }
   return instructions.filter((instruction) => instruction.length > 0).join("\n");
@@ -2741,7 +2881,25 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
           isSafeGenerateObjectContractErrorCode(safeCode)
             ? "model_contract_failed"
             : "transport_interrupted";
-        throw new CampaignPlayGameMasterError(code, value ? { ...value, errorCode: safeCode ?? code } : null, null, { cause });
+        const error = new CampaignPlayGameMasterError(
+          code,
+          value ? { ...value, errorCode: safeCode ?? code } : null,
+          null,
+          toolMode ? undefined : { cause },
+        );
+        if (toolMode && isSafeGenerateObjectContractErrorCode(safeCode)) {
+          const contractDiagnostic = {
+            phase: "provider_extraction",
+            coordinate: "proposal.provider_response",
+          } as const;
+          rememberCampaignPlayGameMasterContractDiagnostic(error, contractDiagnostic);
+          rememberCampaignPlayGameMasterRecoveryFeedback(error, {
+            diagnostic: "game_master_semantic_validation_mismatch",
+            failedChecks: [],
+            contractDiagnostic,
+          });
+        }
+        throw error;
       }
       phase = "evidence";
       const modelEvidence = evidence(generated.trace, request.budget, Date.now() - started);
@@ -2820,12 +2978,19 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
             isSafeGenerateObjectContractErrorCode(safeCode)
               ? "model_contract_failed"
               : "transport_interrupted";
-          throw new CampaignPlayGameMasterError(
+          const error = new CampaignPlayGameMasterError(
             code,
             { ...combined, errorCode: safeCode ?? code },
             null,
-            { cause },
+            toolMode ? undefined : { cause },
           );
+          if (toolMode && isSafeGenerateObjectContractErrorCode(safeCode)) {
+            rememberCampaignPlayGameMasterContractDiagnostic(error, {
+              phase: "provider_extraction",
+              coordinate: "reviewer.provider_response",
+            });
+          }
+          throw error;
         }
         const reviewerEvidence = evidence(
           reviewed.trace,
@@ -2858,7 +3023,9 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
         const reviewObject = toolMode
           ? (() => {
               const parsed = mechanicalAuthorityReviewSchema.safeParse(reviewed.object);
-              if (!parsed.success) toolContractFailure(parsed.error);
+              if (!parsed.success) {
+                toolContractFailure({ phase: "domain_mismatch", coordinate: "reviewer.domain" });
+              }
               return parsed.data;
             })()
           : reviewed.object;
@@ -2906,11 +3073,23 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
             cause.code,
             cause.modelEvidence ?? { ...modelEvidence, errorCode: cause.code },
             cause.denial,
-            { cause },
+            toolMode ? undefined : { cause },
           );
+          const causeRecoveryFeedback = getCampaignPlayGameMasterRecoveryFeedback(cause);
+          const causeContractDiagnostic = getCampaignPlayGameMasterContractDiagnostic(cause);
+          rememberCampaignPlayGameMasterContractDiagnostic(wrapped, causeContractDiagnostic);
           rememberCampaignPlayGameMasterRecoveryFeedback(
             wrapped,
-            getCampaignPlayGameMasterRecoveryFeedback(cause),
+            causeRecoveryFeedback === undefined && causeContractDiagnostic === undefined
+              ? undefined
+              : {
+                  diagnostic: causeRecoveryFeedback?.diagnostic
+                    ?? "game_master_semantic_validation_mismatch",
+                  failedChecks: causeRecoveryFeedback?.failedChecks ?? [],
+                  ...(causeContractDiagnostic === undefined
+                    ? {}
+                    : { contractDiagnostic: causeContractDiagnostic }),
+                },
           );
           if (reviewFailedChecks !== undefined) {
             rememberMechanicalAuthorityReviewFailedChecks(wrapped, reviewFailedChecks);

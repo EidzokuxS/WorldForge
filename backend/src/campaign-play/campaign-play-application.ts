@@ -153,10 +153,13 @@ export function accumulateCampaignPlayGameMasterRecoveryFeedback(
   for (const check of [...accumulated.failedChecks, ...next.failedChecks]) {
     failedChecks.set(canonicalizeCampaignPlayProjection(check), check);
   }
-  return {
-    diagnostic: "game_master_semantic_validation_mismatch",
+  const merged = {
+    diagnostic: "game_master_semantic_validation_mismatch" as const,
     failedChecks: [...failedChecks.values()],
   };
+  return next.contractDiagnostic === undefined
+    ? merged
+    : { ...merged, contractDiagnostic: next.contractDiagnostic };
 }
 
 export function accumulateCampaignPlayNarratorRecoveryFeedback(

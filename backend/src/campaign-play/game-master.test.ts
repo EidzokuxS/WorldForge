@@ -287,7 +287,28 @@ function toolTransport(
       throw new Error(`Unsupported tool effect kind: ${String(kind)}`);
     }
     const items = transport[kind] as Record<string, unknown>[];
-    const { kind: _kind, ...item } = effect;
+    const { kind: _kind, ...rawItem } = effect;
+    const item = structuredClone(rawItem) as Record<string, unknown>;
+    const rawExposure = item.exposure as Record<string, unknown> | undefined;
+    if (rawExposure !== undefined) {
+      const rawMode = rawExposure.mode;
+      if (rawMode === "protected") {
+        item.exposure = { mode: "protected", predicates: [] };
+      } else if (rawMode === "projectable") {
+        const predicates = Array.isArray(rawExposure.predicates)
+          ? rawExposure.predicates as Array<Record<string, unknown>>
+          : [];
+        item.exposure = {
+          mode: "projectable",
+          predicates: predicates.map((predicate) => ({
+            channel: predicate.channel,
+            anchorHandle: predicate.anchorHandle ?? predicate.locationId ?? predicate.actorHandle,
+            visibleForMinutes: predicate.visibleForMinutes ?? 0,
+            triggers: predicate.triggers ?? [],
+          })),
+        };
+      }
+    }
     const index = items.length;
     items.push(item);
     (transport.effectOrder as Array<{ kind: string; index: number }>).push({ kind, index });
@@ -1798,6 +1819,66 @@ describe("Campaign Play Game Master", () => {
     );
     const reviewerJson = z.toJSONSchema(reviewerSchema) as { required?: string[] };
     expect(reviewerJson.required).toEqual(expect.arrayContaining(["verdict", "reason", "failedChecks"]));
+    expect(reviewerSchema.safeParse({
+      verdict: "accepted",
+      reason: "The event is grounded.",
+      failedChecks: ["route_authority_missing"],
+    }).success).toBe(false);
+    expect(reviewerSchema.safeParse({
+      verdict: "rejected",
+      reason: "The event is not grounded.",
+      failedChecks: [],
+    }).success).toBe(false);
+  });
+
+  it("rejects contradictory reviewer verdict coupling through the private plan boundary", async () => {
+    const cases = [
+      {
+        label: "accepted with failed checks",
+        review: {
+          verdict: "accepted" as const,
+          reason: "The event is grounded.",
+          failedChecks: ["route_authority_missing" as const],
+        },
+      },
+      {
+        label: "rejected without failed checks",
+        review: {
+          verdict: "rejected" as const,
+          reason: "The event is not grounded.",
+          failedChecks: [] as const,
+        },
+      },
+    ];
+    for (const malformedCase of cases) {
+      const generateObject = vi.fn()
+        .mockResolvedValueOnce({
+          object: toolTransport(proposal.elapsedMinutes, proposal.effects),
+          trace: trace("tool_mode", undefined, "tool"),
+        })
+        .mockResolvedValueOnce({
+          object: malformedCase.review,
+          trace: trace("tool_mode", undefined, "tool"),
+        });
+      let thrown: unknown;
+      try {
+        await createCampaignPlayGameMaster({
+          generateObject: generateObject as unknown as typeof safeGenerateObject,
+        }).plan({
+          frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+          model: model(), temperature: 0.2, budget, structuredOutputMode: "tool",
+        });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown, malformedCase.label).toMatchObject({ code: "model_contract_failed" });
+      expect(getCampaignPlayGameMasterRecoveryFeedback(thrown), malformedCase.label).toMatchObject({
+        diagnostic: "game_master_semantic_validation_mismatch",
+        failedChecks: [],
+        contractDiagnostic: { phase: "domain_mismatch", coordinate: "reviewer.domain" },
+      });
+      expect(generateObject).toHaveBeenCalledTimes(2);
+    }
   });
 
   it("keeps the null-sentinel contract in a recovered tool-mode attempt", async () => {
@@ -1827,6 +1908,319 @@ describe("Campaign Play Game Master", () => {
     expect(recoveryPrompt).toContain(
       'For move_actor.actorHandle and record_world_event.performingActorHandle, include the required field and return the empty string "" when the domain value is null. For materialize_support_actor.nextAction, include the required string and return the empty string "" when the domain value is omitted. Never emit JSON null or omit a required field.',
     );
+  });
+
+  it("partitions the fixed-key exposure transport and rejects mixed or contradictory channels", async () => {
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({
+        object: toolTransport(proposal.elapsedMinutes, proposal.effects),
+        trace: trace("tool_mode", undefined, "tool"),
+      })
+      .mockResolvedValueOnce({
+        object: { verdict: "accepted", reason: "The event is grounded.", failedChecks: [] },
+        trace: trace("tool_mode", undefined, "tool"),
+      });
+    await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget, structuredOutputMode: "tool",
+    });
+    const proposalSchema = generateObject.mock.calls[0]![0].schema as z.ZodType<unknown>;
+    const exposureItem = (predicate: Record<string, unknown>) => toolTransport(1, [{
+      kind: "set_actor_condition",
+      exposure: { mode: "projectable", predicates: [predicate] },
+      actorHandle: "guard",
+      condition: "strained",
+      operation: "set",
+      summary: "The guard looks strained.",
+    }]);
+    for (const predicate of [
+      { channel: "direct_perception", anchorHandle: "here", visibleForMinutes: 0, triggers: [] },
+      { channel: "local_aftermath", anchorHandle: "here", visibleForMinutes: 5, triggers: [] },
+      { channel: "route_state", anchorHandle: "passage", visibleForMinutes: 0, triggers: ["inspect"] },
+      { channel: "witness_report", anchorHandle: "guard", visibleForMinutes: 0, triggers: [] },
+    ]) {
+      expect(proposalSchema.safeParse(exposureItem(predicate)).success).toBe(true);
+    }
+    const protectedTransport = toolTransport(1, [{
+      kind: "set_actor_condition",
+      exposure: { mode: "protected" },
+      actorHandle: "guard",
+      condition: "strained",
+      operation: "set",
+      summary: "The guard looks strained.",
+    }]);
+    expect(proposalSchema.safeParse(protectedTransport).success).toBe(true);
+    const oldProtected = structuredClone(protectedTransport);
+    ((oldProtected.set_actor_condition as Record<string, unknown>[])[0]!.exposure as Record<string, unknown>) = {
+      mode: "protected",
+    };
+    expect(proposalSchema.safeParse(oldProtected).success).toBe(false);
+    const missingFixedKey = exposureItem({
+      channel: "direct_perception", anchorHandle: "here", visibleForMinutes: 0, triggers: [],
+    });
+    delete (((missingFixedKey.set_actor_condition as Record<string, unknown>[])[0]!.exposure as Record<string, unknown>)
+      .predicates as Record<string, unknown>[])[0]!.visibleForMinutes;
+    expect(proposalSchema.safeParse(missingFixedKey).success).toBe(false);
+    const mixedFields = exposureItem({
+      channel: "direct_perception", anchorHandle: "here", visibleForMinutes: 0, triggers: [],
+    });
+    const mixedPredicate = (((mixedFields.set_actor_condition as Record<string, unknown>[])[0]!.exposure as Record<string, unknown>)
+      .predicates as Record<string, unknown>[])[0]!;
+    mixedPredicate.locationId = "here";
+    expect(proposalSchema.safeParse(mixedFields).success).toBe(false);
+
+    const protectedNonEmpty = toolTransport(1, [{
+      kind: "set_actor_condition",
+      exposure: { mode: "protected", predicates: [] },
+      actorHandle: "guard", condition: "strained", operation: "set", summary: "The guard looks strained.",
+    }]);
+    (((protectedNonEmpty.set_actor_condition as Record<string, unknown>[])[0]!.exposure as Record<string, unknown>)
+      .predicates as Record<string, unknown>[]).push({
+        channel: "direct_perception", anchorHandle: "here", visibleForMinutes: 0, triggers: [],
+      });
+    const privateDecodeCases = [
+      {
+        label: "empty route trigger set",
+        transport: exposureItem({ channel: "route_state", anchorHandle: "passage", visibleForMinutes: 0, triggers: [] }),
+        coordinate: "exposure.predicates[0].route_state.triggers",
+      },
+      {
+        label: "duplicate route trigger set",
+        transport: exposureItem({ channel: "route_state", anchorHandle: "passage", visibleForMinutes: 0, triggers: ["inspect", "inspect"] }),
+        coordinate: "exposure.predicates[0].route_state.triggers",
+      },
+      {
+        label: "projectable empty partition",
+        transport: toolTransport(1, [{
+          kind: "set_actor_condition",
+          exposure: { mode: "projectable", predicates: [] },
+          actorHandle: "guard", condition: "strained", operation: "set", summary: "The guard looks strained.",
+        }]),
+        coordinate: "exposure.predicates.cardinality",
+      },
+      {
+        label: "protected non-empty partition",
+        transport: protectedNonEmpty,
+        coordinate: "exposure.protected.predicates",
+      },
+    ];
+    for (const malformedCase of privateDecodeCases) {
+      let thrown: unknown;
+      const malformedGenerateObject = vi.fn().mockResolvedValue({
+        object: malformedCase.transport,
+        trace: trace("tool_mode", undefined, "tool"),
+      });
+      try {
+        await createCampaignPlayGameMaster({
+          generateObject: malformedGenerateObject as unknown as typeof safeGenerateObject,
+        }).plan({
+          frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+          model: model(), temperature: 0.2, budget, structuredOutputMode: "tool",
+        });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown, malformedCase.label).toMatchObject({ code: "model_contract_failed" });
+      expect(getCampaignPlayGameMasterRecoveryFeedback(thrown), malformedCase.label).toMatchObject({
+        contractDiagnostic: { phase: "private_decode", coordinate: malformedCase.coordinate },
+      });
+      expect(malformedGenerateObject).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("requires a model-owned name only for new acquisition and transform, and carries only its sanitized coordinate into recovery", async () => {
+    const possessionRuling = ruling({
+      possessionEffectAuthority: {
+        kind: "adjust_actor_possession", enforcement: "required", operation: "acquire",
+        possessionHandle: null, quantity: 1, minimumResult: "success",
+      },
+    });
+    const malformedTransport = toolTransport(1, [{
+      kind: "adjust_actor_possession",
+      name: "Copper chit",
+      summary: "The guard hands over one copper chit.",
+      affectedHandles: ["you", "guard"],
+    }, guardResponseEffect]);
+    delete (malformedTransport.adjust_actor_possession as Record<string, unknown>[])[0]!.name;
+    const firstGenerateObject = vi.fn().mockResolvedValue({
+      object: malformedTransport,
+      trace: trace("tool_mode", undefined, "tool"),
+    });
+    let firstError: unknown;
+    try {
+      await createCampaignPlayGameMaster({
+        generateObject: firstGenerateObject as unknown as typeof safeGenerateObject,
+      }).plan({
+        frame: frame(), ruling: possessionRuling, resolution, uncertaintyAuthority: null,
+        model: model(), temperature: 0.2, budget, structuredOutputMode: "tool",
+      });
+    } catch (error) {
+      firstError = error;
+    }
+    expect(firstError).toMatchObject({ code: "model_contract_failed" });
+    const recoveryFeedback = getCampaignPlayGameMasterRecoveryFeedback(firstError);
+    expect(recoveryFeedback).toEqual({
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [],
+      contractDiagnostic: { phase: "provider_extraction", coordinate: "adjust_actor_possession.name" },
+    });
+    expect(JSON.stringify(recoveryFeedback)).not.toContain("Copper chit");
+
+    const correctedTransport = toolTransport(1, [{
+      kind: "adjust_actor_possession",
+      name: "Copper chit",
+      summary: "The guard hands over one copper chit.",
+      affectedHandles: ["you", "guard"],
+    }, guardResponseEffect]);
+    const correctedGenerateObject = vi.fn()
+      .mockResolvedValueOnce({ object: correctedTransport, trace: trace("tool_mode", undefined, "tool") })
+      .mockResolvedValueOnce({
+        object: { verdict: "accepted", reason: "The corrected typed acquisition is grounded.", failedChecks: [] },
+        trace: trace("tool_mode", undefined, "tool"),
+      });
+    await createCampaignPlayGameMaster({
+      generateObject: correctedGenerateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: possessionRuling, resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget, structuredOutputMode: "tool", recoveryFeedback,
+    });
+    const correctedPrompt = String(correctedGenerateObject.mock.calls[0]![0].prompt);
+    expect(correctedPrompt).toContain(
+      "The previous tool response failed the provider_extraction contract at adjust_actor_possession.name. Return the same fixed object shape with that coordinate corrected. Do not add prose or change any code-owned field.",
+    );
+    expect(correctedPrompt).not.toContain("Copper chit");
+  });
+
+  it("forbids names on existing-stack acquire and spend, requires them on transform, and keeps unavailable authority empty", async () => {
+    const possessionKey = deriveCampaignPlayPossessionKey("Copper chit");
+    const possessionId = deriveCampaignPlayPossessionId(CAMPAIGN_ID, PLAYER_ID, possessionKey);
+    const sourceFrame = frame();
+    sourceFrame.visibleFacts.push({ handle: "copper-chit", kind: "possession", summary: "Copper chit: 2" });
+    sourceFrame.handleBindings.push({ handle: "copper-chit", reference: { kind: "possession", id: possessionId } });
+    sourceFrame.authority.authorizedRefs.push({ kind: "possession", id: possessionId });
+    sourceFrame.rulebookFrame.possessions.push({ possessionId, actorId: PLAYER_ID, possessionKey, name: "Copper chit", quantity: 2 });
+    const readSchema = async (requestRuling: CampaignPlayJudgeRuling) => {
+      const authority = requestRuling.possessionEffectAuthority;
+      const possessionEffect = authority.kind === "adjust_actor_possession"
+        ? {
+            kind: "adjust_actor_possession" as const,
+            ...(authority.operation === "transform" || authority.possessionHandle === null
+              ? { name: "Stamped copper chit" }
+              : {}),
+            summary: "The possession transition is complete.",
+            affectedHandles: ["you"],
+          }
+        : proposal.effects[0]!;
+      const generateObject = vi.fn()
+        .mockResolvedValueOnce({ object: toolTransport(1, [possessionEffect, guardResponseEffect]), trace: trace("tool_mode", undefined, "tool") })
+        .mockResolvedValueOnce({ object: { verdict: "accepted", reason: "No mechanical change.", failedChecks: [] }, trace: trace("tool_mode", undefined, "tool") });
+      await createCampaignPlayGameMaster({ generateObject: generateObject as unknown as typeof safeGenerateObject }).plan({
+        frame: sourceFrame, ruling: requestRuling, resolution, uncertaintyAuthority: null,
+        model: model(), temperature: 0.2, budget, structuredOutputMode: "tool",
+      });
+      return generateObject.mock.calls[0]![0].schema as z.ZodType<unknown>;
+    };
+    const spendRuling = ruling({
+      possessionEffectAuthority: {
+        kind: "adjust_actor_possession", enforcement: "required", operation: "spend",
+        possessionHandle: "copper-chit", quantity: 1, minimumResult: "success",
+      },
+      citedVisibleFactHandles: ["guard", "copper-chit"],
+    });
+    const spendSchema = await readSchema(spendRuling);
+    const spendBase = toolTransport(1, [{ kind: "adjust_actor_possession", summary: "One chit is spent.", affectedHandles: ["you"] }, guardResponseEffect]);
+    expect(spendSchema.safeParse(spendBase).success).toBe(true);
+    const illicitSpend = structuredClone(spendBase);
+    (illicitSpend.adjust_actor_possession as Record<string, unknown>[])[0]!.name = "Illicit name";
+    expect(spendSchema.safeParse(illicitSpend).success).toBe(false);
+
+    const transformRuling = ruling({
+      possessionEffectAuthority: {
+        kind: "adjust_actor_possession", enforcement: "required", operation: "transform",
+        possessionHandle: "copper-chit", quantity: 1, minimumResult: "success",
+      },
+      citedVisibleFactHandles: ["guard", "copper-chit"],
+    });
+    const transformSchema = await readSchema(transformRuling);
+    const transformBase = toolTransport(1, [{ kind: "adjust_actor_possession", summary: "The chit is stamped.", affectedHandles: ["you"] }, guardResponseEffect]);
+    expect(transformSchema.safeParse(transformBase).success).toBe(false);
+    const namedTransform = structuredClone(transformBase);
+    (namedTransform.adjust_actor_possession as Record<string, unknown>[])[0]!.name = "Stamped copper chit";
+    expect(transformSchema.safeParse(namedTransform).success).toBe(true);
+
+    const unavailableGenerateObject = vi.fn()
+      .mockResolvedValueOnce({ object: toolTransport(1, [proposal.effects[0]]), trace: trace("tool_mode", undefined, "tool") })
+      .mockResolvedValueOnce({ object: { verdict: "accepted", reason: "No mechanical change.", failedChecks: [] }, trace: trace("tool_mode", undefined, "tool") });
+    await createCampaignPlayGameMaster({ generateObject: unavailableGenerateObject as unknown as typeof safeGenerateObject }).plan({
+      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget, structuredOutputMode: "tool",
+    });
+    const unavailableSchema = unavailableGenerateObject.mock.calls[0]![0].schema as z.ZodType<unknown>;
+    const illicitUnavailable = toolTransport(1, [{
+      kind: "adjust_actor_possession", summary: "An unauthorized item.", affectedHandles: ["you"],
+    }]);
+    expect(unavailableSchema.safeParse(illicitUnavailable).success).toBe(false);
+  });
+
+  it("distinguishes provider extraction, private decode, and domain mismatch without retaining raw content", async () => {
+    const domainMismatch = toolTransport(1, [{
+      kind: "record_world_event",
+      eventClass: "dialogue",
+      performingActorHandle: "guard",
+      summary: " The guard answers. ",
+      affectedHandles: ["you", "guard", "introduced-support-actor"],
+    }]);
+    const cases = [
+      {
+        label: "private decode",
+        transport: toolTransport(1, [{
+          kind: "set_actor_condition",
+          exposure: { mode: "projectable", predicates: [{ channel: "route_state", anchorHandle: "passage", visibleForMinutes: 0, triggers: ["inspect", "inspect"] }] },
+          actorHandle: "guard", condition: "strained", operation: "set", summary: "The guard looks strained.",
+        }]),
+        diagnostic: { phase: "private_decode", coordinate: "exposure.predicates[0].route_state.triggers" },
+      },
+      {
+        label: "domain mismatch",
+        transport: domainMismatch,
+        diagnostic: { phase: "domain_mismatch", coordinate: "proposal.domain" },
+      },
+    ] as const;
+    for (const malformedCase of cases) {
+      const generateObject = vi.fn().mockResolvedValue({
+        object: malformedCase.transport,
+        trace: trace("tool_mode", undefined, "tool"),
+      });
+      let thrown: unknown;
+      try {
+        await createCampaignPlayGameMaster({ generateObject: generateObject as unknown as typeof safeGenerateObject }).plan({
+          frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+          model: model(), temperature: 0.2, budget, structuredOutputMode: "tool",
+        });
+      } catch (error) {
+        thrown = error;
+      }
+      const feedback = getCampaignPlayGameMasterRecoveryFeedback(thrown);
+      expect(feedback?.contractDiagnostic, malformedCase.label).toEqual(malformedCase.diagnostic);
+      expect(JSON.stringify(feedback)).not.toContain("The guard answers.");
+      expect(generateObject).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("keeps native schema planning on the unchanged effects transport", async () => {
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: proposal, trace: trace("native_schema") })
+      .mockResolvedValueOnce({ object: { verdict: "accepted", reason: "The event is grounded." }, trace: trace("native_schema") });
+    await createCampaignPlayGameMaster({ generateObject: generateObject as unknown as typeof safeGenerateObject }).plan({
+      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget,
+    });
+    const nativeSchema = generateObject.mock.calls[0]![0].schema as z.ZodType<unknown>;
+    expect(nativeSchema.safeParse(proposal).success).toBe(true);
+    expect(JSON.stringify(z.toJSONSchema(nativeSchema))).toContain("effects");
+    expect(generateObject.mock.calls[0]![0].mode).toBe("auto");
   });
 
   it("keeps every non-resource tool array strict and decodes the required empty nextAction sentinel", async () => {
@@ -2022,7 +2416,7 @@ describe("Campaign Play Game Master", () => {
     expect(acquisitionSchema.safeParse({
       ...acquisitionProposal,
       adjust_actor_possession: [missingPossessionName],
-    }).success).toBe(true);
+    }).success).toBe(false);
     expect(acquisitionSchema.safeParse({
       ...acquisitionProposal,
       adjust_actor_possession: [{
@@ -4556,7 +4950,9 @@ describe("Campaign Play Game Master contract rejection diagnostics", () => {
       errorCode: "model_contract_failed",
       modelEvidenceErrorCode: "invalid_structured_tool_call",
       safeGenerationCode: "invalid_structured_tool_call",
-      recoveryDiagnostic: null,
+      contractDiagnosticPhase: "provider_extraction",
+      contractDiagnosticCoordinate: "proposal.provider_response",
+      recoveryDiagnostic: "game_master_semantic_validation_mismatch",
       failedChecks: [],
       reviewFailedChecks: [],
       denial: null,
