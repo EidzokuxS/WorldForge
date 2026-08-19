@@ -275,6 +275,29 @@ describe("Campaign Play API", () => {
     });
   });
 
+  it("accepts an exhausted interrupted turn without re-enabling recovery", async () => {
+    const exhaustedTurn = {
+      turnId: "turn-one",
+      turnKind: "player_action" as const,
+      status: "interrupted" as const,
+      progress: null,
+      lastEventSequence: 13,
+      retryEligible: false,
+      submittedAt: 1,
+      completedAt: null,
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+      ...versions,
+      campaignId: "campaign-one",
+      turn: exhaustedTurn,
+      result: { status: "interrupted", errorCode: "turn_interrupted" },
+    })));
+
+    await expect(loadCampaignPlayTurn("campaign-one", "turn-one")).resolves.toMatchObject({
+      turn: exhaustedTurn,
+    });
+  });
+
   it("loads directed payable and receivable obligations from the public state", async () => {
     const obligations = [{
       handle: "obligation-payable",
@@ -747,6 +770,25 @@ describe("Campaign Play API", () => {
     );
     expect(received).toEqual([progressed, completed]);
     expect(result).toEqual({ lastSequence: 4, terminalEvent: completed });
+  });
+
+  it("accepts an interrupted event whose recovery budget is exhausted", async () => {
+    const interrupted: CampaignPlaySseEvent = {
+      sequence: 3,
+      turnId: "turn-one",
+      ...versions,
+      createdAt: 10,
+      type: "turn.interrupted",
+      retryEligible: false,
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse([eventBlock(interrupted)])));
+    const received: CampaignPlaySseEvent[] = [];
+
+    await expect(streamCampaignPlayTurnEvents("campaign-one", "turn-one", {
+      afterSequence: 2,
+      onEvent: (event) => received.push(event),
+    })).resolves.toEqual({ lastSequence: 3, terminalEvent: interrupted });
+    expect(received).toEqual([interrupted]);
   });
 
   it("rejects SSE content-type, identity, conflicting duplicates, gaps, and out-of-order sequences", async () => {

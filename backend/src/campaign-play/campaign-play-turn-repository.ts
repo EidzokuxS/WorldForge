@@ -750,6 +750,22 @@ function modelStageId(turnId: string, kind: CampaignPlayTurnModelStageKind): str
   });
 }
 
+const CAMPAIGN_PLAY_GAME_MASTER_MAX_ATTEMPTS = 3;
+
+function deriveResumeEligibility(
+  row: TurnRow,
+  modelSelection: CampaignPlayTurnModelSelection,
+  modelStages: readonly ModelStageRow[],
+): boolean {
+  if (row.resumeEligible !== 1) return false;
+  if (row.stage !== "interrupted" || row.interruptedStage === null) return true;
+  const route = resolveStageClaimRoute(row.turnKind, row.interruptedStage, modelSelection);
+  if (route.model?.kind !== "game_master") return true;
+  const stageId = modelStageId(row.turnId, route.model.kind);
+  const attempts = modelStages.filter((stage) => stage.stageId === stageId);
+  return attempts.length < CAMPAIGN_PLAY_GAME_MASTER_MAX_ATTEMPTS;
+}
+
 function modelStageAttemptId(stageId: string, attempt: number): string {
   return hashCampaignPlayProjection({
     domain: "campaign_play_turn_model_stage_attempt",
@@ -2417,11 +2433,12 @@ function loadRow(handle: CampaignPlayDatabaseHandle, row: TurnRow): LoadedCampai
   ) {
     throw corrupt("Campaign Play turn events disagree with accepted-world provenance.");
   }
+  const resumeEligible = deriveResumeEligibility(row, modelSelection, modelStages);
   return {
     ...row,
     document,
     modelSelection,
-    resumeEligible: row.resumeEligible === 1,
+    resumeEligible,
     mutationAudit,
     terminalReason,
     events,

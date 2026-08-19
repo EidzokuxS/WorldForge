@@ -93,7 +93,7 @@ function publicTurn(handle: CampaignPlayDatabaseHandle, turn: LoadedCampaignPlay
       status: "interrupted" as const,
       progress: null,
       lastEventSequence: latest.sequence,
-      retryEligible: true,
+      retryEligible: turn.stage === "interrupted" ? turn.resumeEligible : true,
       submittedAt: turn.submittedAt,
       completedAt: null,
     };

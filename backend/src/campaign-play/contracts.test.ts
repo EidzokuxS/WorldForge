@@ -976,6 +976,12 @@ describe("Campaign Play shared public contracts", () => {
       },
       {
         ...turnBase,
+        status: "interrupted",
+        progress: null,
+        retryEligible: false,
+      },
+      {
+        ...turnBase,
         status: "completed",
         progress: null,
         retryEligible: false,
