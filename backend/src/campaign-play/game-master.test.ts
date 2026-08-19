@@ -275,7 +275,11 @@ const toolEffectKinds = [
 function toolTransport(
   elapsedMinutes: number,
   effects: readonly Record<string, unknown>[],
+  performerHandles: readonly string[] = ["guard", "introduced-support-actor"],
 ): Record<string, unknown> {
+  const performerKeyByHandle = new Map(
+    performerHandles.map((handle, index) => [handle, `p${index + 1}`]),
+  );
   const transport: Record<string, unknown> = {
     elapsedMinutes,
     effectOrder: [],
@@ -289,6 +293,15 @@ function toolTransport(
     const items = transport[kind] as Record<string, unknown>[];
     const { kind: _kind, ...rawItem } = effect;
     const item = structuredClone(rawItem) as Record<string, unknown>;
+    if (kind === "record_world_event") {
+      const performerHandle = item.performingActorHandle;
+      delete item.performingActorHandle;
+      item.performingActorKey = performerHandle === null || performerHandle === ""
+        ? ""
+        : typeof performerHandle === "string"
+          ? (performerKeyByHandle.get(performerHandle) ?? `unknown-${performerHandle}`)
+          : `unknown-${String(performerHandle)}`;
+    }
     const rawExposure = item.exposure as Record<string, unknown> | undefined;
     if (rawExposure !== undefined) {
       const rawMode = rawExposure.mode;
@@ -309,9 +322,8 @@ function toolTransport(
         };
       }
     }
-    const index = items.length;
     items.push(item);
-    (transport.effectOrder as Array<{ kind: string; index: number }>).push({ kind, index });
+    (transport.effectOrder as string[]).push(kind);
   }
   return transport;
 }
@@ -1773,6 +1785,14 @@ describe("Campaign Play Game Master", () => {
     ]));
     expect(proposalJson.properties?.record_world_event?.items?.properties?.eventClass?.enum)
       .toEqual(expect.arrayContaining(["dialogue", "discovery"]));
+    const proposalJsonText = JSON.stringify(proposalJson);
+    expect(proposalJsonText).not.toContain("performingActorHandle");
+    expect(proposalJsonText).not.toContain('"index"');
+    expect(proposalJsonText).toContain('"p1"');
+    expect(proposalJsonText).toContain('"p2"');
+    expect(proposalJson.properties?.effectOrder?.items).toEqual(expect.objectContaining({
+      enum: expect.arrayContaining([...toolEffectKinds]),
+    }));
     expect(proposalSchema.safeParse({
       ...toolTransport(proposal.elapsedMinutes, [{ ...proposal.effects[0], performingActorHandle: "you" }]),
     }).success).toBe(false);
@@ -1785,15 +1805,18 @@ describe("Campaign Play Game Master", () => {
     }).success).toBe(true);
     expect(proposalSchema.safeParse({
       ...toolTransport(proposal.elapsedMinutes, [{ ...proposal.effects[0], performingActorHandle: "" }]),
-    }).success).toBe(true);
+    }).success).toBe(false);
     expect(proposalSchema.safeParse({
       ...toolTransport(proposal.elapsedMinutes, [{ ...proposal.effects[0], performingActorHandle: null }]),
     }).success).toBe(false);
-    const missingPerformer = { ...proposal.effects[0] } as Record<string, unknown>;
-    delete missingPerformer.performingActorHandle;
-    expect(proposalSchema.safeParse({
-      ...toolTransport(proposal.elapsedMinutes, [missingPerformer]),
-    }).success).toBe(false);
+    const missingPerformer = toolTransport(proposal.elapsedMinutes, [proposal.effects[0]]);
+    delete (missingPerformer.record_world_event as Record<string, unknown>[])[0]!.performingActorKey;
+    expect(proposalSchema.safeParse(missingPerformer).success).toBe(false);
+    const oldRawPerformer = toolTransport(proposal.elapsedMinutes, [proposal.effects[0]]);
+    const oldRawRow = (oldRawPerformer.record_world_event as Record<string, unknown>[])[0]!;
+    delete oldRawRow.performingActorKey;
+    oldRawRow.performingActorHandle = "guard";
+    expect(proposalSchema.safeParse(oldRawPerformer).success).toBe(false);
     expect(proposalSchema.safeParse({
       ...toolTransport(5, [{ kind: "move_actor", actorHandle: "" }]),
     }).success).toBe(true);
@@ -1805,7 +1828,7 @@ describe("Campaign Play Game Master", () => {
     }).success).toBe(false);
     expect(proposalSchemaJson).toContain('""');
     const sentinelInstruction =
-      'For move_actor.actorHandle and record_world_event.performingActorHandle, include the required field and return the empty string "" when the domain value is null. For materialize_support_actor.nextAction, include the required string and return the empty string "" when the domain value is omitted. Never emit JSON null or omit a required field.';
+      'For move_actor.actorHandle and record_world_event.performingActorKey, include the required field and return the empty string "" when the domain value is null. For materialize_support_actor.nextAction, include the required string and return the empty string "" when the domain value is omitted. Never emit JSON null or omit a required field.';
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(sentinelInstruction);
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
       "The named effect arrays in TOOL_MODE_OUTPUT_CONTRACT are the complete transport surface; do not emit a flat effects array.",
@@ -1906,7 +1929,7 @@ describe("Campaign Play Game Master", () => {
     });
     const recoveryPrompt = String(generateObject.mock.calls[0]![0].prompt);
     expect(recoveryPrompt).toContain(
-      'For move_actor.actorHandle and record_world_event.performingActorHandle, include the required field and return the empty string "" when the domain value is null. For materialize_support_actor.nextAction, include the required string and return the empty string "" when the domain value is omitted. Never emit JSON null or omit a required field.',
+      'For move_actor.actorHandle and record_world_event.performingActorKey, include the required field and return the empty string "" when the domain value is null. For materialize_support_actor.nextAction, include the required string and return the empty string "" when the domain value is omitted. Never emit JSON null or omit a required field.',
     );
   });
 
@@ -2272,7 +2295,7 @@ describe("Campaign Play Game Master", () => {
     expect(proposalSchema.safeParse(omittedNextAction).success).toBe(false);
   });
 
-  it("reconstructs indexed tool order and rejects duplicate, missing, out-of-range, and wrong-kind entries", async () => {
+  it("reconstructs kind-list tool order and rejects missing, over-covered, and wrong-kind entries", async () => {
     const firstEvent = {
       kind: "record_world_event" as const,
       eventClass: "dialogue" as const,
@@ -2287,10 +2310,7 @@ describe("Campaign Play Game Master", () => {
     const orderedTransport = toolTransport(1, [firstEvent, secondEvent]);
     const orderedItems = orderedTransport.record_world_event as Record<string, unknown>[];
     orderedTransport.record_world_event = [orderedItems[1], orderedItems[0]];
-    orderedTransport.effectOrder = [
-      { kind: "record_world_event", index: 1 },
-      { kind: "record_world_event", index: 0 },
-    ];
+    orderedTransport.effectOrder = ["record_world_event", "record_world_event"];
     const generateObject = vi.fn()
       .mockResolvedValueOnce({ object: orderedTransport, trace: trace("tool_mode", undefined, "tool") })
       .mockResolvedValueOnce({
@@ -2307,26 +2327,92 @@ describe("Campaign Play Game Master", () => {
       .filter((command) => command.kind === "record_world_event")
       .map((command) => command.summary);
     expect(orderedSummaries).toEqual([
-      firstEvent.summary,
       secondEvent.summary,
+      firstEvent.summary,
     ]);
 
-    const malformedCases: Array<{ label: string; transport: Record<string, unknown> }> = [];
-    const duplicate = toolTransport(1, [firstEvent, secondEvent]);
-    duplicate.effectOrder = [
-      { kind: "record_world_event", index: 0 },
-      { kind: "record_world_event", index: 0 },
+    const ambientRuling = ruling({
+      normalizedIntent: {
+        originalText: "I call to the nearby workers and offer to mend a torn boot.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "contact",
+        targets: [],
+        method: "Offer a practical repair to anyone within earshot",
+        stakes: "Find one resident willing to stop and answer",
+      },
+      citedVisibleFactHandles: ["here"],
+      reason: "Nearby residents can hear and choose whether to respond.",
+    });
+    const supportEffects = [
+      {
+        kind: "materialize_support_actor" as const,
+        actorHandle: "introduced-support-actor",
+        name: "Sella Rook",
+        summary: "A rope mender pauses nearby.",
+        goal: "Find a dry place before rain.",
+        motivation: "Protect the workshop tools.",
+        nextIntentKind: "observe" as const,
+        nextAction: "",
+        observableTrace: "Waxed thread catches the light.",
+        cadenceMinutes: 30,
+      },
+      {
+        kind: "record_world_event" as const,
+        eventClass: "dialogue" as const,
+        performingActorHandle: "introduced-support-actor",
+        summary: "Sella offers to inspect the torn boot.",
+        affectedHandles: ["you", "here", "introduced-support-actor"],
+      },
+      {
+        kind: "record_world_event" as const,
+        eventClass: "discovery" as const,
+        performingActorHandle: null,
+        summary: "The torn boot shows a clean place to start stitching.",
+        affectedHandles: ["here"],
+      },
     ];
-    malformedCases.push({ label: "duplicate", transport: duplicate });
+    const mixedTransport = toolTransport(2, supportEffects, ["introduced-support-actor"]);
+    mixedTransport.effectOrder = [
+      "materialize_support_actor",
+      "record_world_event",
+      "record_world_event",
+    ];
+    const mixedGenerateObject = vi.fn()
+      .mockResolvedValueOnce({ object: mixedTransport, trace: trace("tool_mode", undefined, "tool") })
+      .mockResolvedValueOnce({
+        object: { verdict: "accepted", reason: "The support actor and observations are grounded.", failedChecks: [] },
+        trace: trace("tool_mode", undefined, "tool"),
+      });
+    const mixedCandidate = await createCampaignPlayGameMaster({
+      generateObject: mixedGenerateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: ambientRuling, resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget, structuredOutputMode: "tool",
+    });
+    expect(mixedCandidate.batch.commands.map((command) => command.kind)).toEqual([
+      "advance_world_time",
+      "materialize_support_actor",
+      "record_world_event",
+      "record_world_event",
+    ]);
+    expect(mixedCandidate.batch.commands.slice(2).map((command) =>
+      command.kind === "record_world_event" ? command.eventClass : command.kind,
+    )).toEqual(["dialogue", "discovery"]);
+
+    const malformedCases: Array<{ label: string; transport: Record<string, unknown> }> = [];
     const missing = toolTransport(1, [firstEvent, secondEvent]);
-    missing.effectOrder = [{ kind: "record_world_event", index: 0 }];
+    missing.effectOrder = ["record_world_event"];
     malformedCases.push({ label: "missing", transport: missing });
-    const outOfRange = toolTransport(1, [firstEvent]);
-    outOfRange.effectOrder = [{ kind: "record_world_event", index: 1 }];
-    malformedCases.push({ label: "out-of-range", transport: outOfRange });
+    const overCovered = toolTransport(1, [firstEvent, secondEvent]);
+    overCovered.effectOrder = ["record_world_event", "record_world_event", "record_world_event"];
+    malformedCases.push({ label: "over-covered", transport: overCovered });
     const wrongKind = toolTransport(1, [firstEvent]);
-    wrongKind.effectOrder = [{ kind: "move_actor", index: 0 }];
+    wrongKind.effectOrder = ["move_actor"];
     malformedCases.push({ label: "wrong-kind", transport: wrongKind });
+    const oldIndexed = toolTransport(1, [firstEvent]);
+    oldIndexed.effectOrder = [{ kind: "record_world_event", index: 0 }];
+    malformedCases.push({ label: "old-indexed-order", transport: oldIndexed });
     for (const malformedCase of malformedCases) {
       const malformedGenerateObject = vi.fn().mockResolvedValue({
         object: malformedCase.transport,
