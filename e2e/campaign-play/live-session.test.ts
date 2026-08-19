@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import Database from "better-sqlite3";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -22,6 +23,7 @@ import {
   captureCampaignPlayReloadBoundary,
   captureCampaignPlaySubscriptionQuota,
   campaignPlayLiveSessionRoot,
+  inspectCoherentSettlementCopy,
   prepareCampaignPlayLiveSession,
   stageCampaignPlayManualDecision,
   waitForCompletedPublicTurn,
@@ -202,11 +204,377 @@ describe("Campaign Play live evidence session", () => {
 
   it("accepts only coherent completed player-turn outcomes", () => {
     expect(assertCoherentPlayerTurnTerminalReason("action_resolved")).toBe("action_resolved");
+    expect(assertCoherentPlayerTurnTerminalReason("action_impossible")).toBe("action_impossible");
     expect(assertCoherentPlayerTurnTerminalReason("clarification_requested")).toBe("clarification_requested");
-    expect(() => assertCoherentPlayerTurnTerminalReason("terminal_failure")).toThrow(
-      "does not have one coherent durable result",
-    );
+    for (const value of [
+      "terminal_failure",
+      "opening_completed",
+      "unknown",
+      "",
+      undefined,
+    ]) {
+      expect(() => assertCoherentPlayerTurnTerminalReason(value as string)).toThrow(
+        "does not have one coherent durable result",
+      );
+    }
   });
+
+  it("fails closed when the exact durable result is missing or duplicated", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "worldforge-live-result-cardinality-"));
+    roots.push(root);
+    const campaignId = "6c293ce5-a46a-4935-9345-dd8f3f544bc4";
+    const turnId = "turn-player-action:d8459a19c30186653cce6e5b5a3a6e54efa12001";
+    const frozenRoot = path.resolve(
+      "output/playtests/campaign-play/release-60-glm53-new-world-r7r-20260819",
+    );
+    const sourceSettlementPath = path.join(
+      frozenRoot,
+      "evidence",
+      "release-60-glm53-new-world-r7r-20260819.session",
+      "probes",
+      "settlements",
+      "action-6-05fc1fe72e12617d.sqlite",
+    );
+    const sourceReceiptPath = path.join(
+      frozenRoot,
+      "evidence",
+      "release-60-glm53-new-world-r7r-20260819.session",
+      "signed-decisions",
+      "action-6-signed-1787138822496-baf39c28cf033ed449774d92498d4e3ba5e079a24c066bc1a1542cc62d9895c2.json",
+    );
+    const copyPath = path.join(root, "action-6.sqlite");
+    const sourceDatabase = new Database(sourceSettlementPath, { readonly: true });
+    const resultRow = sourceDatabase.prepare(`
+      SELECT turn_id AS turnId, campaign_id AS campaignId,
+        terminal_reason AS terminalReason, created_at AS createdAt
+      FROM campaign_play_turn_results WHERE campaign_id = ? AND turn_id = ?
+    `).get(campaignId, turnId) as {
+      turnId: string;
+      campaignId: string;
+      terminalReason: string;
+      createdAt: number;
+    };
+    sourceDatabase.close();
+    const pending = (JSON.parse(fs.readFileSync(sourceReceiptPath, "utf8")) as {
+      pendingDecision: Parameters<typeof inspectCoherentSettlementCopy>[0]["pending"];
+    }).pendingDecision;
+
+    const replaceResults = (rows: Array<typeof resultRow>) => {
+      fs.rmSync(copyPath, { force: true });
+      fs.rmSync(`${copyPath}-shm`, { force: true });
+      fs.rmSync(`${copyPath}-wal`, { force: true });
+      fs.copyFileSync(sourceSettlementPath, copyPath);
+      const database = new Database(copyPath);
+      database.pragma("foreign_keys = OFF");
+      database.exec(`
+        DROP TRIGGER IF EXISTS campaign_play_turn_results_update_immutable;
+        DROP TRIGGER IF EXISTS campaign_play_turn_results_delete_immutable;
+        DROP TRIGGER IF EXISTS campaign_play_turn_results_insert_guard;
+        ALTER TABLE campaign_play_turn_results RENAME TO campaign_play_turn_results_original;
+        CREATE TABLE campaign_play_turn_results (
+          turn_id TEXT NOT NULL,
+          campaign_id TEXT NOT NULL,
+          terminal_reason TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+      `);
+      const insert = database.prepare(`
+        INSERT INTO campaign_play_turn_results (turn_id, campaign_id, terminal_reason, created_at)
+        VALUES (?, ?, ?, ?)
+      `);
+      for (const row of rows) insert.run(row.turnId, row.campaignId, row.terminalReason, row.createdAt);
+      database.exec("DROP TABLE campaign_play_turn_results_original");
+      database.close();
+    };
+
+    for (const rows of [[], [resultRow, resultRow]]) {
+      replaceResults(rows);
+      expect(() => inspectCoherentSettlementCopy({
+        copyPath,
+        campaignId,
+        turnId,
+        pending,
+      })).toThrow("does not have one coherent durable result");
+    }
+  });
+
+  it("fails closed for interrupted and failed public turns", async () => {
+    const turnId = "turn-failed-or-interrupted";
+    for (const status of ["failed", "interrupted"] as const) {
+      vi.stubGlobal("fetch", vi.fn(async (input: unknown) => {
+        const url = String(input);
+        const body = url.endsWith("/state")
+          ? { phase: "ready", activeTurn: null, projectionHash: "a".repeat(64) }
+          : {
+              turn: { turnId, status },
+              result: { status, narration: null, narrationOperation: null },
+            };
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }));
+      await expect(waitForCompletedPublicTurn("campaign-failure-boundary", turnId, {
+        pollIntervalMs: 0,
+      })).rejects.toThrow(`terminal ${status}`);
+    }
+  });
+
+  it("binds a copied completed action-impossible turn exactly once without touching its source database", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "worldforge-live-action-impossible-"));
+    roots.push(root);
+    const campaignId = "6c293ce5-a46a-4935-9345-dd8f3f544bc4";
+    const turnId = "turn-player-action:d8459a19c30186653cce6e5b5a3a6e54efa12001";
+    const frozenRoot = path.resolve(
+      "output/playtests/campaign-play/release-60-glm53-new-world-r7r-20260819",
+    );
+    const frozenSessionRoot = path.join(
+      frozenRoot,
+      "evidence",
+      "release-60-glm53-new-world-r7r-20260819.session",
+    );
+    const frozenCampaignRoot = path.join(
+      frozenRoot,
+      "..",
+      "..",
+      "campaign-world-runs",
+      "release-60-glm53-new-world-r7r-20260819",
+      "campaigns",
+      campaignId,
+    );
+    const sourceRunConfig = JSON.parse(fs.readFileSync(
+      path.join(frozenSessionRoot, "build", "run-config.json"),
+      "utf8",
+    )) as CampaignPlayRunConfig;
+    const config: CampaignPlayRunConfig = {
+      ...sourceRunConfig,
+      outputRoot: path.join(root, "evidence"),
+    };
+    const sessionRoot = campaignPlayLiveSessionRoot(config);
+    fs.cpSync(frozenSessionRoot, sessionRoot, { recursive: true });
+    const campaignsRoot = path.join(root, "campaigns");
+    const campaignRoot = path.join(campaignsRoot, campaignId);
+    fs.mkdirSync(campaignsRoot, { recursive: true });
+    fs.cpSync(frozenCampaignRoot, campaignRoot, { recursive: true });
+    process.env.GSD_CAMPAIGNS_ROOT = campaignsRoot;
+
+    const identityPaths = [
+      "signed-decisions/action-6-signed-1787138822496-baf39c28cf033ed449774d92498d4e3ba5e079a24c066bc1a1542cc62d9895c2.json",
+      "probes/choice-captures/action-6.json",
+      "probes/click-proofs/action-6.json",
+      "probes/render-proofs/action-6.json",
+    ];
+    const sourceIdentityBytes = new Map(identityPaths.map((relativePath) => [
+      relativePath,
+      fs.readFileSync(path.join(frozenSessionRoot, relativePath)),
+    ]));
+    for (const relativePath of identityPaths) {
+      expect(fs.readFileSync(path.join(sessionRoot, relativePath))).toEqual(
+        sourceIdentityBytes.get(relativePath),
+      );
+    }
+
+    const pendingPath = path.join(sessionRoot, "pending-decision.json");
+    const receiptPath = path.join(
+      sessionRoot,
+      "signed-decisions",
+      "action-6-signed-1787138822496-baf39c28cf033ed449774d92498d4e3ba5e079a24c066bc1a1542cc62d9895c2.json",
+    );
+    const renderProofPath = path.join(sessionRoot, "probes", "render-proofs", "action-6.json");
+    const clickProofPath = path.join(sessionRoot, "probes", "click-proofs", "action-6.json");
+    const renderProof = JSON.parse(fs.readFileSync(renderProofPath, "utf8")) as {
+      playerActionNumber: number;
+      turnId: string;
+      ready: boolean;
+      afterProjectionHash: string;
+      renderedNarrationId: string;
+      renderedSceneIdentity: string;
+    };
+    expect(renderProof).toMatchObject({
+      playerActionNumber: 6,
+      turnId,
+      ready: true,
+    });
+    expect(fs.existsSync(pendingPath)).toBe(true);
+    expect(fs.existsSync(receiptPath)).toBe(true);
+    fs.rmSync(pendingPath);
+
+    const operationDatabasePath = path.join(
+      sessionRoot,
+      "probes",
+      "settlements",
+      "action-6-05fc1fe72e12617d.sqlite",
+    );
+    const operationDatabase = new Database(operationDatabasePath, { readonly: true });
+    const operation = operationDatabase.prepare(`
+      SELECT operation_id AS operationId, narration_id AS narrationId
+      FROM campaign_play_narration_operations WHERE campaign_id = ? AND turn_id = ?
+    `).get(campaignId, turnId) as { operationId: string; narrationId: string };
+    operationDatabase.close();
+    expect(operation).toMatchObject({
+      narrationId: renderProof.renderedNarrationId,
+      operationId: expect.any(String),
+    });
+
+    const state = {
+      phase: "ready",
+      activeTurn: null,
+      projectionHash: renderProof.afterProjectionHash,
+      worldVersion: 18,
+      runtimeRevision: 132,
+    };
+    const turn = {
+      turn: { turnId, status: "completed" },
+      result: {
+        status: "completed",
+        narration: { turnId, narrationId: operation.narrationId },
+        narrationOperation: {
+          turnId,
+          operationId: operation.operationId,
+          sourceKind: "model_accepted",
+        },
+      },
+    };
+    const fetchMock = vi.fn(async (input: unknown, _init?: RequestInit) => {
+      const body = String(input).endsWith("/state") ? state : turn;
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const ledgerPath = path.join(sessionRoot, "browser-actions.jsonl");
+    expect(fs.readFileSync(ledgerPath, "utf8").trim().split("\n")).toHaveLength(5);
+    const frozenDatabasePath = path.join(frozenCampaignRoot, "state.db");
+    const copiedDatabasePath = path.join(campaignRoot, "state.db");
+    const frozenDatabaseBytes = fs.readFileSync(frozenDatabasePath);
+    const copiedDatabaseBytes = fs.readFileSync(copiedDatabasePath);
+    expect(copiedDatabaseBytes).toEqual(frozenDatabaseBytes);
+    const settlementPath = path.join(sessionRoot, "probes", "settlements", "action-6.json");
+    expect(fs.existsSync(settlementPath)).toBe(false);
+
+    const firstBound = await bindCampaignPlayManualDecisionCoherent({
+      runConfig: config,
+      admittedTurnId: turnId,
+      renderProofPath,
+      clickProofPath,
+    });
+    expect(firstBound).toMatchObject({
+      runId: config.runId,
+      campaignId,
+      playerActionNumber: 6,
+      turnId,
+      decisionDigest: "baf39c28cf033ed449774d92498d4e3ba5e079a24c066bc1a1542cc62d9895c2",
+    });
+    const settlement = JSON.parse(fs.readFileSync(settlementPath, "utf8")) as Record<string, unknown>;
+    expect(settlement).toMatchObject({
+      playerActionNumber: 6,
+      turnId,
+      terminalReason: "action_impossible",
+      sourceKind: "model_accepted",
+      projectionHash: renderProof.afterProjectionHash,
+      integrity: "ok",
+      foreignKeyViolations: 0,
+    });
+    expect((settlement.renderProof as { ready?: unknown }).ready).toBe(true);
+    expect(fs.existsSync(pendingPath)).toBe(false);
+    expect(fs.readFileSync(ledgerPath, "utf8").trim().split("\n")).toHaveLength(6);
+
+    const settledDatabase = new Database(operationDatabasePath, { readonly: true });
+    settledDatabase.pragma("query_only = ON");
+    const settledTurn = settledDatabase.prepare(`
+      SELECT base_world_version AS baseWorldVersion, final_world_version AS finalWorldVersion,
+        stage, completed_at AS completedAt
+      FROM campaign_play_turns WHERE campaign_id = ? AND id = ?
+    `).get(campaignId, turnId) as {
+      baseWorldVersion: number;
+      finalWorldVersion: number;
+      stage: string;
+      completedAt: number | null;
+    };
+    const settledResult = settledDatabase.prepare(`
+      SELECT terminal_reason AS terminalReason FROM campaign_play_turn_results
+      WHERE campaign_id = ? AND turn_id = ?
+    `).get(campaignId, turnId) as { terminalReason: string };
+    const judgeStage = settledDatabase.prepare(`
+      SELECT status, artifact_json AS artifactJson FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'judge'
+    `).get(campaignId, turnId) as { status: string; artifactJson: string };
+    const operationRows = settledDatabase.prepare(`
+      SELECT status, source_kind AS sourceKind FROM campaign_play_narration_operations
+      WHERE campaign_id = ? AND turn_id = ?
+    `).all(campaignId, turnId) as Array<{ status: string; sourceKind: string }>;
+    const sceneRows = settledDatabase.prepare(`
+      SELECT narration_id AS narrationId, operation_id AS operationId FROM campaign_play_proper_scenes
+      WHERE campaign_id = ? AND turn_id = ?
+    `).all(campaignId, turnId) as Array<{ narrationId: string; operationId: string }>;
+    expect(settledTurn).toMatchObject({
+      baseWorldVersion: 18,
+      finalWorldVersion: 18,
+      stage: "completed",
+    });
+    expect(settledTurn.completedAt).not.toBeNull();
+    expect(settledResult).toEqual({ terminalReason: "action_impossible" });
+    expect(operationRows).toEqual([{ status: "complete", sourceKind: "model_accepted" }]);
+    expect(sceneRows).toEqual([{
+      narrationId: operation.narrationId,
+      operationId: operation.operationId,
+    }]);
+    const judgeArtifact = JSON.parse(judgeStage.artifactJson) as {
+      primaryPlan: { commands: unknown[]; kind: string; reason: string };
+      publicResult: { disposition: string; result: string };
+    };
+    expect(judgeStage.status).toBe("accepted");
+    expect(judgeArtifact.primaryPlan).toMatchObject({ kind: "no_effect", reason: "impossible", commands: [] });
+    expect(judgeArtifact.publicResult).toMatchObject({ disposition: "impossible", result: "no_effect" });
+    for (const table of ["campaign_play_commands", "campaign_play_receipts", "campaign_play_events"]) {
+      expect(settledDatabase.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE turn_id = ?`)
+        .get(turnId)).toEqual({ count: 0 });
+    }
+    const stateRow = settledDatabase.prepare(`
+      SELECT accepted_world_version AS acceptedWorldVersion, world_version AS worldVersion
+      FROM campaign_play_states WHERE campaign_id = ?
+    `).get(campaignId) as { acceptedWorldVersion: number; worldVersion: number };
+    expect(stateRow).toMatchObject({ acceptedWorldVersion: 1, worldVersion: 18 });
+    expect(settledDatabase.prepare("PRAGMA integrity_check").get()).toEqual({ integrity_check: "ok" });
+    expect(settledDatabase.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    settledDatabase.close();
+    expect(fs.readFileSync(frozenDatabasePath)).toEqual(frozenDatabaseBytes);
+    expect(fs.readFileSync(copiedDatabasePath)).toEqual(copiedDatabaseBytes);
+
+    const fetchCallsAfterFirstBind = fetchMock.mock.calls.length;
+    const repeated = await bindCampaignPlayManualDecisionCoherent({
+      runConfig: config,
+      admittedTurnId: turnId,
+      renderProofPath,
+      clickProofPath,
+    });
+    expect(repeated).toEqual(firstBound);
+    expect(fetchMock).toHaveBeenCalledTimes(fetchCallsAfterFirstBind);
+    expect(fs.readFileSync(ledgerPath, "utf8").trim().split("\n")).toHaveLength(6);
+
+    fs.writeFileSync(settlementPath, `${JSON.stringify({ ...settlement, decisionDigest: "0".repeat(64) })}\n`, "utf8");
+    await expect(bindCampaignPlayManualDecisionCoherent({
+      runConfig: config,
+      admittedTurnId: turnId,
+      renderProofPath,
+      clickProofPath,
+    })).rejects.toThrow("existing settlement proof conflicts");
+    expect(fetchMock).toHaveBeenCalledTimes(fetchCallsAfterFirstBind);
+    expect(fetchMock.mock.calls.every(([, init]) =>
+      ((init as RequestInit | undefined)?.method ?? "GET").toUpperCase() === "GET")).toBe(true);
+    for (const relativePath of identityPaths) {
+      expect(fs.readFileSync(path.join(frozenSessionRoot, relativePath))).toEqual(
+        sourceIdentityBytes.get(relativePath),
+      );
+      expect(fs.readFileSync(path.join(sessionRoot, relativePath))).toEqual(
+        sourceIdentityBytes.get(relativePath),
+      );
+    }
+    expect(fs.readFileSync(frozenDatabasePath)).toEqual(frozenDatabaseBytes);
+    expect(fs.readFileSync(copiedDatabasePath)).toEqual(copiedDatabaseBytes);
+  }, 120_000);
 
   it("keeps reconciling a healthy turn past the historical 120-second window", async () => {
     vi.useFakeTimers();

@@ -151,7 +151,10 @@ interface CampaignPlayModelStageScalar {
   completedAt: number | null;
 }
 
-export type CoherentPlayerTurnTerminalReason = "action_resolved" | "clarification_requested";
+export type CoherentPlayerTurnTerminalReason =
+  | "action_resolved"
+  | "action_impossible"
+  | "clarification_requested";
 
 interface CoherentSettlement {
   turnId: string;
@@ -245,7 +248,11 @@ function safeSessionPath(root: string, candidate: string): string {
 export function assertCoherentPlayerTurnTerminalReason(
   value: string,
 ): CoherentPlayerTurnTerminalReason {
-  if (value !== "action_resolved" && value !== "clarification_requested") {
+  if (
+    value !== "action_resolved"
+    && value !== "action_impossible"
+    && value !== "clarification_requested"
+  ) {
     throw new Error("The exact player turn does not have one coherent durable result.");
   }
   return value;
@@ -884,7 +891,7 @@ async function backupCampaignPlayDatabase(
   }
 }
 
-function inspectCoherentSettlementCopy(input: {
+export function inspectCoherentSettlementCopy(input: {
   copyPath: string;
   campaignId: string;
   turnId: string;
