@@ -275,29 +275,6 @@ describe("Campaign Play API", () => {
     });
   });
 
-  it("accepts an exhausted interrupted turn without re-enabling recovery", async () => {
-    const exhaustedTurn = {
-      turnId: "turn-one",
-      turnKind: "player_action" as const,
-      status: "interrupted" as const,
-      progress: null,
-      lastEventSequence: 13,
-      retryEligible: false,
-      submittedAt: 1,
-      completedAt: null,
-    };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
-      ...versions,
-      campaignId: "campaign-one",
-      turn: exhaustedTurn,
-      result: { status: "interrupted", errorCode: "turn_interrupted" },
-    })));
-
-    await expect(loadCampaignPlayTurn("campaign-one", "turn-one")).resolves.toMatchObject({
-      turn: exhaustedTurn,
-    });
-  });
-
   it("loads directed payable and receivable obligations from the public state", async () => {
     const obligations = [{
       handle: "obligation-payable",
@@ -678,6 +655,24 @@ describe("Campaign Play API", () => {
   });
 
   it("rejects valid payloads whose campaign or turn identity differs from the addressed resource", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+      ...versions,
+      campaignId: "campaign-one",
+      turn: {
+        turnId: "turn-one",
+        turnKind: "player_action",
+        status: "interrupted",
+        progress: null,
+        lastEventSequence: 3,
+        retryEligible: false,
+        submittedAt: 1,
+        completedAt: null,
+      },
+      result: { status: "interrupted", errorCode: "turn_interrupted" },
+    })));
+    await expect(loadCampaignPlayTurn("campaign-one", "turn-one"))
+      .rejects.toMatchObject({ code: "service_unavailable", invalidResponse: true });
+
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse(state)));
     await expect(loadCampaignPlayState("campaign-two"))
       .rejects.toMatchObject({ code: "service_unavailable", invalidResponse: true });
@@ -772,26 +767,19 @@ describe("Campaign Play API", () => {
     expect(result).toEqual({ lastSequence: 4, terminalEvent: completed });
   });
 
-  it("accepts an interrupted event whose recovery budget is exhausted", async () => {
+  it("rejects SSE content-type, identity, conflicting duplicates, gaps, and out-of-order sequences", async () => {
     const interrupted: CampaignPlaySseEvent = {
-      sequence: 3,
+      sequence: 1,
       turnId: "turn-one",
       ...versions,
-      createdAt: 10,
+      createdAt: 1,
       type: "turn.interrupted",
       retryEligible: false,
     };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse([eventBlock(interrupted)])));
-    const received: CampaignPlaySseEvent[] = [];
+    await expect(streamCampaignPlayTurnEvents("campaign-1", "turn-one", { afterSequence: 0, onEvent: vi.fn() }))
+      .rejects.toMatchObject({ code: "service_unavailable", invalidResponse: true });
 
-    await expect(streamCampaignPlayTurnEvents("campaign-one", "turn-one", {
-      afterSequence: 2,
-      onEvent: (event) => received.push(event),
-    })).resolves.toEqual({ lastSequence: 3, terminalEvent: interrupted });
-    expect(received).toEqual([interrupted]);
-  });
-
-  it("rejects SSE content-type, identity, conflicting duplicates, gaps, and out-of-order sequences", async () => {
     const accepted: CampaignPlaySseEvent = {
       sequence: 1,
       turnId: "turn-one",

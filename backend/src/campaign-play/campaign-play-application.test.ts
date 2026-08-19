@@ -911,12 +911,14 @@ async function runStageLocalRecoveryScenario(rejectGameMasterSecond = false) {
       onResume: (input) => resumeInputs.push(input),
     });
   });
+  const runtimeFactory = {
+    createOpening: (handle: CampaignPlayDatabaseHandle) =>
+      fakeOpeningRuntime(handle, { runNextStage: vi.fn() }),
+    createTurn,
+  };
   const application = createCampaignPlayApplication({
     now: () => 1_300,
-    runtimeFactory: {
-      createOpening: (handle) => fakeOpeningRuntime(handle, { runNextStage: vi.fn() }),
-      createTurn,
-    },
+    runtimeFactory,
   });
   bootstrapPlayer(application);
   markPlayerPhaseReady();
@@ -943,6 +945,10 @@ async function runStageLocalRecoveryScenario(rejectGameMasterSecond = false) {
     );
     return {
       application,
+      createReopenedApplication: () => createCampaignPlayApplication({
+        now: () => 1_350,
+        runtimeFactory,
+      }),
       admission,
       createTurnInputs,
       resumeInputs,
@@ -1807,7 +1813,7 @@ describe("CampaignPlayApplication", () => {
     expect(result.continuityCount).toEqual({ count: 0 });
   });
 
-  it("exhausts three Game Master attempts without replaying the accepted Judge stage", async () => {
+  it("leaves the exhausted Game Master turn resumable for one explicit same-turn attempt", async () => {
     const result = await runStageLocalRecoveryScenario(true);
     expect(result.resumeInputs.map((input) => input.interruptedStage)).toEqual([
       "admitted",
@@ -1830,7 +1836,7 @@ describe("CampaignPlayApplication", () => {
       stage: "interrupted",
       interruptedStage: "judged",
       workerEpoch: 5,
-      resumeEligible: false,
+      resumeEligible: true,
     });
     expect((result.rows as Array<{ kind: string }>).filter((row) => row.kind === "game_master"))
       .toHaveLength(3);
@@ -1840,77 +1846,182 @@ describe("CampaignPlayApplication", () => {
     const stateBeforeResume = result.application.loadState(CAMPAIGN_ID);
     expect(stateBeforeResume.activeTurn).toMatchObject({
       status: "interrupted",
-      retryEligible: false,
+      retryEligible: true,
     });
     expect(result.application.loadTurn(CAMPAIGN_ID, result.admission.turnId).turn)
-      .toMatchObject({ status: "interrupted", retryEligible: false });
+      .toMatchObject({ status: "interrupted", retryEligible: true });
 
-    const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
+    const handleBefore = openCampaignPlayDatabase(CAMPAIGN_ID);
+    let identityBefore: Record<string, unknown> | undefined;
+    let gameMasterRowsBefore: Array<{
+      stageId: string;
+      attempt: number;
+      workerEpoch: number;
+      requestedProviderId: string;
+      requestedModel: string;
+      requestedStrategy: string;
+      actualProviderId: string | null;
+      actualModel: string | null;
+      actualStrategy: string | null;
+      errorCode: string | null;
+    }> = [];
+    let acceptedJudgeArtifactHash: string | null = null;
+    let protectedBefore: Record<string, number> = {};
+    let resumeEventCountBefore = 0;
     try {
-      const countForTurn = (table: string) => handle.sqlite.prepare(
+      const countForTurn = (table: string) => handleBefore.sqlite.prepare(
         `SELECT COUNT(*) AS count FROM ${table} WHERE campaign_id = ? AND turn_id = ?`,
       ).get(CAMPAIGN_ID, result.admission.turnId) as { count: number };
-      const protectedBefore = {
-        modelStages: countForTurn("campaign_play_model_stages"),
-        runtimeEvents: countForTurn("campaign_play_runtime_events"),
-        turnEvents: countForTurn("campaign_play_turn_events"),
-        commands: countForTurn("campaign_play_commands"),
-        receipts: countForTurn("campaign_play_receipts"),
-        turnResults: countForTurn("campaign_play_turn_results"),
-        narrations: countForTurn("campaign_play_narrations"),
-        narrationOperations: countForTurn("campaign_play_narration_operations"),
-        properScenes: countForTurn("campaign_play_proper_scenes"),
-        turn: handle.sqlite.prepare(`SELECT stage, interrupted_stage AS interruptedStage,
-            resume_eligible AS resumeEligible, worker_lease_owner AS workerLeaseOwner,
-            worker_epoch AS workerEpoch, worker_lease_expires_at AS workerLeaseExpiresAt,
-            next_event_sequence AS nextEventSequence, updated_at AS updatedAt
-          FROM campaign_play_turns WHERE campaign_id = ? AND id = ?`).get(
-            CAMPAIGN_ID, result.admission.turnId,
-          ),
-        authority: handle.sqlite.prepare(`SELECT world_version AS worldVersion,
-            runtime_revision AS runtimeRevision FROM campaign_play_states
-          WHERE campaign_id = ?`).get(CAMPAIGN_ID),
+      identityBefore = handleBefore.sqlite.prepare(`SELECT id,
+          input_hash AS inputHash, idempotency_key AS idempotencyKey,
+          expected_world_version AS expectedWorldVersion,
+          expected_runtime_revision AS expectedRuntimeRevision,
+          base_world_version AS baseWorldVersion, frame_hash AS frameHash
+        FROM campaign_play_turns WHERE campaign_id = ? AND id = ?`).get(
+        CAMPAIGN_ID, result.admission.turnId,
+      ) as Record<string, unknown> | undefined;
+      gameMasterRowsBefore = handleBefore.sqlite.prepare(`SELECT stage_id AS stageId,
+          attempt, worker_epoch AS workerEpoch, requested_provider_id AS requestedProviderId,
+          requested_model AS requestedModel, requested_strategy AS requestedStrategy,
+          actual_provider_id AS actualProviderId, actual_model AS actualModel,
+          actual_strategy AS actualStrategy, error_code AS errorCode
+        FROM campaign_play_model_stages
+        WHERE campaign_id = ? AND turn_id = ? AND kind = 'game_master'
+        ORDER BY attempt`).all(CAMPAIGN_ID, result.admission.turnId) as typeof gameMasterRowsBefore;
+      acceptedJudgeArtifactHash = (handleBefore.sqlite.prepare(`SELECT artifact_hash AS artifactHash
+        FROM campaign_play_model_stages WHERE campaign_id = ? AND turn_id = ?
+          AND kind = 'judge' AND status = 'accepted'`).get(
+        CAMPAIGN_ID, result.admission.turnId,
+      ) as { artifactHash: string } | undefined)?.artifactHash ?? null;
+      protectedBefore = {
+        commands: countForTurn("campaign_play_commands").count,
+        receipts: countForTurn("campaign_play_receipts").count,
+        turnResults: countForTurn("campaign_play_turn_results").count,
+        narrations: countForTurn("campaign_play_narrations").count,
+        narrationOperations: countForTurn("campaign_play_narration_operations").count,
+        properScenes: countForTurn("campaign_play_proper_scenes").count,
       };
-      expect(protectedBefore.turn).toMatchObject({ resumeEligible: 1 });
-      let resumeError: unknown;
-      try {
-        result.application.resumeTurn(CAMPAIGN_ID, result.admission.turnId, {
-          expectedWorldVersion: stateBeforeResume.worldVersion,
-          expectedRuntimeRevision: stateBeforeResume.runtimeRevision,
-        });
-      } catch (error) {
-        resumeError = error;
-      }
-      expect(resumeError).toBeInstanceOf(CampaignPlayApplicationError);
-      expect((resumeError as CampaignPlayApplicationError).publicCode).toBe("turn_not_resumable");
-      const protectedAfter = {
-        modelStages: countForTurn("campaign_play_model_stages"),
-        runtimeEvents: countForTurn("campaign_play_runtime_events"),
-        turnEvents: countForTurn("campaign_play_turn_events"),
-        commands: countForTurn("campaign_play_commands"),
-        receipts: countForTurn("campaign_play_receipts"),
-        turnResults: countForTurn("campaign_play_turn_results"),
-        narrations: countForTurn("campaign_play_narrations"),
-        narrationOperations: countForTurn("campaign_play_narration_operations"),
-        properScenes: countForTurn("campaign_play_proper_scenes"),
-        turn: handle.sqlite.prepare(`SELECT stage, interrupted_stage AS interruptedStage,
-            resume_eligible AS resumeEligible, worker_lease_owner AS workerLeaseOwner,
-            worker_epoch AS workerEpoch, worker_lease_expires_at AS workerLeaseExpiresAt,
-            next_event_sequence AS nextEventSequence, updated_at AS updatedAt
-          FROM campaign_play_turns WHERE campaign_id = ? AND id = ?`).get(
-            CAMPAIGN_ID, result.admission.turnId,
-          ),
-        authority: handle.sqlite.prepare(`SELECT world_version AS worldVersion,
-            runtime_revision AS runtimeRevision FROM campaign_play_states
-          WHERE campaign_id = ?`).get(CAMPAIGN_ID),
-      };
-      expect(protectedAfter).toEqual(protectedBefore);
-      expect(result.resumeInputs).toHaveLength(3);
-      expect(result.application.loadState(CAMPAIGN_ID)).toEqual(stateBeforeResume);
-      expect(result.application.loadTurn(CAMPAIGN_ID, result.admission.turnId).turn)
-        .toMatchObject({ status: "interrupted", retryEligible: false });
+      resumeEventCountBefore = (handleBefore.sqlite.prepare(`SELECT COUNT(*) AS count
+        FROM campaign_play_runtime_events WHERE campaign_id = ? AND turn_id = ?
+          AND kind = 'turn_resumed'`).get(CAMPAIGN_ID, result.admission.turnId) as { count: number }).count;
     } finally {
-      handle.close();
+      handleBefore.close();
+    }
+    expect(acceptedJudgeArtifactHash).toEqual(expect.any(String));
+    expect(result.resumeInputs).toHaveLength(3);
+
+    // A close/reopen boundary must preserve the explicit capability without invoking the provider.
+    const createTurnCountBeforeReopen = result.createTurnInputs.length;
+    const reopenedApplication = result.createReopenedApplication();
+    const reopenedState = reopenedApplication.loadState(CAMPAIGN_ID);
+    expect(reopenedState).toMatchObject({
+      activeTurn: { status: "interrupted", retryEligible: true },
+    });
+    expect(reopenedApplication.loadTurn(CAMPAIGN_ID, result.admission.turnId).turn)
+      .toMatchObject({ status: "interrupted", retryEligible: true });
+    expect(result.createTurnInputs).toHaveLength(createTurnCountBeforeReopen);
+    expect(result.resumeInputs).toHaveLength(3);
+
+    reopenedApplication.resumeTurn(CAMPAIGN_ID, result.admission.turnId, {
+      expectedWorldVersion: reopenedState.worldVersion,
+      expectedRuntimeRevision: reopenedState.runtimeRevision,
+    });
+    await reopenedApplication.waitForIdle(CAMPAIGN_ID);
+
+    expect(result.resumeInputs).toHaveLength(4);
+    expect(result.resumeInputs.at(-1)).toEqual({
+      interruptedStage: "judged",
+      observedEpoch: 5,
+      gameMasterRecoveryFeedback: undefined,
+    });
+    expect(reopenedApplication.loadState(CAMPAIGN_ID)).toMatchObject({
+      activeTurn: { status: "interrupted", retryEligible: true },
+    });
+    expect(reopenedApplication.loadTurn(CAMPAIGN_ID, result.admission.turnId).turn)
+      .toMatchObject({ status: "interrupted", retryEligible: true });
+
+    const handleAfter = openCampaignPlayDatabase(CAMPAIGN_ID);
+    try {
+      const countForTurn = (table: string) => handleAfter.sqlite.prepare(
+        `SELECT COUNT(*) AS count FROM ${table} WHERE campaign_id = ? AND turn_id = ?`,
+      ).get(CAMPAIGN_ID, result.admission.turnId) as { count: number };
+      const identityAfter = handleAfter.sqlite.prepare(`SELECT id,
+          input_hash AS inputHash, idempotency_key AS idempotencyKey,
+          expected_world_version AS expectedWorldVersion,
+          expected_runtime_revision AS expectedRuntimeRevision,
+          base_world_version AS baseWorldVersion, frame_hash AS frameHash
+        FROM campaign_play_turns WHERE campaign_id = ? AND id = ?`).get(
+        CAMPAIGN_ID, result.admission.turnId,
+      );
+      expect(identityAfter).toEqual(identityBefore);
+
+      const gameMasterRowsAfter = handleAfter.sqlite.prepare(`SELECT stage_id AS stageId,
+          attempt, worker_epoch AS workerEpoch, requested_provider_id AS requestedProviderId,
+          requested_model AS requestedModel, requested_strategy AS requestedStrategy,
+          actual_provider_id AS actualProviderId, actual_model AS actualModel,
+          actual_strategy AS actualStrategy, error_code AS errorCode
+        FROM campaign_play_model_stages
+        WHERE campaign_id = ? AND turn_id = ? AND kind = 'game_master'
+        ORDER BY attempt`).all(CAMPAIGN_ID, result.admission.turnId) as Array<{
+          stageId: string;
+          attempt: number;
+          workerEpoch: number;
+          requestedProviderId: string;
+          requestedModel: string;
+          requestedStrategy: string;
+          actualProviderId: string | null;
+          actualModel: string | null;
+          actualStrategy: string | null;
+          errorCode: string | null;
+        }>;
+      expect(gameMasterRowsAfter).toHaveLength(4);
+      expect(gameMasterRowsAfter[3]).toMatchObject({
+        stageId: gameMasterRowsBefore[0]!.stageId,
+        attempt: 4,
+        workerEpoch: 6,
+        requestedProviderId: "provider-frozen",
+        requestedModel: "game-master-frozen",
+        requestedStrategy: "strict_object",
+        actualProviderId: "provider-frozen",
+        actualModel: "game-master-frozen",
+        actualStrategy: "strict_object",
+        errorCode: "model_contract_invalid",
+      });
+      expect(gameMasterRowsAfter.slice(0, 3)).toEqual(gameMasterRowsBefore);
+      const firstGameMaster = gameMasterRowsAfter[0]!;
+      expect(gameMasterRowsAfter.every((row) =>
+        row.stageId === firstGameMaster.stageId &&
+        row.requestedProviderId === firstGameMaster.requestedProviderId &&
+        row.requestedModel === firstGameMaster.requestedModel &&
+        row.requestedStrategy === firstGameMaster.requestedStrategy,
+      )).toBe(true);
+      expect(handleAfter.sqlite.prepare(`SELECT artifact_hash AS artifactHash
+        FROM campaign_play_model_stages WHERE campaign_id = ? AND turn_id = ?
+          AND kind = 'judge' AND status = 'accepted'`).get(
+        CAMPAIGN_ID, result.admission.turnId,
+      )).toEqual({ artifactHash: acceptedJudgeArtifactHash });
+      expect(handleAfter.sqlite.prepare(`SELECT COUNT(*) AS count
+        FROM campaign_play_model_stages WHERE campaign_id = ? AND turn_id = ?
+          AND kind = 'game_master' AND attempt = 5`).get(
+        CAMPAIGN_ID, result.admission.turnId,
+      )).toEqual({ count: 0 });
+      expect({
+        commands: countForTurn("campaign_play_commands").count,
+        receipts: countForTurn("campaign_play_receipts").count,
+        turnResults: countForTurn("campaign_play_turn_results").count,
+        narrations: countForTurn("campaign_play_narrations").count,
+        narrationOperations: countForTurn("campaign_play_narration_operations").count,
+        properScenes: countForTurn("campaign_play_proper_scenes").count,
+      }).toEqual(protectedBefore);
+      expect(handleAfter.sqlite.prepare(`SELECT COUNT(*) AS count
+        FROM campaign_play_runtime_events WHERE campaign_id = ? AND turn_id = ?
+          AND kind = 'turn_resumed'`).get(CAMPAIGN_ID, result.admission.turnId))
+        .toEqual({ count: resumeEventCountBefore + 1 });
+      expect(handleAfter.sqlite.prepare("PRAGMA integrity_check").get())
+        .toEqual({ integrity_check: "ok" });
+      expect(handleAfter.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    } finally {
+      handleAfter.close();
     }
   });
 

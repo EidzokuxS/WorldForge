@@ -1079,11 +1079,11 @@ export const campaignPlayPublicTurnSchema = z.object({
     });
   }
   if (turn.status === "interrupted") {
-    if (turn.completedAt !== null) {
+    if (turn.completedAt !== null || !turn.retryEligible) {
       context.addIssue({
         code: "custom",
         path: ["retryEligible"],
-        message: "Interrupted turn remains incomplete.",
+        message: "Interrupted turn remains incomplete and exposes resume.",
       });
     }
     return;
@@ -1796,7 +1796,7 @@ export const campaignPlaySseEventSchema: z.ZodType<CampaignPlaySseEvent> =
     z.object({
       ...campaignPlaySseBaseShape,
       type: z.literal("turn.interrupted"),
-      retryEligible: z.boolean(),
+      retryEligible: z.literal(true),
     }).strict(),
     z.object({
       ...campaignPlaySseBaseShape,

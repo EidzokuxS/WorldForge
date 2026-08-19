@@ -633,7 +633,7 @@ function parsePublicTurn(value: unknown): CampaignPlayPublicTurn | null {
   if (value.status === "processing") {
     if (value.progress === null || value.completedAt !== null || value.retryEligible) return null;
   } else if (value.status === "interrupted") {
-    if (value.progress !== null || value.completedAt !== null) return null;
+    if (value.progress !== null || value.completedAt !== null || !value.retryEligible) return null;
   } else if (value.progress !== null || value.completedAt === null || value.retryEligible) {
     return null;
   }
@@ -1179,7 +1179,7 @@ function parseSseEvent(value: unknown, expectedTurnId: string): CampaignPlaySseE
         "type",
         "retryEligible",
       ]) ||
-      typeof value.retryEligible !== "boolean"
+      value.retryEligible !== true
     ) {
       return null;
     }
