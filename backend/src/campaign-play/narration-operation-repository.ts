@@ -21,6 +21,10 @@ import type {
   CampaignPlayModelExecutionEvidence,
   CampaignPlayRequestedModel,
 } from "./campaign-play-turn-repository.js";
+import {
+  campaignPlayNarratorRecoveryFeedbackSchema,
+  type CampaignPlayNarratorRecoveryFeedback,
+} from "./narrator.js";
 
 export const CAMPAIGN_PLAY_AUTOMATIC_NARRATION_WINDOW_MS = 180_000;
 export const CAMPAIGN_PLAY_MANUAL_NARRATION_WINDOW_MS = 180_000;
@@ -58,7 +62,12 @@ export interface CampaignPlayNarrationAttemptToken {
   expiresAt: number;
   deadlineAt: number;
   createdAt: number;
+  recoveryFeedback?: CampaignPlayNarratorRecoveryFeedback;
 }
+
+export type CampaignPlayNarrationOperationWithRecovery = CampaignPlayNarrationOperation & {
+  recoveryFeedback?: CampaignPlayNarratorRecoveryFeedback;
+};
 
 interface OperationRow {
   operationId: string;
@@ -75,6 +84,7 @@ interface OperationRow {
   currentAttempt: number;
   currentAttemptId: string | null;
   errorCode: string | null;
+  recoveryFeedbackJson: string | null;
   leaseOwner: string | null;
   leaseEpoch: number;
   leaseExpiresAt: number | null;
@@ -115,6 +125,36 @@ function parseReceiptIds(value: string): string[] {
   return parsed;
 }
 
+function parseRecoveryFeedback(value: string | null): CampaignPlayNarratorRecoveryFeedback | undefined {
+  if (value === null) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value) as unknown;
+  } catch (cause) {
+    throw new CampaignPlayNarrationOperationError(
+      "operation_corrupt",
+      "Campaign Play narration recovery feedback is not valid JSON.",
+      { cause },
+    );
+  }
+  const result = campaignPlayNarratorRecoveryFeedbackSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new CampaignPlayNarrationOperationError(
+      "operation_corrupt",
+      "Campaign Play narration recovery feedback is invalid.",
+    );
+  }
+  return result.data as CampaignPlayNarratorRecoveryFeedback;
+}
+
+function serializeRecoveryFeedback(
+  value: CampaignPlayNarratorRecoveryFeedback | null | undefined,
+): string | null {
+  if (value === null || value === undefined) return null;
+  const parsed = campaignPlayNarratorRecoveryFeedbackSchema.parse(value);
+  return canonicalizeCampaignPlayProjection(parsed);
+}
+
 function conciseResult(packetJson: string): {
   displayText: string;
   suggestedActions: CampaignPlaySuggestedAction[];
@@ -142,14 +182,15 @@ function selectOperation(
   key: "turn_id" | "operation_id",
   value: string,
 ): OperationRow | null {
-  return (handle.sqlite.prepare(`SELECT operation_id AS operationId,
+  const row = (handle.sqlite.prepare(`SELECT operation_id AS operationId,
       campaign_id AS campaignId, turn_id AS turnId, result_id AS resultId,
       narration_id AS narrationId, packet_hash AS packetHash,
       receipt_ids_json AS receiptIdsJson, concise_display_text AS conciseDisplayText,
       concise_suggested_actions_json AS conciseSuggestedActionsJson, status,
       source_kind AS sourceKind,
       current_attempt AS currentAttempt, current_attempt_id AS currentAttemptId,
-      error_code AS errorCode, lease_owner AS leaseOwner, lease_epoch AS leaseEpoch,
+      error_code AS errorCode, recovery_feedback_json AS recoveryFeedbackJson,
+      lease_owner AS leaseOwner, lease_epoch AS leaseEpoch,
       lease_expires_at AS leaseExpiresAt,
       automatic_deadline_at AS automaticDeadlineAt,
       active_deadline_at AS activeDeadlineAt,
@@ -157,9 +198,19 @@ function selectOperation(
       updated_at AS updatedAt, completed_at AS completedAt
     FROM campaign_play_narration_operations
     WHERE campaign_id = ? AND ${key} = ?`).get(handle.campaignId, value) as OperationRow | undefined) ?? null;
+  if (row === null) return null;
+  const attempts = handle.sqlite.prepare(`SELECT recovery_feedback_json AS recoveryFeedbackJson
+    FROM campaign_play_narration_attempts
+    WHERE campaign_id = ? AND operation_id = ?`).all(
+      handle.campaignId,
+      row.operationId,
+  ) as Array<{ recoveryFeedbackJson: string | null }>;
+  for (const attempt of attempts) parseRecoveryFeedback(attempt.recoveryFeedbackJson);
+  return row;
 }
 
-function operationView(row: OperationRow): CampaignPlayNarrationOperation {
+function operationView(row: OperationRow): CampaignPlayNarrationOperationWithRecovery {
+  const recoveryFeedback = parseRecoveryFeedback(row.recoveryFeedbackJson);
   return {
     operationId: row.operationId,
     resultId: row.resultId,
@@ -177,6 +228,7 @@ function operationView(row: OperationRow): CampaignPlayNarrationOperation {
     sourceKind: row.sourceKind,
     createdAt: row.createdAt,
     completedAt: row.completedAt,
+    ...(recoveryFeedback === undefined ? {} : { recoveryFeedback }),
   };
 }
 
@@ -531,6 +583,7 @@ export function createCampaignPlayNarrationOperationRepository(
       input.requested.model,
       input.claimedAt,
     );
+    const recoveryFeedback = parseRecoveryFeedback(operation.recoveryFeedbackJson);
     return {
       operationId: operation.operationId,
       resultId: operation.resultId,
@@ -546,6 +599,7 @@ export function createCampaignPlayNarrationOperationRepository(
       expiresAt: effectiveLeaseExpiresAt,
       deadlineAt: operation.activeDeadlineAt,
       createdAt: packet.createdAt,
+      ...(recoveryFeedback === undefined ? {} : { recoveryFeedback }),
     };
   }).immediate();
 
@@ -591,12 +645,13 @@ export function createCampaignPlayNarrationOperationRepository(
     token: CampaignPlayNarrationAttemptToken;
     evidence: CampaignPlayExternalInterruptionEvidence;
     failedAt: number;
+    recoveryFeedback: CampaignPlayNarratorRecoveryFeedback | null;
   }): CampaignPlayNarrationOperation => handle.sqlite.transaction(() => {
     const { token, evidence } = input;
     const attemptUpdate = handle.sqlite.prepare(`UPDATE campaign_play_narration_attempts
       SET status = 'failed', actual_provider_id = ?, actual_model = ?, actual_strategy = ?,
         input_tokens = ?, output_tokens = ?, duration_ms = ?, finish_reason = ?,
-        schema_outcome = ?, error_code = ?, completed_at = ?
+        schema_outcome = ?, error_code = ?, recovery_feedback_json = ?, completed_at = ?
       WHERE attempt_id = ? AND operation_id = ? AND campaign_id = ?
         AND status = 'running' AND worker_epoch = ?`).run(
           evidence.actualProviderId,
@@ -608,6 +663,7 @@ export function createCampaignPlayNarrationOperationRepository(
           evidence.finishReason,
           evidence.schemaOutcome,
           evidence.errorCode,
+          serializeRecoveryFeedback(input.recoveryFeedback),
           input.failedAt,
           token.attemptId,
           token.operationId,
@@ -615,11 +671,12 @@ export function createCampaignPlayNarrationOperationRepository(
           token.workerEpoch,
         );
     const operationUpdate = handle.sqlite.prepare(`UPDATE campaign_play_narration_operations
-      SET status = 'failed', error_code = ?, lease_owner = NULL,
+      SET status = 'failed', error_code = ?, recovery_feedback_json = ?, lease_owner = NULL,
         lease_expires_at = NULL, updated_at = ?
       WHERE operation_id = ? AND campaign_id = ? AND status = 'running'
         AND current_attempt_id = ? AND lease_owner = ? AND lease_epoch = ?`).run(
           evidence.errorCode,
+          serializeRecoveryFeedback(input.recoveryFeedback),
           input.failedAt,
           token.operationId,
           handle.campaignId,
@@ -766,7 +823,8 @@ export function createCampaignPlayNarrationOperationRepository(
       narration.createdAt,
     );
     const operationUpdate = handle.sqlite.prepare(`UPDATE campaign_play_narration_operations
-      SET status = 'complete', error_code = NULL, lease_owner = NULL,
+      SET status = 'complete', error_code = NULL, recovery_feedback_json = NULL,
+        lease_owner = NULL,
         lease_expires_at = NULL, updated_at = ?, completed_at = ?
       WHERE operation_id = ? AND campaign_id = ? AND status = 'running'
         AND current_attempt_id = ? AND lease_owner = ? AND lease_epoch = ?

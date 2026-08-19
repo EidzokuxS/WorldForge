@@ -3740,6 +3740,205 @@ describe("Campaign Play player-action turn runtime", () => {
     },
   );
 
+  it("persists only the latest bounded Narrator diagnosis across reopen and clears it on acceptance", async () => {
+    const successful = playerNarratorFixture();
+    const firstFeedback: CampaignPlayNarratorRecoveryFeedback = {
+      diagnostic: "narrator_generation_schema_mismatch",
+      failedChecks: [{ check: "generation_schema_invalid" }],
+      contractDiagnostic: {
+        phase: "provider_extraction",
+        coordinate: "selectedIntentKeys",
+      },
+    };
+    const secondFeedback: CampaignPlayNarratorRecoveryFeedback = {
+      diagnostic: "narrator_generation_schema_mismatch",
+      failedChecks: [{ check: "generation_schema_invalid" }],
+      contractDiagnostic: {
+        phase: "private_decode",
+        coordinate: "actionSelections",
+      },
+    };
+    const requests: Parameters<typeof successful.narrate>[0][] = [];
+    const narrator: TestNarrator = {
+      compile: successful.compile,
+      narrate: vi.fn(async (request) => {
+        requests.push(request);
+        if (requests.length === 1) {
+          throw new CampaignPlayNarratorError("model_contract_failed", null, {
+            recoveryFeedback: firstFeedback,
+          });
+        }
+        if (requests.length === 2) {
+          throw new CampaignPlayNarratorError("model_contract_failed", null, {
+            recoveryFeedback: secondFeedback,
+          });
+        }
+        return successful.narrate(request);
+      }),
+    };
+    const prepared = await createCompletedPlayerActionForApplication();
+    const identity = (operation: {
+      operationId: string;
+      resultId: string;
+      narrationId: string;
+      packetHash: string;
+      receiptIds: string[];
+    }) => ({
+      operationId: operation.operationId,
+      resultId: operation.resultId,
+      narrationId: operation.narrationId,
+      packetHash: operation.packetHash,
+      receiptIds: operation.receiptIds,
+    });
+    const firstRuntime = turnRuntime(
+      prepared.handle,
+      prepared.time,
+      judgeFixture("deterministic"),
+      gameMasterFixture(),
+      { narrator },
+    );
+    const first = await firstRuntime.runNarration(prepared.turnId);
+    expect(first).toMatchObject({ status: "failed", attempt: 1 });
+    if (!first) throw new Error("First Narrator attempt did not return an operation.");
+    const firstRows = prepared.handle.sqlite.prepare(`SELECT attempt, status,
+        recovery_feedback_json AS recoveryFeedbackJson
+      FROM campaign_play_narration_attempts
+      WHERE campaign_id = ? AND operation_id = ? ORDER BY attempt`).all(
+      CAMPAIGN_ID,
+      first.operationId,
+    ) as Array<{ attempt: number; status: string; recoveryFeedbackJson: string | null }>;
+    expect(firstRows).toEqual([{
+      attempt: 1,
+      status: "failed",
+      recoveryFeedbackJson: canonicalizeCampaignPlayProjection(firstFeedback),
+    }]);
+    expect(prepared.handle.sqlite.prepare(`SELECT recovery_feedback_json AS recoveryFeedbackJson
+      FROM campaign_play_narration_operations WHERE campaign_id = ? AND operation_id = ?`).get(
+      CAMPAIGN_ID,
+      first.operationId,
+    )).toEqual({ recoveryFeedbackJson: canonicalizeCampaignPlayProjection(firstFeedback) });
+    closeTracked(prepared.handle);
+
+    const reopened = track(openCampaignPlayDatabase(CAMPAIGN_ID));
+    reopened.sqlite.prepare(`UPDATE campaign_play_narration_operations
+      SET recovery_feedback_json = ?
+      WHERE campaign_id = ? AND operation_id = ?`).run(
+        JSON.stringify({ diagnostic: "not-a-contract-feedback" }),
+        CAMPAIGN_ID,
+        first.operationId,
+      );
+    expect(() => createCampaignPlayNarrationOperationRepository(reopened).loadByTurn(
+      prepared.turnId,
+    )).toThrow("recovery feedback is invalid");
+    reopened.sqlite.prepare(`UPDATE campaign_play_narration_operations
+      SET recovery_feedback_json = ?
+      WHERE campaign_id = ? AND operation_id = ?`).run(
+        canonicalizeCampaignPlayProjection(firstFeedback),
+        CAMPAIGN_ID,
+        first.operationId,
+    );
+    const recoveryRuntime = turnRuntime(
+      reopened,
+      prepared.time,
+      judgeFixture("deterministic"),
+      gameMasterFixture(),
+      { narrator },
+    );
+    const secondToken = recoveryRuntime.prepareNarrationRecovery(identity(first), "manual");
+    expect(secondToken.recoveryFeedback).toEqual(firstFeedback);
+    const second = await recoveryRuntime.runNarration(
+      prepared.turnId,
+      secondToken,
+      undefined,
+      "auto",
+    );
+    expect(second).toMatchObject({ status: "failed", attempt: 2 });
+    if (!second) throw new Error("Second Narrator attempt did not return an operation.");
+    expect(requests.map((request) => request.recoveryFeedback)).toEqual([
+      undefined,
+      firstFeedback,
+    ]);
+    const secondRows = reopened.sqlite.prepare(`SELECT attempt, status,
+        recovery_feedback_json AS recoveryFeedbackJson
+      FROM campaign_play_narration_attempts
+      WHERE campaign_id = ? AND operation_id = ? ORDER BY attempt`).all(
+      CAMPAIGN_ID,
+      second.operationId,
+    ) as Array<{ attempt: number; status: string; recoveryFeedbackJson: string | null }>;
+    expect(secondRows).toEqual([
+      {
+        attempt: 1,
+        status: "failed",
+        recoveryFeedbackJson: canonicalizeCampaignPlayProjection(firstFeedback),
+      },
+      {
+        attempt: 2,
+        status: "failed",
+        recoveryFeedbackJson: canonicalizeCampaignPlayProjection(secondFeedback),
+      },
+    ]);
+    expect(reopened.sqlite.prepare(`SELECT recovery_feedback_json AS recoveryFeedbackJson
+      FROM campaign_play_narration_operations WHERE campaign_id = ? AND operation_id = ?`).get(
+      CAMPAIGN_ID,
+      second.operationId,
+    )).toEqual({ recoveryFeedbackJson: canonicalizeCampaignPlayProjection(secondFeedback) });
+
+    const thirdToken = recoveryRuntime.prepareNarrationRecovery(identity(second), "manual");
+    expect(thirdToken.recoveryFeedback).toEqual(secondFeedback);
+    const completed = await recoveryRuntime.runNarration(
+      prepared.turnId,
+      thirdToken,
+      undefined,
+      "auto",
+    );
+    expect(completed).toMatchObject({ status: "complete", attempt: 3 });
+    expect(requests.map((request) => request.recoveryFeedback)).toEqual([
+      undefined,
+      firstFeedback,
+      secondFeedback,
+    ]);
+    expect(requests.map((request) => request.packetBytes)).toEqual([
+      requests[0]!.packetBytes,
+      requests[0]!.packetBytes,
+      requests[0]!.packetBytes,
+    ]);
+    expect(reopened.sqlite.prepare(`SELECT recovery_feedback_json AS recoveryFeedbackJson
+      FROM campaign_play_narration_operations WHERE campaign_id = ? AND operation_id = ?`).get(
+      CAMPAIGN_ID,
+      second.operationId,
+    )).toEqual({ recoveryFeedbackJson: null });
+    expect(reopened.sqlite.prepare(`SELECT attempt, status,
+        recovery_feedback_json AS recoveryFeedbackJson
+      FROM campaign_play_narration_attempts
+      WHERE campaign_id = ? AND operation_id = ? ORDER BY attempt`).all(
+      CAMPAIGN_ID,
+      second.operationId,
+    )).toEqual([
+      {
+        attempt: 1,
+        status: "failed",
+        recoveryFeedbackJson: canonicalizeCampaignPlayProjection(firstFeedback),
+      },
+      {
+        attempt: 2,
+        status: "failed",
+        recoveryFeedbackJson: canonicalizeCampaignPlayProjection(secondFeedback),
+      },
+      { attempt: 3, status: "accepted", recoveryFeedbackJson: null },
+    ]);
+    expect(reopened.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_proper_scenes WHERE campaign_id = ? AND operation_id = ?`).get(
+      CAMPAIGN_ID,
+      second.operationId,
+    )).toEqual({ count: 1 });
+    expect(playerActionMechanicsSnapshot(reopened, prepared.turnId)).toEqual(prepared.mechanics);
+    reopened.sqlite.pragma("query_only = ON");
+    expect(reopened.sqlite.prepare("PRAGMA query_only").get()).toEqual({ query_only: 1 });
+    expect(reopened.sqlite.prepare("PRAGMA integrity_check").get())
+      .toEqual({ integrity_check: "ok" });
+    expect(reopened.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
   it("carries every prior safe Narrator check into the third automatic attempt", async () => {
     const successful = playerNarratorFixture();
     const actorMismatch: CampaignPlayNarratorRecoveryFeedback = {

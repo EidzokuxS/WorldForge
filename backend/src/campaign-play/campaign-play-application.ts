@@ -177,10 +177,13 @@ export function accumulateCampaignPlayNarratorRecoveryFeedback(
   for (const check of [...accumulated.failedChecks, ...next.failedChecks]) {
     failedChecks.set(canonicalizeCampaignPlayProjection(check), check);
   }
-  return {
-    diagnostic: "narrator_packet_validation_mismatch",
+  const merged = {
+    diagnostic: "narrator_packet_validation_mismatch" as const,
     failedChecks: [...failedChecks.values()],
   };
+  return next.contractDiagnostic === undefined
+    ? merged
+    : { ...merged, contractDiagnostic: next.contractDiagnostic };
 }
 
 export function campaignPlayMayAutomaticallyResumeExternalStage(input: {

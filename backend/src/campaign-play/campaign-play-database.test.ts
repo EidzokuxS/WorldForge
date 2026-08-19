@@ -1184,7 +1184,7 @@ describe("Campaign Play core and Rulebook storage", () => {
       .get() as { sql: string };
     expect(after.sql).toContain("job.defer_reason = 'actor_capacity'");
     expect(opened.sqlite.prepare(`SELECT max(created_at) AS latest
-      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_786_974_991_659 });
+      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_787_117_360_740 });
     expect((opened.sqlite.prepare(`SELECT sql FROM sqlite_master
       WHERE type = 'trigger' AND name = 'campaign_play_turn_terminal_result'`)
       .get() as { sql: string }).sql).toContain("'certified_observe'");
@@ -1200,6 +1200,46 @@ describe("Campaign Play core and Rulebook storage", () => {
         expect.objectContaining({ name: "admitted_plan_id", notnull: 0 }),
         expect.objectContaining({ name: "plan_id", notnull: 0 }),
       ]);
+  });
+
+  it("adds nullable Narrator recovery feedback columns to an existing pre-column fixture", () => {
+    const databasePath = path.join(root, "narration-recovery-before-column.db");
+    const sqlite = new Database(databasePath);
+    try {
+      sqlite.pragma("foreign_keys = ON");
+      const db = drizzle(sqlite, { schema });
+      runForeignKeySafeMigrations(db, sqlite, migrationFolderThrough(55));
+      sqlite.prepare(`INSERT INTO campaigns (
+        id, name, premise, created_at, updated_at
+      ) VALUES (?, 'Before Narrator Recovery Feedback', 'Premise', 1, 1)`).run(CAMPAIGN_A);
+      expect((sqlite.pragma("table_info('campaign_play_narration_operations')") as Array<{
+        name: string;
+      }>).some((column) => column.name === "recovery_feedback_json")).toBe(false);
+      expect((sqlite.pragma("table_info('campaign_play_narration_attempts')") as Array<{
+        name: string;
+      }>).some((column) => column.name === "recovery_feedback_json")).toBe(false);
+
+      runForeignKeySafeMigrations(db, sqlite, migrationFolderThrough(56));
+      for (const table of [
+        "campaign_play_narration_operations",
+        "campaign_play_narration_attempts",
+      ]) {
+        expect((sqlite.pragma(`table_info('${table}')`) as Array<{
+          name: string;
+          notnull: number;
+        }>).find((column) => column.name === "recovery_feedback_json")).toMatchObject({
+          name: "recovery_feedback_json",
+          notnull: 0,
+        });
+      }
+      expect(sqlite.prepare("SELECT id FROM campaigns WHERE id = ?").get(CAMPAIGN_A))
+        .toEqual({ id: CAMPAIGN_A });
+      expect(sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
+      expect(sqlite.pragma("foreign_key_check")).toEqual([]);
+      expect(sqlite.pragma("foreign_keys", { simple: true })).toBe(1);
+    } finally {
+      sqlite.close();
+    }
   });
 
   it("backfills narration deadlines for an operation created before the hard-deadline migration", () => {

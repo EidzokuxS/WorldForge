@@ -393,6 +393,13 @@
       "when": 1786974991659,
       "tag": "0055_campaign_play_actor_replan_three_attempts",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "6",
+      "when": 1787117360740,
+      "tag": "0056_talented_spitfire",
+      "breakpoints": true
     }
   ]
 }

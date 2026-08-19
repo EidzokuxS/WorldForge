@@ -1084,12 +1084,34 @@ describe("CampaignPlayApplication", () => {
           canonicalName: null,
         }],
       }],
+      contractDiagnostic: {
+        phase: "packet_validation",
+        coordinate: "beats",
+      },
     };
     const duplicateIntent: CampaignPlayNarratorRecoveryFeedback = {
       diagnostic: "narrator_packet_validation_mismatch",
       failedChecks: [{ check: "duplicate_selected_intent_indexes", indexes: [0] }],
+      contractDiagnostic: {
+        phase: "provider_extraction",
+        coordinate: "selectedIntentKeys",
+      },
+    };
+    const semanticOnly: CampaignPlayNarratorRecoveryFeedback = {
+      diagnostic: "narrator_packet_validation_mismatch",
+      failedChecks: [{
+        check: "missing_consequence_beat",
+        beatPurposes: ["orientation"],
+        requiredPurpose: "consequence",
+      }],
     };
 
+    expect(accumulateCampaignPlayNarratorRecoveryFeedback(undefined, actorMismatch)).toEqual(
+      actorMismatch,
+    );
+    expect(accumulateCampaignPlayNarratorRecoveryFeedback(actorMismatch, undefined)).toBe(
+      actorMismatch,
+    );
     expect(accumulateCampaignPlayNarratorRecoveryFeedback(
       actorMismatch,
       duplicateIntent,
@@ -1099,11 +1121,19 @@ describe("CampaignPlayApplication", () => {
         actorMismatch.failedChecks[0],
         duplicateIntent.failedChecks[0],
       ],
+      contractDiagnostic: duplicateIntent.contractDiagnostic,
     });
     expect(accumulateCampaignPlayNarratorRecoveryFeedback(
       actorMismatch,
       actorMismatch,
     )).toEqual(actorMismatch);
+    expect(accumulateCampaignPlayNarratorRecoveryFeedback(
+      duplicateIntent,
+      semanticOnly,
+    )).toEqual({
+      diagnostic: "narrator_packet_validation_mismatch",
+      failedChecks: [duplicateIntent.failedChecks[0], semanticOnly.failedChecks[0]],
+    });
   });
 
   it("allows only the first two automatic attempts for retryable external stages", () => {

@@ -136,6 +136,7 @@ import {
   createCampaignPlayNarrationOperationRepository,
   type CampaignPlayNarrationRecoveryKind,
   type CampaignPlayNarrationAttemptToken,
+  type CampaignPlayNarrationOperationWithRecovery,
 } from "./narration-operation-repository.js";
 import { campaignPlayResponseModelMatches } from "./model-identity.js";
 
@@ -407,9 +408,7 @@ export interface CampaignPlayTurnRuntime {
   loadTelemetry(turnId: string): CampaignPlayTurnTelemetry;
 }
 
-export type CampaignPlayNarrationExecution = CampaignPlayNarrationOperation & {
-  recoveryFeedback?: CampaignPlayNarratorRecoveryFeedback;
-};
+export type CampaignPlayNarrationExecution = CampaignPlayNarrationOperationWithRecovery;
 
 interface CompletedPublicMomentRow {
   sourceTurnId: string;
@@ -2687,7 +2686,11 @@ export function createCampaignPlayTurnRuntime(
         temperature: input.narratorModel.temperature,
         budget: modelBudget(input.narratorModel),
         structuredOutputMode,
-        ...(recoveryFeedback === undefined ? {} : { recoveryFeedback }),
+        ...(recoveryFeedback === undefined
+          ? initialToken.recoveryFeedback === undefined
+            ? {}
+            : { recoveryFeedback: initialToken.recoveryFeedback }
+          : { recoveryFeedback }),
         signal: controller.signal,
       });
       void request.catch(() => undefined);
@@ -2728,15 +2731,13 @@ export function createCampaignPlayTurnRuntime(
         token,
         evidence: interruption.evidence,
         failedAt: now(),
+        recoveryFeedback: !deadlineExpired &&
+            cause instanceof CampaignPlayNarratorError &&
+            (cause.code === "narration_invalid" || cause.code === "model_contract_failed")
+          ? cause.recoveryFeedback
+          : null,
       });
-      const safeRecoveryFeedback = !deadlineExpired &&
-          cause instanceof CampaignPlayNarratorError &&
-          (cause.code === "narration_invalid" || cause.code === "model_contract_failed")
-        ? cause.recoveryFeedback
-        : null;
-      return safeRecoveryFeedback === null
-        ? failedOperation
-        : { ...failedOperation, recoveryFeedback: safeRecoveryFeedback };
+      return failedOperation;
     } finally {
       heartbeatStopped = true;
       controller.abort();

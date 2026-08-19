@@ -465,6 +465,8 @@ describe("Campaign Play narrator contract rejection diagnostics", () => {
       safeGenerationCode: null,
       recoveryDiagnostic: "narrator_packet_validation_mismatch",
       failedChecks: [{ check: "selected_action_count", actual: 1, expected: 2 }],
+      contractDiagnosticPhase: "packet_validation",
+      contractDiagnosticCoordinate: "actionSelections",
     }]);
     expect((thrown as CampaignPlayNarratorError).recoveryFeedback?.failedChecks)
       .toEqual(contractRejectionEvents()[0]!.failedChecks);
@@ -500,8 +502,10 @@ describe("Campaign Play narrator contract rejection diagnostics", () => {
       phase: "evidence",
       errorCode: "model_contract_failed",
       safeGenerationCode: null,
-      recoveryDiagnostic: null,
-      failedChecks: [],
+      recoveryDiagnostic: "narrator_generation_schema_mismatch",
+      failedChecks: [{ check: "generation_schema_invalid" }],
+      contractDiagnosticPhase: "provider_extraction",
+      contractDiagnosticCoordinate: "proposal.packet",
     }]);
   });
 
@@ -530,15 +534,24 @@ describe("Campaign Play narrator contract rejection diagnostics", () => {
       budget,
     })).rejects.toMatchObject({
       code: "narration_invalid",
-      recoveryFeedback: null,
+      recoveryFeedback: {
+        diagnostic: "narrator_packet_validation_mismatch",
+        failedChecks: [],
+        contractDiagnostic: {
+          phase: "packet_validation",
+          coordinate: "proposal.packet",
+        },
+      },
     });
     expect(contractRejectionEvents()).toMatchObject([{
       narrationId: "narration-semantic-diagnostic",
       phase: "semantic",
       errorCode: "narration_invalid",
       safeGenerationCode: null,
-      recoveryDiagnostic: null,
+      recoveryDiagnostic: "narrator_packet_validation_mismatch",
       failedChecks: [],
+      contractDiagnosticPhase: "packet_validation",
+      contractDiagnosticCoordinate: "proposal.packet",
     }]);
 
     narratorEvent.mockClear();
@@ -2073,6 +2086,10 @@ describe("Campaign Play narrator", () => {
             canonicalName: "Dren Vask",
           }],
         }],
+        contractDiagnostic: {
+          phase: "packet_validation",
+          coordinate: "beats",
+        },
       },
     }));
     expect(narratorWarn).toHaveBeenCalledOnce();
@@ -3145,6 +3162,8 @@ END_RECOVERY_DIAGNOSTIC`);
       name: string;
       transport: unknown;
       diagnostic: "narrator_generation_schema_mismatch" | "narrator_packet_validation_mismatch";
+      phase: "provider_extraction" | "packet_validation";
+      coordinate: "selectedIntentKeys" | "requiredReplyDetail" | "beats" | "observationIndexes";
     }> = [
       {
         name: "unknown-key",
@@ -3153,6 +3172,8 @@ END_RECOVERY_DIAGNOSTIC`);
           selectedIntentKeys: ["intent0", "intent1", "intent3"],
         },
         diagnostic: "narrator_generation_schema_mismatch",
+        phase: "provider_extraction",
+        coordinate: "selectedIntentKeys",
       },
       {
         name: "duplicate-key",
@@ -3161,6 +3182,8 @@ END_RECOVERY_DIAGNOSTIC`);
           selectedIntentKeys: ["intent0", "intent0", "intent1"],
         },
         diagnostic: "narrator_generation_schema_mismatch",
+        phase: "provider_extraction",
+        coordinate: "selectedIntentKeys",
       },
       {
         name: "missing-key",
@@ -3169,6 +3192,8 @@ END_RECOVERY_DIAGNOSTIC`);
           selectedIntentKeys: ["intent0", "intent1"],
         },
         diagnostic: "narrator_generation_schema_mismatch",
+        phase: "provider_extraction",
+        coordinate: "selectedIntentKeys",
       },
       {
         name: "extra-key",
@@ -3177,6 +3202,8 @@ END_RECOVERY_DIAGNOSTIC`);
           selectedIntentKeys: ["intent0", "intent1", "intent2", "intent4"],
         },
         diagnostic: "narrator_generation_schema_mismatch",
+        phase: "provider_extraction",
+        coordinate: "selectedIntentKeys",
       },
       {
         name: "excess-opening-beats",
@@ -3185,6 +3212,8 @@ END_RECOVERY_DIAGNOSTIC`);
           beats: [...validTransport.beats, validTransport.beats[0]],
         },
         diagnostic: "narrator_generation_schema_mismatch",
+        phase: "provider_extraction",
+        coordinate: "beats",
       },
       {
         name: "bad-observation-coverage",
@@ -3196,6 +3225,8 @@ END_RECOVERY_DIAGNOSTIC`);
           })),
         },
         diagnostic: "narrator_packet_validation_mismatch",
+        phase: "packet_validation",
+        coordinate: "observationIndexes",
       },
       {
         name: "invalid-detail-nullability",
@@ -3204,6 +3235,8 @@ END_RECOVERY_DIAGNOSTIC`);
           requiredReplyDetail: null,
         },
         diagnostic: "narrator_generation_schema_mismatch",
+        phase: "provider_extraction",
+        coordinate: "requiredReplyDetail",
       },
       {
         name: "missing-required-reply-detail",
@@ -3212,6 +3245,8 @@ END_RECOVERY_DIAGNOSTIC`);
           requiredReplyDetail: undefined,
         },
         diagnostic: "narrator_generation_schema_mismatch",
+        phase: "provider_extraction",
+        coordinate: "requiredReplyDetail",
       },
       {
         name: "blank-required-reply-detail",
@@ -3220,6 +3255,8 @@ END_RECOVERY_DIAGNOSTIC`);
           requiredReplyDetail: "",
         },
         diagnostic: "narrator_generation_schema_mismatch",
+        phase: "provider_extraction",
+        coordinate: "requiredReplyDetail",
       },
       {
         name: "whitespace-required-reply-detail",
@@ -3228,6 +3265,8 @@ END_RECOVERY_DIAGNOSTIC`);
           requiredReplyDetail: "   ",
         },
         diagnostic: "narrator_generation_schema_mismatch",
+        phase: "provider_extraction",
+        coordinate: "requiredReplyDetail",
       },
       {
         name: "multiline-required-reply-detail",
@@ -3236,6 +3275,8 @@ END_RECOVERY_DIAGNOSTIC`);
           requiredReplyDetail: "accept the share\nthen leave",
         },
         diagnostic: "narrator_generation_schema_mismatch",
+        phase: "provider_extraction",
+        coordinate: "requiredReplyDetail",
       },
     ];
 
@@ -3247,7 +3288,13 @@ END_RECOVERY_DIAGNOSTIC`);
             ? "model_contract_failed"
             : "narration_invalid",
           modelEvidence: { errorCode: "narration_invalid" },
-          recoveryFeedback: { diagnostic: invalidCase.diagnostic },
+          recoveryFeedback: {
+            diagnostic: invalidCase.diagnostic,
+            contractDiagnostic: {
+              phase: invalidCase.phase,
+              coordinate: invalidCase.coordinate,
+            },
+          },
         });
     }
     expect(generateObject).toHaveBeenCalledTimes(4 + invalidCases.length);

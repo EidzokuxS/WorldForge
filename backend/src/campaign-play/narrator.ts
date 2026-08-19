@@ -215,15 +215,153 @@ export type CampaignPlayNarratorPacketValidationFailure =
       }>;
     };
 
+export const CAMPAIGN_PLAY_NARRATOR_CONTRACT_DIAGNOSTIC_PHASES = [
+  "provider_extraction",
+  "private_decode",
+  "packet_validation",
+] as const;
+
+export type CampaignPlayNarratorContractDiagnosticPhase =
+  (typeof CAMPAIGN_PLAY_NARRATOR_CONTRACT_DIAGNOSTIC_PHASES)[number];
+
+export const CAMPAIGN_PLAY_NARRATOR_CONTRACT_DIAGNOSTIC_COORDINATES = [
+  "selectedIntentKeys",
+  "requiredReplyDetail",
+  "beats",
+  "observationIndexes",
+  "actionSelections",
+  "proposal.packet",
+] as const;
+
+export type CampaignPlayNarratorContractDiagnosticCoordinate =
+  (typeof CAMPAIGN_PLAY_NARRATOR_CONTRACT_DIAGNOSTIC_COORDINATES)[number];
+
+export interface CampaignPlayNarratorContractDiagnostic {
+  phase: CampaignPlayNarratorContractDiagnosticPhase;
+  coordinate: CampaignPlayNarratorContractDiagnosticCoordinate;
+}
+
 export type CampaignPlayNarratorRecoveryFeedback =
   | {
       diagnostic: "narrator_packet_validation_mismatch";
       failedChecks: CampaignPlayNarratorPacketValidationFailure[];
+      contractDiagnostic?: CampaignPlayNarratorContractDiagnostic;
     }
   | {
       diagnostic: "narrator_generation_schema_mismatch";
       failedChecks: [{ check: "generation_schema_invalid" }];
+      contractDiagnostic?: CampaignPlayNarratorContractDiagnostic;
     };
+
+const narratorContractDiagnosticSchema = z.object({
+  phase: z.enum(CAMPAIGN_PLAY_NARRATOR_CONTRACT_DIAGNOSTIC_PHASES),
+  coordinate: z.enum(CAMPAIGN_PLAY_NARRATOR_CONTRACT_DIAGNOSTIC_COORDINATES),
+}).strict();
+
+const narratorPacketValidationFailureSchema = z.union([
+  z.object({
+    check: z.literal("selected_action_count"),
+    actual: z.number().int().nonnegative(),
+    expected: z.number().int().nonnegative(),
+  }).strict(),
+  z.object({
+    check: z.literal("duplicate_selected_intent_indexes"),
+    indexes: z.array(z.number().int().nonnegative()).max(CAMPAIGN_PLAY_LIMITS.suggestedActions),
+  }).strict(),
+  z.object({
+    check: z.literal("selected_intent_indexes_out_of_range"),
+    indexes: z.array(z.number().int().nonnegative()).max(CAMPAIGN_PLAY_LIMITS.suggestedActions),
+    availableIntentCount: z.number().int().nonnegative(),
+  }).strict(),
+  z.object({
+    check: z.literal("required_reply_intent_mismatch"),
+    requiredIntentIndex: z.number().int().nonnegative(),
+    firstSelectedIntentIndex: z.number().int().nonnegative().nullable(),
+  }).strict(),
+  z.object({
+    check: z.literal("covered_observation_count"),
+    actual: z.number().int().nonnegative(),
+    expected: z.number().int().nonnegative(),
+  }).strict(),
+  z.object({
+    check: z.literal("duplicate_covered_observation_indexes"),
+    indexes: z.array(z.number().int().nonnegative()).max(CAMPAIGN_PLAY_LIMITS.newObservations),
+  }).strict(),
+  z.object({
+    check: z.literal("covered_observation_indexes_out_of_range"),
+    indexes: z.array(z.number().int().nonnegative()).max(CAMPAIGN_PLAY_LIMITS.newObservations),
+    observationCount: z.number().int().nonnegative(),
+  }).strict(),
+  z.object({
+    check: z.literal("missing_expected_observation_indexes"),
+    indexes: z.array(z.number().int().nonnegative()).max(CAMPAIGN_PLAY_LIMITS.newObservations),
+  }).strict(),
+  z.object({
+    check: z.literal("opening_first_beat_purpose"),
+    actualPurpose: z.string().min(1).max(64).nullable(),
+    expectedPurpose: z.literal("orientation"),
+  }).strict(),
+  z.object({
+    check: z.literal("missing_consequence_beat"),
+    beatPurposes: z.array(z.string().min(1).max(64)).max(CAMPAIGN_PLAY_LIMITS.narrationBeats),
+    requiredPurpose: z.literal("consequence"),
+  }).strict(),
+  z.object({
+    check: z.literal("action_selection_detail_nullability"),
+    violations: z.array(z.object({
+      actionSelectionIndex: z.number().int().nonnegative(),
+      intentIndex: z.number().int().nonnegative(),
+      intentKind: z.string().min(1).max(64).nullable(),
+      detailIsNull: z.boolean(),
+    }).strict()).max(CAMPAIGN_PLAY_LIMITS.suggestedActions),
+  }).strict(),
+  z.object({
+    check: z.literal("action_selection_repeated_action_verb"),
+    violations: z.array(z.object({
+      actionSelectionIndex: z.number().int().nonnegative(),
+      intentIndex: z.number().int().nonnegative(),
+      intentKind: z.enum(["observe", "contact", "attempt"]),
+      repeatedVerb: z.enum(["examine", "talk", "try"]),
+    }).strict()).max(CAMPAIGN_PLAY_LIMITS.suggestedActions),
+  }).strict(),
+  z.object({
+    check: z.literal("visible_actor_observation_mismatch"),
+    beatIndex: z.number().int().nonnegative(),
+    fieldPath: z.string().min(1).max(128),
+    observationIndexes: z.array(z.number().int().nonnegative())
+      .max(CAMPAIGN_PLAY_LIMITS.newObservations),
+    matchedActor: z.object({
+      canonicalId: z.string().min(1).max(CAMPAIGN_PLAY_LIMITS.handle),
+      canonicalName: z.string().min(1).max(CAMPAIGN_PLAY_LIMITS.name),
+      matchedAlias: z.string().min(1).max(CAMPAIGN_PLAY_LIMITS.name),
+    }).strict(),
+    allowedActors: z.array(z.object({
+      canonicalId: z.string().min(1).max(CAMPAIGN_PLAY_LIMITS.handle),
+      canonicalName: z.string().min(1).max(CAMPAIGN_PLAY_LIMITS.name),
+    }).strict()).max(CAMPAIGN_PLAY_LIMITS.characterList),
+    sourceObservationPerformers: z.array(z.object({
+      observationIndex: z.number().int().nonnegative(),
+      canonicalId: z.string().min(1).max(CAMPAIGN_PLAY_LIMITS.handle).nullable(),
+      canonicalName: z.string().min(1).max(CAMPAIGN_PLAY_LIMITS.name).nullable(),
+    }).strict()).max(CAMPAIGN_PLAY_LIMITS.newObservations),
+  }).strict(),
+]);
+
+export const campaignPlayNarratorRecoveryFeedbackSchema = z.union([
+  z.object({
+    diagnostic: z.literal("narrator_packet_validation_mismatch"),
+    failedChecks: z.array(narratorPacketValidationFailureSchema)
+      .max(CAMPAIGN_PLAY_LIMITS.narrationBeats + CAMPAIGN_PLAY_LIMITS.suggestedActions + 8),
+    contractDiagnostic: narratorContractDiagnosticSchema.optional(),
+  }).strict(),
+  z.object({
+    diagnostic: z.literal("narrator_generation_schema_mismatch"),
+    failedChecks: z.tuple([z.object({
+      check: z.literal("generation_schema_invalid"),
+    }).strict()]),
+    contractDiagnostic: narratorContractDiagnosticSchema.optional(),
+  }).strict(),
+]);
 
 interface CampaignPlayNarratorErrorOptions extends ErrorOptions {
   recoveryFeedback?: CampaignPlayNarratorRecoveryFeedback;
@@ -248,6 +386,78 @@ interface CampaignPlayNarratorDependencies {
 }
 
 type CampaignPlayNarratorContractRejectionPhase = "generation" | "evidence" | "semantic";
+
+function contractDiagnosticForPath(
+  path: readonly unknown[],
+  fallback: CampaignPlayNarratorContractDiagnosticCoordinate,
+): CampaignPlayNarratorContractDiagnosticCoordinate {
+  const first = typeof path[0] === "string" ? path[0] : null;
+  if (first === "selectedIntentKeys") return "selectedIntentKeys";
+  if (first === "requiredReplyDetail") return "requiredReplyDetail";
+  if (first === "beats") {
+    return path.includes("observationIndexes") ? "observationIndexes" : "beats";
+  }
+  if (first === "observationIndexes") return "observationIndexes";
+  if (first === "actionSelections") return "actionSelections";
+  return fallback;
+}
+
+function contractDiagnosticFromUnknown(
+  cause: unknown,
+  phase: CampaignPlayNarratorContractDiagnosticPhase,
+  fallback: CampaignPlayNarratorContractDiagnosticCoordinate,
+): CampaignPlayNarratorContractDiagnostic {
+  let current: unknown = cause;
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (typeof current !== "object" || current === null) break;
+    const issues = (current as { issues?: unknown }).issues;
+    if (Array.isArray(issues)) {
+      const issue = issues.find((candidate): candidate is { path?: unknown } =>
+        typeof candidate === "object" && candidate !== null);
+      const path = issue && Array.isArray(issue.path) ? issue.path : [];
+      return {
+        phase,
+        coordinate: contractDiagnosticForPath(path, fallback),
+      };
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return { phase, coordinate: fallback };
+}
+
+function contractDiagnosticForPacketFailure(
+  check: CampaignPlayNarratorPacketValidationFailure,
+): CampaignPlayNarratorContractDiagnostic {
+  if (
+    check.check === "selected_action_count" ||
+    check.check === "duplicate_selected_intent_indexes" ||
+    check.check === "selected_intent_indexes_out_of_range" ||
+    check.check === "required_reply_intent_mismatch" ||
+    check.check === "action_selection_detail_nullability" ||
+    check.check === "action_selection_repeated_action_verb"
+  ) return { phase: "packet_validation", coordinate: "actionSelections" };
+  if (
+    check.check === "covered_observation_count" ||
+    check.check === "duplicate_covered_observation_indexes" ||
+    check.check === "covered_observation_indexes_out_of_range" ||
+    check.check === "missing_expected_observation_indexes"
+  ) return { phase: "packet_validation", coordinate: "observationIndexes" };
+  if (
+    check.check === "opening_first_beat_purpose" ||
+    check.check === "missing_consequence_beat" ||
+    check.check === "visible_actor_observation_mismatch"
+  ) return { phase: "packet_validation", coordinate: "beats" };
+  return { phase: "packet_validation", coordinate: "proposal.packet" };
+}
+
+function packetValidationDiagnostic(
+  failedChecks: CampaignPlayNarratorPacketValidationFailure[],
+): CampaignPlayNarratorContractDiagnostic {
+  const first = failedChecks[0];
+  return first === undefined
+    ? { phase: "packet_validation", coordinate: "proposal.packet" }
+    : contractDiagnosticForPacketFailure(first);
+}
 
 function recoveryDiagnosticForEvent(
   recoveryFeedback: CampaignPlayNarratorRecoveryFeedback | null,
@@ -279,6 +489,7 @@ function emitNarratorContractRejection(
           error.modelEvidence?.errorCode === "narration_invalid"
         ? "evidence"
         : "semantic";
+  const contractDiagnostic = error.recoveryFeedback?.contractDiagnostic;
   log.event("narrator.contract_rejected", {
     narrationId: request.narrationId,
     campaignId: packet?.campaignId ?? null,
@@ -288,6 +499,12 @@ function emitNarratorContractRejection(
     safeGenerationCode: phase === "generation" ? safeGenerationCode : null,
     recoveryDiagnostic: recoveryDiagnosticForEvent(error.recoveryFeedback),
     failedChecks: error.recoveryFeedback?.failedChecks ?? [],
+    ...(contractDiagnostic === undefined
+      ? {}
+      : {
+          contractDiagnosticPhase: contractDiagnostic.phase,
+          contractDiagnosticCoordinate: contractDiagnostic.coordinate,
+        }),
   });
 }
 
@@ -898,16 +1115,20 @@ function narratorToolSchemaForPacket(packet: CampaignPlayNarratorPacket) {
     : z.array(z.enum(
       selectionFrame.entries.map(({ key }) => key) as [string, ...string[]],
     )).length(selectionFrame.expectedSelectedCount);
+  const uniqueSelectedIntentKeySchema = selectedIntentKeySchema.refine(
+    (keys) => new Set(keys).size === keys.length,
+    { message: "selectedIntentKeys must contain distinct keys" },
+  );
   if (requiredIntentIndex !== null) {
     return z.object({
       beats,
       requiredReplyDetail: requiredReplyDetailSchema(packet, requiredIntentIndex),
-      selectedIntentKeys: selectedIntentKeySchema,
+      selectedIntentKeys: uniqueSelectedIntentKeySchema,
     }).strict();
   }
   return z.object({
     beats,
-    selectedIntentKeys: selectedIntentKeySchema,
+    selectedIntentKeys: uniqueSelectedIntentKeySchema,
   }).strict();
 }
 
@@ -928,12 +1149,12 @@ function decodeNarratorToolResult(
   const seenKeys = new Set<string>();
   const selectedIntentIndexes = transport.selectedIntentKeys.map((key) => {
     if (seenKeys.has(key)) {
-      throw new Error(`Duplicate tool intent selection key: ${key}.`);
+      throw new Error("Private Narrator decode rejected duplicate selected intent keys.");
     }
     seenKeys.add(key);
     const intentIndex = intentIndexByKey.get(key);
     if (intentIndex === undefined) {
-      throw new Error(`Unknown tool intent selection key: ${key}.`);
+      throw new Error("Private Narrator decode rejected an unknown selected intent key.");
     }
     return intentIndex;
   }).sort((left, right) => left - right);
@@ -1000,6 +1221,9 @@ Rebuild beat observationIndexes from OBSERVATION_COVERAGE_REPAIR_FRAME. Across a
 OBSERVATION_COVERAGE_REPAIR_FRAME
 ${canonicalizeCampaignPlayProjection(buildObservationCoverageRepairFrame(packet))}
 END_OBSERVATION_COVERAGE_REPAIR_FRAME` : "";
+  const contractRecoveryBlock = recoveryFeedback?.contractDiagnostic === undefined
+    ? ""
+    : `\nThe previous Narrator response failed the ${recoveryFeedback.contractDiagnostic.phase} contract at ${recoveryFeedback.contractDiagnostic.coordinate}. Return the same packet shape with that coordinate corrected. Do not change packet-owned values or add facts outside the visible packet.${recoveryFeedback.failedChecks.length > 0 ? " Correct every listed semantic check separately." : ""}`;
   const requiredReplyIndexMarker = toolRequiredReply
     ? "REQUIRED_REPLY_INTENT_INDEX=application-owned (absent from model output)"
     : `REQUIRED_REPLY_INTENT_INDEX=${JSON.stringify(requiredIntentIndex)}`;
@@ -1102,7 +1326,7 @@ Keep distant events, hidden actors, private goals, protected state, Judge reason
 
 NARRATOR_RECOVERY
 The prior proposal failed the safe checks below. Regenerate a fresh proposal from NARRATOR_PACKET. Correct every listed check. Do not reuse the rejected observation-index or action-selection arrangement. Every schema, grounding, identity, visibility, and action rule above remains unchanged.
-If a failed check requires changing observation coverage or observationIndexes, recompute permittedActorNames, quotedReferenceActorNames, sourceReferenceActorNames, and forbiddenActorNames for every beat from OBSERVATION_ACTOR_NAME_FRAME using its final observationIndexes. Then rewrite each beat so every actor name follows the rules above.${actorScopeRepairBlock}${generationRecoveryBlock}
+If a failed check requires changing observation coverage or observationIndexes, recompute permittedActorNames, quotedReferenceActorNames, sourceReferenceActorNames, and forbiddenActorNames for every beat from OBSERVATION_ACTOR_NAME_FRAME using its final observationIndexes. Then rewrite each beat so every actor name follows the rules above.${actorScopeRepairBlock}${generationRecoveryBlock}${contractRecoveryBlock}
 RECOVERY_DIAGNOSTIC
 ${canonicalizeCampaignPlayProjection(recoveryFeedback)}
 END_RECOVERY_DIAGNOSTIC`}`;
@@ -1273,6 +1497,7 @@ function assertProposalForPacket(
       recoveryFeedback: {
         diagnostic: "narrator_packet_validation_mismatch",
         failedChecks,
+        contractDiagnostic: packetValidationDiagnostic(failedChecks),
       },
     });
   }
@@ -1284,7 +1509,13 @@ function assertProposalForPacket(
       beat.text !== packet.actionContext.clarificationQuestion ||
       beat.observationIndexes.length !== 0
     ) {
-      throw new CampaignPlayNarratorError("narration_invalid", null);
+      throw new CampaignPlayNarratorError("narration_invalid", null, {
+        recoveryFeedback: {
+          diagnostic: "narrator_packet_validation_mismatch",
+          failedChecks: [],
+          contractDiagnostic: { phase: "packet_validation", coordinate: "proposal.packet" },
+        },
+      });
     }
   }
   const subjectBindings = new Map(
@@ -1401,6 +1632,7 @@ function assertProposalForPacket(
             check: "visible_actor_observation_mismatch",
             ...mismatchCoordinates,
           }],
+          contractDiagnostic: { phase: "packet_validation", coordinate: "beats" },
         },
       });
     }
@@ -1423,14 +1655,26 @@ function assertProposalForPacket(
       selection.detail === null ? [] : [selection.detail]),
   ].join("\n");
   if (forbidden.some((value) => playerText.includes(value))) {
-    throw new CampaignPlayNarratorError("narration_invalid", null);
+    throw new CampaignPlayNarratorError("narration_invalid", null, {
+      recoveryFeedback: {
+        diagnostic: "narrator_packet_validation_mismatch",
+        failedChecks: [],
+        contractDiagnostic: { phase: "packet_validation", coordinate: "proposal.packet" },
+      },
+    });
   }
   if (
     packet.turnKind === "opening" &&
     packet.visibleActors.filter((actor) =>
       proposal.beats.some((beat) => beat.text.includes(actor.name))).length > 2
   ) {
-    throw new CampaignPlayNarratorError("narration_invalid", null);
+    throw new CampaignPlayNarratorError("narration_invalid", null, {
+      recoveryFeedback: {
+        diagnostic: "narrator_packet_validation_mismatch",
+        failedChecks: [],
+        contractDiagnostic: { phase: "packet_validation", coordinate: "beats" },
+      },
+    });
   }
 }
 
@@ -1440,7 +1684,23 @@ export function createCampaignPlayNarrator(
   const dependencies = { generateObject: safeGenerateObject, ...overrides };
   const compile: CampaignPlayNarrator["compile"] = (input) => {
     const packet = campaignPlayNarratorPacketSchema.parse(input.packet);
-    const proposal = campaignPlayNarratorProposalSchema.parse(input.proposal);
+    let proposal: CampaignPlayNarratorProposal;
+    try {
+      proposal = campaignPlayNarratorProposalSchema.parse(input.proposal);
+    } catch (cause) {
+      throw new CampaignPlayNarratorError("narration_invalid", null, {
+        cause,
+        recoveryFeedback: {
+          diagnostic: "narrator_packet_validation_mismatch",
+          failedChecks: [],
+          contractDiagnostic: contractDiagnosticFromUnknown(
+            cause,
+            "packet_validation",
+            "proposal.packet",
+          ),
+        },
+      });
+    }
     if (
       input.narrationId.length === 0 || input.narrationId !== input.narrationId.trim() ||
       !Number.isSafeInteger(input.createdAt) || input.createdAt < 0
@@ -1549,13 +1809,14 @@ export function createCampaignPlayNarrator(
         });
       }
       const startedAt = Date.now();
+      const outputSchema = capability.primaryStrategy === "tool_mode"
+        ? narratorToolSchemaForPacket(packet)
+        : narratorProposalSchemaForPacket(packet);
       let generated;
       try {
         generated = await dependencies.generateObject<unknown>({
           model: request.model,
-          schema: capability.primaryStrategy === "tool_mode"
-            ? narratorToolSchemaForPacket(packet)
-            : narratorProposalSchemaForPacket(packet),
+          schema: outputSchema,
           prompt: buildPrompt(
             packet,
             request.recoveryFeedback,
@@ -1581,16 +1842,26 @@ export function createCampaignPlayNarrator(
           isSafeGenerateObjectContractErrorCode(safeCode)
             ? "model_contract_failed"
             : "transport_interrupted";
+        const generationRecoveryFeedback = safeCode === "schema_validation_failed"
+          ? {
+              diagnostic: "narrator_generation_schema_mismatch" as const,
+              failedChecks: [{ check: "generation_schema_invalid" as const }] as [{
+                check: "generation_schema_invalid";
+              }],
+              contractDiagnostic: contractDiagnosticFromUnknown(
+                cause,
+                "provider_extraction",
+                capability.primaryStrategy === "tool_mode"
+                  ? "selectedIntentKeys"
+                  : "proposal.packet",
+              ),
+            }
+          : undefined;
         throw new CampaignPlayNarratorError(code, modelEvidence, {
           cause,
-          ...(safeCode === "schema_validation_failed"
-            ? {
-                recoveryFeedback: {
-                  diagnostic: "narrator_generation_schema_mismatch",
-                  failedChecks: [{ check: "generation_schema_invalid" }],
-                },
-              }
-            : {}),
+          ...(generationRecoveryFeedback === undefined
+            ? {}
+            : { recoveryFeedback: generationRecoveryFeedback }),
         });
       }
       const modelEvidence = evidence(
@@ -1602,9 +1873,21 @@ export function createCampaignPlayNarrator(
         modelEvidence.actualStrategy !== capability.primaryStrategy ||
         modelEvidence.repairUsed || modelEvidence.retryUsed || modelEvidence.textFallbackUsed
       ) {
+        const generationRecoveryFeedback: CampaignPlayNarratorRecoveryFeedback = {
+          diagnostic: "narrator_generation_schema_mismatch",
+          failedChecks: [{ check: "generation_schema_invalid" }],
+          contractDiagnostic: {
+            phase: "provider_extraction",
+            coordinate: capability.primaryStrategy === "tool_mode"
+              ? "selectedIntentKeys"
+              : "proposal.packet",
+          },
+        };
         throw new CampaignPlayNarratorError("model_contract_failed", {
           ...modelEvidence,
           errorCode: "narration_invalid",
+        }, {
+          recoveryFeedback: generationRecoveryFeedback,
         });
       }
       if (!withinBudget(
@@ -1620,8 +1903,26 @@ export function createCampaignPlayNarrator(
       let proposalForCompile = generated.object as CampaignPlayNarratorProposal;
       if (capability.primaryStrategy === "tool_mode") {
         try {
-          proposalForCompile = decodeNarratorToolResult(packet, generated.object);
+          const parsedTransport = outputSchema.safeParse(generated.object);
+          if (!parsedTransport.success) {
+            throw new CampaignPlayNarratorError("model_contract_failed", {
+              ...modelEvidence,
+              errorCode: "narration_invalid",
+            }, {
+              recoveryFeedback: {
+                diagnostic: "narrator_generation_schema_mismatch",
+                failedChecks: [{ check: "generation_schema_invalid" }],
+                contractDiagnostic: contractDiagnosticFromUnknown(
+                  parsedTransport.error,
+                  "provider_extraction",
+                  "selectedIntentKeys",
+                ),
+              },
+            });
+          }
+          proposalForCompile = decodeNarratorToolResult(packet, parsedTransport.data);
         } catch (cause) {
+          if (cause instanceof CampaignPlayNarratorError) throw cause;
           throw new CampaignPlayNarratorError("model_contract_failed", {
             ...modelEvidence,
             errorCode: "narration_invalid",
@@ -1630,6 +1931,11 @@ export function createCampaignPlayNarrator(
             recoveryFeedback: {
               diagnostic: "narrator_generation_schema_mismatch",
               failedChecks: [{ check: "generation_schema_invalid" }],
+              contractDiagnostic: contractDiagnosticFromUnknown(
+                cause,
+                "private_decode",
+                "selectedIntentKeys",
+              ),
             },
           });
         }
@@ -1646,7 +1952,9 @@ export function createCampaignPlayNarrator(
         if (cause instanceof CampaignPlayNarratorError) {
           log.warn("Narration proposal failed semantic compilation.", {
             code: cause.code,
-            stack: cause.stack,
+            recoveryDiagnostic: recoveryDiagnosticForEvent(cause.recoveryFeedback),
+            contractDiagnosticPhase: cause.recoveryFeedback?.contractDiagnostic?.phase ?? null,
+            contractDiagnosticCoordinate: cause.recoveryFeedback?.contractDiagnostic?.coordinate ?? null,
           });
           throw new CampaignPlayNarratorError(cause.code, {
             ...modelEvidence,
