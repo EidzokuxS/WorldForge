@@ -7,10 +7,12 @@ import {
 } from "@worldforge/shared";
 import {
   getSafeGenerateObjectErrorCode,
+  getSafeGenerateObjectSchemaDiagnostics,
   getSafeGenerateObjectTrace,
   isSafeGenerateObjectContractErrorCode,
   safeGenerateObject,
   type SafeGenerateErrorCode,
+  type SafeGenerateObjectSchemaDiagnostics,
   type SafeGenerateTrace,
 } from "../ai/generate-object-safe.js";
 import {
@@ -251,6 +253,7 @@ export type CampaignPlayNarratorRecoveryFeedback =
       diagnostic: "narrator_generation_schema_mismatch";
       failedChecks: [{ check: "generation_schema_invalid" }];
       contractDiagnostic?: CampaignPlayNarratorContractDiagnostic;
+      recoveryInstruction?: "structured_output_tool_call";
     };
 
 const narratorContractDiagnosticSchema = z.object({
@@ -360,6 +363,7 @@ export const campaignPlayNarratorRecoveryFeedbackSchema = z.union([
       check: z.literal("generation_schema_invalid"),
     }).strict()]),
     contractDiagnostic: narratorContractDiagnosticSchema.optional(),
+    recoveryInstruction: z.literal("structured_output_tool_call").optional(),
   }).strict(),
 ]);
 
@@ -390,7 +394,15 @@ type CampaignPlayNarratorContractRejectionPhase = "generation" | "evidence" | "s
 function contractDiagnosticForPath(
   path: readonly unknown[],
   fallback: CampaignPlayNarratorContractDiagnosticCoordinate,
-): CampaignPlayNarratorContractDiagnosticCoordinate {
+): CampaignPlayNarratorContractDiagnosticCoordinate;
+function contractDiagnosticForPath(
+  path: readonly unknown[],
+  fallback?: CampaignPlayNarratorContractDiagnosticCoordinate,
+): CampaignPlayNarratorContractDiagnosticCoordinate | undefined;
+function contractDiagnosticForPath(
+  path: readonly unknown[],
+  fallback?: CampaignPlayNarratorContractDiagnosticCoordinate,
+): CampaignPlayNarratorContractDiagnosticCoordinate | undefined {
   const first = typeof path[0] === "string" ? path[0] : null;
   if (first === "selectedIntentKeys") return "selectedIntentKeys";
   if (first === "requiredReplyDetail") return "requiredReplyDetail";
@@ -400,6 +412,40 @@ function contractDiagnosticForPath(
   if (first === "observationIndexes") return "observationIndexes";
   if (first === "actionSelections") return "actionSelections";
   return fallback;
+}
+
+function contractDiagnosticFromSafeSchemaDiagnostics(
+  diagnostics: SafeGenerateObjectSchemaDiagnostics | null,
+): CampaignPlayNarratorContractDiagnostic | undefined {
+  for (const issue of diagnostics?.schemaIssues ?? []) {
+    const coordinate = contractDiagnosticForPath(issue.path);
+    if (coordinate !== undefined) {
+      return { phase: "provider_extraction", coordinate };
+    }
+  }
+  return undefined;
+}
+
+function structuredOutputToolCallRecoveryFeedback(
+  cause: unknown,
+): CampaignPlayNarratorRecoveryFeedback {
+  const contractDiagnostic = contractDiagnosticFromSafeSchemaDiagnostics(
+    getSafeGenerateObjectSchemaDiagnostics(cause),
+  );
+  return {
+    diagnostic: "narrator_generation_schema_mismatch",
+    failedChecks: [{ check: "generation_schema_invalid" }],
+    recoveryInstruction: "structured_output_tool_call",
+    ...(contractDiagnostic === undefined ? {} : { contractDiagnostic }),
+  };
+}
+
+function structuredOutputToolCallRecoveryInstruction(
+  contractDiagnostic: CampaignPlayNarratorContractDiagnostic | undefined,
+): string {
+  return contractDiagnostic === undefined
+    ? "The previous response did not provide one valid Narrator structured_output tool call. Return exactly one structured_output tool call whose arguments satisfy the required Narrator schema."
+    : `The previous response did not match the Narrator tool contract at ${contractDiagnostic.coordinate}. Return exactly one structured_output tool call whose arguments satisfy the required Narrator schema.`;
 }
 
 function contractDiagnosticFromUnknown(
@@ -1206,8 +1252,11 @@ Each entry identifies one failed beat field. Keep its final observationIndexes g
 ${actorScopeRepairHasSourceReference ? "If a matched actor is a source reference, either copy the corresponding observation text exactly or remove the actor's canonical name and matched alias from that field.\n" : ""}ACTOR_SCOPE_REPAIR_FRAME
 ${canonicalizeCampaignPlayProjection(actorScopeRepairFrame)}
 END_ACTOR_SCOPE_REPAIR_FRAME`;
+  const structuredOutputToolCallRecovery = recoveryFeedback?.diagnostic ===
+    "narrator_generation_schema_mismatch" &&
+    recoveryFeedback.recoveryInstruction === "structured_output_tool_call";
   const generationRecoveryBlock = recoveryFeedback?.diagnostic ===
-    "narrator_generation_schema_mismatch" ? `
+    "narrator_generation_schema_mismatch" && !structuredOutputToolCallRecovery ? `
 NARRATOR_GENERATION_RECOVERY
 The prior response did not match the provider-facing schema. Regenerate a fresh object. ${toolMode
     ? `Rebuild selectedIntentKeys from TOOL_INTENT_SELECTION_FRAME. Return exactly expectedSelectedCount distinct listed keys. Do not reuse a key. Keep every other schema, packet, grounding, visibility, and narration rule unchanged.${toolRequiredReply ? " The required reply key is application-owned and absent from selectedIntentKeys. requiredReplyDetail supplies only that immediate reply as one non-empty single-line detail." : ""}`
@@ -1221,7 +1270,11 @@ Rebuild beat observationIndexes from OBSERVATION_COVERAGE_REPAIR_FRAME. Across a
 OBSERVATION_COVERAGE_REPAIR_FRAME
 ${canonicalizeCampaignPlayProjection(buildObservationCoverageRepairFrame(packet))}
 END_OBSERVATION_COVERAGE_REPAIR_FRAME` : "";
-  const contractRecoveryBlock = recoveryFeedback?.contractDiagnostic === undefined
+  const structuredOutputToolCallRecoveryBlock = structuredOutputToolCallRecovery
+    ? `\n${structuredOutputToolCallRecoveryInstruction(recoveryFeedback?.contractDiagnostic)}`
+    : "";
+  const contractRecoveryBlock = recoveryFeedback?.contractDiagnostic === undefined ||
+    structuredOutputToolCallRecovery
     ? ""
     : `\nThe previous Narrator response failed the ${recoveryFeedback.contractDiagnostic.phase} contract at ${recoveryFeedback.contractDiagnostic.coordinate}. Return the same packet shape with that coordinate corrected. Do not change packet-owned values or add facts outside the visible packet.${recoveryFeedback.failedChecks.length > 0 ? " Correct every listed semantic check separately." : ""}`;
   const requiredReplyIndexMarker = toolRequiredReply
@@ -1325,8 +1378,10 @@ Treat visibleActors as authoritative current placement: these people remain in t
 Keep distant events, hidden actors, private goals, protected state, Judge reasoning, random seeds, internal identifiers, handles, metadata, rules, and system language out of the prose. Do not summarize the world, list the cast, explain lore for its own sake, decide the player's thoughts or actions, resolve a future choice, or imply movement or state changes absent from the packet.${recoveryFeedback === undefined ? "" : `
 
 NARRATOR_RECOVERY
-The prior proposal failed the safe checks below. Regenerate a fresh proposal from NARRATOR_PACKET. Correct every listed check. Do not reuse the rejected observation-index or action-selection arrangement. Every schema, grounding, identity, visibility, and action rule above remains unchanged.
-If a failed check requires changing observation coverage or observationIndexes, recompute permittedActorNames, quotedReferenceActorNames, sourceReferenceActorNames, and forbiddenActorNames for every beat from OBSERVATION_ACTOR_NAME_FRAME using its final observationIndexes. Then rewrite each beat so every actor name follows the rules above.${actorScopeRepairBlock}${generationRecoveryBlock}${contractRecoveryBlock}
+${structuredOutputToolCallRecovery
+  ? structuredOutputToolCallRecoveryBlock
+  : `The prior proposal failed the safe checks below. Regenerate a fresh proposal from NARRATOR_PACKET. Correct every listed check. Do not reuse the rejected observation-index or action-selection arrangement. Every schema, grounding, identity, visibility, and action rule above remains unchanged.
+If a failed check requires changing observation coverage or observationIndexes, recompute permittedActorNames, quotedReferenceActorNames, sourceReferenceActorNames, and forbiddenActorNames for every beat from OBSERVATION_ACTOR_NAME_FRAME using its final observationIndexes. Then rewrite each beat so every actor name follows the rules above.${actorScopeRepairBlock}${generationRecoveryBlock}${contractRecoveryBlock}`}
 RECOVERY_DIAGNOSTIC
 ${canonicalizeCampaignPlayProjection(recoveryFeedback)}
 END_RECOVERY_DIAGNOSTIC`}`;
@@ -1842,8 +1897,10 @@ export function createCampaignPlayNarrator(
           isSafeGenerateObjectContractErrorCode(safeCode)
             ? "model_contract_failed"
             : "transport_interrupted";
-        const generationRecoveryFeedback = safeCode === "schema_validation_failed"
-          ? {
+        const generationRecoveryFeedback = safeCode === "invalid_structured_tool_call"
+          ? structuredOutputToolCallRecoveryFeedback(cause)
+          : safeCode === "schema_validation_failed"
+            ? {
               diagnostic: "narrator_generation_schema_mismatch" as const,
               failedChecks: [{ check: "generation_schema_invalid" as const }] as [{
                 check: "generation_schema_invalid";
@@ -1856,7 +1913,7 @@ export function createCampaignPlayNarrator(
                   : "proposal.packet",
               ),
             }
-          : undefined;
+            : undefined;
         throw new CampaignPlayNarratorError(code, modelEvidence, {
           cause,
           ...(generationRecoveryFeedback === undefined

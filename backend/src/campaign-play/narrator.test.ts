@@ -13,6 +13,7 @@ import {
   safeGenerateObject,
   type SafeGenerateTrace,
 } from "../ai/generate-object-safe.js";
+import * as raindropWorkshop from "../ai/raindrop-workshop.js";
 import {
   canonicalizeCampaignPlayProjection,
 } from "./campaign-play-projection.js";
@@ -396,6 +397,166 @@ describe("Campaign Play narrator contract rejection diagnostics", () => {
       failedChecks: [],
     }]);
     expect(JSON.stringify(contractRejectionEvents())).not.toContain("private model output");
+  });
+
+  it("turns an invalid structured tool call into one bounded Narrator recovery instruction", async () => {
+    const generateText = vi.spyOn(raindropWorkshop, "generateText");
+    generateText
+      .mockResolvedValueOnce({
+        text: "",
+        finishReason: "tool-calls",
+        toolCalls: [{
+          type: "tool-call",
+          toolName: "structured_output",
+          invalid: true,
+          input: {
+            rejectedRawValue: "provider-private-player-prose",
+          },
+        }],
+        usage: { inputTokens: 10, outputTokens: 4, totalTokens: 14 },
+        response: { modelId: "test-model" },
+      } as never)
+      .mockResolvedValueOnce({
+        text: "",
+        finishReason: "tool-calls",
+        toolCalls: [{
+          type: "tool-call",
+          toolName: "structured_output",
+          input: {
+            beats: [{
+              purpose: "orientation",
+              text: "Rain needles the Salt Harbor steps.",
+              observationIndexes: [],
+            }],
+            selectedIntentKeys: ["intent0"],
+          },
+        }],
+        usage: { inputTokens: 12, outputTokens: 20, totalTokens: 32 },
+        response: { modelId: "test-model" },
+      } as never);
+
+    const narrator = createCampaignPlayNarrator();
+    const request = {
+      narrationId: "narration-invalid-tool-recovery",
+      packetBytes: canonicalizeCampaignPlayProjection(packetFixture()),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+      structuredOutputMode: "tool" as const,
+    };
+
+    let firstError: CampaignPlayNarratorError | undefined;
+    try {
+      await narrator.narrate(request);
+    } catch (cause) {
+      firstError = cause as CampaignPlayNarratorError;
+    }
+
+    expect(firstError).toMatchObject({
+      code: "model_contract_failed",
+      modelEvidence: { errorCode: "invalid_structured_tool_call" },
+      recoveryFeedback: {
+        diagnostic: "narrator_generation_schema_mismatch",
+        failedChecks: [{ check: "generation_schema_invalid" }],
+        recoveryInstruction: "structured_output_tool_call",
+        contractDiagnostic: {
+          phase: "provider_extraction",
+          coordinate: "beats",
+        },
+      },
+    });
+    expect(firstError?.cause).toBeDefined();
+
+    const recoveryFeedback = firstError?.recoveryFeedback;
+    expect(recoveryFeedback).toBeDefined();
+    await narrator.narrate({ ...request, recoveryFeedback: recoveryFeedback ?? undefined });
+
+    const recoveryPrompt = String(generateText.mock.calls[1]?.[0]?.prompt ?? "");
+    expect(recoveryPrompt).toContain(
+      "The previous response did not match the Narrator tool contract at beats. Return exactly one structured_output tool call whose arguments satisfy the required Narrator schema.",
+    );
+    expect(recoveryPrompt).not.toContain("NARRATOR_GENERATION_RECOVERY");
+    expect(recoveryPrompt).not.toContain("provider-private-player-prose");
+    expect(recoveryPrompt).not.toContain("rejectedRawValue");
+    expect(recoveryPrompt.match(/Return exactly one structured_output tool call/g)).toHaveLength(1);
+    expect(generateText).toHaveBeenCalledTimes(2);
+    expect(narratorEvent.mock.calls.some(([name]) => name === "narrator.contract_rejected")).toBe(true);
+    generateText.mockRestore();
+  });
+
+  it("uses the generic structured-output instruction when no safe coordinate is available", async () => {
+    const generateText = vi.spyOn(raindropWorkshop, "generateText");
+    generateText
+      .mockResolvedValueOnce({
+        text: "",
+        finishReason: "tool-calls",
+        toolCalls: [{
+          type: "tool-call",
+          toolName: "structured_output",
+          invalid: true,
+          input: null,
+        }],
+        usage: { inputTokens: 10, outputTokens: 4, totalTokens: 14 },
+        response: { modelId: "test-model" },
+      } as never)
+      .mockResolvedValueOnce({
+        text: "",
+        finishReason: "tool-calls",
+        toolCalls: [{
+          type: "tool-call",
+          toolName: "structured_output",
+          input: {
+            beats: [{
+              purpose: "orientation",
+              text: "Rain needles the Salt Harbor steps.",
+              observationIndexes: [],
+            }],
+            selectedIntentKeys: ["intent0"],
+          },
+        }],
+        usage: { inputTokens: 12, outputTokens: 20, totalTokens: 32 },
+        response: { modelId: "test-model" },
+      } as never);
+
+    const narrator = createCampaignPlayNarrator();
+    const request = {
+      narrationId: "narration-invalid-tool-recovery-generic",
+      packetBytes: canonicalizeCampaignPlayProjection(packetFixture()),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+      structuredOutputMode: "tool" as const,
+    };
+    let firstError: CampaignPlayNarratorError | undefined;
+    try {
+      await narrator.narrate(request);
+    } catch (cause) {
+      firstError = cause as CampaignPlayNarratorError;
+    }
+    expect(firstError).toMatchObject({
+      code: "model_contract_failed",
+      modelEvidence: { errorCode: "invalid_structured_tool_call" },
+      recoveryFeedback: {
+        diagnostic: "narrator_generation_schema_mismatch",
+        recoveryInstruction: "structured_output_tool_call",
+      },
+    });
+    expect(firstError?.recoveryFeedback?.contractDiagnostic).toBeUndefined();
+    await narrator.narrate({
+      ...request,
+      recoveryFeedback: firstError?.recoveryFeedback ?? undefined,
+    });
+
+    const recoveryPrompt = String(generateText.mock.calls[1]?.[0]?.prompt ?? "");
+    expect(recoveryPrompt).toContain(
+      "The previous response did not provide one valid Narrator structured_output tool call. Return exactly one structured_output tool call whose arguments satisfy the required Narrator schema.",
+    );
+    expect(recoveryPrompt).not.toContain("NARRATOR_GENERATION_RECOVERY");
+    expect(recoveryPrompt).not.toContain("contract at");
+    expect(recoveryPrompt.match(/Return exactly one structured_output tool call/g)).toHaveLength(1);
+    generateText.mockRestore();
   });
 
   it("keeps packet recovery coordinates ordered beside the existing warning", async () => {
