@@ -2,9 +2,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { LanguageModel } from "ai";
-import type {
-  CampaignPlayCharacterDraft,
-  CampaignPlayNarratorPacket,
+import {
+  CAMPAIGN_PLAY_LIMITS,
+  type CampaignPlayCharacterDraft,
+  type CampaignPlayNarratorPacket,
 } from "@worldforge/shared";
 
 import { closeDb } from "../../backend/src/db/index.js";
@@ -117,19 +118,12 @@ export function createSeededAcceptedCampaign(root: string, campaignId: string): 
     });
     advanceBuildToPersistence(repository, "deterministic-replay-build");
     const candidate = candidateFixture(source);
-    const draft = {
-      ...candidate.draft,
-      placements: candidate.draft.placements.map((placement) =>
-        placement.id === "placement-b"
-          ? { ...placement, locationId: "location-a" }
-          : placement),
-    };
     const review = repository.completeBuild({
       buildId: "deterministic-replay-build",
       candidate: {
         ...candidate,
-        draft,
-        contentHash: calculateCampaignWorldContentHash(source.sourceDigest, draft),
+        draft: candidate.draft,
+        contentHash: calculateCampaignWorldContentHash(source.sourceDigest, candidate.draft),
       },
       completedAt: 1_100,
     });
@@ -175,41 +169,13 @@ function playerDraft(): CampaignPlayCharacterDraft {
 }
 
 function openingProposal(): CampaignPlayOpeningProposal {
-  const actorPlans = ["a", "b", "c", "d", "e", "f"].map((suffix) => {
-    const actorId = `actor-${suffix}`;
-    const goalId = `goal-${suffix}`;
-    const targets = suffix === "b"
-      ? [
-          { kind: "location" as const, id: "location-b" },
-          { kind: "location" as const, id: "location-a" },
-          { kind: "goal" as const, id: goalId },
-        ]
-      : suffix === "c"
-        ? [
-            { kind: "location" as const, id: "location-c" },
-            { kind: "goal" as const, id: goalId },
-          ]
-        : [{ kind: "goal" as const, id: goalId }];
-    const intent = {
-      kind: "attempt" as const,
-      targets,
-      method: `Advance ${goalId} from the current situation`,
-      stakes: "The actor's own objective",
-    };
-    const observableTrace = suffix === "b"
-      ? "Fresh sealing wax and torn binding thread mark a ledger removed in haste."
-      : `Fresh tool marks show that work on ${goalId} continued here.`;
-    return {
-      actorId,
-      primaryGoalId: goalId,
-      cadenceMinutes: 1_440,
-      steps: [{
-        intent,
-        observableTrace,
-        elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
-      }],
-    };
-  });
+  const scene = {
+    sceneLocationId: "location-c",
+    openingActorId: "actor-f",
+    supportActorId: "actor-c",
+    pressureId: "pressure-b",
+    routeId: "route-c",
+  } as const;
   return {
     start: {
       role: "A visitor on Bell Island",
@@ -217,22 +183,14 @@ function openingProposal(): CampaignPlayOpeningProposal {
       immediateSituation: "Signal keepers prepare for another route closure.",
     },
     scene: {
-      candidateId: deriveCampaignPlayOpeningSceneCandidateId({
-        locationId: "location-c",
-        openingActorId: "actor-c",
-        supportActorId: "actor-c",
-        pressureId: "pressure-b",
-        routeId: "route-c",
-      }),
+      candidateId: deriveCampaignPlayOpeningSceneCandidateId(scene),
     },
-    actorPlans,
-    hiddenConsequence: {
-      actorId: "actor-b",
-      summary: "A courier changes which ledger reaches the reef.",
-      exposure: {
-        channel: "local_aftermath",
-        validUntilWorldTimeMinutes: 4,
-      },
+    playerPremise: {
+      motivationIndex: 0,
+      anchor: "supportActor",
+      eventClass: "interaction",
+      summary: "Mara asks the bell tender what the warning pattern is hiding.",
+      routeRestriction: null,
     },
   };
 }
@@ -325,6 +283,26 @@ function openingPlannerFixture() {
   };
 }
 
+function narratorActionSelections(packet: CampaignPlayNarratorPacket) {
+  const latestVisiblePerformer = [...packet.consequences].reverse().find((consequence) =>
+    consequence.performingActorHandle !== null && packet.visibleActors.some((actor) =>
+      actor.handle === consequence.performingActorHandle))?.performingActorHandle ?? null;
+  const requiredReplyIndex = latestVisiblePerformer === null
+    ? -1
+    : packet.availableIntents.findIndex((intent) => intent.kind === "contact"
+      && intent.targets.some((target) => target.kind === "actor"
+        && target.handle === latestVisiblePerformer));
+  const indexes = packet.availableIntents.map((_intent, intentIndex) => intentIndex);
+  const orderedIndexes = requiredReplyIndex < 0
+    ? indexes
+    : [requiredReplyIndex, ...indexes.filter((intentIndex) => intentIndex !== requiredReplyIndex)];
+  const selectedIndexes = orderedIndexes.slice(0, CAMPAIGN_PLAY_LIMITS.suggestedActions);
+  return selectedIndexes.map((intentIndex) => ({
+    intentIndex,
+    detail: intentIndex === requiredReplyIndex ? "the immediate situation" : null,
+  }));
+}
+
 function openingNarratorFixture() {
   const compiler = createCampaignPlayNarrator();
   return {
@@ -335,20 +313,24 @@ function openingNarratorFixture() {
         narrationId: request.narrationId,
         packet,
         proposal: {
+          actionSelections: narratorActionSelections(packet),
           beats: [
-            { purpose: "orientation", text: "Rain rings against the signal tower as Mara reaches Bell Island." },
-            { purpose: "consequence", text: "Signal keepers brace the route gate while warning bells gather pace." },
-            { purpose: "action_handoff", text: "The open path and the waiting keeper leave a clear choice." },
+            {
+              purpose: "orientation",
+              observationIndexes: [],
+              text: "Rain rings against the signal tower as Mara reaches Bell Island.",
+            },
+            {
+              purpose: "consequence",
+              observationIndexes: packet.newObservations.map((_entry, index) => index),
+              text: "Signal keepers brace the route gate while warning bells gather pace.",
+            },
+            {
+              purpose: "action_handoff",
+              observationIndexes: [],
+              text: "The open path and the waiting keeper leave a clear choice.",
+            },
           ],
-          actionDetails: packet.availableIntents.map((intent) => {
-            switch (intent.kind) {
-              case "observe": return "the warning bells at the gate";
-              case "move": return "old signal marks on the posts";
-              case "contact": return "the route keeper's warning";
-              case "wait": return "listen for the next bell";
-              case "attempt": return "test the gate latch";
-            }
-          }),
         },
         createdAt: request.createdAt,
         modelEvidence: { ...narratorEvidence, responseModel: "fixture-opening-narrator" },
@@ -367,25 +349,19 @@ function playerNarratorFixture() {
         narrationId: request.narrationId,
         packet,
         proposal: {
+          actionSelections: narratorActionSelections(packet),
           beats: [
             {
               purpose: "consequence",
+              observationIndexes: packet.newObservations.map((_entry, index) => index),
               text: `${packet.actionContext!.submittedText} leaves a visible trace at ${packet.currentLocation.name}.`,
             },
             {
               purpose: "action_handoff",
+              observationIndexes: [],
               text: `The scene at ${packet.currentLocation.name} leaves another move open.`,
             },
           ],
-          actionDetails: packet.availableIntents.map((intent) => {
-            switch (intent.kind) {
-              case "observe": return "the new marks left nearby";
-              case "move": return "fresh tracks beyond the scene";
-              case "contact": return "the witness's account";
-              case "wait": return "watch for another change";
-              case "attempt": return "test what changed here";
-            }
-          }),
         },
         createdAt: request.createdAt,
         modelEvidence: narratorEvidence,
@@ -410,26 +386,36 @@ function judgeFixture(policy: SeededCampaignPlayReplayOptions["policy"]) {
         throw new Error("Deterministic Judge requires one visible route for intervention.");
       }
       const ruling = compiler.compile(request.frame, request.input, {
-        kind: frozenChoice?.kind ?? (intervening ? "attempt" : "wait"),
-        targets: frozenChoice?.targets ?? (interventionRouteHandle
-          ? [{ handle: interventionRouteHandle, kind: "route" as const }]
-          : []),
-        method: intervening
-          ? "Lower the visible signal gate and secure it against unsafe passage"
-          : "Wait and watch the visible situation",
-        stakes: intervening
-          ? "Restrict the visible route until the gate is safe"
-          : "Learn what changes at the signal gate",
-        movementRouteHandle,
-        disposition: "deterministic",
-        citedVisibleFactHandles: [request.frame.locationHandle],
-        resultBounds: { minimum: "success", maximum: "success" },
-        elapsedBounds: { minimumMinutes: 1, maximumMinutes: 2 },
-        uncertainty: { kind: "none" },
-        reason: intervening
-          ? "The visible route and its gate can be worked on from the current location."
-          : "Waiting is possible from the current visible location.",
-        clarificationQuestion: null,
+          kind: frozenChoice?.kind ?? (intervening ? "attempt" : "wait"),
+          targets: frozenChoice?.targets ?? (interventionRouteHandle
+            ? [{ handle: interventionRouteHandle, kind: "route" as const }]
+            : []),
+          visibleActorReactions: request.frame.visibleFacts
+            .filter((fact) => fact.kind === "actor" && fact.handle !== request.frame.playerActorHandle)
+            .map((fact) => ({
+              actorHandle: fact.handle,
+              reaction: "none" as const,
+              supportingVisibleFactHandle: null,
+              reason: "No additional material reaction is under test.",
+            })),
+          possessionEffectAuthority: { kind: "none" },
+          requiredObligationEffect: { kind: "none" },
+          method: intervening
+            ? "Lower the visible signal gate and secure it against unsafe passage"
+            : "Wait and watch the visible situation",
+          stakes: intervening
+            ? "Restrict the visible route until the gate is safe"
+            : "Learn what changes at the signal gate",
+          movementRouteHandle,
+          disposition: "deterministic",
+          citedVisibleFactHandles: [request.frame.locationHandle],
+          resultBounds: { minimum: "success", maximum: "success" },
+          elapsedBounds: { minimumMinutes: 1, maximumMinutes: 2 },
+          uncertainty: { kind: "none" },
+          reason: intervening
+            ? "The visible route and its gate can be worked on from the current location."
+            : "Waiting is possible from the current visible location.",
+          clarificationQuestion: null,
       });
       return {
         ruling,
@@ -450,6 +436,9 @@ function gameMasterFixture(policy: SeededCampaignPlayReplayOptions["policy"]) {
       const locationHandle = request.frame.visibleFacts.find((fact) => fact.kind === "location")?.handle;
       if (!locationHandle) throw new Error("Deterministic Game Master requires the current location binding.");
       const routeHandle = request.frame.visibleFacts.find((fact) => fact.kind === "route")?.handle;
+      const targetedActorHandles = request.ruling.normalizedIntent.targets
+        .filter((target) => target.kind === "actor")
+        .map((target) => target.handle);
       const consequenceEffects = policy === "intervene"
         ? (() => {
             if (!routeHandle) {
@@ -466,17 +455,25 @@ function gameMasterFixture(policy: SeededCampaignPlayReplayOptions["policy"]) {
               },
             }];
           })()
-        : [{
-            kind: "record_world_event" as const,
-            eventClass: "scene" as const,
-            summary: `Mara waits and records the visible signal pattern for ${request.ruling.normalizedIntent.originalText}.`,
-            affectedHandles: [playerHandle, locationHandle],
-          }];
+        : targetedActorHandles.length > 0
+          ? targetedActorHandles.map((actorHandle) => ({
+              kind: "record_world_event" as const,
+              eventClass: "dialogue" as const,
+              performingActorHandle: actorHandle,
+              summary: `The contacted actor answers Mara about ${request.ruling.normalizedIntent.originalText}.`,
+              affectedHandles: [actorHandle, playerHandle],
+            }))
+          : [{
+              kind: "record_world_event" as const,
+              eventClass: "scene" as const,
+              performingActorHandle: null,
+              summary: `Mara waits and records the visible signal pattern for ${request.ruling.normalizedIntent.originalText}.`,
+              affectedHandles: [playerHandle, locationHandle],
+            }];
       const effects = request.ruling.movementRouteHandle === null
         ? consequenceEffects
         : [{ kind: "move_actor" as const }, ...consequenceEffects];
-      return {
-        ...compiler.compile(
+      const compiled = compiler.compile(
           request.frame,
           request.ruling,
           request.resolution,
@@ -485,8 +482,11 @@ function gameMasterFixture(policy: SeededCampaignPlayReplayOptions["policy"]) {
             elapsedMinutes: 1,
             effects,
           },
-        ),
+        );
+      return {
+        ...compiled,
         modelEvidence: modelEvidence("fixture-game-master"),
+        semanticReview: { kind: "not_required" as const },
       };
     },
   };
@@ -558,6 +558,7 @@ function turnRuntime(
     judgeModel: stageModel("fixture-judge"),
     gameMasterModel: stageModel("fixture-game-master"),
     actorReplannerModel: stageModel("fixture-actor-replanner"),
+    actorCriticalPathReplanLimit: 0,
     narratorModel: stageModel("fixture-narrator"),
     judge: judgeFixture(policy),
     gameMaster: gameMasterFixture(policy),

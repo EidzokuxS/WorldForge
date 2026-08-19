@@ -171,16 +171,18 @@ async function runLiveLane(config: CampaignPlayRunConfig, phase: string): Promis
       process.stdout.write(`${JSON.stringify({ phase, capture })}\n`);
       return;
     }
-    case "bind": {
+    case "bind":
+    case "reconcile":
+    case "resume": {
       const admittedTurnId = argumentValue("--turn-id");
       const renderProofPath = argumentValue("--render-proof");
       const clickProofPath = argumentValue("--click-proof");
-      if (admittedTurnId === null || renderProofPath === null) {
-        throw new Error("Coherent bind requires --turn-id and --render-proof.");
+      if (renderProofPath === null) {
+        throw new Error("Coherent bind requires --render-proof.");
       }
       const evidence = await bindCampaignPlayManualDecisionCoherent({
         runConfig: config,
-        admittedTurnId,
+        admittedTurnId: admittedTurnId ?? undefined,
         renderProofPath: path.resolve(renderProofPath),
         clickProofPath: clickProofPath === null ? undefined : path.resolve(clickProofPath),
       });
@@ -273,7 +275,7 @@ async function runLiveLane(config: CampaignPlayRunConfig, phase: string): Promis
       return;
     }
     default:
-      throw new Error("--live-phase must be prepare, decide, bind, cancel-decision, reload-before, reload-after, or finalize.");
+      throw new Error("--live-phase must be prepare, decide, bind, reconcile, resume, cancel-decision, reload-before, reload-after, or finalize.");
   }
 }
 

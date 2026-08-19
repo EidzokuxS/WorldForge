@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   materializeCampaignWorldTemplate,
   snapshotCampaignWorldTemplate,
+  verifyCampaignWorldTemplatePackage,
 } from "./world-template.js";
 
 const roots: string[] = [];
@@ -78,6 +79,23 @@ describe("Campaign world templates", () => {
       characterCount: 0,
       turnCount: 0,
     });
+    expect(snapshot.manifest.packageId).toBe(snapshot.manifest.templateId);
+    expect(snapshot.manifest.manifestPath).toBe(path.join(snapshot.templateDirectory, "template.json"));
+    expect(snapshot.manifest.packagePath).toBe(snapshot.templateDirectory);
+    const packageBytesBefore = {
+      manifest: fs.readFileSync(snapshot.manifestPath),
+      state: fs.readFileSync(path.join(snapshot.templateDirectory, "state.db")),
+      config: fs.readFileSync(path.join(snapshot.templateDirectory, "config.json")),
+    };
+    const other = fixture();
+    const otherDb = new Database(path.join(other.campaignsRoot, CAMPAIGN_ID, "state.db"));
+    otherDb.prepare("UPDATE campaign_worlds SET accepted_content_hash = ? WHERE campaign_id = ?")
+      .run("b".repeat(64), CAMPAIGN_ID);
+    otherDb.close();
+    expect(verifyCampaignWorldTemplatePackage(snapshot.templateDirectory).manifest.acceptedContentHash)
+      .toBe("a".repeat(64));
+    expect(() => verifyCampaignWorldTemplatePackage(path.join(other.campaignsRoot, CAMPAIGN_ID)))
+      .toThrow();
     const materialized = materializeCampaignWorldTemplate({
       templateDirectory: snapshot.templateDirectory,
       runId: "run-one",
@@ -88,6 +106,12 @@ describe("Campaign world templates", () => {
     );
     expect(fs.existsSync(path.join(materialized.campaignDirectory, "state.db"))).toBe(true);
     expect(fs.existsSync(path.join(materialized.campaignDirectory, "state.db-wal"))).toBe(false);
+    fs.appendFileSync(path.join(materialized.campaignDirectory, "config.json"), "copy-only\n");
+    expect(Buffer.compare(fs.readFileSync(snapshot.manifestPath), packageBytesBefore.manifest)).toBe(0);
+    expect(Buffer.compare(fs.readFileSync(path.join(snapshot.templateDirectory, "state.db")), packageBytesBefore.state)).toBe(0);
+    expect(Buffer.compare(fs.readFileSync(path.join(snapshot.templateDirectory, "config.json")), packageBytesBefore.config)).toBe(0);
+    expect(verifyCampaignWorldTemplatePackage(snapshot.templateDirectory).manifest.packageSha256)
+      .toBe(snapshot.manifest.packageSha256);
   });
 
   it("rejects a world after character creation", async () => {

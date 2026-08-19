@@ -28,6 +28,7 @@ import {
   type CampaignPlayWorldSource,
 } from "./contracts.js";
 import { captureCampaignPlayReplay } from "./replay-report.js";
+import { verifyCampaignWorldTemplatePackage } from "./world-template.js";
 
 export interface CampaignPlayLiveSessionManifest {
   evidenceVersion: typeof CAMPAIGN_PLAY_EVIDENCE_VERSION;
@@ -60,6 +61,19 @@ export interface PendingManualDecision {
   chooser: string;
   signedAt: number;
   decisionNote: string;
+  captureIdentity: string;
+  captureHash: string;
+  decisionDigest: string;
+  decisionReceiptPath: string;
+}
+
+export interface CampaignPlaySignedDecisionReceipt {
+  receiptVersion: 1;
+  runId: string;
+  campaignId: string;
+  pendingDecision: PendingManualDecision;
+  decisionDigest: string;
+  signedAt: number;
 }
 
 export interface CampaignPlayCancelledDecision {
@@ -86,6 +100,7 @@ export interface CampaignPlaySettlementRenderProof {
   renderedNarrationId: string;
   renderedSceneIdentity: string;
   capturedAt: number;
+  decisionDigest?: string;
 }
 
 /**
@@ -107,6 +122,7 @@ export interface CampaignPlayRenderedChoiceCapture {
   renderedControlIdentity: string;
   visibleStateHash: string;
   capturedAt: number;
+  decisionDigest?: string;
 }
 
 export type CampaignPlayChoiceContainer = "suggested" | "utility";
@@ -168,6 +184,64 @@ function sha256File(filePath: string): string {
   return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
 }
 
+function decisionCaptureIdentity(pending: Pick<PendingManualDecision,
+  "control" | "playerActionNumber" | "choiceHandle" | "choiceContainer" | "choiceOrdinal"
+  | "visibleLabel" | "renderedControlIdentity" | "choiceCaptureAt" | "visibleStateHash">): string {
+  return JSON.stringify({
+    control: pending.control,
+    playerActionNumber: pending.playerActionNumber,
+    choiceHandle: pending.choiceHandle,
+    choiceContainer: pending.choiceContainer,
+    choiceOrdinal: pending.choiceOrdinal,
+    visibleLabel: pending.visibleLabel,
+    renderedControlIdentity: pending.renderedControlIdentity,
+    choiceCaptureAt: pending.choiceCaptureAt,
+    visibleStateHash: pending.visibleStateHash,
+  });
+}
+
+function decisionDigestPayload(input: {
+  runId: string;
+  campaignId: string;
+  pendingDecision: Omit<PendingManualDecision, "decisionDigest" | "decisionReceiptPath">;
+}): string {
+  return JSON.stringify({
+    receiptVersion: 1,
+    runId: input.runId,
+    campaignId: input.campaignId,
+    pendingDecision: input.pendingDecision,
+  });
+}
+
+function signedDecisionDigest(
+  runId: string,
+  campaignId: string,
+  pendingDecision: Omit<PendingManualDecision, "decisionDigest" | "decisionReceiptPath">,
+): string {
+  return sha256(decisionDigestPayload({ runId, campaignId, pendingDecision }));
+}
+
+function decisionReceiptRelativePath(
+  pending: Pick<PendingManualDecision, "playerActionNumber" | "signedAt"> & { decisionDigest?: string },
+): string {
+  return path.posix.join(
+    "signed-decisions",
+    `action-${pending.playerActionNumber}-signed-${pending.signedAt}`
+      + (pending.decisionDigest ? `-${pending.decisionDigest}` : "")
+      + ".json",
+  );
+}
+
+function safeSessionPath(root: string, candidate: string): string {
+  const resolvedRoot = path.resolve(root);
+  const resolved = path.resolve(root, candidate);
+  const relative = path.relative(resolvedRoot, resolved);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error("Signed decision receipt path escaped the session root.");
+  }
+  return resolved;
+}
+
 export function assertCoherentPlayerTurnTerminalReason(
   value: string,
 ): CoherentPlayerTurnTerminalReason {
@@ -187,6 +261,32 @@ function verifyTemplateWorldSource(
   const campaignsRoot = process.env.GSD_CAMPAIGNS_ROOT;
   if (!campaignsRoot) {
     throw new Error("Template-backed live evidence requires an isolated GSD_CAMPAIGNS_ROOT.");
+  }
+  const manifestPath = path.resolve(config.worldSource.manifestPath);
+  const packageDirectory = path.resolve(config.worldSource.packagePath);
+  if (path.dirname(manifestPath) !== packageDirectory) {
+    throw new Error("Template provenance manifest and package paths do not identify one package.");
+  }
+  if (sha256File(manifestPath) !== config.worldSource.manifestSha256) {
+    throw new Error("Template provenance manifest bytes do not match the run configuration.");
+  }
+  const verified = verifyCampaignWorldTemplatePackage(packageDirectory);
+  const template = verified.manifest;
+  if (
+    verified.manifestSha256 !== config.worldSource.manifestSha256
+    || template.packageId !== config.worldSource.packageId
+    || template.packagePath !== config.worldSource.packagePath
+    || template.manifestPath !== config.worldSource.manifestPath
+    || template.packageSha256 !== config.worldSource.packageSha256
+    || template.schemaMigrationId !== config.worldSource.schemaMigrationId
+    || template.sourceCampaignId !== config.worldSource.sourceCampaignId
+    || template.sourceCommit !== config.worldSource.sourceCommit
+    || template.acceptedWorldVersion !== config.worldSource.acceptedWorldVersion
+    || template.acceptedContentHash !== config.worldSource.acceptedContentHash
+    || template.files["state.db"] !== config.worldSource.stateDbSha256
+    || template.files["config.json"] !== config.worldSource.configSha256
+  ) {
+    throw new Error("Run configuration does not identify the same immutable template package.");
   }
   const root = path.resolve(campaignsRoot);
   const campaignDirectory = path.resolve(root, config.campaignId);
@@ -222,6 +322,176 @@ function readJson<T>(filePath: string): T {
 function readJsonLines<T>(filePath: string): T[] {
   const text = fs.readFileSync(filePath, "utf8");
   return text.split("\n").filter(Boolean).map((line) => JSON.parse(line) as T);
+}
+
+function normalizedRelativePath(root: string, filePath: string): string {
+  return path.relative(path.resolve(root), path.resolve(filePath)).split(path.sep).join("/");
+}
+
+function assertPendingDecisionIntegrity(
+  pending: PendingManualDecision,
+  runId: string,
+  campaignId: string,
+): PendingManualDecision {
+  if (
+    !Number.isSafeInteger(pending.playerActionNumber)
+    || pending.playerActionNumber < 1
+    || (pending.control !== "choice" && pending.control !== "freeform")
+    || !boundedScalar(pending.chosenText, 4_000)
+    || !isHash(pending.visibleStateHash)
+    || !boundedScalar(pending.chooser, 240)
+    || !Number.isSafeInteger(pending.signedAt)
+    || pending.signedAt < 0
+    || !boundedScalar(pending.decisionNote, 1_000)
+    || !boundedScalar(pending.captureIdentity, 1_000)
+    || !isHash(pending.captureHash)
+    || !isHash(pending.decisionDigest)
+    || !isNonemptyString(pending.decisionReceiptPath)
+    || pending.decisionReceiptPath !== decisionReceiptRelativePath(pending)
+  ) {
+    throw new Error("The signed manual decision receipt is malformed.");
+  }
+  if (pending.control === "choice") {
+    if (
+      !boundedScalar(pending.choiceHandle, 256)
+      || (pending.choiceContainer !== "suggested" && pending.choiceContainer !== "utility")
+      || pending.choiceOrdinal === null
+      || !Number.isSafeInteger(pending.choiceOrdinal)
+      || pending.choiceOrdinal < 0
+      || !boundedScalar(pending.visibleLabel, 2_000)
+      || !boundedScalar(pending.renderedControlIdentity, 512)
+      || pending.choiceCaptureAt === null
+      || !Number.isSafeInteger(pending.choiceCaptureAt)
+      || pending.choiceCaptureAt < 0
+      || pending.visibleLabel !== pending.chosenText
+      || pending.captureIdentity !== pending.renderedControlIdentity
+    ) throw new Error("The signed choice receipt is missing its exact rendered-control identity.");
+  } else if (
+    pending.choiceHandle !== null
+    || pending.choiceContainer !== null
+    || pending.choiceOrdinal !== null
+    || pending.visibleLabel !== null
+    || pending.renderedControlIdentity !== null
+    || pending.choiceCaptureAt !== null
+    || pending.captureIdentity !== `freeform:${pending.visibleStateHash}`
+  ) {
+    throw new Error("The signed freeform receipt carries a suggested-choice identity.");
+  }
+  const { decisionDigest: ignoredDigest, decisionReceiptPath: ignoredPath, ...withoutReceipt } = pending;
+  if (pending.captureHash !== sha256(decisionCaptureIdentity(pending))) {
+    throw new Error("The signed decision capture hash is invalid.");
+  }
+  if (pending.decisionDigest !== signedDecisionDigest(runId, campaignId, withoutReceipt)) {
+    throw new Error("The signed decision digest is invalid.");
+  }
+  return pending;
+}
+
+function readSignedDecisionReceipt(
+  root: string,
+  receiptPath: string,
+  runId: string,
+  campaignId: string,
+): PendingManualDecision {
+  const absolutePath = safeSessionPath(root, receiptPath);
+  const receipt = readJson<CampaignPlaySignedDecisionReceipt>(absolutePath);
+  if (
+    receipt.receiptVersion !== 1
+    || receipt.runId !== runId
+    || receipt.campaignId !== campaignId
+    || receipt.signedAt !== receipt.pendingDecision.signedAt
+    || receipt.decisionDigest !== receipt.pendingDecision.decisionDigest
+  ) throw new Error("The signed decision receipt identity is inconsistent.");
+  const pending = assertPendingDecisionIntegrity(receipt.pendingDecision, runId, campaignId);
+  if (pending.decisionReceiptPath !== normalizedRelativePath(root, absolutePath)) {
+    throw new Error("The signed decision receipt path is not immutable and path-qualified.");
+  }
+  return pending;
+}
+
+function readActiveManualDecision(
+  root: string,
+  runId: string,
+  campaignId: string,
+  expectedActionNumber: number,
+): PendingManualDecision | null {
+  const pendingPath = path.join(root, "pending-decision.json");
+  if (fs.existsSync(pendingPath)) {
+    const pointer = readJson<PendingManualDecision>(pendingPath);
+    if (pointer.playerActionNumber !== expectedActionNumber) {
+      throw new Error("The pending manual decision is not the next action.");
+    }
+    const pending = readSignedDecisionReceipt(
+      root,
+      pointer.decisionReceiptPath,
+      runId,
+      campaignId,
+    );
+    if (JSON.stringify(pointer) !== JSON.stringify(pending)) {
+      throw new Error("The mutable pending pointer conflicts with the immutable signed decision receipt.");
+    }
+    return pending;
+  }
+  const receiptRoot = path.join(root, "signed-decisions");
+  if (!fs.existsSync(receiptRoot)) return null;
+  const cancelledDigests = new Set<string>();
+  const cancellationRoot = path.join(root, "cancelled-decisions");
+  if (fs.existsSync(cancellationRoot)) {
+    for (const fileName of fs.readdirSync(cancellationRoot)) {
+      if (!fileName.endsWith(".json")) continue;
+      const cancellation = readJson<CampaignPlayCancelledDecision>(path.join(cancellationRoot, fileName));
+      if (cancellation.pendingDecision?.decisionDigest) {
+        cancelledDigests.add(cancellation.pendingDecision.decisionDigest);
+      }
+    }
+  }
+  const candidates: PendingManualDecision[] = [];
+  for (const fileName of fs.readdirSync(receiptRoot)) {
+    if (!fileName.endsWith(".json")) continue;
+    const receiptPath = path.join(receiptRoot, fileName);
+    const receipt = readJson<CampaignPlaySignedDecisionReceipt>(receiptPath);
+    if (receipt.pendingDecision?.playerActionNumber !== expectedActionNumber) continue;
+    const pending = readSignedDecisionReceipt(
+      root,
+      normalizedRelativePath(root, receiptPath),
+      runId,
+      campaignId,
+    );
+    if (!cancelledDigests.has(pending.decisionDigest)) candidates.push(pending);
+  }
+  if (candidates.length > 1) {
+    throw new Error("Conflicting immutable signed decisions exist for the same action.");
+  }
+  return candidates[0] ?? null;
+}
+
+function writeSignedDecisionReceipt(
+  root: string,
+  runId: string,
+  campaignId: string,
+  pending: PendingManualDecision,
+): void {
+  const receiptPath = safeSessionPath(root, pending.decisionReceiptPath);
+  fs.mkdirSync(path.dirname(receiptPath), { recursive: true });
+  const receipt: CampaignPlaySignedDecisionReceipt = {
+    receiptVersion: 1,
+    runId,
+    campaignId,
+    pendingDecision: pending,
+    decisionDigest: pending.decisionDigest,
+    signedAt: pending.signedAt,
+  };
+  writeJsonExclusive(receiptPath, receipt);
+}
+
+function removePendingDecisionPointer(root: string, pending: PendingManualDecision): void {
+  const pendingPath = path.join(root, "pending-decision.json");
+  if (!fs.existsSync(pendingPath)) return;
+  const pointer = readJson<PendingManualDecision>(pendingPath);
+  if (JSON.stringify(pointer) !== JSON.stringify(pending)) {
+    throw new Error("The pending decision pointer conflicts with the immutable decision during settlement.");
+  }
+  fs.rmSync(pendingPath);
 }
 
 function assertLiveConfig(input: CampaignPlayRunConfig): CampaignPlayRunConfig & {
@@ -411,6 +681,11 @@ function assertRenderProof(value: unknown): CampaignPlaySettlementRenderProof {
     renderedNarrationId: proof.renderedNarrationId as string,
     renderedSceneIdentity: proof.renderedSceneIdentity as string,
     capturedAt: proof.capturedAt as number,
+    ...(proof.decisionDigest === undefined
+      ? {}
+      : { decisionDigest: isHash(proof.decisionDigest) ? proof.decisionDigest : (() => {
+          throw new Error("The render proof decision digest is invalid.");
+        })() }),
   };
 }
 
@@ -462,6 +737,11 @@ export function assertCampaignPlayRenderedChoiceCapture(
     renderedControlIdentity: capture.renderedControlIdentity,
     visibleStateHash: capture.visibleStateHash,
     capturedAt: capture.capturedAt,
+    ...(capture.decisionDigest === undefined
+      ? {}
+      : { decisionDigest: isHash(capture.decisionDigest) ? capture.decisionDigest : (() => {
+          throw new Error("The rendered choice decision digest is invalid.");
+        })() }),
   };
 }
 
@@ -594,7 +874,7 @@ async function backupCampaignPlayDatabase(
 ): Promise<void> {
   fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
   if (fs.existsSync(destinationPath)) {
-    throw new Error("The task-owned SQLite settlement copy already exists.");
+    return;
   }
   const source = new Database(sourcePath, { readonly: true, fileMustExist: true });
   try {
@@ -854,6 +1134,7 @@ function assertPendingChoiceMatchesCapture(
     || pending.renderedControlIdentity !== capture.renderedControlIdentity
     || pending.visibleStateHash !== capture.visibleStateHash
     || pending.choiceCaptureAt !== capture.capturedAt
+    || (capture.decisionDigest !== undefined && capture.decisionDigest !== pending.decisionDigest)
   ) {
     throw new Error("The rendered choice changed; cancel the pending decision before clicking.");
   }
@@ -867,12 +1148,11 @@ export async function authorizeCampaignPlayManualChoice(input: {
   const root = campaignPlayLiveSessionRoot(config);
   const manifest = sessionManifest(config);
   assertSessionOwnership(config, manifest);
-  const pendingPath = path.join(root, "pending-decision.json");
-  if (!fs.existsSync(pendingPath)) {
+  const actions = readJsonLines<CampaignPlayBrowserActionEvidence>(path.join(root, "browser-actions.jsonl"));
+  const pending = readActiveManualDecision(root, config.runId, config.campaignId, actions.length + 1);
+  if (!pending) {
     throw new Error("No signed choice is awaiting its same-control click authorization.");
   }
-  const pending = readJson<PendingManualDecision>(pendingPath);
-  const actions = readJsonLines<CampaignPlayBrowserActionEvidence>(path.join(root, "browser-actions.jsonl"));
   const capture = assertCampaignPlayRenderedChoiceCapture(input.capture);
   assertPendingChoiceMatchesCapture(pending, capture, actions.length + 1);
   const state = await loadPublicState(config.campaignId);
@@ -884,7 +1164,7 @@ export async function authorizeCampaignPlayManualChoice(input: {
     throw new Error("The ready projection changed; cancel the pending decision before clicking.");
   }
   assertCampaignPlayReadyChoiceMatchesApi(state, capture);
-  return capture;
+  return { ...capture, decisionDigest: pending.decisionDigest };
 }
 
 function assertPendingChoiceMatchesClickProof(
@@ -903,30 +1183,73 @@ function assertPendingChoiceMatchesClickProof(
 
 export async function bindCampaignPlayManualDecisionCoherent(input: {
   runConfig: CampaignPlayRunConfig;
-  admittedTurnId: string;
+  admittedTurnId?: string;
   renderProofPath: string;
   clickProofPath?: string;
+  injectFault?: (point: "after_settlement_write") => void;
 }): Promise<CampaignPlayBrowserActionEvidence> {
   const config = assertLiveConfig(input.runConfig);
   const root = campaignPlayLiveSessionRoot(config);
   const manifest = sessionManifest(config);
   assertSessionOwnership(config, manifest);
-  if (!isNonemptyString(input.admittedTurnId)) throw new Error("An admitted turn ID is required for coherent binding.");
-  const pendingPath = path.join(root, "pending-decision.json");
-  if (!fs.existsSync(pendingPath)) throw new Error("No signed manual decision is awaiting a durable turn.");
-  const pending = readJson<PendingManualDecision>(pendingPath);
-  const existing = readJsonLines<CampaignPlayBrowserActionEvidence>(path.join(root, "browser-actions.jsonl"));
-  if (pending.playerActionNumber !== existing.length + 1) {
-    throw new Error("The pending manual decision is not the next action.");
-  }
+  const existing = readJsonLines<CampaignPlayBrowserActionEvidence>(
+    path.join(root, "browser-actions.jsonl"),
+  ).map((record) => campaignPlayBrowserActionEvidenceSchema.parse(record));
   const proof = assertRenderProof(readJson<unknown>(path.resolve(input.renderProofPath)));
+  const pending = readActiveManualDecision(
+    root,
+    config.runId,
+    config.campaignId,
+    proof.playerActionNumber,
+  );
+  if (!pending) throw new Error("No immutable signed manual decision is awaiting coherent binding.");
+  const admittedTurnId = input.admittedTurnId ?? proof.turnId;
+  if (!isNonemptyString(admittedTurnId)) throw new Error("The render proof must identify the admitted turn.");
   if (
     proof.playerActionNumber !== pending.playerActionNumber
-    || proof.turnId !== input.admittedTurnId
+    || proof.turnId !== admittedTurnId
     || proof.beforeProjectionHash !== pending.visibleStateHash
     || proof.afterProjectionHash === proof.beforeProjectionHash
+    || proof.decisionDigest !== pending.decisionDigest
   ) {
     throw new Error("The rendered proof does not belong to the signed decision and admitted turn.");
+  }
+  if (existing.length > pending.playerActionNumber) {
+    throw new Error("Bound browser-action evidence contains a later action than the signed decision.");
+  }
+  const existingEvidence = existing[pending.playerActionNumber - 1];
+  const settlementPath = path.join(
+    root,
+    "probes",
+    "settlements",
+    "action-" + pending.playerActionNumber + ".json",
+  );
+  if (existingEvidence) {
+    if (
+      existing.length !== pending.playerActionNumber
+      || existingEvidence.playerActionNumber !== pending.playerActionNumber
+      || existingEvidence.turnId !== admittedTurnId
+      || existingEvidence.decisionDigest !== pending.decisionDigest
+    ) {
+      throw new Error("Conflicting or duplicate browser-action evidence exists for the signed decision.");
+    }
+    if (!fs.existsSync(settlementPath)) {
+      throw new Error("Browser-action evidence exists without its durable settlement proof.");
+    }
+    const settled = readJson<Record<string, unknown>>(settlementPath);
+    if (
+      settled.playerActionNumber !== pending.playerActionNumber
+      || settled.turnId !== admittedTurnId
+      || settled.decisionDigest !== pending.decisionDigest
+      || (settled.renderProof as { decisionDigest?: unknown } | undefined)?.decisionDigest !== pending.decisionDigest
+    ) {
+      throw new Error("The existing settlement proof conflicts with the signed decision.");
+    }
+    removePendingDecisionPointer(root, pending);
+    return existingEvidence;
+  }
+  if (existing.length !== pending.playerActionNumber - 1) {
+    throw new Error("The signed manual decision is not the next action.");
   }
   let clickProof: CampaignPlayChoiceClickProof | null = null;
   if (pending.control === "choice") {
@@ -935,9 +1258,12 @@ export async function bindCampaignPlayManualDecisionCoherent(input: {
     }
     clickProof = readCampaignPlayChoiceClickProof(input.clickProofPath);
     assertPendingChoiceMatchesClickProof(pending, clickProof, existing.length + 1);
+    if (clickProof.decisionDigest !== pending.decisionDigest) {
+      throw new Error("The DOM click proof is not bound to the immutable signed decision.");
+    }
   }
 
-  const completed = await waitForCompletedPublicTurn(config.campaignId, input.admittedTurnId);
+  const completed = await waitForCompletedPublicTurn(config.campaignId, admittedTurnId);
   const state = completed.state;
   const turn = completed.turn;
   const turnRecord = (turn.turn ?? {}) as Record<string, unknown>;
@@ -945,9 +1271,9 @@ export async function bindCampaignPlayManualDecisionCoherent(input: {
   const apiNarration = (result.narration ?? {}) as Record<string, unknown>;
   const apiOperation = (result.narrationOperation ?? {}) as Record<string, unknown>;
   if (
-    turnRecord.turnId !== input.admittedTurnId
-    || apiNarration.turnId !== input.admittedTurnId
-    || apiOperation.turnId !== input.admittedTurnId
+    turnRecord.turnId !== admittedTurnId
+    || apiNarration.turnId !== admittedTurnId
+    || apiOperation.turnId !== admittedTurnId
     || apiOperation.sourceKind !== "model_accepted"
     || !isNonemptyString(apiNarration.narrationId)
     || !isNonemptyString(apiOperation.operationId)
@@ -964,7 +1290,7 @@ export async function bindCampaignPlayManualDecisionCoherent(input: {
 
   const sourceHandle = openCampaignPlayDatabase(config.campaignId);
   let settlement: CoherentSettlement;
-  const turnEvidenceId = sha256(input.admittedTurnId).slice(0, 16);
+  const turnEvidenceId = sha256(admittedTurnId).slice(0, 16);
   const copyPath = path.join(
     root,
     "probes",
@@ -976,7 +1302,7 @@ export async function bindCampaignPlayManualDecisionCoherent(input: {
     const inspected = inspectCoherentSettlementCopy({
       copyPath,
       campaignId: config.campaignId,
-      turnId: input.admittedTurnId,
+      turnId: admittedTurnId,
       pending,
     });
     settlement = {
@@ -992,7 +1318,7 @@ export async function bindCampaignPlayManualDecisionCoherent(input: {
   }
 
   const adjacentState = await loadPublicState(config.campaignId);
-  const adjacentTurn = await loadPublicTurn(config.campaignId, input.admittedTurnId);
+  const adjacentTurn = await loadPublicTurn(config.campaignId, admittedTurnId);
   const adjacentTurnRecord = (adjacentTurn.turn ?? {}) as Record<string, unknown>;
   const adjacentResult = (adjacentTurn.result ?? {}) as Record<string, unknown>;
   const adjacentOperation = (adjacentResult.narrationOperation ?? {}) as Record<string, unknown>;
@@ -1032,6 +1358,7 @@ export async function bindCampaignPlayManualDecisionCoherent(input: {
     playerActionNumber: pending.playerActionNumber,
     control: pending.control,
     visibleStateHash: pending.visibleStateHash,
+    decisionDigest: pending.decisionDigest,
     chosenText: pending.chosenText,
     choiceHandle: pending.choiceHandle,
     turnId: settlement.turnId,
@@ -1040,10 +1367,11 @@ export async function bindCampaignPlayManualDecisionCoherent(input: {
     decisionNote: pending.decisionNote,
   });
   fs.mkdirSync(path.join(root, "probes", "settlements"), { recursive: true });
-  writeJsonExclusive(path.join(root, "probes", "settlements", `action-${pending.playerActionNumber}.json`), {
+  const settlementEvidence = {
     capturedAt: Date.now(),
     playerActionNumber: pending.playerActionNumber,
     turnId: settlement.turnId,
+    decisionDigest: pending.decisionDigest,
     resultId: settlement.resultId,
     terminalReason: settlement.terminalReason,
     operationId: settlement.operationId,
@@ -1076,10 +1404,54 @@ export async function bindCampaignPlayManualDecisionCoherent(input: {
     modelStages: settlement.modelStages,
     outcome: "model_accepted_coherent_settlement",
     integrity: "ok",
-    foreignKeyViolations: 0,
-  });
-  fs.appendFileSync(path.join(root, "browser-actions.jsonl"), `${JSON.stringify(evidence)}\n`, "utf8");
-  fs.rmSync(pendingPath);
+   foreignKeyViolations: 0,
+  };
+  if (fs.existsSync(settlementPath)) {
+    const stored = readJson<Record<string, unknown>>(settlementPath);
+    if (
+      stored.playerActionNumber !== settlementEvidence.playerActionNumber
+      || stored.turnId !== settlementEvidence.turnId
+      || stored.decisionDigest !== settlementEvidence.decisionDigest
+      || stored.operationId !== settlementEvidence.operationId
+      || stored.narrationId !== settlementEvidence.narrationId
+      || stored.projectionHash !== settlementEvidence.projectionHash
+      || JSON.stringify(stored.renderProof) !== JSON.stringify(settlementEvidence.renderProof)
+      || JSON.stringify(stored.clickProof) !== JSON.stringify(settlementEvidence.clickProof)
+    ) {
+      throw new Error("Conflicting settlement evidence exists for the signed decision.");
+    }
+  } else {
+    writeJsonExclusive(settlementPath, settlementEvidence);
+    input.injectFault?.("after_settlement_write");
+  }
+  const afterSettlement = readJsonLines<CampaignPlayBrowserActionEvidence>(
+    path.join(root, "browser-actions.jsonl"),
+  ).map((record) => campaignPlayBrowserActionEvidenceSchema.parse(record));
+  if (afterSettlement.length > pending.playerActionNumber) {
+    throw new Error("Browser-action ledger contains a conflicting later or duplicate row.");
+  }
+  if (afterSettlement.length === pending.playerActionNumber) {
+    const row = afterSettlement[pending.playerActionNumber - 1]!;
+    if (JSON.stringify(row) !== JSON.stringify(evidence)) {
+      throw new Error("Conflicting browser-action ledger evidence exists for the signed decision.");
+    }
+    removePendingDecisionPointer(root, pending);
+    return row;
+  }
+  if (afterSettlement.length !== pending.playerActionNumber - 1) {
+    throw new Error("Browser-action ledger numbering is not contiguous at settlement.");
+  }
+  fs.appendFileSync(path.join(root, "browser-actions.jsonl"), JSON.stringify(evidence) + "\n", "utf8");
+  const durableLedger = readJsonLines<CampaignPlayBrowserActionEvidence>(
+    path.join(root, "browser-actions.jsonl"),
+  ).map((record) => campaignPlayBrowserActionEvidenceSchema.parse(record));
+  if (
+    durableLedger.length !== pending.playerActionNumber
+    || JSON.stringify(durableLedger[pending.playerActionNumber - 1]) !== JSON.stringify(evidence)
+  ) {
+    throw new Error("Browser-action ledger append did not produce one durable matching row.");
+  }
+  removePendingDecisionPointer(root, pending);
   return evidence;
 }
 
@@ -1208,11 +1580,14 @@ export async function stageCampaignPlayManualDecision(input: {
   const config = assertLiveConfig(input.runConfig);
   const manifest = sessionManifest(config);
   assertSessionOwnership(config, manifest);
-  const pendingPath = path.join(campaignPlayLiveSessionRoot(config), "pending-decision.json");
-  if (fs.existsSync(pendingPath)) throw new Error("A manual decision is already awaiting a durable turn.");
+  const root = campaignPlayLiveSessionRoot(config);
+  const pendingPath = path.join(root, "pending-decision.json");
   const actions = readJsonLines<CampaignPlayBrowserActionEvidence>(
-    path.join(campaignPlayLiveSessionRoot(config), "browser-actions.jsonl"),
+    path.join(root, "browser-actions.jsonl"),
   );
+  if (readActiveManualDecision(root, config.runId, config.campaignId, actions.length + 1)) {
+    throw new Error("A manual decision is already awaiting a durable turn.");
+  }
   const state = await loadPublicState(config.campaignId);
   if (state.phase !== "ready" || typeof state.projectionHash !== "string") {
     throw new Error("A manual decision can only be signed from the ready player-visible state.");
@@ -1253,7 +1628,7 @@ export async function stageCampaignPlayManualDecision(input: {
       throw new Error("Freeform input requires text and no suggested-choice capture.");
     }
   }
-  const pending: PendingManualDecision = {
+  const pendingUnsigned = {
     playerActionNumber: actions.length + 1,
     control: input.control,
     chosenText,
@@ -1267,7 +1642,20 @@ export async function stageCampaignPlayManualDecision(input: {
     chooser: config.operators.player!,
     signedAt: input.signedAt,
     decisionNote,
+    captureIdentity: input.control === "choice"
+      ? renderedControlIdentity!
+      : "freeform:" + state.projectionHash,
+    captureHash: "",
   };
+  pendingUnsigned.captureHash = sha256(decisionCaptureIdentity(pendingUnsigned));
+  const decisionDigest = signedDecisionDigest(config.runId, config.campaignId, pendingUnsigned);
+  const pending: PendingManualDecision = {
+    ...pendingUnsigned,
+    decisionDigest,
+    decisionReceiptPath: decisionReceiptRelativePath({ ...pendingUnsigned, decisionDigest }),
+  };
+  assertPendingDecisionIntegrity(pending, config.runId, config.campaignId);
+  writeSignedDecisionReceipt(root, config.runId, config.campaignId, pending);
   writeJson(pendingPath, pending);
   return pending;
 }
@@ -1279,15 +1667,11 @@ export function bindCampaignPlayManualDecision(
   const root = campaignPlayLiveSessionRoot(config);
   const manifest = sessionManifest(config);
   assertSessionOwnership(config, manifest);
-  const pendingPath = path.join(root, "pending-decision.json");
-  if (!fs.existsSync(pendingPath)) throw new Error("No signed manual decision is awaiting a turn.");
-  const pending = readJson<PendingManualDecision>(pendingPath);
   const existing = readJsonLines<CampaignPlayBrowserActionEvidence>(
     path.join(root, "browser-actions.jsonl"),
   );
-  if (pending.playerActionNumber !== existing.length + 1) {
-    throw new Error("The pending manual decision is not the next action.");
-  }
+  const pending = readActiveManualDecision(root, config.runId, config.campaignId, existing.length + 1);
+  if (!pending) throw new Error("No signed manual decision is awaiting a turn.");
 
   const handle = openCampaignPlayDatabase(config.campaignId);
   try {
@@ -1321,6 +1705,7 @@ export function bindCampaignPlayManualDecision(
       playerActionNumber: pending.playerActionNumber,
       control: pending.control,
       visibleStateHash: pending.visibleStateHash,
+      decisionDigest: pending.decisionDigest,
       chosenText: pending.chosenText,
       choiceHandle: pending.choiceHandle,
       turnId: String(turn.id),
@@ -1333,7 +1718,7 @@ export function bindCampaignPlayManualDecision(
       `${JSON.stringify(evidence)}\n`,
       "utf8",
     );
-    fs.rmSync(pendingPath);
+    removePendingDecisionPointer(root, pending);
     return evidence;
   } finally {
     handle.close();
@@ -1356,11 +1741,13 @@ export async function cancelCampaignPlayManualDecision(input: {
     throw new Error("Cancellation time must be a nonnegative safe integer.");
   }
 
-  const pendingPath = path.join(root, "pending-decision.json");
-  if (!fs.existsSync(pendingPath)) {
+  const actions = readJsonLines<CampaignPlayBrowserActionEvidence>(
+    path.join(root, "browser-actions.jsonl"),
+  ).map((record) => campaignPlayBrowserActionEvidenceSchema.parse(record));
+  const pending = readActiveManualDecision(root, config.runId, config.campaignId, actions.length + 1);
+  if (!pending) {
     throw new Error("No signed manual decision is awaiting cancellation.");
   }
-  const pending = readJson<PendingManualDecision>(pendingPath);
   if (
     !Number.isSafeInteger(pending.playerActionNumber)
     || pending.playerActionNumber < 1
@@ -1369,9 +1756,6 @@ export async function cancelCampaignPlayManualDecision(input: {
     throw new Error("The pending manual decision has invalid action numbering or signature time.");
   }
 
-  const actions = readJsonLines<CampaignPlayBrowserActionEvidence>(
-    path.join(root, "browser-actions.jsonl"),
-  ).map((record) => campaignPlayBrowserActionEvidenceSchema.parse(record));
   if (actions.some((action, index) => action.playerActionNumber !== index + 1)) {
     throw new Error("Bound browser actions are not numbered contiguously.");
   }
@@ -1418,7 +1802,7 @@ export async function cancelCampaignPlayManualDecision(input: {
   );
   fs.mkdirSync(cancellationRoot, { recursive: true });
   writeJsonExclusive(cancellationPath, cancellation);
-  fs.rmSync(pendingPath);
+  removePendingDecisionPointer(root, pending);
   return cancellation;
 }
 
@@ -1560,12 +1944,12 @@ export function loadCampaignPlayLiveSession(input: CampaignPlayRunConfig): {
   const root = campaignPlayLiveSessionRoot(config);
   const manifest = sessionManifest(config);
   assertSessionOwnership(config, manifest);
-  if (fs.existsSync(path.join(root, "pending-decision.json"))) {
-    throw new Error("The live session still has an unbound manual decision.");
-  }
   const browserActions = readJsonLines<CampaignPlayBrowserActionEvidence>(
     path.join(root, "browser-actions.jsonl"),
   ).map((record) => campaignPlayBrowserActionEvidenceSchema.parse(record));
+  if (readActiveManualDecision(root, config.runId, config.campaignId, browserActions.length + 1)) {
+    throw new Error("The live session still has an unbound manual decision.");
+  }
   const reloadMatches = config.restartAfterPlayerActions.length === 0
     ? readJson<{ matches: boolean }>(path.join(root, "probes", "reload-proof.json")).matches
     : config.restartAfterPlayerActions.every((afterPlayerAction) => {

@@ -340,7 +340,9 @@ export function validateCampaignPlayBundle(bundleRoot: string): CampaignPlayBund
     if (
       manifest.worldSource.kind === "template"
       && (
-        manifest.worldSource.sourceCampaignId !== manifest.campaignId
+        path.dirname(path.resolve(manifest.worldSource.manifestPath))
+          !== path.resolve(manifest.worldSource.packagePath)
+        || manifest.worldSource.sourceCampaignId !== manifest.campaignId
         || manifest.worldSource.acceptedWorldVersion !== eligibility.acceptedWorldVersion
         || manifest.worldSource.acceptedContentHash !== eligibility.acceptedContentHash
       )
