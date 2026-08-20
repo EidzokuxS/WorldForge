@@ -167,7 +167,7 @@ async function renderPage() {
     view = render(<CampaignForgePage params={params} />);
     await params;
   });
-  return view;
+  return view!;
 }
 
 function pendingStream(
@@ -215,6 +215,45 @@ describe("CampaignForgePage", () => {
     expect(campaignApi.loadCampaign).toHaveBeenCalledWith("campaign-1");
     expect(worldApi.loadCampaignWorldState).toHaveBeenCalledWith("campaign-1");
     expect(worldApi.saveCampaignWorldDna).not.toHaveBeenCalled();
+  });
+
+  it("resets to loading for a new campaign while its route data is pending", async () => {
+    worldApi.loadCampaignWorldState.mockResolvedValue(unbuiltState());
+    const view = await renderPage();
+    expect(await screen.findByText("Bell Coast")).toBeInTheDocument();
+
+    let resolveCampaignB!: (campaign: {
+      id: string;
+      name: string;
+      premise: string;
+      createdAt: number;
+      updatedAt: number;
+    }) => void;
+    let resolveStateB!: (state: CampaignWorldStateResponse) => void;
+    campaignApi.loadCampaign.mockReturnValueOnce(new Promise((resolve) => {
+      resolveCampaignB = resolve;
+    }));
+    worldApi.loadCampaignWorldState.mockReturnValueOnce(new Promise((resolve) => {
+      resolveStateB = resolve;
+    }));
+
+    await act(async () => {
+      view.rerender(<CampaignForgePage params={Promise.resolve({ id: "campaign-2" })} />);
+    });
+    expect(screen.getByText("Loading Campaign Forge")).toBeInTheDocument();
+    expect(screen.queryByText("Bell Coast")).not.toBeInTheDocument();
+
+    resolveCampaignB({
+      id: "campaign-2",
+      name: "Salt Basin",
+      premise: "A salt basin remembers every road that crossed it.",
+      createdAt: 2,
+      updatedAt: 2,
+    });
+    resolveStateB(unbuiltState());
+
+    expect(await screen.findByText("Salt Basin")).toBeInTheDocument();
+    expect(worldApi.loadCampaignWorldState).toHaveBeenLastCalledWith("campaign-2");
   });
 
   it("replays a running build from sequence zero in a fresh page instance", async () => {

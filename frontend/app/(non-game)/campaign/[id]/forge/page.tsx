@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useRef, useState } from "react";
+import { use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
@@ -27,6 +27,10 @@ function isAbortError(error: unknown): boolean {
 
 export default function CampaignForgePage(props: { params: Promise<{ id: string }> }) {
   const { id: campaignId } = use(props.params);
+  return <CampaignForge key={campaignId} campaignId={campaignId} />;
+}
+
+function CampaignForge({ campaignId }: { campaignId: string }) {
   const router = useRouter();
   const [campaignName, setCampaignName] = useState("");
   const [worldState, setWorldState] = useState<CampaignWorldStateResponse | null>(null);
@@ -38,23 +42,23 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
   const lifecycleRef = useRef(0);
   const lastAppliedSequenceRef = useRef(0);
 
-  function stopEventStream() {
+  const stopEventStream = useCallback(() => {
     streamAbortRef.current?.abort();
     streamAbortRef.current = null;
-  }
+  }, []);
 
-  function applyEvent(event: CampaignWorldBuildEvent) {
+  const applyEvent = useCallback((event: CampaignWorldBuildEvent) => {
     if (event.sequence <= lastAppliedSequenceRef.current) return;
     lastAppliedSequenceRef.current = event.sequence;
     setEvents((current) => [...current, event]);
-  }
+  }, []);
 
-  async function followBuild(
+  const followBuild = useCallback(async (
     buildId: string,
     afterSequence: number,
     lifecycle: number,
     navigation: "push" | "replace",
-  ) {
+  ) => {
     stopEventStream();
     const controller = new AbortController();
     streamAbortRef.current = controller;
@@ -96,16 +100,12 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
         return;
       }
     }
-  }
+  }, [applyEvent, campaignId, router, stopEventStream]);
 
   useEffect(() => {
     const lifecycle = lifecycleRef.current + 1;
     lifecycleRef.current = lifecycle;
     stopEventStream();
-    setLoading(true);
-    setLoadError(null);
-    setConnectionError(null);
-    setEvents([]);
     lastAppliedSequenceRef.current = 0;
 
     void Promise.all([
@@ -136,7 +136,7 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
       if (lifecycleRef.current === lifecycle) lifecycleRef.current += 1;
       stopEventStream();
     };
-  }, [campaignId, router]);
+  }, [campaignId, followBuild, router, stopEventStream]);
 
   async function handleSaveDna(dna: CampaignWorldDna) {
     const savedSource = await saveCampaignWorldDna(campaignId, dna);
