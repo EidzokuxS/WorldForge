@@ -59,22 +59,91 @@ function framePacket(): WorldFramePacket {
         tags: ["weather"],
         isStarting: false,
       },
+      {
+        locationRef: "location:north-dock",
+        name: "North Dock",
+        description: "A public counter for passage records beneath the harbor signal lines.",
+        kind: "persistent_sublocation",
+        parentLocationRef: "location:north-harbor",
+        tags: ["fortified", "records"],
+        isStarting: false,
+      },
+      {
+        locationRef: "location:signal-tower",
+        name: "Signal Tower",
+        description: "A wind-scoured tower where harbor flags mark the next crossing.",
+        kind: "persistent_sublocation",
+        parentLocationRef: "location:north-harbor",
+        tags: ["fortified", "signals"],
+        isStarting: false,
+      },
+      {
+        locationRef: "location:reef-market",
+        name: "Reef Market",
+        description: "A covered exchange behind the luminous reef quay.",
+        kind: "persistent_sublocation",
+        parentLocationRef: "location:glass-reef",
+        tags: ["trade"],
+        isStarting: false,
+      },
+      {
+        locationRef: "location:tide-gate",
+        name: "Tide Gate",
+        description: "A narrow gate where tide charts and cargo seals are checked.",
+        kind: "persistent_sublocation",
+        parentLocationRef: "location:glass-reef",
+        tags: ["trade", "routes"],
+        isStarting: false,
+      },
+      {
+        locationRef: "location:bell-foundry",
+        name: "Bell Foundry",
+        description: "A hot foundry that casts the bronze bells used to read the weather.",
+        kind: "persistent_sublocation",
+        parentLocationRef: "location:bell-island",
+        tags: ["weather", "bells"],
+        isStarting: false,
+      },
+      {
+        locationRef: "location:storm-shrine",
+        name: "Storm Shrine",
+        description: "A salt-dark shrine where sailors leave tokens before a crossing.",
+        kind: "persistent_sublocation",
+        parentLocationRef: "location:bell-island",
+        tags: ["weather", "ritual"],
+        isStarting: false,
+      },
     ],
     routes: [
       {
-        fromLocationRef: "location:north-harbor",
-        toLocationRef: "location:glass-reef",
+        fromLocationRef: "location:north-dock",
+        toLocationRef: "location:signal-tower",
         travelCost: 2,
       },
       {
-        fromLocationRef: "location:glass-reef",
-        toLocationRef: "location:bell-island",
+        fromLocationRef: "location:signal-tower",
+        toLocationRef: "location:reef-market",
         travelCost: 3,
       },
       {
-        fromLocationRef: "location:bell-island",
-        toLocationRef: "location:north-harbor",
+        fromLocationRef: "location:reef-market",
+        toLocationRef: "location:tide-gate",
         travelCost: 4,
+      },
+      {
+        fromLocationRef: "location:tide-gate",
+        toLocationRef: "location:bell-foundry",
+        travelCost: 5,
+      },
+      {
+        fromLocationRef: "location:bell-foundry",
+        toLocationRef: "location:storm-shrine",
+        travelCost: 6,
+      },
+      {
+        fromLocationRef: "location:storm-shrine",
+        toLocationRef: "location:north-dock",
+        travelCost: 7,
       },
     ],
   };
@@ -165,26 +234,26 @@ function castPacket(): WorldCastPacket {
     placements: [
       {
         actorRef: "actor:mara-venn",
-        locationRef: "location:north-harbor",
+        locationRef: "location:north-dock",
         placementKind: "present",
       },
       {
         actorRef: "actor:oren-tide",
-        locationRef: "location:glass-reef",
+        locationRef: "location:signal-tower",
         placementKind: "present",
       },
       {
         actorRef: "actor:sel-bell",
-        locationRef: "location:bell-island",
+        locationRef: "location:reef-market",
         placementKind: "present",
       },
       {
         actorRef: "actor:lantern-council",
-        locationRef: "location:north-harbor",
+        locationRef: "location:tide-gate",
         placementKind: "present",
       },
-      { actorRef: "actor:niko-salt", locationRef: "location:glass-reef", placementKind: "present" },
-      { actorRef: "actor:rhea-quill", locationRef: "location:bell-island", placementKind: "present" },
+      { actorRef: "actor:niko-salt", locationRef: "location:bell-foundry", placementKind: "present" },
+      { actorRef: "actor:rhea-quill", locationRef: "location:storm-shrine", placementKind: "present" },
     ],
   };
 }
@@ -223,7 +292,7 @@ function connectionsPacket(): WorldConnectionsPacket {
         trajectory: "North Harbor loses supply access within two route cycles.",
         urgency: 5,
         actorRefs: ["actor:mara-venn", "actor:lantern-council", "actor:rhea-quill"],
-        locationRefs: ["location:north-harbor"],
+        locationRefs: ["location:signal-tower"],
       },
       {
         name: "False Bells",
@@ -231,7 +300,7 @@ function connectionsPacket(): WorldConnectionsPacket {
         trajectory: "Couriers stop trusting Bell Island's warnings.",
         urgency: 3,
         actorRefs: ["actor:sel-bell", "actor:niko-salt"],
-        locationRefs: ["location:bell-island"],
+        locationRefs: ["location:bell-foundry"],
       },
     ],
   };
@@ -558,7 +627,7 @@ describe("Campaign World routes", () => {
       currentStage: "persistence",
       lastEventSequence: 12,
     });
-    expect(reviewState.world.locations).toHaveLength(3);
+    expect(reviewState.world.locations).toHaveLength(9);
 
     const resumed = await app.request(
       `/api/campaigns/${CAMPAIGN_ID}/world/builds/${started.buildId}/events`,
