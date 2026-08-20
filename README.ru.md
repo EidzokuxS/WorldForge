@@ -225,6 +225,7 @@ campaigns/{campaignId}/
 # Root
 npm run dev                  # backend + frontend
 npm run build                # shared + frontend + backend
+npm test                     # gate тестов пакетов shared + frontend + backend; e2e/R7-приёмка отдельно
 npm run typecheck            # frontend lint + frontend TypeScript (including tests) + backend typecheck
 
 # Backend
