@@ -225,7 +225,7 @@ campaigns/{campaignId}/
 # Root
 npm run dev                  # backend + frontend
 npm run build                # shared + frontend + backend
-npm run typecheck            # frontend lint + backend typecheck
+npm run typecheck            # frontend lint + frontend TypeScript (including tests) + backend typecheck
 
 # Backend
 npm --prefix backend run dev

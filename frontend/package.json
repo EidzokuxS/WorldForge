@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "vitest",
     "typecheck": "npm --prefix ../shared run build && tsc --noEmit -p tsconfig.typecheck.json",
+    "typecheck:tests": "npm --prefix ../shared run build && tsc --noEmit -p tsconfig.typecheck.tests.json",
     "capture:campaign-play": "node scripts/capture-campaign-play-visuals.mjs"
   },
   "dependencies": {
