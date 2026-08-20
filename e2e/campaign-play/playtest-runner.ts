@@ -11,6 +11,7 @@ import {
 import { assertCampaignPlayBundle } from "./probes.js";
 import {
   bindCampaignPlayManualDecisionCoherent,
+  captureCampaignPlaySettlementRenderProof,
   captureCampaignPlayReloadBoundary,
   captureCampaignPlaySubscriptionQuota,
   cancelCampaignPlayManualDecision,
@@ -171,6 +172,21 @@ async function runLiveLane(config: CampaignPlayRunConfig, phase: string): Promis
       process.stdout.write(`${JSON.stringify({ phase, capture })}\n`);
       return;
     }
+    case "capture-render-proof": {
+      const observationPath = argumentValue("--dom-observation");
+      const renderProofPath = argumentValue("--render-proof");
+      if (observationPath === null || renderProofPath === null) {
+        throw new Error("capture-render-proof requires --dom-observation and --render-proof.");
+      }
+      const proof = await captureCampaignPlaySettlementRenderProof({
+        runConfig: config,
+        domObservation: JSON.parse(fs.readFileSync(path.resolve(observationPath), "utf8")) as unknown,
+        renderProofPath: path.resolve(renderProofPath),
+        admittedTurnId: argumentValue("--turn-id") ?? undefined,
+      });
+      process.stdout.write(`${JSON.stringify({ phase, proof })}\n`);
+      return;
+    }
     case "bind":
     case "reconcile":
     case "resume": {
@@ -275,7 +291,7 @@ async function runLiveLane(config: CampaignPlayRunConfig, phase: string): Promis
       return;
     }
     default:
-      throw new Error("--live-phase must be prepare, decide, bind, reconcile, resume, cancel-decision, reload-before, reload-after, or finalize.");
+      throw new Error("--live-phase must be prepare, decide, authorize-click, capture-render-proof, bind, reconcile, resume, cancel-decision, reload-before, reload-after, or finalize.");
   }
 }
 

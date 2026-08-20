@@ -85,10 +85,48 @@ export interface CampaignPlayCancelledDecision {
   publicProjectionHash: string;
 }
 
+const CAMPAIGN_PLAY_RENDER_CONTROL_LIMIT = 100;
+
 /**
- * A browser-side render observation is intentionally scalar.  It is paired
- * with the exact admitted turn by the coherent binder below; a DOM/API sample
- * on its own is never sufficient evidence for a durable browser action.
+ * Browser input is only a bounded DOM observation.  It deliberately has no
+ * projection hash: the repository-owned capture phase obtains that authority
+ * from the public API after the observation.
+ */
+export interface CampaignPlaySettlementDomObservation {
+  playerActionNumber: number;
+  turnId: string;
+  ready: true;
+  enabledChoiceCount: number;
+  renderedNarrationId: string;
+  renderedSceneIdentity: string;
+  suggestedControlHandles: string[];
+  utilityControlHandles: string[];
+  capturedAt: number;
+  decisionDigest?: string;
+}
+
+export interface CampaignPlaySettlementTerminalSnapshot {
+  capturedAt: number;
+  projectionHash: string;
+  worldVersion: number;
+  runtimeRevision: number;
+  ready: true;
+  activeTurn: null;
+  turnId: string;
+  narrationId: string;
+  properSceneNarrationId: string;
+  narrationOperationId: string;
+  narrationOperationStatus: "complete";
+  narrationOperationCompletedAt: number;
+  narrationOperationSourceKind: string;
+  suggestedControlHandles: string[];
+  utilityControlHandles: string[];
+}
+
+/**
+ * A render proof contains the browser observation plus one bounded terminal
+ * API tuple.  terminalSnapshot is optional only for historical proofs; the
+ * coherent binder never lets such a proof authorize a new settlement.
  */
 export interface CampaignPlaySettlementRenderProof {
   playerActionNumber: number;
@@ -101,6 +139,7 @@ export interface CampaignPlaySettlementRenderProof {
   renderedSceneIdentity: string;
   capturedAt: number;
   decisionDigest?: string;
+  terminalSnapshot?: CampaignPlaySettlementTerminalSnapshot;
 }
 
 /**
@@ -320,6 +359,25 @@ function writeJsonExclusive(filePath: string, value: unknown): void {
     encoding: "utf8",
     flag: "wx",
   });
+}
+
+function writeJsonExclusiveAtomic(filePath: string, value: unknown): void {
+  const temporaryPath = `${filePath}.${process.pid}.${crypto.randomBytes(8).toString("hex")}.tmp`;
+  const contents = `${JSON.stringify(value, null, 2)}\n`;
+  let descriptor: number | null = null;
+  try {
+    descriptor = fs.openSync(temporaryPath, "wx");
+    fs.writeFileSync(descriptor, contents, "utf8");
+    fs.fsyncSync(descriptor);
+    fs.closeSync(descriptor);
+    descriptor = null;
+    // A hard-link publish is atomic and remains exclusive if a prior proof
+    // already occupies the destination.
+    fs.linkSync(temporaryPath, filePath);
+  } finally {
+    if (descriptor !== null) fs.closeSync(descriptor);
+    if (fs.existsSync(temporaryPath)) fs.unlinkSync(temporaryPath);
+  }
 }
 
 function readJson<T>(filePath: string): T {
@@ -656,6 +714,161 @@ function isNonemptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
+function assertBoundedControlHandles(value: unknown, label: string): string[] {
+  if (!Array.isArray(value) || value.length > CAMPAIGN_PLAY_RENDER_CONTROL_LIMIT) {
+    throw new Error(`${label} must be a bounded ordered handle list.`);
+  }
+  const handles = value.map((handle) => {
+    if (!boundedScalar(handle, 256)) {
+      throw new Error(`${label} contains an invalid control handle.`);
+    }
+    return handle;
+  });
+  if (new Set(handles).size !== handles.length) {
+    throw new Error(`${label} contains a duplicate control handle.`);
+  }
+  return handles;
+}
+
+export function assertCampaignPlaySettlementDomObservation(
+  value: unknown,
+): CampaignPlaySettlementDomObservation {
+  if (!value || typeof value !== "object") {
+    throw new Error("The settlement DOM observation is not an object.");
+  }
+  const observation = value as Partial<CampaignPlaySettlementDomObservation> & {
+    afterProjectionHash?: unknown;
+    projectionHash?: unknown;
+  };
+  if ("afterProjectionHash" in observation || "projectionHash" in observation) {
+    throw new Error("The settlement DOM observation cannot supply a terminal projection hash.");
+  }
+  if (
+    typeof observation.playerActionNumber !== "number"
+    || !Number.isSafeInteger(observation.playerActionNumber)
+    || observation.playerActionNumber < 1
+    || !boundedScalar(observation.turnId, 512)
+    || observation.ready !== true
+    || typeof observation.enabledChoiceCount !== "number"
+    || !Number.isSafeInteger(observation.enabledChoiceCount)
+    || observation.enabledChoiceCount < 1
+    || observation.enabledChoiceCount > CAMPAIGN_PLAY_RENDER_CONTROL_LIMIT
+    || !boundedScalar(observation.renderedNarrationId, 512)
+    || !boundedScalar(observation.renderedSceneIdentity, 512)
+    || typeof observation.capturedAt !== "number"
+    || !Number.isSafeInteger(observation.capturedAt)
+    || observation.capturedAt < 0
+  ) {
+    throw new Error("The settlement DOM observation is missing a bounded ready-state identity.");
+  }
+  const suggestedControlHandles = assertBoundedControlHandles(
+    observation.suggestedControlHandles,
+    "The settlement suggested controls",
+  );
+  const utilityControlHandles = assertBoundedControlHandles(
+    observation.utilityControlHandles,
+    "The settlement utility controls",
+  );
+  if (new Set([...suggestedControlHandles, ...utilityControlHandles]).size
+    !== suggestedControlHandles.length + utilityControlHandles.length) {
+    throw new Error("The settlement DOM observation contains a duplicate control handle.");
+  }
+  return {
+    playerActionNumber: observation.playerActionNumber,
+    turnId: observation.turnId,
+    ready: true,
+    enabledChoiceCount: observation.enabledChoiceCount,
+    renderedNarrationId: observation.renderedNarrationId,
+    renderedSceneIdentity: observation.renderedSceneIdentity,
+    suggestedControlHandles,
+    utilityControlHandles,
+    capturedAt: observation.capturedAt,
+    ...(observation.decisionDigest === undefined
+      ? {}
+      : { decisionDigest: isHash(observation.decisionDigest) ? observation.decisionDigest : (() => {
+          throw new Error("The settlement DOM decision digest is invalid.");
+        })() }),
+  };
+}
+
+function assertTerminalSnapshot(
+  value: unknown,
+): CampaignPlaySettlementTerminalSnapshot {
+  if (!value || typeof value !== "object") {
+    throw new Error("The terminal render snapshot is not an object.");
+  }
+  const snapshot = value as Partial<CampaignPlaySettlementTerminalSnapshot>;
+  if (
+    typeof snapshot.capturedAt !== "number"
+    || !Number.isSafeInteger(snapshot.capturedAt)
+    || snapshot.capturedAt < 0
+    || !isHash(snapshot.projectionHash)
+    || typeof snapshot.worldVersion !== "number"
+    || !Number.isSafeInteger(snapshot.worldVersion)
+    || snapshot.worldVersion < 0
+    || typeof snapshot.runtimeRevision !== "number"
+    || !Number.isSafeInteger(snapshot.runtimeRevision)
+    || snapshot.runtimeRevision < 0
+    || snapshot.ready !== true
+    || snapshot.activeTurn !== null
+    || !boundedScalar(snapshot.turnId, 512)
+    || !boundedScalar(snapshot.narrationId, 512)
+    || !boundedScalar(snapshot.properSceneNarrationId, 512)
+    || snapshot.properSceneNarrationId !== snapshot.narrationId
+    || !boundedScalar(snapshot.narrationOperationId, 512)
+    || snapshot.narrationOperationStatus !== "complete"
+    || typeof snapshot.narrationOperationCompletedAt !== "number"
+    || !Number.isSafeInteger(snapshot.narrationOperationCompletedAt)
+    || snapshot.narrationOperationCompletedAt < 0
+    || !boundedScalar(snapshot.narrationOperationSourceKind, 128)
+  ) {
+    throw new Error("The terminal render snapshot is incomplete or not bounded.");
+  }
+  const suggestedControlHandles = assertBoundedControlHandles(
+    snapshot.suggestedControlHandles,
+    "The terminal suggested controls",
+  );
+  const utilityControlHandles = assertBoundedControlHandles(
+    snapshot.utilityControlHandles,
+    "The terminal utility controls",
+  );
+  if (new Set([...suggestedControlHandles, ...utilityControlHandles]).size
+    !== suggestedControlHandles.length + utilityControlHandles.length) {
+    throw new Error("The terminal render snapshot contains a duplicate control handle.");
+  }
+  return {
+    capturedAt: snapshot.capturedAt,
+    projectionHash: snapshot.projectionHash,
+    worldVersion: snapshot.worldVersion,
+    runtimeRevision: snapshot.runtimeRevision,
+    ready: true,
+    activeTurn: null,
+    turnId: snapshot.turnId,
+    narrationId: snapshot.narrationId,
+    properSceneNarrationId: snapshot.properSceneNarrationId,
+    narrationOperationId: snapshot.narrationOperationId,
+    narrationOperationStatus: "complete",
+    narrationOperationCompletedAt: snapshot.narrationOperationCompletedAt,
+    narrationOperationSourceKind: snapshot.narrationOperationSourceKind,
+    suggestedControlHandles,
+    utilityControlHandles,
+  };
+}
+
+function terminalSnapshotIdentity(snapshot: CampaignPlaySettlementTerminalSnapshot): string {
+  const { capturedAt: _capturedAt, ...identity } = snapshot;
+  return JSON.stringify(identity);
+}
+
+function assertTerminalSnapshotMatches(
+  expected: CampaignPlaySettlementTerminalSnapshot,
+  actual: CampaignPlaySettlementTerminalSnapshot,
+): void {
+  if (terminalSnapshotIdentity(expected) !== terminalSnapshotIdentity(actual)) {
+    throw new Error("The terminal public snapshot changed before settlement binding.");
+  }
+}
+
 function assertRenderProof(value: unknown): CampaignPlaySettlementRenderProof {
   if (!value || typeof value !== "object") throw new Error("The render proof is not an object.");
   const proof = value as Partial<CampaignPlaySettlementRenderProof>;
@@ -668,6 +881,7 @@ function assertRenderProof(value: unknown): CampaignPlaySettlementRenderProof {
     || typeof proof.enabledChoiceCount !== "number"
     || !Number.isSafeInteger(proof.enabledChoiceCount)
     || proof.enabledChoiceCount < 1
+    || proof.enabledChoiceCount > CAMPAIGN_PLAY_RENDER_CONTROL_LIMIT
     || !isHash(proof.beforeProjectionHash)
     || !isHash(proof.afterProjectionHash)
     || !isNonemptyString(proof.renderedNarrationId)
@@ -677,6 +891,12 @@ function assertRenderProof(value: unknown): CampaignPlaySettlementRenderProof {
     || proof.capturedAt < 0
   ) {
     throw new Error("The render proof is missing a bounded ready-state scalar.");
+  }
+  const terminalSnapshot = proof.terminalSnapshot === undefined
+    ? undefined
+    : assertTerminalSnapshot(proof.terminalSnapshot);
+  if (terminalSnapshot && terminalSnapshot.projectionHash !== proof.afterProjectionHash) {
+    throw new Error("The render proof projection hash is not its terminal snapshot hash.");
   }
   return {
     playerActionNumber: proof.playerActionNumber as number,
@@ -693,6 +913,7 @@ function assertRenderProof(value: unknown): CampaignPlaySettlementRenderProof {
       : { decisionDigest: isHash(proof.decisionDigest) ? proof.decisionDigest : (() => {
           throw new Error("The render proof decision digest is invalid.");
         })() }),
+    ...(terminalSnapshot === undefined ? {} : { terminalSnapshot }),
   };
 }
 
@@ -1074,6 +1295,121 @@ export function inspectCoherentSettlementCopy(input: {
   }
 }
 
+function apiControlHandles(value: unknown, label: string): string[] {
+  if (!Array.isArray(value) || value.length > CAMPAIGN_PLAY_RENDER_CONTROL_LIMIT) {
+    throw new Error(`${label} is not a bounded ordered control list.`);
+  }
+  return value.map((row, index) => {
+    if (!row || typeof row !== "object") {
+      throw new Error(`${label} contains an invalid control at ordinal ${index}.`);
+    }
+    const choiceHandle = (row as { choiceHandle?: unknown }).choiceHandle;
+    const visibleLabel = (row as { label?: unknown }).label;
+    if (!boundedScalar(choiceHandle, 256) || !boundedScalar(visibleLabel, 2_000)) {
+      throw new Error(`${label} contains an unbounded control identity.`);
+    }
+    return choiceHandle;
+  });
+}
+
+export async function readCampaignPlaySettlementTerminalSnapshot(
+  campaignId: string,
+  turnId: string,
+): Promise<{
+  state: Record<string, unknown>;
+  turn: Record<string, unknown>;
+  snapshot: CampaignPlaySettlementTerminalSnapshot;
+}> {
+  const state = await loadPublicState(campaignId);
+  const turn = await loadPublicTurn(campaignId, turnId);
+  const turnRecord = (turn.turn ?? {}) as Record<string, unknown>;
+  const result = (turn.result ?? {}) as Record<string, unknown>;
+  const status = turnRecord.status;
+  if (status === "failed" || status === "interrupted") {
+    throw new Error(`The exact player turn reached terminal ${String(status)}.`);
+  }
+  if (
+    state.phase !== "ready"
+    || state.activeTurn !== null
+    || status !== "completed"
+    || result.status !== "completed"
+  ) {
+    throw new Error("The public turn is not in a ready completed state.");
+  }
+  const apiNarration = (result.narration ?? {}) as Record<string, unknown>;
+  const apiOperation = (result.narrationOperation ?? {}) as Record<string, unknown>;
+  const stateNarration = (state.narration ?? {}) as Record<string, unknown>;
+  const stateOperation = (state.narrationOperation ?? {}) as Record<string, unknown>;
+  const completedAt = apiOperation.completedAt;
+  if (
+    !boundedScalar(turnRecord.turnId, 512)
+    || turnRecord.turnId !== turnId
+    || !boundedScalar(apiNarration.turnId, 512)
+    || apiNarration.turnId !== turnId
+    || !boundedScalar(apiNarration.narrationId, 512)
+    || !boundedScalar(stateNarration.turnId, 512)
+    || stateNarration.turnId !== turnId
+    || stateNarration.narrationId !== apiNarration.narrationId
+    || !boundedScalar(apiOperation.turnId, 512)
+    || apiOperation.turnId !== turnId
+    || !boundedScalar(apiOperation.operationId, 512)
+    || apiOperation.narrationId !== apiNarration.narrationId
+    || apiOperation.status !== "complete"
+    || apiOperation.sourceKind !== "model_accepted"
+    || !Number.isSafeInteger(completedAt)
+    || (completedAt as number) < 0
+    || stateOperation.operationId !== apiOperation.operationId
+    || stateOperation.turnId !== turnId
+    || stateOperation.narrationId !== apiOperation.narrationId
+    || stateOperation.status !== "complete"
+    || stateOperation.sourceKind !== apiOperation.sourceKind
+    || stateOperation.completedAt !== completedAt
+  ) {
+    throw new Error("The public turn does not expose one completed proper narration operation.");
+  }
+  if (
+    !isHash(state.projectionHash)
+    || typeof state.worldVersion !== "number"
+    || !Number.isSafeInteger(state.worldVersion)
+    || state.worldVersion < 0
+    || typeof state.runtimeRevision !== "number"
+    || !Number.isSafeInteger(state.runtimeRevision)
+    || state.runtimeRevision < 0
+  ) {
+    throw new Error("The terminal public state is missing bounded version or projection identity.");
+  }
+  const suggestedControlHandles = apiControlHandles(
+    stateNarration.suggestedActions,
+    "The terminal suggested controls",
+  );
+  const utilityControlHandles = apiControlHandles(
+    state.utilityActions,
+    "The terminal utility controls",
+  );
+  if (new Set([...suggestedControlHandles, ...utilityControlHandles]).size
+    !== suggestedControlHandles.length + utilityControlHandles.length) {
+    throw new Error("The terminal public state contains a duplicate control handle.");
+  }
+  const snapshot = assertTerminalSnapshot({
+    capturedAt: Date.now(),
+    projectionHash: state.projectionHash,
+    worldVersion: state.worldVersion,
+    runtimeRevision: state.runtimeRevision,
+    ready: true,
+    activeTurn: null,
+    turnId,
+    narrationId: apiNarration.narrationId,
+    properSceneNarrationId: apiNarration.narrationId,
+    narrationOperationId: apiOperation.operationId,
+    narrationOperationStatus: "complete",
+    narrationOperationCompletedAt: completedAt,
+    narrationOperationSourceKind: apiOperation.sourceKind,
+    suggestedControlHandles,
+    utilityControlHandles,
+  });
+  return { state, turn, snapshot };
+}
+
 export async function waitForCompletedPublicTurn(
   campaignId: string,
   turnId: string,
@@ -1091,31 +1427,157 @@ export async function waitForCompletedPublicTurn(
   // durable terminal states remain the only failure fences; healthy model work
   // may exceed the historical 120-second runner observation window.
   for (;;) {
+    let state: Record<string, unknown>;
+    let turn: Record<string, unknown>;
     try {
-      const state = await loadPublicState(campaignId);
-      const turn = await loadPublicTurn(campaignId, turnId);
-      const turnRecord = (turn.turn ?? {}) as Record<string, unknown>;
-      const result = (turn.result ?? {}) as Record<string, unknown>;
-      const status = turnRecord.status;
-      if (status === "failed" || status === "interrupted") {
-        throw new Error(`The exact player turn reached terminal ${String(status)}.`);
-      }
-      if (
-        state.phase === "ready"
-        && state.activeTurn === null
-        && status === "completed"
-        && result.status === "completed"
-        && result.narration !== null
-        && result.narrationOperation !== null
-      ) {
-        return { state, turn, readyObservedAt: Date.now() };
-      }
+      state = await loadPublicState(campaignId);
+      turn = await loadPublicTurn(campaignId, turnId);
     } catch (error) {
       if (error instanceof Error && /terminal (failed|interrupted)/.test(error.message)) throw error;
       // A transient HTTP/CDP boundary is observation noise; keep reconciling
       // the same admitted turn rather than clicking or binding again.
+      await new Promise<void>((resolve) => setTimeout(resolve, pollIntervalMs));
+      continue;
+    }
+    const turnRecord = (turn.turn ?? {}) as Record<string, unknown>;
+    const result = (turn.result ?? {}) as Record<string, unknown>;
+    if (turnRecord.status === "failed" || turnRecord.status === "interrupted") {
+      throw new Error(`The exact player turn reached terminal ${String(turnRecord.status)}.`);
+    }
+    if (
+      state.phase === "ready"
+      && state.activeTurn === null
+      && turnRecord.status === "completed"
+      && result.status === "completed"
+    ) {
+      try {
+        const observed = await readCampaignPlaySettlementTerminalSnapshot(campaignId, turnId);
+        return {
+          state: observed.state,
+          turn: observed.turn,
+          readyObservedAt: observed.snapshot.capturedAt,
+        };
+      } catch (error) {
+        const apiNarration = (result.narration ?? {}) as Record<string, unknown>;
+        const apiOperation = (result.narrationOperation ?? {}) as Record<string, unknown>;
+        const stateNarration = (state.narration ?? {}) as Record<string, unknown>;
+        const stateOperation = (state.narrationOperation ?? {}) as Record<string, unknown>;
+        const operationStillSettling =
+          state.narration === null
+          || result.narration === null
+          || state.narrationOperation === null
+          || result.narrationOperation === null
+          || apiOperation.status === "pending"
+          || apiOperation.status === "running"
+          || stateOperation.status === "pending"
+          || stateOperation.status === "running"
+          || apiOperation.status === "complete" && !Number.isSafeInteger(apiOperation.completedAt)
+          || stateOperation.status === "complete" && !Number.isSafeInteger(stateOperation.completedAt)
+          || !boundedScalar(apiNarration.narrationId, 512)
+          || !boundedScalar(stateNarration.narrationId, 512);
+        if (!operationStillSettling) throw error;
+      }
     }
     await new Promise<void>((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+}
+
+export async function captureCampaignPlaySettlementRenderProof(input: {
+  runConfig: CampaignPlayRunConfig;
+  domObservation: unknown;
+  renderProofPath: string;
+  admittedTurnId?: string;
+  pollIntervalMs?: number;
+}): Promise<CampaignPlaySettlementRenderProof> {
+  const config = assertLiveConfig(input.runConfig);
+  const root = campaignPlayLiveSessionRoot(config);
+  const manifest = sessionManifest(config);
+  assertSessionOwnership(config, manifest);
+  const observation = assertCampaignPlaySettlementDomObservation(input.domObservation);
+  const actions = readJsonLines<CampaignPlayBrowserActionEvidence>(
+    path.join(root, "browser-actions.jsonl"),
+  );
+  const pending = readActiveManualDecision(
+    root,
+    config.runId,
+    config.campaignId,
+    observation.playerActionNumber,
+  );
+  if (!pending) throw new Error("No immutable signed manual decision is awaiting terminal render capture.");
+  const admittedTurnId = input.admittedTurnId ?? observation.turnId;
+  if (
+    observation.playerActionNumber !== pending.playerActionNumber
+    || observation.turnId !== admittedTurnId
+    || observation.decisionDigest !== undefined && observation.decisionDigest !== pending.decisionDigest
+    || actions.length !== pending.playerActionNumber - 1
+  ) {
+    throw new Error("The terminal DOM observation does not belong to the signed decision and admitted turn.");
+  }
+
+  await waitForCompletedPublicTurn(config.campaignId, admittedTurnId, {
+    pollIntervalMs: input.pollIntervalMs,
+  });
+  const first = await readCampaignPlaySettlementTerminalSnapshot(config.campaignId, admittedTurnId);
+  const second = await readCampaignPlaySettlementTerminalSnapshot(config.campaignId, admittedTurnId);
+  assertTerminalSnapshotMatches(first.snapshot, second.snapshot);
+  const terminalSnapshot = assertTerminalSnapshot({
+    ...second.snapshot,
+    capturedAt: Date.now(),
+  });
+  if (
+    observation.ready !== terminalSnapshot.ready
+    || observation.turnId !== terminalSnapshot.turnId
+    || observation.renderedNarrationId !== terminalSnapshot.narrationId
+    || (observation.renderedSceneIdentity !== terminalSnapshot.properSceneNarrationId
+      && observation.renderedSceneIdentity !== terminalSnapshot.narrationOperationId)
+    || JSON.stringify(observation.suggestedControlHandles)
+      !== JSON.stringify(terminalSnapshot.suggestedControlHandles)
+    || JSON.stringify(observation.utilityControlHandles)
+      !== JSON.stringify(terminalSnapshot.utilityControlHandles)
+    || observation.enabledChoiceCount
+      !== terminalSnapshot.suggestedControlHandles.length + terminalSnapshot.utilityControlHandles.length
+  ) {
+    throw new Error("The terminal DOM observation does not match the same public API snapshot.");
+  }
+  const capturedAt = terminalSnapshot.capturedAt;
+  const proof: CampaignPlaySettlementRenderProof = {
+    playerActionNumber: pending.playerActionNumber,
+    turnId: admittedTurnId,
+    ready: true,
+    enabledChoiceCount: observation.enabledChoiceCount,
+    beforeProjectionHash: pending.visibleStateHash,
+    afterProjectionHash: terminalSnapshot.projectionHash,
+    renderedNarrationId: observation.renderedNarrationId,
+    renderedSceneIdentity: observation.renderedSceneIdentity,
+    capturedAt,
+    decisionDigest: pending.decisionDigest,
+    terminalSnapshot,
+  };
+  const renderProofPath = safeSessionPath(root, input.renderProofPath);
+  fs.mkdirSync(path.dirname(renderProofPath), { recursive: true });
+  writeJsonExclusiveAtomic(renderProofPath, proof);
+  return proof;
+}
+
+function assertRenderProofMatchesExistingSettlement(
+  current: CampaignPlaySettlementRenderProof,
+  stored: CampaignPlaySettlementRenderProof,
+): void {
+  if (
+    current.playerActionNumber !== stored.playerActionNumber
+    || current.turnId !== stored.turnId
+    || current.ready !== stored.ready
+    || current.enabledChoiceCount !== stored.enabledChoiceCount
+    || current.beforeProjectionHash !== stored.beforeProjectionHash
+    || current.afterProjectionHash !== stored.afterProjectionHash
+    || current.renderedNarrationId !== stored.renderedNarrationId
+    || current.renderedSceneIdentity !== stored.renderedSceneIdentity
+    || current.decisionDigest !== stored.decisionDigest
+    || (current.terminalSnapshot !== undefined
+      && (stored.terminalSnapshot === undefined
+        || terminalSnapshotIdentity(current.terminalSnapshot) !== terminalSnapshotIdentity(stored.terminalSnapshot)))
+  ) {
+    throw new Error("The existing settlement proof conflicts with the signed decision.");
   }
 }
 
@@ -1252,11 +1714,18 @@ export async function bindCampaignPlayManualDecisionCoherent(input: {
     ) {
       throw new Error("The existing settlement proof conflicts with the signed decision.");
     }
+    assertRenderProofMatchesExistingSettlement(
+      proof,
+      assertRenderProof((settled as { renderProof?: unknown }).renderProof),
+    );
     removePendingDecisionPointer(root, pending);
     return existingEvidence;
   }
   if (existing.length !== pending.playerActionNumber - 1) {
     throw new Error("The signed manual decision is not the next action.");
+  }
+  if (proof.terminalSnapshot === undefined) {
+    throw new Error("A legacy render proof cannot authorize a new settlement; capture a terminal proof first.");
   }
   let clickProof: CampaignPlayChoiceClickProof | null = null;
   if (pending.control === "choice") {
@@ -1270,8 +1739,11 @@ export async function bindCampaignPlayManualDecisionCoherent(input: {
     }
   }
 
-  const completed = await waitForCompletedPublicTurn(config.campaignId, admittedTurnId);
-  const state = completed.state;
+  const completed = await readCampaignPlaySettlementTerminalSnapshot(
+    config.campaignId,
+    admittedTurnId,
+  );
+  assertTerminalSnapshotMatches(proof.terminalSnapshot, completed.snapshot);
   const turn = completed.turn;
   const turnRecord = (turn.turn ?? {}) as Record<string, unknown>;
   const result = (turn.result ?? {}) as Record<string, unknown>;
@@ -1284,14 +1756,16 @@ export async function bindCampaignPlayManualDecisionCoherent(input: {
     || apiOperation.sourceKind !== "model_accepted"
     || !isNonemptyString(apiNarration.narrationId)
     || !isNonemptyString(apiOperation.operationId)
-    || proof.renderedNarrationId !== apiNarration.narrationId
-    || (proof.renderedSceneIdentity !== apiNarration.narrationId
-      && proof.renderedSceneIdentity !== apiOperation.operationId)
+    || proof.renderedNarrationId !== completed.snapshot.narrationId
+    || (proof.renderedSceneIdentity !== completed.snapshot.properSceneNarrationId
+      && proof.renderedSceneIdentity !== completed.snapshot.narrationOperationId)
+    || proof.enabledChoiceCount
+      !== completed.snapshot.suggestedControlHandles.length
+        + completed.snapshot.utilityControlHandles.length
   ) {
     throw new Error("The rendered and API narration identities do not match the admitted turn.");
   }
-  if (!isHash(state.projectionHash)) throw new Error("The ready API projection hash is invalid.");
-  if (proof.afterProjectionHash !== state.projectionHash) {
+  if (proof.afterProjectionHash !== completed.snapshot.projectionHash) {
     throw new Error("The rendered and API projection hashes do not match.");
   }
 
@@ -1314,7 +1788,7 @@ export async function bindCampaignPlayManualDecisionCoherent(input: {
     });
     settlement = {
       ...inspected,
-      readyObservedAt: completed.readyObservedAt,
+      readyObservedAt: completed.snapshot.capturedAt,
       stateDbPath: sourceHandle.databasePath,
       stateDbSha256: sha256File(sourceHandle.databasePath),
       readCopyPath: copyPath,

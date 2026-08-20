@@ -20,11 +20,13 @@ import {
   bindCampaignPlayManualDecision,
   bindCampaignPlayManualDecisionCoherent,
   cancelCampaignPlayManualDecision,
+  captureCampaignPlaySettlementRenderProof,
   captureCampaignPlayReloadBoundary,
   captureCampaignPlaySubscriptionQuota,
   campaignPlayLiveSessionRoot,
   inspectCoherentSettlementCopy,
   prepareCampaignPlayLiveSession,
+  readCampaignPlaySettlementTerminalSnapshot,
   stageCampaignPlayManualDecision,
   waitForCompletedPublicTurn,
 } from "./live-session.js";
@@ -380,15 +382,17 @@ describe("Campaign Play live evidence session", () => {
       "signed-decisions",
       "action-6-signed-1787138822496-baf39c28cf033ed449774d92498d4e3ba5e079a24c066bc1a1542cc62d9895c2.json",
     );
-    const renderProofPath = path.join(sessionRoot, "probes", "render-proofs", "action-6.json");
+    const legacyRenderProofPath = path.join(sessionRoot, "probes", "render-proofs", "action-6.json");
+    const renderProofPath = path.join(sessionRoot, "probes", "render-proofs", "action-6-terminal.json");
     const clickProofPath = path.join(sessionRoot, "probes", "click-proofs", "action-6.json");
-    const renderProof = JSON.parse(fs.readFileSync(renderProofPath, "utf8")) as {
+    const renderProof = JSON.parse(fs.readFileSync(legacyRenderProofPath, "utf8")) as {
       playerActionNumber: number;
       turnId: string;
       ready: boolean;
       afterProjectionHash: string;
       renderedNarrationId: string;
       renderedSceneIdentity: string;
+      capturedAt: number;
     };
     expect(renderProof).toMatchObject({
       playerActionNumber: 6,
@@ -397,7 +401,6 @@ describe("Campaign Play live evidence session", () => {
     });
     expect(fs.existsSync(pendingPath)).toBe(true);
     expect(fs.existsSync(receiptPath)).toBe(true);
-    fs.rmSync(pendingPath);
 
     const operationDatabasePath = path.join(
       sessionRoot,
@@ -407,14 +410,29 @@ describe("Campaign Play live evidence session", () => {
     );
     const operationDatabase = new Database(operationDatabasePath, { readonly: true });
     const operation = operationDatabase.prepare(`
-      SELECT operation_id AS operationId, narration_id AS narrationId
+      SELECT operation_id AS operationId, narration_id AS narrationId,
+        status, completed_at AS completedAt
       FROM campaign_play_narration_operations WHERE campaign_id = ? AND turn_id = ?
-    `).get(campaignId, turnId) as { operationId: string; narrationId: string };
+    `).get(campaignId, turnId) as {
+      operationId: string;
+      narrationId: string;
+      status: string;
+      completedAt: number;
+    };
+    const scene = operationDatabase.prepare(`
+      SELECT suggested_actions_json AS suggestedActionsJson
+      FROM campaign_play_proper_scenes WHERE campaign_id = ? AND turn_id = ?
+    `).get(campaignId, turnId) as { suggestedActionsJson: string };
     operationDatabase.close();
     expect(operation).toMatchObject({
       narrationId: renderProof.renderedNarrationId,
       operationId: expect.any(String),
+      status: "complete",
     });
+    const suggestedActions = JSON.parse(scene.suggestedActionsJson) as Array<{
+      choiceHandle: string;
+      label: string;
+    }>;
 
     const state = {
       phase: "ready",
@@ -422,15 +440,32 @@ describe("Campaign Play live evidence session", () => {
       projectionHash: renderProof.afterProjectionHash,
       worldVersion: 18,
       runtimeRevision: 132,
+      narration: {
+        turnId,
+        narrationId: operation.narrationId,
+        suggestedActions,
+      },
+      narrationOperation: {
+        turnId,
+        operationId: operation.operationId,
+        narrationId: operation.narrationId,
+        status: "complete",
+        completedAt: operation.completedAt,
+        sourceKind: "model_accepted",
+      },
+      utilityActions: [],
     };
     const turn = {
-      turn: { turnId, status: "completed" },
+      turn: { turnId, status: "completed", completedAt: operation.completedAt },
       result: {
         status: "completed",
         narration: { turnId, narrationId: operation.narrationId },
         narrationOperation: {
           turnId,
           operationId: operation.operationId,
+          narrationId: operation.narrationId,
+          status: "complete",
+          completedAt: operation.completedAt,
           sourceKind: "model_accepted",
         },
       },
@@ -443,6 +478,24 @@ describe("Campaign Play live evidence session", () => {
       });
     });
     vi.stubGlobal("fetch", fetchMock);
+
+    await captureCampaignPlaySettlementRenderProof({
+      runConfig: config,
+      renderProofPath,
+      domObservation: {
+        playerActionNumber: 6,
+        turnId,
+        ready: true,
+        enabledChoiceCount: suggestedActions.length,
+        renderedNarrationId: renderProof.renderedNarrationId,
+        renderedSceneIdentity: renderProof.renderedSceneIdentity,
+        suggestedControlHandles: suggestedActions.map((action) => action.choiceHandle),
+        utilityControlHandles: [],
+        capturedAt: renderProof.capturedAt,
+      },
+      pollIntervalMs: 0,
+    });
+    fs.rmSync(pendingPath);
 
     const ledgerPath = path.join(sessionRoot, "browser-actions.jsonl");
     expect(fs.readFileSync(ledgerPath, "utf8").trim().split("\n")).toHaveLength(5);
@@ -576,6 +629,328 @@ describe("Campaign Play live evidence session", () => {
     expect(fs.readFileSync(copiedDatabasePath)).toEqual(copiedDatabaseBytes);
   }, 120_000);
 
+  it("rejects a running projection mixed with an accepted proper-scene proof before settlement mutation", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "worldforge-live-mixed-snapshot-"));
+    roots.push(root);
+    process.env.GSD_CAMPAIGNS_ROOT = root;
+    const campaignId = "d16b0000-0000-4000-8000-000000000007";
+    createSeededAcceptedCampaign(root, campaignId);
+    const replay = await runAcceptedCampaignPlayReplay(campaignId, {
+      playerActions: 1,
+      policy: "peripheral",
+    });
+    const config = liveConfig(path.join(root, "evidence"), campaignId, 1);
+    const sessionRoot = writeLiveSessionFixture(config, replay);
+    const playerTurn = replay.report.tables.turns.find((row) => row.turn_kind === "player_action")!;
+    const operation = (() => {
+      const handle = openCampaignPlayDatabase(campaignId);
+      try {
+        return handle.sqlite.prepare(`
+          SELECT operation_id AS operationId, narration_id AS narrationId,
+            completed_at AS completedAt
+          FROM campaign_play_narration_operations
+          WHERE campaign_id = ? AND turn_id = ?
+        `).get(campaignId, playerTurn.id) as {
+          operationId: string;
+          narrationId: string;
+          completedAt: number;
+        };
+      } finally {
+        handle.close();
+      }
+    })();
+    const runningProjectionHash = "5d21abcf03919944aff19503191af3ddd46a311fe7dd297779f5f83350bd3969";
+    const terminalProjectionHash = "145cb558d0bcd12fe01d0451145a58921b4d624dc0ccf28d56f0893dc2ae417f";
+    const terminalState = {
+      phase: "ready",
+      activeTurn: null,
+      projectionHash: terminalProjectionHash,
+      worldVersion: 13,
+      runtimeRevision: 36,
+      narration: {
+        turnId: playerTurn.id,
+        narrationId: operation.narrationId,
+        suggestedActions: [{ choiceHandle: "stable-choice", label: "Wait at the visible edge." }],
+      },
+      narrationOperation: {
+        turnId: playerTurn.id,
+        operationId: operation.operationId,
+        narrationId: operation.narrationId,
+        status: "complete",
+        completedAt: operation.completedAt,
+        sourceKind: "model_accepted",
+      },
+      utilityActions: [],
+    };
+    const terminalTurn = {
+      turn: { turnId: playerTurn.id, status: "completed", completedAt: operation.completedAt },
+      result: {
+        status: "completed",
+        narration: { turnId: playerTurn.id, narrationId: operation.narrationId },
+        narrationOperation: {
+          turnId: playerTurn.id,
+          operationId: operation.operationId,
+          narrationId: operation.narrationId,
+          status: "complete",
+          completedAt: operation.completedAt,
+          sourceKind: "model_accepted",
+        },
+      },
+    };
+    let terminal = false;
+    const fetchMock = vi.fn(async (input: unknown, _init?: RequestInit) => {
+      if (String(input).endsWith("/state")) {
+        return new Response(JSON.stringify(terminal
+          ? terminalState
+          : { phase: "ready", activeTurn: null, projectionHash: replay.openingProjectionHash }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify(terminalTurn), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const chosenText = "I remain at the visible edge of the signal gate and watch change 1.";
+    const pending = await stageCampaignPlayManualDecision({
+      runConfig: config,
+      control: "freeform",
+      chosenText,
+      choiceHandle: null,
+      decisionNote: "The signed visible action is preserved while the terminal scene settles.",
+      signedAt: Number(playerTurn.submitted_at) - 1,
+    });
+    terminal = true;
+    const renderProofPath = path.join(sessionRoot, "probes", "mixed-render-proof.json");
+    fs.mkdirSync(path.dirname(renderProofPath), { recursive: true });
+    fs.writeFileSync(renderProofPath, `${JSON.stringify({
+      playerActionNumber: 1,
+      turnId: playerTurn.id,
+      ready: true,
+      enabledChoiceCount: 1,
+      beforeProjectionHash: pending.visibleStateHash,
+      afterProjectionHash: runningProjectionHash,
+      renderedNarrationId: operation.narrationId,
+      renderedSceneIdentity: operation.narrationId,
+      capturedAt: Number(playerTurn.submitted_at) + 20,
+      decisionDigest: pending.decisionDigest,
+      terminalSnapshot: {
+        capturedAt: Number(playerTurn.submitted_at) + 20,
+        projectionHash: runningProjectionHash,
+        worldVersion: 13,
+        runtimeRevision: 36,
+        ready: true,
+        activeTurn: null,
+        turnId: playerTurn.id,
+        narrationId: operation.narrationId,
+        properSceneNarrationId: operation.narrationId,
+        narrationOperationId: operation.operationId,
+        narrationOperationStatus: "complete",
+        narrationOperationCompletedAt: operation.completedAt,
+        narrationOperationSourceKind: "model_accepted",
+        suggestedControlHandles: ["stable-choice"],
+        utilityControlHandles: [],
+      },
+    })}\n`, "utf8");
+
+    await expect(bindCampaignPlayManualDecisionCoherent({
+      runConfig: config,
+      renderProofPath,
+    })).rejects.toThrow("terminal public snapshot changed");
+    expect(fs.readFileSync(path.join(sessionRoot, "browser-actions.jsonl"), "utf8")).toBe("");
+    expect(fs.existsSync(path.join(sessionRoot, "pending-decision.json"))).toBe(true);
+    expect(fs.existsSync(path.join(sessionRoot, "probes", "settlements", "action-1.json"))).toBe(false);
+    expect(fetchMock.mock.calls.every(([, init]) =>
+      ((init as RequestInit | undefined)?.method ?? "GET").toUpperCase() === "GET")).toBe(true);
+  });
+
+  it("fails closed on incomplete operations, changing API tuples, DOM drift, and legacy proofs", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "worldforge-live-terminal-guards-"));
+    roots.push(root);
+    process.env.GSD_CAMPAIGNS_ROOT = root;
+    const campaignId = "d16b0000-0000-4000-8000-000000000008";
+    createSeededAcceptedCampaign(root, campaignId);
+    const replay = await runAcceptedCampaignPlayReplay(campaignId, {
+      playerActions: 1,
+      policy: "peripheral",
+    });
+    const config = liveConfig(path.join(root, "evidence"), campaignId, 1);
+    const sessionRoot = writeLiveSessionFixture(config, replay);
+    const playerTurn = replay.report.tables.turns.find((row) => row.turn_kind === "player_action")!;
+    const operation = (() => {
+      const handle = openCampaignPlayDatabase(campaignId);
+      try {
+        return handle.sqlite.prepare(`
+          SELECT operation_id AS operationId, narration_id AS narrationId,
+            completed_at AS completedAt
+          FROM campaign_play_narration_operations
+          WHERE campaign_id = ? AND turn_id = ?
+        `).get(campaignId, playerTurn.id) as {
+          operationId: string;
+          narrationId: string;
+          completedAt: number;
+        };
+      } finally {
+        handle.close();
+      }
+    })();
+    const controls = [
+      { choiceHandle: "stable-choice-1", label: "Wait at the visible edge." },
+      { choiceHandle: "stable-choice-2", label: "Watch the signal gate." },
+    ];
+    const terminalProjectionHash = "1".repeat(64);
+    const terminalState = {
+      phase: "ready",
+      activeTurn: null,
+      projectionHash: terminalProjectionHash,
+      worldVersion: replay.report.authority.worldVersion,
+      runtimeRevision: replay.report.authority.runtimeRevision,
+      narration: { turnId: playerTurn.id, narrationId: operation.narrationId, suggestedActions: controls },
+      narrationOperation: {
+        turnId: playerTurn.id,
+        operationId: operation.operationId,
+        narrationId: operation.narrationId,
+        status: "complete",
+        completedAt: operation.completedAt,
+        sourceKind: "model_accepted",
+      },
+      utilityActions: [],
+    };
+    const terminalTurn = {
+      turn: { turnId: playerTurn.id, status: "completed", completedAt: operation.completedAt },
+      result: {
+        status: "completed",
+        narration: { turnId: playerTurn.id, narrationId: operation.narrationId },
+        narrationOperation: {
+          turnId: playerTurn.id,
+          operationId: operation.operationId,
+          narrationId: operation.narrationId,
+          status: "complete",
+          completedAt: operation.completedAt,
+          sourceKind: "model_accepted",
+        },
+      },
+    };
+    const runningState = {
+      ...terminalState,
+      narration: null,
+      narrationOperation: {
+        ...terminalState.narrationOperation,
+        status: "running",
+        completedAt: null,
+      },
+    };
+    const runningTurn = {
+      ...terminalTurn,
+      result: {
+        ...terminalTurn.result,
+        narration: null,
+        narrationOperation: {
+          ...terminalTurn.result.narrationOperation,
+          status: "running",
+          completedAt: null,
+        },
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: unknown) => new Response(JSON.stringify(
+      String(input).endsWith("/state") ? runningState : runningTurn,
+    ), { status: 200, headers: { "content-type": "application/json" } })));
+    await expect(readCampaignPlaySettlementTerminalSnapshot(campaignId, String(playerTurn.id)))
+      .rejects.toThrow("completed proper narration operation");
+
+    vi.stubGlobal("fetch", vi.fn(async (input: unknown) => new Response(JSON.stringify({
+      phase: "ready",
+      activeTurn: null,
+      projectionHash: replay.openingProjectionHash,
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    const pending = await stageCampaignPlayManualDecision({
+      runConfig: config,
+      control: "freeform",
+      chosenText: "I remain at the visible edge and watch the signal gate.",
+      choiceHandle: null,
+      decisionNote: "A bounded terminal observation must precede settlement.",
+      signedAt: Number(playerTurn.submitted_at) - 1,
+    });
+    const stableObservation = {
+      playerActionNumber: 1,
+      turnId: playerTurn.id,
+      ready: true,
+      enabledChoiceCount: controls.length,
+      renderedNarrationId: operation.narrationId,
+      renderedSceneIdentity: operation.narrationId,
+      suggestedControlHandles: controls.map((control) => control.choiceHandle),
+      utilityControlHandles: [],
+      capturedAt: Number(playerTurn.submitted_at) + 2,
+      decisionDigest: pending.decisionDigest,
+    };
+    let stateReadCount = 0;
+    const changingFetch = vi.fn(async (input: unknown) => {
+      if (String(input).endsWith("/state")) {
+        stateReadCount += 1;
+        return new Response(JSON.stringify(stateReadCount >= 4
+          ? { ...terminalState, projectionHash: "2".repeat(64) }
+          : terminalState), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify(terminalTurn), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", changingFetch);
+    const changingProofPath = path.join(sessionRoot, "probes", "changing-terminal.json");
+    await expect(captureCampaignPlaySettlementRenderProof({
+      runConfig: config,
+      domObservation: stableObservation,
+      renderProofPath: changingProofPath,
+      pollIntervalMs: 0,
+    })).rejects.toThrow("terminal public snapshot changed");
+
+    const stableFetch = vi.fn(async (input: unknown) => new Response(JSON.stringify(
+      String(input).endsWith("/state") ? terminalState : terminalTurn,
+    ), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", stableFetch);
+    await expect(captureCampaignPlaySettlementRenderProof({
+      runConfig: config,
+      domObservation: { ...stableObservation, renderedNarrationId: "narration-mismatch" },
+      renderProofPath: path.join(sessionRoot, "probes", "narration-mismatch.json"),
+      pollIntervalMs: 0,
+    })).rejects.toThrow("DOM observation does not match");
+    await expect(captureCampaignPlaySettlementRenderProof({
+      runConfig: config,
+      domObservation: {
+        ...stableObservation,
+        suggestedControlHandles: ["stable-choice-2", "stable-choice-1"],
+      },
+      renderProofPath: path.join(sessionRoot, "probes", "control-order-mismatch.json"),
+      pollIntervalMs: 0,
+    })).rejects.toThrow("DOM observation does not match");
+
+    const legacyProofPath = path.join(sessionRoot, "probes", "legacy-render-proof.json");
+    fs.mkdirSync(path.dirname(legacyProofPath), { recursive: true });
+    fs.writeFileSync(legacyProofPath, `${JSON.stringify({
+      playerActionNumber: 1,
+      turnId: playerTurn.id,
+      ready: true,
+      enabledChoiceCount: controls.length,
+      beforeProjectionHash: pending.visibleStateHash,
+      afterProjectionHash: terminalProjectionHash,
+      renderedNarrationId: operation.narrationId,
+      renderedSceneIdentity: operation.narrationId,
+      capturedAt: Number(playerTurn.submitted_at) + 3,
+      decisionDigest: pending.decisionDigest,
+    })}\n`, "utf8");
+    const fetchCallsBeforeLegacy = stableFetch.mock.calls.length;
+    await expect(bindCampaignPlayManualDecisionCoherent({
+      runConfig: config,
+      renderProofPath: legacyProofPath,
+    })).rejects.toThrow("legacy render proof cannot authorize a new settlement");
+    expect(stableFetch).toHaveBeenCalledTimes(fetchCallsBeforeLegacy);
+    expect(fs.readFileSync(path.join(sessionRoot, "browser-actions.jsonl"), "utf8")).toBe("");
+    expect(fs.existsSync(path.join(sessionRoot, "pending-decision.json"))).toBe(true);
+  });
+
   it("keeps reconciling a healthy turn past the historical 120-second window", async () => {
     vi.useFakeTimers();
     try {
@@ -589,6 +964,26 @@ describe("Campaign Play live evidence session", () => {
             phase: ready ? "ready" : "acting",
             activeTurn: ready ? null : { turnId, status: "processing" },
             projectionHash,
+            ...(ready
+              ? {
+                  worldVersion: 1,
+                  runtimeRevision: 1,
+                  narration: {
+                    turnId,
+                    narrationId: "narration-wait-healthy",
+                    suggestedActions: [{ choiceHandle: "choice-wait", label: "Wait" }],
+                  },
+                  narrationOperation: {
+                    turnId,
+                    operationId: "operation-wait-healthy",
+                    narrationId: "narration-wait-healthy",
+                    status: "complete",
+                    completedAt: 120_001,
+                    sourceKind: "model_accepted",
+                  },
+                  utilityActions: [],
+                }
+              : {}),
           }), { status: 200, headers: { "content-type": "application/json" } });
         }
         return new Response(JSON.stringify({
@@ -597,7 +992,14 @@ describe("Campaign Play live evidence session", () => {
             ? {
                 status: "completed",
                 narration: { turnId, narrationId: "narration-wait-healthy" },
-                narrationOperation: { turnId, operationId: "operation-wait-healthy" },
+                narrationOperation: {
+                  turnId,
+                  operationId: "operation-wait-healthy",
+                  narrationId: "narration-wait-healthy",
+                  status: "complete",
+                  completedAt: 120_001,
+                  sourceKind: "model_accepted",
+                },
               }
             : { status: "pending", narration: null, narrationOperation: null },
         }), { status: 200, headers: { "content-type": "application/json" } });
@@ -1165,15 +1567,36 @@ describe("Campaign Play live evidence session", () => {
       projectionHash: replay.publicStateHash,
       worldVersion: replay.report.authority.worldVersion,
       runtimeRevision: replay.report.authority.runtimeRevision,
+      narration: {
+        turnId: playerTurn.id,
+        narrationId: operation.narrationId,
+        suggestedActions: [{ choiceHandle: choice.choiceHandle, label: choice.label }],
+      },
+      narrationOperation: {
+        turnId: playerTurn.id,
+        operationId: operation.operationId,
+        narrationId: operation.narrationId,
+        status: "complete",
+        completedAt: Number(playerTurn.submitted_at) + 10,
+        sourceKind: "model_accepted",
+      },
+      utilityActions: [],
     };
     const completedTurn = {
-      turn: { turnId: playerTurn.id, status: "completed" },
+      turn: {
+        turnId: playerTurn.id,
+        status: "completed",
+        completedAt: Number(playerTurn.submitted_at) + 10,
+      },
       result: {
         status: "completed",
         narration: { turnId: playerTurn.id, narrationId: operation.narrationId },
         narrationOperation: {
           turnId: playerTurn.id,
           operationId: operation.operationId,
+          narrationId: operation.narrationId,
+          status: "complete",
+          completedAt: Number(playerTurn.submitted_at) + 10,
           sourceKind: "model_accepted",
         },
       },
@@ -1226,21 +1649,26 @@ describe("Campaign Play live evidence session", () => {
       clickCompletedAt: submittedAt + 1,
     };
     fs.writeFileSync(clickProofPath, `${JSON.stringify(clickProof)}\n`, "utf8");
-    const renderProofPath = path.join(sessionRoot, "probes", "render-proof.json");
-    fs.writeFileSync(renderProofPath, `${JSON.stringify({
-      playerActionNumber: 1,
-      turnId: playerTurn.id,
-      ready: true,
-      enabledChoiceCount: 1,
-      beforeProjectionHash: replay.openingProjectionHash,
-      afterProjectionHash: replay.publicStateHash,
-      renderedNarrationId: operation.narrationId,
-      renderedSceneIdentity: operation.narrationId,
-      capturedAt: submittedAt + 2,
-      decisionDigest: pending.decisionDigest,
-    })}\n`, "utf8");
-    fs.rmSync(path.join(sessionRoot, "pending-decision.json"));
     beforeDispatch = false;
+    const renderProofPath = path.join(sessionRoot, "probes", "render-proof.json");
+    await captureCampaignPlaySettlementRenderProof({
+      runConfig: config,
+      renderProofPath,
+      domObservation: {
+        playerActionNumber: 1,
+        turnId: playerTurn.id,
+        ready: true,
+        enabledChoiceCount: 1,
+        renderedNarrationId: operation.narrationId,
+        renderedSceneIdentity: operation.narrationId,
+        suggestedControlHandles: [choice.choiceHandle],
+        utilityControlHandles: [],
+        capturedAt: submittedAt + 2,
+        decisionDigest: pending.decisionDigest,
+      },
+      pollIntervalMs: 0,
+    });
+    fs.rmSync(path.join(sessionRoot, "pending-decision.json"));
 
     await expect(bindCampaignPlayManualDecisionCoherent({
       runConfig: config,
