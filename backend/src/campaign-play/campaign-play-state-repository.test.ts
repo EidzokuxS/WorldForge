@@ -101,7 +101,7 @@ function buildCampaign(
       placements: input.eligible
         ? candidate.draft.placements.map((placement) =>
           placement.id === "placement-b"
-            ? { ...placement, locationId: "location-a" }
+            ? { ...placement, locationId: "location-a-office" }
             : placement
         )
         : candidate.draft.placements,
@@ -318,14 +318,17 @@ describe("Campaign Play state repository bootstrap", () => {
     });
   });
 
-  it("persists the typed ineligible topology boundary for downstream character rejection", () => {
-    buildCampaign(CAMPAIGN_A, { accepted: true, eligible: false });
-    const repository = createCampaignPlayStateRepository(openPlay());
-    const state = repository.createState({ eventId: "state-ineligible", createdAt: 1_300 });
+  it("rejects an ineligible topology before Campaign Play state creation", () => {
+    expect(() => buildCampaign(CAMPAIGN_A, { accepted: true, eligible: false }))
+      .toThrowError(
+        "Campaign World validation failed: world requires one starting-macro persistent scene with a present support person, a pressure anchor, and an outgoing route to another reachable persistent scene",
+      );
 
-    expect(state.eligibility.projection.eligible).toBe(false);
-    expect(state.eligibility.projection.unmetRequirements).toContain("opening_scene_unavailable");
-    expect(state.authority.setupPhase).toBe("character_required");
+    const handle = track(openCampaignWorldDatabase(CAMPAIGN_A));
+    expect(handle.sqlite.prepare(`
+      SELECT COUNT(*) AS count FROM campaign_play_states
+      WHERE campaign_id = ?
+    `).get(CAMPAIGN_A)).toEqual({ count: 0 });
   });
 
   it("rejects review worlds and corrupt accepted snapshots", () => {
