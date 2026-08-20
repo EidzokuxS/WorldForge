@@ -226,6 +226,7 @@ campaigns/{campaignId}/
 npm run dev                  # backend + frontend
 npm run build                # shared + frontend + backend
 npm test                     # shared + frontend + backend package-test gate; e2e/R7 acceptance is separate
+npm run test:e2e:offline     # seven-file offline/provider-free Campaign Play check; live-session/R7 acceptance remains separate
 npm run typecheck            # frontend lint + frontend TypeScript (including tests) + backend typecheck
 
 # Backend

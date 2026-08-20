@@ -226,6 +226,7 @@ campaigns/{campaignId}/
 npm run dev                  # backend + frontend
 npm run build                # shared + frontend + backend
 npm test                     # gate тестов пакетов shared + frontend + backend; e2e/R7-приёмка отдельно
+npm run test:e2e:offline     # офлайн-проверка Campaign Play без провайдеров по семи файлам; live-session/R7-приёмка остаётся отдельно
 npm run typecheck            # frontend lint + frontend TypeScript (including tests) + backend typecheck
 
 # Backend

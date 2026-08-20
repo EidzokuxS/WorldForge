@@ -16,6 +16,7 @@
     "dev:playtest": "concurrently -k -n backend,frontend -c magenta,cyan \"npm --prefix backend run dev:stable\" \"npm --prefix frontend run dev\"",
     "build": "npm --prefix shared run build && npm --prefix frontend run build && npm --prefix backend run build",
     "test": "npm --prefix shared run test -- --pool=threads --poolOptions.threads.singleThread --no-file-parallelism && npm --prefix frontend run test -- --run --pool=threads --poolOptions.threads.singleThread --no-file-parallelism && npm --prefix backend run test -- --pool=threads --poolOptions.threads.singleThread --no-file-parallelism",
+    "test:e2e:offline": "vitest run --config vitest.config.ts --pool=threads --poolOptions.threads.singleThread --no-file-parallelism e2e/campaign-play/contracts.test.ts e2e/campaign-play/scorecard.test.ts e2e/campaign-play/probes.test.ts e2e/campaign-play/bundle-writer.test.ts e2e/campaign-play/seeded-replay.test.ts e2e/campaign-play/provenance-replay.test.ts e2e/campaign-play/world-template.test.ts",
     "typecheck": "npm --prefix frontend run lint && npm --prefix frontend run typecheck:tests && npm --prefix backend run typecheck"
   },
   "devDependencies": {
