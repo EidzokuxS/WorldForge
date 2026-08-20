@@ -1,4 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const raindropEnvironmentKeys = [
+  "NODE_ENV",
+  "WORLDFORGE_RAINDROP_IN_TESTS",
+  "RAINDROP_ENDPOINT",
+  "RAINDROP_LOCAL_DEBUGGER",
+  "RAINDROP_WRITE_KEY",
+] as const;
+
+const environmentBeforeTest = new Map<string, string | undefined>();
 
 const mocks = vi.hoisted(() => ({
   generateText: vi.fn(),
@@ -47,12 +57,28 @@ async function importSubject() {
 
 describe("raindrop Workshop telemetry privacy", () => {
   beforeEach(() => {
+    environmentBeforeTest.clear();
+    for (const key of raindropEnvironmentKeys) {
+      environmentBeforeTest.set(key, process.env[key]);
+    }
+
     vi.clearAllMocks();
     process.env.NODE_ENV = "test";
     process.env.WORLDFORGE_RAINDROP_IN_TESTS = "1";
     delete process.env.RAINDROP_ENDPOINT;
     delete process.env.RAINDROP_LOCAL_DEBUGGER;
     delete process.env.RAINDROP_WRITE_KEY;
+  });
+
+  afterEach(() => {
+    for (const key of raindropEnvironmentKeys) {
+      const value = environmentBeforeTest.get(key);
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
   });
 
   it("redacts trace and event payloads by default for remote write-key telemetry", async () => {
