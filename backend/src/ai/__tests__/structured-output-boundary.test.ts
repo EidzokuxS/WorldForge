@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 type BoundaryClassification =
@@ -101,13 +102,46 @@ function readSource(filePath: string): string {
   return fs.readFileSync(filePath, "utf8");
 }
 
+function hasRuntimeImportFrom(sourceFile: ts.SourceFile, moduleSuffix: string): boolean {
+  return sourceFile.statements.some((statement) => {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) {
+      return false;
+    }
+
+    if (!statement.moduleSpecifier.text.endsWith(moduleSuffix)) {
+      return false;
+    }
+
+    const importClause = statement.importClause;
+    if (!importClause) {
+      return true;
+    }
+
+    if (importClause.isTypeOnly || importClause.name || !importClause.namedBindings) {
+      return Boolean(importClause.name) && !importClause.isTypeOnly;
+    }
+
+    if (ts.isNamespaceImport(importClause.namedBindings)) {
+      return true;
+    }
+
+    return importClause.namedBindings.elements.some((element) => !element.isTypeOnly);
+  });
+}
+
 function collectStructuredOutputBoundaryFiles(): string[] {
   const srcRoot = path.resolve(process.cwd(), "src");
   return collectSourceFiles(srcRoot)
     .filter((filePath) => {
       const source = readSource(filePath);
-      const safeGenerateObjectImport =
-        /from\s*["'][^"']*generate-object-safe\.js["']/.test(source);
+      const sourceFile = ts.createSourceFile(
+        filePath,
+        source,
+        ts.ScriptTarget.Latest,
+        false,
+        filePath.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+      );
+      const safeGenerateObjectImport = hasRuntimeImportFrom(sourceFile, "generate-object-safe.js");
       const directTextImport =
         /import\s*\{[^}]*\b(?:generateText|streamText)\b[^}]*\}\s*from\s*["']ai["']/s.test(source);
       const directTextCall = /\b(?:generateText|streamText)\s*\(/.test(source);
