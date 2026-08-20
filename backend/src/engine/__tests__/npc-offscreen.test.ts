@@ -17,6 +17,7 @@ vi.mock("ai", () => ({
   generateText: vi.fn().mockResolvedValue({
     text: JSON.stringify({ updates: [] }),
   }),
+  streamText: vi.fn(),
 }));
 
 vi.mock("../../ai/provider-registry.js", () => ({

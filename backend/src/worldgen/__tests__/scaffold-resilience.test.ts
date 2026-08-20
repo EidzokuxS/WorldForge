@@ -16,6 +16,7 @@ vi.mock("../../ai/generate-object-safe.js", () => ({
 
 vi.mock("ai", () => ({
   generateText: (...args: unknown[]) => mockGenerateText(...args),
+  streamText: vi.fn(),
 }));
 
 vi.mock("../../ai/index.js", () => ({

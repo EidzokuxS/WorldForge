@@ -6,6 +6,7 @@ import { Hono } from "hono";
 // ---------------------------------------------------------------------------
 vi.mock("ai", () => ({
   generateText: vi.fn(),
+  streamText: vi.fn(),
 }));
 
 vi.mock("../../ai/index.js", () => ({

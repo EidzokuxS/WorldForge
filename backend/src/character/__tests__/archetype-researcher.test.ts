@@ -5,6 +5,7 @@ const mockGenerateText = vi.fn();
 
 vi.mock("ai", () => ({
   generateText: (...args: unknown[]) => mockGenerateText(...args),
+  streamText: vi.fn(),
   stepCountIs: vi.fn(() => () => false),
 }));
 

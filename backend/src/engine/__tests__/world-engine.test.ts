@@ -11,6 +11,7 @@ vi.mock("../../db/index.js", () => ({
 
 vi.mock("ai", () => ({
   generateText: vi.fn().mockResolvedValue({ steps: [] }),
+  streamText: vi.fn(),
   stepCountIs: vi.fn().mockReturnValue(() => false),
   tool: vi.fn((def) => def),
 }));

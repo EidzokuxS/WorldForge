@@ -33,6 +33,7 @@ vi.mock("../tool-executor.js", () => ({
 
 vi.mock("ai", () => ({
   generateText: (...args: unknown[]) => generateTextMock(...args),
+  streamText: vi.fn(),
   tool: vi.fn((definition: Record<string, unknown>) => definition),
   stepCountIs: vi.fn().mockReturnValue(() => false),
 }));

@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("ai", () => ({
   generateObject: vi.fn(),
   generateText: vi.fn(),
+  streamText: vi.fn(),
 }));
 
 // Mock provider registry

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("ai", () => ({
   generateText: vi.fn(),
+  streamText: vi.fn(),
 }));
 
 vi.mock("../provider-registry.js", () => ({

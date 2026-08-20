@@ -48,6 +48,7 @@ vi.mock("ai", () => ({
       },
     ],
   }),
+  streamText: vi.fn(),
   tool: vi.fn((def: Record<string, unknown>) => def),
   stepCountIs: vi.fn().mockReturnValue(() => false),
 }));
