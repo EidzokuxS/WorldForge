@@ -39,6 +39,7 @@ function createMockWizard(
     isSuggesting: false,
     suggestingCategory: null,
     dnaState: null,
+    researchArtifact: null,
     setCampaignName: vi.fn(),
     setCampaignPremise: vi.fn(),
     setCampaignFranchise: vi.fn(),
@@ -61,6 +62,7 @@ function createMockWizard(
     worldbookError: null,
     handleWorldbookUpload: vi.fn(),
     toggleWorldbookSelection: vi.fn(),
+    resetFlow: vi.fn(),
     ...overrides,
   };
 }

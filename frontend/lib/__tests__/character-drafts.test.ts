@@ -150,6 +150,7 @@ describe("characterDraftToScaffoldNpc", () => {
           beliefDrift: ["Someone inside the watch is leaking routes"],
           currentStrains: ["Council pressure"],
           earnedChanges: ["Started trusting the rookie quartermaster"],
+          attachments: [],
         },
       },
     });
@@ -307,6 +308,7 @@ describe("player draft round-trips", () => {
           beliefDrift: ["One ally inside the court may still be loyal"],
           currentStrains: ["Running on too little sleep"],
           earnedChanges: ["Began trusting local smugglers"],
+          attachments: [],
         },
       },
       profile: {

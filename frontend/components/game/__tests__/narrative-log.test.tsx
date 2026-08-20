@@ -6,20 +6,11 @@ import type { ChatMessage } from "@worldforge/shared";
 describe("NarrativeLog", () => {
   const defaultProps = {
     messages: [] as ChatMessage[],
-    premise: "",
     isStreaming: false,
   };
 
   it("shows default empty state when no messages and no premise", () => {
     render(<NarrativeLog {...defaultProps} />);
-    expect(
-      screen.getByText("Begin your adventure when the opening scene is ready.")
-    ).toBeInTheDocument();
-  });
-
-  it("does not render premise as opening narration and keeps a neutral opening placeholder when no assistant messages exist", () => {
-    render(<NarrativeLog {...defaultProps} premise="You awake in a dungeon." />);
-    expect(screen.queryByText("You awake in a dungeon.")).not.toBeInTheDocument();
     expect(
       screen.getByText("Begin your adventure when the opening scene is ready.")
     ).toBeInTheDocument();

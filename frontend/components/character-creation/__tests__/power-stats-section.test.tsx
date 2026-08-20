@@ -8,7 +8,7 @@ import { PowerStatsSection } from "../power-stats-section";
 
 const FIXTURE: PowerStats = {
   attackPotency: { tier: "Street", rank: 5 },
-  speed: { tier: "Athlete", rank: 3 },
+  speed: { tier: "Human", rank: 3 },
   durability: { tier: "Street", rank: 4 },
   intelligence: { tier: "Gifted", rank: 6 },
   hax: [

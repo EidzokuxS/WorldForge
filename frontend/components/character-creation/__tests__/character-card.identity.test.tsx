@@ -41,6 +41,7 @@ function makeDraft(): CharacterDraft {
         beliefDrift: ["Someone inside the watch is leaking routes"],
         currentStrains: ["Council pressure"],
         earnedChanges: ["Started trusting the rookie quartermaster"],
+        attachments: [],
       },
     },
     profile: {

@@ -4,7 +4,7 @@ import { ResearchTab } from "../research-tab";
 import type { Settings } from "@/lib/types";
 
 function createMockSettings(overrides: Partial<Settings> = {}): Settings {
-  const { ui: overrideUi, ...rest } = overrides;
+  const { observability: overrideObservability, ui: overrideUi, ...rest } = overrides;
 
   return {
     providers: [
@@ -33,6 +33,18 @@ function createMockSettings(overrides: Partial<Settings> = {}): Settings {
       searchProvider: "duckduckgo",
     },
     ui: overrideUi ?? { showRawReasoning: false },
+    observability: overrideObservability ?? {
+      enabled: true,
+      dumpFullPrompts: false,
+      roles: {
+        judge: true,
+        storyteller: true,
+        oracle: true,
+        npcAgent: true,
+        reflection: true,
+        embedder: true,
+      },
+    },
     ...rest,
   };
 }

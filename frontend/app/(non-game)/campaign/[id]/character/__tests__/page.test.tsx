@@ -88,6 +88,10 @@ const state: CampaignPlayState = {
   narration: null,
   consequences: [],
   activeTurn: null,
+  possessions: [],
+  obligations: [],
+  narrationOperation: null,
+  utilityActions: [],
   journalCursor: 0,
   projectionHash: "projection",
 };

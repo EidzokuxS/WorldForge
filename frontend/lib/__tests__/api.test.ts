@@ -79,6 +79,7 @@ function makeReviewNpcDraft(): CharacterDraft {
         beliefDrift: [],
         currentStrains: ["Gets clipped and procedural when crowds stall"],
         earnedChanges: [],
+        attachments: [],
       },
     },
     profile: {

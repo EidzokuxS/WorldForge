@@ -20,6 +20,18 @@ vi.mock("@/lib/settings", () => ({
     images: { providerId: "", model: "", stylePrompt: "", enabled: false },
     research: { enabled: false, maxSearchSteps: 0, searchProvider: "duckduckgo" },
     ui: { showRawReasoning: false },
+    observability: {
+      enabled: true,
+      dumpFullPrompts: false,
+      roles: {
+        judge: true,
+        storyteller: true,
+        oracle: true,
+        npcAgent: true,
+        reflection: true,
+        embedder: true,
+      },
+    },
   })),
 }));
 
@@ -176,6 +188,18 @@ describe("CampaignNewFlowProvider", () => {
       images: { providerId: "", model: "", stylePrompt: "", enabled: false },
       research: { enabled: false, maxSearchSteps: 0, searchProvider: "duckduckgo" },
       ui: { showRawReasoning: false },
+      observability: {
+        enabled: true,
+        dumpFullPrompts: false,
+        roles: {
+          judge: true,
+          storyteller: true,
+          oracle: true,
+          npcAgent: true,
+          reflection: true,
+          embedder: true,
+        },
+      },
     });
   });
 

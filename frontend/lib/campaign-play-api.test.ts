@@ -768,7 +768,7 @@ describe("Campaign Play API", () => {
   });
 
   it("rejects SSE content-type, identity, conflicting duplicates, gaps, and out-of-order sequences", async () => {
-    const interrupted: CampaignPlaySseEvent = {
+    const interrupted = {
       sequence: 1,
       turnId: "turn-one",
       ...versions,
@@ -776,7 +776,9 @@ describe("Campaign Play API", () => {
       type: "turn.interrupted",
       retryEligible: false,
     };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse([eventBlock(interrupted)])));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      streamResponse([eventBlock(interrupted as unknown as CampaignPlaySseEvent)]),
+    ));
     await expect(streamCampaignPlayTurnEvents("campaign-1", "turn-one", { afterSequence: 0, onEvent: vi.fn() }))
       .rejects.toMatchObject({ code: "service_unavailable", invalidResponse: true });
 

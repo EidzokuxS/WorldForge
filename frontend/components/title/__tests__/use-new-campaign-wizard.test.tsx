@@ -77,6 +77,18 @@ const SETTINGS: Settings = {
   images: { providerId: "", model: "", stylePrompt: "", enabled: false },
   research: { enabled: true, maxSearchSteps: 3, searchProvider: "duckduckgo" },
   ui: { showRawReasoning: false },
+  observability: {
+    enabled: true,
+    dumpFullPrompts: false,
+    roles: {
+      judge: true,
+      storyteller: true,
+      oracle: true,
+      npcAgent: true,
+      reflection: true,
+      embedder: true,
+    },
+  },
 };
 
 const LIBRARY_ITEMS: WorldbookLibraryItem[] = [
@@ -400,7 +412,7 @@ describe("useNewCampaignWizard", () => {
       mode: "diverged",
       protagonistRole: {
         kind: "custom",
-        interpretation: "newcomer",
+        interpretation: "outsider",
         roleSummary: "Stale legacy protagonist role.",
       },
       preservedCanonFacts: [],

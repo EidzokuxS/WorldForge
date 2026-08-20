@@ -67,6 +67,18 @@ function createMockSettings(): Settings {
       searchProvider: "duckduckgo",
     },
     ui: { showRawReasoning: false },
+    observability: {
+      enabled: true,
+      dumpFullPrompts: false,
+      roles: {
+        judge: true,
+        storyteller: true,
+        oracle: true,
+        npcAgent: true,
+        reflection: true,
+        embedder: true,
+      },
+    },
   };
 }
 
