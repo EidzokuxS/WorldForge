@@ -71,6 +71,7 @@ import {
 import {
   CampaignPlayGameMasterError,
   createCampaignPlayGameMaster,
+  getCampaignPlayGameMasterContractFailureDiagnostic,
   getCampaignPlayGameMasterRecoveryFeedback,
   type CampaignPlayGameMasterFrame,
   type CampaignPlayGameMasterRecoveryFeedback,
@@ -2132,22 +2133,28 @@ function gameMasterInterruption(
   cause: unknown,
   durationMs: number,
 ): CampaignPlayExternalStageInterruption {
-  const evidence = cause instanceof CampaignPlayGameMasterError ? cause.modelEvidence : null;
+  const modelEvidence = cause instanceof CampaignPlayGameMasterError ? cause.modelEvidence : null;
   const budget = cause instanceof CampaignPlayGameMasterError && cause.code === "stage_budget_exceeded";
   const timeout = cause instanceof CampaignPlayGameMasterError && cause.code === "stage_timeout";
   const denied = cause instanceof CampaignPlayGameMasterError && cause.code === "rulebook_denied";
   const contract = cause instanceof CampaignPlayGameMasterError &&
     cause.code !== "transport_interrupted" && cause.code !== "stage_timeout";
+  const interruption = interruptionEvidence({
+    requested,
+    evidence: modelEvidence,
+    durationMs: modelEvidence?.durationMs ?? durationMs,
+    errorCode: timeout ? "stage_timeout" : budget ? "stage_budget_exceeded"
+      : denied ? "rulebook_denied"
+      : contract ? "model_contract_invalid" : "provider_unavailable",
+    schemaOutcome: contract ? "invalid" : "transport_error",
+  });
+  const contractFailureDiagnostic = contract && !denied && cause instanceof CampaignPlayGameMasterError
+    ? getCampaignPlayGameMasterContractFailureDiagnostic(cause) ?? null
+    : null;
   return new CampaignPlayExternalStageInterruption(
-    interruptionEvidence({
-      requested,
-      evidence,
-      durationMs: evidence?.durationMs ?? durationMs,
-      errorCode: timeout ? "stage_timeout" : budget ? "stage_budget_exceeded"
-        : denied ? "rulebook_denied"
-        : contract ? "model_contract_invalid" : "provider_unavailable",
-      schemaOutcome: contract ? "invalid" : "transport_error",
-    }),
+    contractFailureDiagnostic === null
+      ? interruption
+      : { ...interruption, contractFailureDiagnostic },
     "Campaign Play Game Master requires explicit resume.",
     { cause },
   );

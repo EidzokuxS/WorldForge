@@ -22,6 +22,7 @@ import {
   hashCampaignPlayProjection,
   type CampaignPlayProjectionRecord,
 } from "./campaign-play-projection.js";
+import type { CampaignPlayGameMasterContractFailureDiagnostic } from "./game-master.js";
 import {
   CampaignPlayTurnRepositoryError,
   createCampaignPlayTurnRepository,
@@ -2040,16 +2041,116 @@ describe("Campaign Play deterministic and terminal turn boundaries", () => {
       owner: "gm-worker", claimedAt: 3_250, leaseExpiresAt: 3_500,
       mutationId: "gm-claim-one",
     });
+    const beforeInvalidDiagnostic = {
+      runtime: runtimeSnapshot(handle),
+      stage: handle.sqlite.prepare(`SELECT status, worker_epoch AS workerEpoch,
+          contract_failure_diagnostic_json AS contractFailureDiagnosticJson
+        FROM campaign_play_model_stages
+        WHERE campaign_id = ? AND turn_id = ? AND kind = 'game_master' AND attempt = 1`).get(
+        campaignId,
+        "turn-player",
+      ),
+    };
+    expectTurnError(() => repository.interruptExternal({
+      token: gameMasterToken,
+      evidence: {
+        ...interruption,
+        actualModel: "game-master",
+        schemaOutcome: "invalid",
+        errorCode: "model_contract_invalid",
+        contractFailureDiagnostic: {
+          rejectionPhase: "generation",
+          safeGenerationCode: "invalid_json",
+          contractDiagnosticPhase: "provider_extraction",
+          contractDiagnosticCoordinate: "proposal provider response",
+          recoveryDiagnostic: null,
+          failedChecks: [],
+          reviewFailedChecks: [],
+        } satisfies CampaignPlayGameMasterContractFailureDiagnostic,
+      },
+      interruptedAt: 3_290,
+      mutationId: "gm-invalid-diagnostic",
+    }), "turn_stage_invalid");
+    expect({
+      runtime: runtimeSnapshot(handle),
+      stage: handle.sqlite.prepare(`SELECT status, worker_epoch AS workerEpoch,
+          contract_failure_diagnostic_json AS contractFailureDiagnosticJson
+        FROM campaign_play_model_stages
+        WHERE campaign_id = ? AND turn_id = ? AND kind = 'game_master' AND attempt = 1`).get(
+        campaignId,
+        "turn-player",
+      ),
+    }).toEqual(beforeInvalidDiagnostic);
     repository.interruptExternal({
       token: gameMasterToken,
-      evidence: { ...interruption, actualModel: "game-master" },
+      evidence: {
+        ...interruption,
+        actualModel: "game-master",
+        schemaOutcome: "invalid",
+        errorCode: "model_contract_invalid",
+        contractFailureDiagnostic: {
+          rejectionPhase: "generation",
+          safeGenerationCode: "invalid_json",
+          contractDiagnosticPhase: "provider_extraction",
+          contractDiagnosticCoordinate: "proposal.provider_response",
+          recoveryDiagnostic: null,
+          failedChecks: [],
+          reviewFailedChecks: [],
+        } satisfies CampaignPlayGameMasterContractFailureDiagnostic,
+      },
       interruptedAt: 3_300,
       mutationId: "gm-interrupted",
     });
 
+    const diagnosticRow = handle.sqlite.prepare(`SELECT status, attempt,
+        worker_epoch AS workerEpoch, error_code AS errorCode,
+        contract_failure_diagnostic_json AS contractFailureDiagnosticJson
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'game_master'`).get(
+      campaignId,
+      "turn-player",
+    );
+    expect(diagnosticRow).toEqual({
+      status: "interrupted",
+      attempt: 1,
+      workerEpoch: 3,
+      errorCode: "model_contract_invalid",
+      contractFailureDiagnosticJson: JSON.stringify({
+        rejectionPhase: "generation",
+        safeGenerationCode: "invalid_json",
+        contractDiagnosticPhase: "provider_extraction",
+        contractDiagnosticCoordinate: "proposal.provider_response",
+        recoveryDiagnostic: null,
+        failedChecks: [],
+        reviewFailedChecks: [],
+      }),
+    });
+    expect(handle.sqlite.prepare(`SELECT contract_failure_diagnostic_json AS diagnostic
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'judge' AND status = 'accepted'`).get(
+      campaignId,
+      "turn-player",
+    )).toEqual({ diagnostic: null });
+
     handle.close();
     handles = handles.filter((candidate) => candidate !== handle);
     const reopened = openPlay();
+    expect(reopened.sqlite.prepare(`SELECT contract_failure_diagnostic_json AS contractFailureDiagnosticJson
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'game_master' AND attempt = 1`).get(
+      campaignId,
+      "turn-player",
+    )).toEqual({
+      contractFailureDiagnosticJson: JSON.stringify({
+        rejectionPhase: "generation",
+        safeGenerationCode: "invalid_json",
+        contractDiagnosticPhase: "provider_extraction",
+        contractDiagnosticCoordinate: "proposal.provider_response",
+        recoveryDiagnostic: null,
+        failedChecks: [],
+        reviewFailedChecks: [],
+      }),
+    });
     const recovered = createCampaignPlayTurnRepository(reopened);
     expect(recovered.loadRecoveryState("turn-player", 3_350)).toEqual({
       kind: "explicit_resume_required",
@@ -2058,7 +2159,7 @@ describe("Campaign Play deterministic and terminal turn boundaries", () => {
       workerEpoch: 3,
       attempt: 1,
       attemptStartedAt: 3_250,
-      errorCode: "provider_unavailable",
+      errorCode: "model_contract_invalid",
     });
     const resumedGameMaster = recovered.resumeExternal({
       turnId: "turn-player", interruptedStage: "judged", observedEpoch: 3,

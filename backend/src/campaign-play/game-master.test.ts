@@ -1121,6 +1121,18 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
         reviewFailedChecks: ["possession_authority_missing", "route_authority_missing"],
       }],
       reviewFailedChecks: ["possession_authority_missing", "route_authority_missing"],
+      contractFailureDiagnostic: {
+        rejectionPhase: "review",
+        safeGenerationCode: null,
+        contractDiagnosticPhase: null,
+        contractDiagnosticCoordinate: null,
+        recoveryDiagnostic: "game_master_semantic_validation_mismatch",
+        failedChecks: [{
+          check: "mechanical_authority_rejected",
+          reviewFailedChecks: ["possession_authority_missing", "route_authority_missing"],
+        }],
+        reviewFailedChecks: ["possession_authority_missing", "route_authority_missing"],
+      },
       denial: null,
     });
     expect(JSON.stringify(eventPayload)).not.toContain("SENTINEL_REVIEW_REASON");
@@ -5014,6 +5026,7 @@ describe("Campaign Play Game Master contract rejection diagnostics", () => {
       recoveryDiagnostic: null,
       failedChecks: [],
       reviewFailedChecks: [],
+      contractFailureDiagnostic: null,
       denial: null,
     });
     expect(JSON.stringify(eventPayload)).not.toContain("SENTINEL_PROVIDER_BODY_AND_STACK");
@@ -5041,6 +5054,15 @@ describe("Campaign Play Game Master contract rejection diagnostics", () => {
       recoveryDiagnostic: "game_master_semantic_validation_mismatch",
       failedChecks: [],
       reviewFailedChecks: [],
+      contractFailureDiagnostic: {
+        rejectionPhase: "generation",
+        safeGenerationCode: "invalid_structured_tool_call",
+        contractDiagnosticPhase: "provider_extraction",
+        contractDiagnosticCoordinate: "proposal.provider_response",
+        recoveryDiagnostic: "game_master_semantic_validation_mismatch",
+        failedChecks: [],
+        reviewFailedChecks: [],
+      },
       denial: null,
     });
     const serialized = JSON.stringify(eventPayload);
@@ -5073,6 +5095,15 @@ describe("Campaign Play Game Master contract rejection diagnostics", () => {
         recoveryDiagnostic: null,
         failedChecks: [],
         reviewFailedChecks: [],
+        contractFailureDiagnostic: {
+          rejectionPhase: "evidence",
+          safeGenerationCode: null,
+          contractDiagnosticPhase: null,
+          contractDiagnosticCoordinate: null,
+          recoveryDiagnostic: null,
+          failedChecks: [],
+          reviewFailedChecks: [],
+        },
         denial: null,
       },
     ]);
@@ -5109,6 +5140,21 @@ describe("Campaign Play Game Master contract rejection diagnostics", () => {
         recentOwnActionIndex: 0,
       }],
       reviewFailedChecks: [],
+      contractFailureDiagnostic: {
+        rejectionPhase: "compilation",
+        safeGenerationCode: null,
+        contractDiagnosticPhase: null,
+        contractDiagnosticCoordinate: null,
+        recoveryDiagnostic: "game_master_semantic_validation_mismatch",
+        failedChecks: [{
+          check: "repeated_actor_dialogue",
+          effectIndex: 0,
+          fieldPath: "effects[0].summary",
+          performingActorHandle: "guard",
+          recentOwnActionIndex: 0,
+        }],
+        reviewFailedChecks: [],
+      },
       denial: null,
     });
     expect(JSON.stringify(eventPayload)).not.toContain(repeatedSummary);
@@ -5195,6 +5241,7 @@ describe("Campaign Play Game Master contract rejection diagnostics", () => {
       recoveryDiagnostic: null,
       failedChecks: [],
       reviewFailedChecks: [],
+      contractFailureDiagnostic: null,
       denial: null,
     });
     expect(JSON.stringify(eventPayload)).not.toContain("SENTINEL_REVIEW_PROVIDER_BODY");

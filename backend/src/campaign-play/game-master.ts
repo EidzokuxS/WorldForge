@@ -6,6 +6,7 @@ import {
   getSafeGenerateObjectTrace,
   isSafeGenerateObjectContractErrorCode,
   safeGenerateObject,
+  type SafeGenerateErrorCode,
   type SafeGenerateResult,
   type SafeGenerateTrace,
 } from "../ai/generate-object-safe.js";
@@ -612,14 +613,34 @@ type CampaignPlayGameMasterContractDiagnosticPhase =
   | "private_decode"
   | "domain_mismatch";
 
+type CampaignPlayGameMasterContractRejectedPhase =
+  | "generation"
+  | "evidence"
+  | "compilation"
+  | "review";
+
 export interface CampaignPlayGameMasterContractDiagnostic {
   readonly phase: CampaignPlayGameMasterContractDiagnosticPhase;
   readonly coordinate: string;
 }
 
+export interface CampaignPlayGameMasterContractFailureDiagnostic {
+  readonly rejectionPhase: CampaignPlayGameMasterContractRejectedPhase;
+  readonly safeGenerationCode: SafeGenerateErrorCode | null;
+  readonly contractDiagnosticPhase: CampaignPlayGameMasterContractDiagnosticPhase | null;
+  readonly contractDiagnosticCoordinate: string | null;
+  readonly recoveryDiagnostic: "game_master_semantic_validation_mismatch" | null;
+  readonly failedChecks: readonly CampaignPlayGameMasterRecoveryCheck[];
+  readonly reviewFailedChecks: readonly MechanicalAuthorityFailedCheck[];
+}
+
 const gameMasterContractDiagnosticByError = new WeakMap<
   CampaignPlayGameMasterError,
   CampaignPlayGameMasterContractDiagnostic
+>();
+const gameMasterContractFailureDiagnosticByError = new WeakMap<
+  CampaignPlayGameMasterError,
+  CampaignPlayGameMasterContractFailureDiagnostic
 >();
 
 function rememberCampaignPlayGameMasterContractDiagnostic(
@@ -634,6 +655,14 @@ export function getCampaignPlayGameMasterContractDiagnostic(
 ): CampaignPlayGameMasterContractDiagnostic | undefined {
   return error instanceof CampaignPlayGameMasterError
     ? gameMasterContractDiagnosticByError.get(error)
+    : undefined;
+}
+
+export function getCampaignPlayGameMasterContractFailureDiagnostic(
+  error: unknown,
+): CampaignPlayGameMasterContractFailureDiagnostic | undefined {
+  return error instanceof CampaignPlayGameMasterError
+    ? gameMasterContractFailureDiagnosticByError.get(error)
     : undefined;
 }
 
@@ -1145,20 +1174,37 @@ interface Dependencies { generateObject: typeof safeGenerateObject }
 
 const CAMPAIGN_PLAY_GAME_MASTER_MODEL_CALL_TIMEOUT_MS = 180_000;
 
-type CampaignPlayGameMasterContractRejectedPhase =
-  | "generation"
-  | "evidence"
-  | "compilation"
-  | "review";
-
 function emitCampaignPlayGameMasterContractRejected(
   error: CampaignPlayGameMasterError,
   phase: CampaignPlayGameMasterContractRejectedPhase,
-  safeGenerationCode: string | null,
+  safeGenerationCode: SafeGenerateErrorCode | null,
 ): void {
   const recoveryFeedback = getCampaignPlayGameMasterRecoveryFeedback(error);
   const contractDiagnostic = getCampaignPlayGameMasterContractDiagnostic(error)
     ?? recoveryFeedback?.contractDiagnostic;
+  const contractFailureDiagnostic = error.code === "model_contract_failed"
+    ? freeze<CampaignPlayGameMasterContractFailureDiagnostic>({
+        rejectionPhase: phase,
+        safeGenerationCode,
+        contractDiagnosticPhase: contractDiagnostic?.phase ?? null,
+        contractDiagnosticCoordinate: contractDiagnostic?.coordinate ?? null,
+        recoveryDiagnostic: recoveryFeedback?.diagnostic ?? null,
+        failedChecks: (recoveryFeedback?.failedChecks ?? []).map((check) => ({
+          ...check,
+          ...(check.check === "mechanical_authority_rejected"
+            ? { reviewFailedChecks: [...check.reviewFailedChecks] }
+            : check.check === "targeted_actor_response_missing"
+              ? { requiredActorHandles: [...check.requiredActorHandles] }
+              : {}),
+        })),
+        reviewFailedChecks: [
+          ...(mechanicalAuthorityReviewFailedChecksByError.get(error) ?? []),
+        ],
+      })
+    : undefined;
+  if (contractFailureDiagnostic !== undefined) {
+    gameMasterContractFailureDiagnosticByError.set(error, contractFailureDiagnostic);
+  }
   try {
     log.event("game_master.contract_rejected", {
       phase,
@@ -1168,6 +1214,7 @@ function emitCampaignPlayGameMasterContractRejected(
       recoveryDiagnostic: recoveryFeedback?.diagnostic ?? null,
       failedChecks: recoveryFeedback?.failedChecks ?? [],
       reviewFailedChecks: mechanicalAuthorityReviewFailedChecksByError.get(error) ?? [],
+      contractFailureDiagnostic: contractFailureDiagnostic ?? null,
       ...(contractDiagnostic === undefined
         ? {}
         : {
@@ -2907,7 +2954,7 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
         : null;
       const started = Date.now();
       let phase: CampaignPlayGameMasterContractRejectedPhase = "generation";
-      let safeGenerationCode: string | null = null;
+      let safeGenerationCode: SafeGenerateErrorCode | null = null;
       let planningStarted = false;
       try {
       const promptText = prompt(

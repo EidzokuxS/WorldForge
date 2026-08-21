@@ -2494,6 +2494,7 @@ export const campaignPlayModelStages = sqliteTable(
     errorCode: text("error_code", {
       enum: campaignPlayInternalErrorCodeValues,
     }),
+    contractFailureDiagnosticJson: text("contract_failure_diagnostic_json"),
     createdAt: integer("created_at", { mode: "number" }).notNull(),
     completedAt: integer("completed_at", { mode: "number" }),
   },
@@ -2578,7 +2579,11 @@ export const campaignPlayModelStages = sqliteTable(
         AND (${table.outputTokens} IS NULL OR ${table.outputTokens} >= 0)
         AND (${table.durationMs} IS NULL OR ${table.durationMs} >= 0)
         AND (${table.artifactJson} IS NULL OR json_valid(${table.artifactJson}))
-        AND (${table.artifactHash} IS NULL OR length(${table.artifactHash}) = 64)`,
+        AND (${table.artifactHash} IS NULL OR length(${table.artifactHash}) = 64)
+        AND (${table.contractFailureDiagnosticJson} IS NULL OR (
+          json_valid(${table.contractFailureDiagnosticJson})
+          AND length(${table.contractFailureDiagnosticJson}) <= 4096
+        ))`,
     ),
     check(
       "campaign_play_model_stages_status_consistent",
@@ -2593,6 +2598,7 @@ export const campaignPlayModelStages = sqliteTable(
           AND ${table.artifactJson} IS NULL
           AND ${table.artifactHash} IS NULL
           AND ${table.errorCode} IS NULL
+          AND ${table.contractFailureDiagnosticJson} IS NULL
           AND ${table.completedAt} IS NULL
         ) OR (
           ${table.status} = 'accepted'
@@ -2605,6 +2611,7 @@ export const campaignPlayModelStages = sqliteTable(
           AND ${table.artifactJson} IS NOT NULL
           AND ${table.artifactHash} IS NOT NULL
           AND ${table.errorCode} IS NULL
+          AND ${table.contractFailureDiagnosticJson} IS NULL
           AND ${table.completedAt} IS NOT NULL
         ) OR (
           ${table.status} = 'interrupted'
@@ -2623,6 +2630,17 @@ export const campaignPlayModelStages = sqliteTable(
           AND ${table.errorCode} IS NOT NULL
           AND ${table.completedAt} IS NOT NULL
         )`,
+    ),
+    check(
+      "campaign_play_model_stages_contract_diagnostic_consistent",
+      sql`(${table.contractFailureDiagnosticJson} IS NULL) OR (
+        ${table.kind} = 'game_master'
+        AND ${table.status} IN ('interrupted', 'failed')
+        AND ${table.schemaOutcome} = 'invalid'
+        AND ${table.errorCode} = 'model_contract_invalid'
+        AND json_valid(${table.contractFailureDiagnosticJson})
+        AND length(${table.contractFailureDiagnosticJson}) <= 4096
+      )`,
     ),
   ],
 );

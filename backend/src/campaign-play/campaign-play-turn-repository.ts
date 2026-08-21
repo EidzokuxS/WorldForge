@@ -6,6 +6,8 @@ import type {
   CampaignPlayTurnAdmissionRequest,
   CampaignPlayTurnAdmissionResponse,
 } from "@worldforge/shared";
+import { CAMPAIGN_PLAY_LIMITS } from "@worldforge/shared";
+import { z } from "zod";
 import type { CampaignPlayDatabaseHandle } from "./campaign-play-database.js";
 import {
   campaignPlayActorPlanSchema,
@@ -30,6 +32,7 @@ import {
 import { createCampaignPlayStateRepository } from "./campaign-play-state-repository.js";
 import type { CampaignPlayMutationContext } from "./campaign-play-state-repository.js";
 import { campaignPlayResponseModelMatches } from "./model-identity.js";
+import type { CampaignPlayGameMasterContractFailureDiagnostic } from "./game-master.js";
 
 export type CampaignPlayTurnRepositoryErrorCode =
   | "turn_not_found"
@@ -220,6 +223,7 @@ export interface CampaignPlayModelFailureEvidence {
   durationMs: number;
   finishReason: string | null;
   schemaOutcome: "invalid" | "transport_error";
+  contractFailureDiagnostic?: CampaignPlayGameMasterContractFailureDiagnostic | null;
 }
 
 export interface FailCampaignPlayTurnInput {
@@ -250,6 +254,7 @@ export interface CampaignPlayExternalInterruptionEvidence {
     | "stage_timeout"
     | "rulebook_denied"
     | "narration_invalid";
+  contractFailureDiagnostic?: CampaignPlayGameMasterContractFailureDiagnostic | null;
 }
 
 export interface InterruptCampaignPlayExternalInput {
@@ -496,6 +501,7 @@ interface ModelStageRow {
   artifactJson: string | null;
   artifactHash: string | null;
   errorCode: string | null;
+  contractFailureDiagnosticJson: string | null;
   createdAt: number;
   completedAt: number | null;
 }
@@ -814,6 +820,134 @@ function validateLeaseToken(token: CampaignPlayWorkerLeaseToken): void {
   }
 }
 
+const CAMPAIGN_PLAY_CONTRACT_FAILURE_DIAGNOSTIC_MAX_BYTES = 4_096;
+const contractFailureDiagnosticCoordinateSchema = z.string()
+  .min(1)
+  .max(CAMPAIGN_PLAY_LIMITS.id)
+  .regex(/^[A-Za-z0-9_.\[\]-]+$/);
+const contractFailureDiagnosticHandleSchema = z.string()
+  .min(1)
+  .max(CAMPAIGN_PLAY_LIMITS.handle)
+  .regex(/^[A-Za-z0-9_:-]+$/);
+const contractFailureDiagnosticFieldPathSchema = z.string()
+  .min(1)
+  .max(CAMPAIGN_PLAY_LIMITS.id)
+  .regex(/^[A-Za-z0-9_.\[\]-]+$/);
+const contractFailureDiagnosticReviewCheckSchema = z.enum([
+  "player_intent_unfulfilled",
+  "possession_authority_missing",
+  "obligation_authority_missing",
+  "route_authority_missing",
+  "possession_transform_identity_incomplete",
+  "other_mechanical_authority_mismatch",
+]);
+const contractFailureDiagnosticFailedChecksSchema = z.discriminatedUnion("check", [
+  z.object({
+    check: z.literal("repeated_actor_dialogue"),
+    effectIndex: z.number().int().nonnegative().max(CAMPAIGN_PLAY_LIMITS.commandsPerBatch),
+    fieldPath: contractFailureDiagnosticFieldPathSchema,
+    performingActorHandle: contractFailureDiagnosticHandleSchema,
+    recentOwnActionIndex: z.number().int().nonnegative().max(CAMPAIGN_PLAY_LIMITS.commandsPerBatch),
+  }).strict(),
+  z.object({
+    check: z.literal("mechanical_authority_rejected"),
+    reviewFailedChecks: z.array(contractFailureDiagnosticReviewCheckSchema).min(1).max(5),
+  }).strict(),
+  z.object({
+    check: z.literal("targeted_actor_response_missing"),
+    intentKind: z.literal("contact"),
+    requiredActorHandles: z.array(contractFailureDiagnosticHandleSchema)
+      .min(1)
+      .max(CAMPAIGN_PLAY_LIMITS.targets),
+    firstActorlessEffectIndex: z.number().int().nonnegative()
+      .max(CAMPAIGN_PLAY_LIMITS.commandsPerBatch)
+      .nullable(),
+  }).strict(),
+  z.object({
+    check: z.literal("record_world_event_scope_overflow"),
+    effectIndex: z.number().int().nonnegative().max(CAMPAIGN_PLAY_LIMITS.commandsPerBatch),
+    fieldPath: contractFailureDiagnosticFieldPathSchema,
+    proposedAffectedHandleCount: z.number().int().nonnegative().max(CAMPAIGN_PLAY_LIMITS.affectedRefs),
+    compilerOwnedAppendCount: z.number().int().nonnegative().max(CAMPAIGN_PLAY_LIMITS.affectedRefs),
+    maximumAffectedRefCount: z.number().int().nonnegative().max(CAMPAIGN_PLAY_LIMITS.affectedRefs),
+  }).strict(),
+]);
+const contractFailureDiagnosticSchema = z.object({
+  rejectionPhase: z.enum(["generation", "evidence", "compilation", "review"]),
+  safeGenerationCode: z.enum([
+    "missing_structured_tool_call",
+    "invalid_structured_tool_call",
+    "schema_validation_failed",
+    "text_fallback_disabled",
+    "native_output_unavailable",
+    "invalid_json",
+    "full_retry_exhausted",
+  ]).nullable(),
+  contractDiagnosticPhase: z.enum(["provider_extraction", "private_decode", "domain_mismatch"]).nullable(),
+  contractDiagnosticCoordinate: contractFailureDiagnosticCoordinateSchema.nullable(),
+  recoveryDiagnostic: z.literal("game_master_semantic_validation_mismatch").nullable(),
+  failedChecks: z.array(contractFailureDiagnosticFailedChecksSchema).max(4),
+  reviewFailedChecks: z.array(contractFailureDiagnosticReviewCheckSchema).max(5),
+}).strict().superRefine((diagnostic, context) => {
+  if ((diagnostic.contractDiagnosticPhase === null) !== (diagnostic.contractDiagnosticCoordinate === null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["contractDiagnosticCoordinate"],
+      message: "Contract diagnostic phase and coordinate must be paired.",
+    });
+  }
+  if (diagnostic.recoveryDiagnostic === null && diagnostic.failedChecks.length > 0) {
+    context.addIssue({
+      code: "custom",
+      path: ["failedChecks"],
+      message: "Failed checks require the bounded recovery diagnostic literal.",
+    });
+  }
+});
+
+function canonicalizeContractFailureDiagnostic(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  const parsed = contractFailureDiagnosticSchema.safeParse(value);
+  if (!parsed.success) {
+    throw stageInvalid("Campaign Play contract failure diagnostic is outside its bounded shape.");
+  }
+  const canonical = {
+    rejectionPhase: parsed.data.rejectionPhase,
+    safeGenerationCode: parsed.data.safeGenerationCode,
+    contractDiagnosticPhase: parsed.data.contractDiagnosticPhase,
+    contractDiagnosticCoordinate: parsed.data.contractDiagnosticCoordinate,
+    recoveryDiagnostic: parsed.data.recoveryDiagnostic,
+    failedChecks: parsed.data.failedChecks.map((check) => ({
+      ...check,
+      ...(check.check === "mechanical_authority_rejected"
+        ? { reviewFailedChecks: [...check.reviewFailedChecks] }
+        : check.check === "targeted_actor_response_missing"
+          ? { requiredActorHandles: [...check.requiredActorHandles] }
+          : {}),
+    })),
+    reviewFailedChecks: [...parsed.data.reviewFailedChecks],
+  } satisfies CampaignPlayGameMasterContractFailureDiagnostic;
+  const json = JSON.stringify(canonical);
+  if (Buffer.byteLength(json, "utf8") > CAMPAIGN_PLAY_CONTRACT_FAILURE_DIAGNOSTIC_MAX_BYTES) {
+    throw stageInvalid("Campaign Play contract failure diagnostic exceeds its bounded size.");
+  }
+  return json;
+}
+
+function parseStoredContractFailureDiagnostic(
+  value: string | null,
+  label: string,
+): void {
+  if (value === null) return;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    const canonical = canonicalizeContractFailureDiagnostic(parsed);
+    if (canonical !== value) throw new TypeError("non-canonical contract failure diagnostic bytes");
+  } catch (error) {
+    throw corrupt(`${label} contains invalid contract failure diagnostic bytes.`, error);
+  }
+}
+
 function validateExecutionEvidence(evidence: CampaignPlayModelExecutionEvidence): void {
   if (
     !isNonemptyText(evidence.actualProviderId) ||
@@ -828,7 +962,9 @@ function validateExecutionEvidence(evidence: CampaignPlayModelExecutionEvidence)
   }
 }
 
-function validateInterruptionEvidence(evidence: CampaignPlayExternalInterruptionEvidence): void {
+function validateInterruptionEvidence(
+  evidence: CampaignPlayExternalInterruptionEvidence,
+): string | null {
   const allActual = evidence.actualProviderId !== null && evidence.actualModel !== null &&
     evidence.actualStrategy !== null;
   const noActual = evidence.actualProviderId === null && evidence.actualModel === null &&
@@ -844,10 +980,14 @@ function validateInterruptionEvidence(evidence: CampaignPlayExternalInterruption
     (evidence.outputTokens !== null && !isNonnegativeInteger(evidence.outputTokens)) ||
     !isNonnegativeInteger(evidence.durationMs) ||
     (evidence.finishReason !== null && !isNonemptyText(evidence.finishReason)) ||
-    (evidence.schemaOutcome !== "invalid" && evidence.schemaOutcome !== "transport_error")
+    (evidence.schemaOutcome !== "invalid" && evidence.schemaOutcome !== "transport_error") ||
+    (evidence.contractFailureDiagnostic !== undefined &&
+      evidence.contractFailureDiagnostic !== null &&
+      (evidence.errorCode !== "model_contract_invalid" || evidence.schemaOutcome !== "invalid"))
   ) {
     throw stageInvalid("Campaign Play external interruption has invalid execution evidence.");
   }
+  return canonicalizeContractFailureDiagnostic(evidence.contractFailureDiagnostic);
 }
 
 function isCanonicalHash(value: unknown): value is string {
@@ -875,7 +1015,7 @@ export function hashCampaignPlayNarratorPacket(
   });
 }
 
-function validateModelFailureEvidence(evidence: CampaignPlayModelFailureEvidence): void {
+function validateModelFailureEvidence(evidence: CampaignPlayModelFailureEvidence): string | null {
   const allActual = evidence.actualProviderId !== null && evidence.actualModel !== null &&
     evidence.actualStrategy !== null;
   const noActual = evidence.actualProviderId === null && evidence.actualModel === null &&
@@ -890,10 +1030,13 @@ function validateModelFailureEvidence(evidence: CampaignPlayModelFailureEvidence
     (evidence.inputTokens !== null && !isNonnegativeInteger(evidence.inputTokens)) ||
     (evidence.outputTokens !== null && !isNonnegativeInteger(evidence.outputTokens)) ||
     !isNonnegativeInteger(evidence.durationMs) ||
-    (evidence.finishReason !== null && !isNonemptyText(evidence.finishReason))
+    (evidence.finishReason !== null && !isNonemptyText(evidence.finishReason)) ||
+    (evidence.contractFailureDiagnostic !== undefined &&
+      evidence.contractFailureDiagnostic !== null && evidence.schemaOutcome !== "invalid")
   ) {
     throw stageInvalid("Campaign Play terminal model failure has invalid execution evidence.");
   }
+  return canonicalizeContractFailureDiagnostic(evidence.contractFailureDiagnostic);
 }
 
 interface DeterministicTransitionRoute {
@@ -1170,6 +1313,7 @@ function selectModelStages(
       duration_ms AS durationMs, finish_reason AS finishReason,
       schema_outcome AS schemaOutcome, artifact_json AS artifactJson,
       artifact_hash AS artifactHash, error_code AS errorCode,
+      contract_failure_diagnostic_json AS contractFailureDiagnosticJson,
       created_at AS createdAt, completed_at AS completedAt
     FROM campaign_play_model_stages
     WHERE campaign_id = ? AND turn_id = ?
@@ -1333,6 +1477,10 @@ function validateModelStages(
     priorAttempt.retryConsumedAt === laterAttempt.createdAt;
   for (const stage of stages) {
     try {
+      parseStoredContractFailureDiagnostic(
+        stage.contractFailureDiagnosticJson,
+        `Campaign Play model stage ${stage.id}`,
+      );
       campaignPlayModelStageSchema.parse({
         stageId: stage.stageId,
         campaignId: stage.campaignId,
@@ -1355,6 +1503,7 @@ function validateModelStages(
         artifactJson: stage.artifactJson,
         artifactHash: stage.artifactHash,
         errorCode: stage.errorCode,
+        contractFailureDiagnosticJson: stage.contractFailureDiagnosticJson,
       });
     } catch (error) {
       throw corrupt("Campaign Play model stage violates its storage contract.", error);
@@ -2469,7 +2618,7 @@ export function createCampaignPlayTurnRepository(
       expiryMode: "live" | "expired";
     },
   ): LoadedCampaignPlayTurn => {
-    validateInterruptionEvidence(input.evidence);
+    const contractFailureDiagnosticJson = validateInterruptionEvidence(input.evidence);
     if (
       !isNonemptyText(input.turnId) || !isNonemptyText(input.owner) ||
       !isPositiveInteger(input.epoch) || !isNonnegativeInteger(input.leaseExpiresAt) ||
@@ -2487,6 +2636,9 @@ export function createCampaignPlayTurnRepository(
     const route = resolveStageClaimRoute(preflight.turnKind, input.stage, preflight.modelSelection);
     if (route.model === null) {
       throw stageInvalid("Campaign Play interruption requires an external model stage.");
+    }
+    if (contractFailureDiagnosticJson !== null && route.model.kind !== "game_master") {
+      throw stageInvalid("Campaign Play contract failure diagnostics belong only to Game Master stages.");
     }
     if (
       preflight.stage !== input.stage || preflight.workerLeaseOwner !== input.owner ||
@@ -2532,6 +2684,9 @@ export function createCampaignPlayTurnRepository(
         ) {
           throw fenceLost("Campaign Play interruption lost its exact worker lease.");
         }
+        if (contractFailureDiagnosticJson !== null && currentRoute.model.kind !== "game_master") {
+          throw stageInvalid("Campaign Play contract failure diagnostics belong only to Game Master stages.");
+        }
         if (
           (input.expiryMode === "live" && input.occurredAt >= input.leaseExpiresAt) ||
           (input.expiryMode === "expired" && input.occurredAt < input.leaseExpiresAt)
@@ -2544,14 +2699,14 @@ export function createCampaignPlayTurnRepository(
           UPDATE campaign_play_model_stages SET
             status = 'interrupted', actual_provider_id = ?, actual_model = ?, actual_strategy = ?,
             input_tokens = ?, output_tokens = ?, duration_ms = ?, finish_reason = ?,
-            schema_outcome = ?, error_code = ?, completed_at = ?
+            schema_outcome = ?, error_code = ?, contract_failure_diagnostic_json = ?, completed_at = ?
           WHERE campaign_id = ? AND turn_id = ? AND stage_id = ?
             AND worker_epoch = ? AND status = 'started'
         `).run(
           input.evidence.actualProviderId, input.evidence.actualModel, input.evidence.actualStrategy,
           input.evidence.inputTokens, input.evidence.outputTokens, input.evidence.durationMs,
           input.evidence.finishReason, input.evidence.schemaOutcome,
-          input.evidence.errorCode, input.occurredAt,
+          input.evidence.errorCode, contractFailureDiagnosticJson, input.occurredAt,
           handle.campaignId, input.turnId, stageId, input.epoch,
         );
         if (attemptUpdate.changes !== 1) {
@@ -3591,6 +3746,9 @@ export function createCampaignPlayTurnRepository(
         throw stageInvalid("Campaign Play terminal failure has an invalid internal error code.");
       }
       const mutationAuditJson = canonicalizeCampaignPlayProjection(input.mutationAudit);
+      const modelFailureDiagnosticJson = input.modelEvidence === null
+        ? null
+        : validateModelFailureEvidence(input.modelEvidence);
       const preflight = loadTurn(input.token.turnId);
       if (!preflight) {
         throw new CampaignPlayTurnRepositoryError("turn_not_found", "Campaign Play turn was not found.");
@@ -3615,7 +3773,12 @@ export function createCampaignPlayTurnRepository(
       if ((route.model !== null) !== (input.modelEvidence !== null)) {
         throw stageInvalid("Campaign Play terminal failure evidence does not match its stage kind.");
       }
-      if (input.modelEvidence !== null) validateModelFailureEvidence(input.modelEvidence);
+      if (
+        modelFailureDiagnosticJson !== null &&
+        (input.errorCode !== "model_contract_invalid" || route.model?.kind !== "game_master")
+      ) {
+        throw stageInvalid("Campaign Play contract failure diagnostics belong only to failed Game Master contract stages.");
+      }
       const stageId = route.model === null
         ? null
         : modelStageId(input.token.turnId, route.model.kind);
@@ -3665,6 +3828,12 @@ export function createCampaignPlayTurnRepository(
           ) {
             throw fenceLost("Campaign Play terminal failure lost its exact worker lease.");
           }
+          if (
+            modelFailureDiagnosticJson !== null &&
+            (currentRoute.model?.kind !== "game_master" || input.errorCode !== "model_contract_invalid")
+          ) {
+            throw stageInvalid("Campaign Play contract failure diagnostics belong only to failed Game Master contract stages.");
+          }
           assertMutationIdUnused(handle, input.mutationId);
           if (currentRoute.model !== null && input.modelEvidence !== null) {
             const currentStageId = modelStageId(input.token.turnId, currentRoute.model.kind);
@@ -3676,7 +3845,7 @@ export function createCampaignPlayTurnRepository(
               UPDATE campaign_play_model_stages SET status = 'failed',
                 actual_provider_id = ?, actual_model = ?, actual_strategy = ?,
                 input_tokens = ?, output_tokens = ?, duration_ms = ?, finish_reason = ?,
-                schema_outcome = ?, error_code = ?, completed_at = ?
+                schema_outcome = ?, error_code = ?, contract_failure_diagnostic_json = ?, completed_at = ?
               WHERE campaign_id = ? AND turn_id = ? AND stage_id = ?
                 AND worker_epoch = ? AND status = 'started'
             `).run(
@@ -3684,7 +3853,7 @@ export function createCampaignPlayTurnRepository(
               input.modelEvidence.actualStrategy, input.modelEvidence.inputTokens,
               input.modelEvidence.outputTokens, input.modelEvidence.durationMs,
               input.modelEvidence.finishReason, input.modelEvidence.schemaOutcome,
-              input.errorCode, input.failedAt, handle.campaignId,
+              input.errorCode, modelFailureDiagnosticJson, input.failedAt, handle.campaignId,
               input.token.turnId, currentStageId, input.token.epoch,
             );
             if (attemptUpdate.changes !== 1) {

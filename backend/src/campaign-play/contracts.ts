@@ -4043,6 +4043,7 @@ export const campaignPlayModelStageSchema = z.object({
   artifactJson: modelStageArtifactJsonSchema.nullable(),
   artifactHash: hashSchema.nullable(),
   errorCode: z.enum(CAMPAIGN_PLAY_INTERNAL_ERROR_CODE_VALUES).nullable(),
+  contractFailureDiagnosticJson: z.string().max(4_096).nullable().default(null),
 }).strict().superRefine((stage, context) => {
   const actualEvidence = [
     stage.actualProviderId,
@@ -4055,6 +4056,7 @@ export const campaignPlayModelStageSchema = z.object({
       stage.artifactJson !== null ||
       stage.artifactHash !== null ||
       stage.errorCode !== null ||
+      stage.contractFailureDiagnosticJson !== null ||
       actualEvidence.some((value) => value !== null)
     ) {
       context.addIssue({
@@ -4071,6 +4073,7 @@ export const campaignPlayModelStageSchema = z.object({
       stage.artifactJson === null ||
       stage.artifactHash === null ||
       stage.errorCode !== null ||
+      stage.contractFailureDiagnosticJson !== null ||
       actualEvidence.some((value) => value === null) ||
       stage.inputTokens === null ||
       stage.outputTokens === null ||
@@ -4101,6 +4104,19 @@ export const campaignPlayModelStageSchema = z.object({
       code: "custom",
       path: ["status"],
       message: "Unaccepted model stage requires typed terminal evidence and no artifact.",
+    });
+  }
+  if (
+    stage.contractFailureDiagnosticJson !== null &&
+    (stage.kind !== "game_master" ||
+      (stage.status !== "interrupted" && stage.status !== "failed") ||
+      stage.schemaOutcome !== "invalid" ||
+      stage.errorCode !== "model_contract_invalid")
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["contractFailureDiagnosticJson"],
+      message: "Contract failure diagnostics belong only to failed Game Master contract stages.",
     });
   }
 });

@@ -40,7 +40,10 @@ import {
 } from "./campaign-play-turn-repository.js";
 import { hashCampaignPlayProjection } from "./campaign-play-projection.js";
 import { createCampaignPlayStateRepository } from "./campaign-play-state-repository.js";
-import type { CampaignPlayGameMasterRecoveryFeedback } from "./game-master.js";
+import type {
+  CampaignPlayGameMasterContractFailureDiagnostic,
+  CampaignPlayGameMasterRecoveryFeedback,
+} from "./game-master.js";
 import type { CampaignPlayNarratorRecoveryFeedback } from "./narrator.js";
 import type { CampaignPlayTurnRuntime } from "./turn-runtime.js";
 import type { CampaignPlayOpeningRuntime } from "./opening-runtime.js";
@@ -503,6 +506,8 @@ function fakePlayerRuntime(
     onGameMasterRecoveryFeedback?: (feedback: CampaignPlayGameMasterRecoveryFeedback) => void;
     gameMasterFeedbackOnRun?: CampaignPlayGameMasterRecoveryFeedback;
     gameMasterFeedbackOnResume?: CampaignPlayGameMasterRecoveryFeedback;
+    gameMasterDiagnosticOnRun?: CampaignPlayGameMasterContractFailureDiagnostic;
+    gameMasterDiagnosticOnResume?: CampaignPlayGameMasterContractFailureDiagnostic;
     onRun?: (turnId: string) => void;
     initialErrorCode?: CampaignPlayExternalInterruptionEvidence["errorCode"];
     resumeErrorCode?: CampaignPlayExternalInterruptionEvidence["errorCode"];
@@ -563,6 +568,9 @@ function fakePlayerRuntime(
           schemaOutcome: options.initialErrorCode === "model_contract_invalid"
             ? "invalid" : "transport_error",
           errorCode: options.initialErrorCode ?? "model_contract_invalid",
+          ...(options.gameMasterDiagnosticOnRun === undefined
+            ? {}
+            : { contractFailureDiagnostic: options.gameMasterDiagnosticOnRun }),
         },
         interruptedAt: claimedAt + 2,
         mutationId: `interrupt:${token.epoch}`,
@@ -611,6 +619,9 @@ function fakePlayerRuntime(
             schemaOutcome: options.resumeErrorCode === "model_contract_invalid"
               ? "invalid" : "transport_error",
             errorCode: options.resumeErrorCode,
+            ...(options.gameMasterDiagnosticOnResume === undefined
+              ? {}
+              : { contractFailureDiagnostic: options.gameMasterDiagnosticOnResume }),
           },
           interruptedAt: resumedAt + 2,
           mutationId: `resume-interrupt:${token.epoch}`,
@@ -719,6 +730,8 @@ function fakeStageLocalRecoveryRuntime(
   options: {
     rejectGameMasterSecond?: boolean;
     gameMasterRecoveryFeedback?: CampaignPlayGameMasterRecoveryFeedback;
+    gameMasterRecoveryFeedbacks?: readonly CampaignPlayGameMasterRecoveryFeedback[];
+    gameMasterDiagnostics?: readonly CampaignPlayGameMasterContractFailureDiagnostic[];
     onJudgeRecoveryFeedback?: (feedback: typeof JUDGE_RECOVERY_FEEDBACK) => void;
     onGameMasterRecoveryFeedback?: (feedback: CampaignPlayGameMasterRecoveryFeedback) => void;
     onResume?: (input: {
@@ -764,10 +777,27 @@ function fakeStageLocalRecoveryRuntime(
       if (turn.stage === "admitted") {
         options.onJudgeRecoveryFeedback?.(JUDGE_RECOVERY_FEEDBACK);
       } else if (turn.stage === "judged") {
-        options.onGameMasterRecoveryFeedback?.(POSSESSION_TRANSFORM_RECOVERY_FEEDBACK);
+        const gameMasterAttempt = (handle.sqlite.prepare(`SELECT COUNT(*) AS count
+          FROM campaign_play_model_stages
+          WHERE campaign_id = ? AND turn_id = ? AND kind = 'game_master'`).get(
+          handle.campaignId,
+          turnId,
+        ) as { count: number }).count - 1;
+        options.onGameMasterRecoveryFeedback?.(
+          options.gameMasterRecoveryFeedbacks?.[gameMasterAttempt] ??
+          POSSESSION_TRANSFORM_RECOVERY_FEEDBACK,
+        );
       } else {
         throw new Error(`Unexpected stage-local recovery stage ${turn.stage}.`);
       }
+      const gameMasterAttempt = turn.stage === "judged"
+        ? (handle.sqlite.prepare(`SELECT COUNT(*) AS count
+            FROM campaign_play_model_stages
+            WHERE campaign_id = ? AND turn_id = ? AND kind = 'game_master'`).get(
+          handle.campaignId,
+          turnId,
+        ) as { count: number }).count - 1
+        : null;
       repository.interruptExternal({
         token,
         evidence: {
@@ -780,6 +810,9 @@ function fakeStageLocalRecoveryRuntime(
           finishReason: "invalid_output",
           schemaOutcome: "invalid",
           errorCode: "model_contract_invalid",
+          ...(gameMasterAttempt !== null && options.gameMasterDiagnostics?.[gameMasterAttempt] !== undefined
+            ? { contractFailureDiagnostic: options.gameMasterDiagnostics[gameMasterAttempt] }
+            : {}),
         },
         interruptedAt: claimedAt + 2,
         mutationId: `interrupt:${token.epoch}`,
@@ -830,8 +863,19 @@ function fakeStageLocalRecoveryRuntime(
       if (input.interruptedStage !== "judged") {
         throw new Error(`Unexpected resume stage ${input.interruptedStage}.`);
       }
-      if (options.rejectGameMasterSecond) {
-        options.onGameMasterRecoveryFeedback?.(POSSESSION_TRANSFORM_RECOVERY_FEEDBACK);
+      const gameMasterAttempt = (handle.sqlite.prepare(`SELECT COUNT(*) AS count
+        FROM campaign_play_model_stages
+        WHERE campaign_id = ? AND turn_id = ? AND kind = 'game_master'`).get(
+        handle.campaignId,
+        input.turnId,
+      ) as { count: number }).count - 1;
+      const nextDiagnostic = options.gameMasterDiagnostics?.[gameMasterAttempt];
+      const shouldReject = nextDiagnostic !== undefined || options.rejectGameMasterSecond === true;
+      if (shouldReject) {
+        options.onGameMasterRecoveryFeedback?.(
+          options.gameMasterRecoveryFeedbacks?.[gameMasterAttempt] ??
+          POSSESSION_TRANSFORM_RECOVERY_FEEDBACK,
+        );
         repository.interruptExternal({
           token,
           evidence: {
@@ -844,6 +888,9 @@ function fakeStageLocalRecoveryRuntime(
             finishReason: "invalid_output",
             schemaOutcome: "invalid",
             errorCode: "model_contract_invalid",
+            ...(nextDiagnostic !== undefined
+              ? { contractFailureDiagnostic: nextDiagnostic }
+              : {}),
           },
           interruptedAt: resumedAt + 2,
           mutationId: `game-master-interrupt:${token.epoch}`,
@@ -1633,7 +1680,7 @@ describe("CampaignPlayApplication", () => {
     }
   });
 
-  it("passes only the latest safe Game Master coordinate through automatic attempts 2 and 3", async () => {
+  it("persists three distinct Game Master diagnostics across automatic attempts without attempt four", async () => {
     createAcceptedCampaign();
     const firstFeedback: CampaignPlayGameMasterRecoveryFeedback = {
       ...GAME_MASTER_RECOVERY_FEEDBACK,
@@ -1658,36 +1705,57 @@ describe("CampaignPlayApplication", () => {
         firstActorlessEffectIndex: 0,
       }],
     };
+    const diagnostics: readonly CampaignPlayGameMasterContractFailureDiagnostic[] = [
+      {
+        rejectionPhase: "generation",
+        safeGenerationCode: "invalid_json",
+        contractDiagnosticPhase: "provider_extraction",
+        contractDiagnosticCoordinate: "proposal.provider_response",
+        recoveryDiagnostic: "game_master_semantic_validation_mismatch",
+        failedChecks: firstFeedback.failedChecks,
+        reviewFailedChecks: [],
+      },
+      {
+        rejectionPhase: "compilation",
+        safeGenerationCode: null,
+        contractDiagnosticPhase: "private_decode",
+        contractDiagnosticCoordinate: "exposure.predicates[0].route_state.triggers",
+        recoveryDiagnostic: "game_master_semantic_validation_mismatch",
+        failedChecks: secondFeedback.failedChecks,
+        reviewFailedChecks: [],
+      },
+      {
+        rejectionPhase: "compilation",
+        safeGenerationCode: null,
+        contractDiagnosticPhase: "domain_mismatch",
+        contractDiagnosticCoordinate: "proposal.domain",
+        recoveryDiagnostic: "game_master_semantic_validation_mismatch",
+        failedChecks: thirdFeedback.failedChecks,
+        reviewFailedChecks: [],
+      },
+    ];
     const createTurnInputs: Array<CampaignPlayGameMasterRecoveryFeedback | undefined> = [];
-    const resumeInputs: Array<CampaignPlayGameMasterRecoveryFeedback | undefined> = [];
     const emittedFeedbacks: CampaignPlayGameMasterRecoveryFeedback[] = [];
-    let createTurnCount = 0;
     const createTurn = vi.fn((
       handle: CampaignPlayDatabaseHandle,
       _selection?: CampaignPlayTurnModelSelection,
       _judgeRecoveryFeedback?: unknown,
-      _onJudgeRecoveryFeedback?: unknown,
+      onJudgeRecoveryFeedback?: unknown,
       gameMasterRecoveryFeedback?: CampaignPlayGameMasterRecoveryFeedback,
       onGameMasterRecoveryFeedback?: (feedback: CampaignPlayGameMasterRecoveryFeedback) => void,
     ) => {
-      const runtimeIndex = createTurnCount++;
       createTurnInputs.push(gameMasterRecoveryFeedback);
-      const resumeFeedback = runtimeIndex === 2
-        ? secondFeedback
-        : runtimeIndex === 3
-          ? thirdFeedback
-          : undefined;
-      return fakePlayerRuntime(handle, {
+      return fakeStageLocalRecoveryRuntime(handle, {
         gameMasterRecoveryFeedback,
+        gameMasterRecoveryFeedbacks: [firstFeedback, secondFeedback, thirdFeedback],
+        gameMasterDiagnostics: diagnostics,
+        onJudgeRecoveryFeedback: typeof onJudgeRecoveryFeedback === "function"
+          ? (feedback) => (onJudgeRecoveryFeedback as (value: typeof JUDGE_RECOVERY_FEEDBACK) => void)(feedback)
+          : undefined,
         onGameMasterRecoveryFeedback: (feedback) => {
           emittedFeedbacks.push(feedback);
           onGameMasterRecoveryFeedback?.(feedback);
         },
-        gameMasterFeedbackOnRun: runtimeIndex === 1 ? firstFeedback : undefined,
-        gameMasterFeedbackOnResume: resumeFeedback,
-        initialErrorCode: "model_contract_invalid",
-        resumeErrorCode: "model_contract_invalid",
-        onResume: (input) => resumeInputs.push(input.gameMasterRecoveryFeedback),
       });
     });
     const application = createCampaignPlayApplication({
@@ -1710,27 +1778,12 @@ describe("CampaignPlayApplication", () => {
     });
     await application.waitForIdle(CAMPAIGN_ID);
 
-    expect(createTurnInputs).toHaveLength(4);
-    expect(createTurnInputs.map((feedback) => feedback?.contractDiagnostic)).toEqual([
-      undefined,
-      undefined,
-      firstFeedback.contractDiagnostic,
-      secondFeedback.contractDiagnostic,
-    ]);
+    expect(createTurnInputs.some((feedback) => feedback?.failedChecks.length === 2)).toBe(true);
     expect(emittedFeedbacks.map((feedback) => feedback.contractDiagnostic)).toEqual([
       firstFeedback.contractDiagnostic,
       secondFeedback.contractDiagnostic,
       undefined,
     ]);
-    expect(resumeInputs.map((feedback) => feedback?.contractDiagnostic)).toEqual([
-      firstFeedback.contractDiagnostic,
-      secondFeedback.contractDiagnostic,
-    ]);
-    expect(createTurnInputs[3]?.failedChecks).toEqual([
-      ...firstFeedback.failedChecks,
-      ...secondFeedback.failedChecks,
-    ]);
-    expect(createTurnInputs[3]?.contractDiagnostic).not.toEqual(firstFeedback.contractDiagnostic);
 
     const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
     try {
@@ -1738,30 +1791,29 @@ describe("CampaignPlayApplication", () => {
       expect(repository.loadTurn(admission.turnId)).toMatchObject({
         turnId: admission.turnId,
         stage: "interrupted",
-        interruptedStage: "admitted",
-        workerEpoch: 3,
+        interruptedStage: "judged",
+        workerEpoch: 5,
         resumeEligible: true,
-        idempotencyKey: "player-gm-recovery-diagnostic-sequence",
       });
-      expect(handle.sqlite.prepare(`SELECT attempt, status, worker_epoch AS workerEpoch,
-          turn_id AS turnId, error_code AS errorCode
-        FROM campaign_play_model_stages WHERE turn_id = ? ORDER BY attempt`).all(
-        admission.turnId,
-      )).toEqual([
-        { attempt: 1, status: "interrupted", workerEpoch: 1, turnId: admission.turnId,
-          errorCode: "model_contract_invalid" },
-        { attempt: 2, status: "interrupted", workerEpoch: 2, turnId: admission.turnId,
-          errorCode: "model_contract_invalid" },
-        { attempt: 3, status: "interrupted", workerEpoch: 3, turnId: admission.turnId,
-          errorCode: "model_contract_invalid" },
-      ]);
+      const rows = handle.sqlite.prepare(`SELECT attempt, status, worker_epoch AS workerEpoch,
+          actual_provider_id AS actualProviderId, actual_model AS actualModel,
+          actual_strategy AS actualStrategy, error_code AS errorCode,
+          contract_failure_diagnostic_json AS contractFailureDiagnosticJson
+        FROM campaign_play_model_stages WHERE turn_id = ? AND kind = 'game_master'
+        ORDER BY attempt`).all(admission.turnId);
+      expect(rows).toEqual(diagnostics.map((diagnostic, index) => ({
+        attempt: index + 1,
+        status: "interrupted",
+        workerEpoch: index + 3,
+        actualProviderId: "provider-frozen",
+        actualModel: "game-master-frozen",
+        actualStrategy: "strict_object",
+        errorCode: "model_contract_invalid",
+        contractFailureDiagnosticJson: JSON.stringify(diagnostic),
+      })));
       expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
-        FROM campaign_play_model_stages WHERE turn_id = ? AND attempt = 4`).get(
+        FROM campaign_play_model_stages WHERE turn_id = ? AND kind = 'game_master' AND attempt = 4`).get(
         admission.turnId,
-      )).toEqual({ count: 0 });
-      expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
-        FROM campaign_play_turn_results WHERE campaign_id = ? AND turn_id = ?`).get(
-        CAMPAIGN_ID, admission.turnId,
       )).toEqual({ count: 0 });
       expect(handle.sqlite.prepare("PRAGMA integrity_check").get()).toEqual({ integrity_check: "ok" });
       expect(handle.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
