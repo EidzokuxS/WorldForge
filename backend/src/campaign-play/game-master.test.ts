@@ -1793,8 +1793,8 @@ describe("Campaign Play Game Master", () => {
     expect(proposalJson.required).toEqual(expect.arrayContaining([
       "elapsedMinutes",
       "effectOrder",
-      ...toolEffectKinds,
     ]));
+    expect(toolEffectKinds.filter((kind) => proposalJson.required?.includes(kind))).toEqual([]);
     expect(proposalJson.properties?.record_world_event?.items?.properties?.eventClass?.enum)
       .toEqual(expect.arrayContaining(["dialogue", "discovery"]));
     const proposalJsonText = JSON.stringify(proposalJson);
@@ -1864,6 +1864,126 @@ describe("Campaign Play Game Master", () => {
       reason: "The event is not grounded.",
       failedChecks: [],
     }).success).toBe(false);
+  });
+
+  it("normalizes omitted zero-cardinality tool partitions before compilation and review", async () => {
+    const omittedTransport = toolTransport(proposal.elapsedMinutes, proposal.effects);
+    for (const kind of toolEffectKinds) {
+      if (kind !== "record_world_event") delete omittedTransport[kind];
+    }
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({
+        object: omittedTransport,
+        trace: trace("tool_mode", undefined, "tool"),
+      })
+      .mockResolvedValueOnce({
+        object: { verdict: "accepted", reason: "The dialogue remains grounded.", failedChecks: [] },
+        trace: trace("tool_mode", undefined, "tool"),
+      });
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget, structuredOutputMode: "tool",
+    });
+
+    expect(candidate.preflight.accepted).toBe(true);
+    expect(candidate.semanticReview.kind).toBe("mechanical_authority");
+    expect(generateObject).toHaveBeenCalledTimes(2);
+    const proposalSchema = generateObject.mock.calls[0]![0].schema as z.ZodType<unknown>;
+    const parsed = proposalSchema.safeParse(omittedTransport);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      const normalized = parsed.data as Record<string, unknown>;
+      for (const kind of toolEffectKinds) {
+        if (kind !== "record_world_event") expect(normalized[kind], kind).toEqual([]);
+      }
+    }
+    const unknownKey = structuredClone(omittedTransport);
+    unknownKey.unused_partition = [];
+    expect(proposalSchema.safeParse(unknownKey).success).toBe(false);
+  });
+
+  it("rejects effectOrder coverage for an omitted default-empty partition at private decode", async () => {
+    const malformedTransport = toolTransport(proposal.elapsedMinutes, proposal.effects);
+    for (const kind of toolEffectKinds) {
+      if (kind !== "record_world_event") delete malformedTransport[kind];
+    }
+    malformedTransport.effectOrder = ["record_world_event", "advance_pressure"];
+    const generateObject = vi.fn().mockResolvedValue({
+      object: malformedTransport,
+      trace: trace("tool_mode", undefined, "tool"),
+    });
+    let thrown: unknown;
+    try {
+      await createCampaignPlayGameMaster({
+        generateObject: generateObject as unknown as typeof safeGenerateObject,
+      }).plan({
+        frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+        model: model(), temperature: 0.2, budget, structuredOutputMode: "tool",
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({ code: "model_contract_failed" });
+    expect(getCampaignPlayGameMasterRecoveryFeedback(thrown)).toMatchObject({
+      contractDiagnostic: { phase: "private_decode", coordinate: "effectOrder.cardinality" },
+    });
+    expect(generateObject).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps authority-required resource partitions required in provider transport", async () => {
+    const cases = [
+      {
+        kind: "adjust_actor_possession" as const,
+        ruling: ruling({
+          possessionEffectAuthority: {
+            kind: "adjust_actor_possession", enforcement: "required", operation: "acquire",
+            possessionHandle: null, quantity: 1, minimumResult: "success",
+          },
+        }),
+      },
+      {
+        kind: "incur_actor_obligation" as const,
+        ruling: ruling({
+          requiredObligationEffect: {
+            kind: "incur_actor_obligation", debtorHandle: "you", creditorHandle: "guard",
+            unitKey: "copper", amount: 1, minimumResult: "success",
+          },
+        }),
+      },
+    ];
+    for (const testCase of cases) {
+      const omittedTransport = toolTransport(proposal.elapsedMinutes, proposal.effects);
+      delete omittedTransport[testCase.kind];
+      const generateObject = vi.fn().mockResolvedValue({
+        object: omittedTransport,
+        trace: trace("tool_mode", undefined, "tool"),
+      });
+      let thrown: unknown;
+      try {
+        await createCampaignPlayGameMaster({
+          generateObject: generateObject as unknown as typeof safeGenerateObject,
+        }).plan({
+          frame: frame(), ruling: testCase.ruling, resolution, uncertaintyAuthority: null,
+          model: model(), temperature: 0.2, budget, structuredOutputMode: "tool",
+        });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown, testCase.kind).toMatchObject({ code: "model_contract_failed" });
+      expect(getCampaignPlayGameMasterRecoveryFeedback(thrown), testCase.kind).toMatchObject({
+        contractDiagnostic: { phase: "provider_extraction" },
+      });
+      expect(generateObject, testCase.kind).toHaveBeenCalledTimes(1);
+
+      const proposalSchema = generateObject.mock.calls[0]![0].schema as z.ZodType<unknown>;
+      const proposalJson = z.toJSONSchema(proposalSchema) as { required?: string[] };
+      const required = proposalJson.required ?? [];
+      expect(required).toEqual(expect.arrayContaining(["elapsedMinutes", "effectOrder", testCase.kind]));
+      expect(toolEffectKinds.filter((kind) => required.includes(kind))).toEqual([testCase.kind]);
+      expect(proposalSchema.safeParse(omittedTransport).success).toBe(false);
+    }
   });
 
   it("rejects contradictory reviewer verdict coupling through the private plan boundary", async () => {

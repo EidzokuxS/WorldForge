@@ -562,7 +562,13 @@ function createToolProposalSchema(
     const bounds = ALL_RESOURCE_EFFECT_KINDS.has(kind as ResourceEffectKind)
       ? toolResourceArrayBounds(kind as ResourceEffectKind, resourceAuthority)
       : { min: 0, max: CAMPAIGN_PLAY_LIMITS.commandsPerBatch - 1 };
-    return [kind, schema.min(bounds.min).max(bounds.max)];
+    const bounded = schema.min(bounds.min).max(bounds.max);
+    return [
+      kind,
+      bounds.min === 0
+        ? z.preprocess((value) => (value === undefined ? [] : value), bounded.optional())
+        : bounded,
+    ];
   })) as typeof arrays;
   return z.object({
     elapsedMinutes: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes),
