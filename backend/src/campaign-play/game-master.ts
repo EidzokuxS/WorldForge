@@ -50,6 +50,7 @@ import {
   deriveCampaignPlayCommandId,
   preflightCampaignPlayRulebook,
   type CampaignPlayRulebookAuthority,
+  type CampaignPlayRulebookDenialCode,
   type CampaignPlayRulebookFrame,
   type CampaignPlayRulebookPreflightResult,
 } from "./rulebook.js";
@@ -1128,6 +1129,11 @@ export type CampaignPlayGameMasterRecoveryCheck =
       readonly proposedAffectedHandleCount: number;
       readonly compilerOwnedAppendCount: number;
       readonly maximumAffectedRefCount: number;
+    }
+  | {
+      readonly check: "rulebook_denied";
+      readonly denialCode: CampaignPlayRulebookDenialCode;
+      readonly commandIndex: number | null;
     };
 
 export interface CampaignPlayGameMasterRecoveryFeedback {
@@ -2594,7 +2600,18 @@ function compile(
   });
   const batch: RulebookCommandBatch = { batchId, baseWorldVersion: frame.rulebookFrame.worldVersion, commands };
   const preflight = preflightCampaignPlayRulebook({ frame: frame.rulebookFrame, authority: frame.authority, batch });
-  if (!preflight.accepted) throw new CampaignPlayGameMasterError("rulebook_denied", null, preflight.denial);
+  if (!preflight.accepted) {
+    const error = new CampaignPlayGameMasterError("model_contract_failed", null, preflight.denial);
+    rememberCampaignPlayGameMasterRecoveryFeedback(error, {
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [{
+        check: "rulebook_denied",
+        denialCode: preflight.denial.code,
+        commandIndex: preflight.denial.commandIndex,
+      }],
+    });
+    throw error;
+  }
   return freeze({ batch: preflight.batch, preflight, batchHash: hashCampaignPlayProjection(preflight.batch) });
 }
 
@@ -2838,6 +2855,9 @@ function prompt(
     const hasRecordWorldEventScopeOverflow = recoveryFeedback.failedChecks.some(
       (check) => check.check === "record_world_event_scope_overflow",
     );
+    const hasRulebookDenial = recoveryFeedback.failedChecks.some(
+      (check) => check.check === "rulebook_denied",
+    );
     const hasRouteAuthorityMissing = recoveryFeedback.failedChecks.some(
       (check) => check.check === "mechanical_authority_rejected"
         && check.reviewFailedChecks.includes("route_authority_missing"),
@@ -2876,6 +2896,9 @@ function prompt(
         : []),
       ...(hasRecordWorldEventScopeOverflow
         ? [`For record_world_event_scope_overflow, reduce affectedHandles at fieldPath until proposedAffectedHandleCount plus compilerOwnedAppendCount is no greater than maximumAffectedRefCount. Keep only handles directly affected by that event, and preserve the ${toolMode ? "performer key" : "performing actor handle"} when the event has one.`]
+        : []),
+      ...(hasRulebookDenial
+        ? ["For rulebook_denied, repair every Rulebook-denied command by grounding each projectable exposure in that command's own affected actor, route, or location references. direct_perception and local_aftermath locations, and route_state routes, must belong to that command effect; otherwise use protected exposure where allowed. Preserve the unchanged frame, ruling, and resolution, and all existing rules."]
         : []),
       "All schema, authority, continuity, and Rulebook rules above still apply.",
     ].join(" ");

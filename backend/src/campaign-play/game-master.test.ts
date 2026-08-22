@@ -1303,6 +1303,120 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
     expect(promptText).not.toContain("SENTINEL_REVIEW_REASON");
     expect(promptText).not.toContain("Oren Tide's private response");
   });
+
+  it("recovers a Rulebook exposure denial with the bounded same-input feedback", async () => {
+    const relationRuling = ruling({
+      normalizedIntent: {
+        originalText: "I inspect the guard's manner.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "observe",
+        targets: [],
+        method: "Inspect the guard's manner",
+        stakes: "Notice the guard's current disposition",
+      },
+      citedVisibleFactHandles: ["guard"],
+    });
+    const invalidProposal = {
+      elapsedMinutes: 1,
+      effects: [{
+        kind: "update_actor_relation" as const,
+        exposure: {
+          mode: "projectable" as const,
+          predicates: [{ channel: "direct_perception" as const, anchorHandle: "south" }],
+        },
+        relationHandle: "trust",
+        intensity: 2,
+        summary: "SENTINEL_PRIVATE_PROPOSAL_RELATION_UPDATE",
+      }],
+    };
+    const firstGenerateObject = vi.fn()
+      .mockResolvedValueOnce({ object: invalidProposal, trace: trace() });
+    gameMasterEvent.mockClear();
+    gameMasterWarn.mockClear();
+    let firstError: unknown;
+    try {
+      await createCampaignPlayGameMaster({
+        generateObject: firstGenerateObject as unknown as typeof safeGenerateObject,
+      }).plan({
+        frame: frame(), ruling: relationRuling, resolution, uncertaintyAuthority: null,
+        model: model(), temperature: 0.2, budget,
+      });
+    } catch (error) {
+      firstError = error;
+    }
+    expect(firstError).toMatchObject({
+      code: "model_contract_failed",
+      denial: {
+        code: "invalid_exposure",
+        commandIndex: 1,
+        detail: "Location exposure is outside the command effect.",
+      },
+    });
+    const feedback = getCampaignPlayGameMasterRecoveryFeedback(firstError);
+    expect(feedback).toEqual({
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [{
+        check: "rulebook_denied",
+        denialCode: "invalid_exposure",
+        commandIndex: 1,
+      }],
+    });
+    expect(JSON.stringify(feedback)).not.toContain("commandId");
+    expect(JSON.stringify(feedback)).not.toContain("detail");
+    expect(JSON.stringify(feedback)).not.toContain("SENTINEL_PRIVATE_PROPOSAL_RELATION_UPDATE");
+    expect(gameMasterEvent).toHaveBeenCalledTimes(1);
+    const [, firstEventPayload] = gameMasterEvent.mock.calls[0]!;
+    expect(firstEventPayload).toMatchObject({
+      phase: "compilation",
+      errorCode: "model_contract_failed",
+      modelEvidenceErrorCode: "model_contract_failed",
+      recoveryDiagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [{
+        check: "rulebook_denied",
+        denialCode: "invalid_exposure",
+        commandIndex: 1,
+      }],
+      denial: {
+        code: "invalid_exposure",
+        commandIndex: 1,
+      },
+    });
+    expect(firstEventPayload.denial).not.toHaveProperty("detail");
+    expect(JSON.stringify(firstEventPayload)).not.toContain("SENTINEL_PRIVATE_PROPOSAL_RELATION_UPDATE");
+    expect(JSON.stringify(firstEventPayload)).not.toContain("South Harbor");
+
+    const correctedProposal = {
+      ...invalidProposal,
+      effects: [{
+        ...invalidProposal.effects[0],
+        exposure: { mode: "protected" as const },
+        summary: "The guard's disposition becomes more trusting.",
+      }],
+    };
+    const secondGenerateObject = vi.fn()
+      .mockResolvedValueOnce({ object: correctedProposal, trace: trace() });
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: secondGenerateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: relationRuling, resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget,
+      recoveryFeedback: feedback,
+    });
+    expect(candidate.preflight.accepted).toBe(true);
+    expect(secondGenerateObject).toHaveBeenCalledOnce();
+    const recoveryPrompt = String(secondGenerateObject.mock.calls[0]![0].prompt);
+    expect(recoveryPrompt).toContain(
+      "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution.",
+    );
+    expect(recoveryPrompt).toContain(
+      "For rulebook_denied, repair every Rulebook-denied command by grounding each projectable exposure in that command's own affected actor, route, or location references. direct_perception and local_aftermath locations, and route_state routes, must belong to that command effect; otherwise use protected exposure where allowed. Preserve the unchanged frame, ruling, and resolution, and all existing rules.",
+    );
+    expect(recoveryPrompt).toContain(JSON.stringify(feedback));
+    expect(recoveryPrompt).not.toContain("Location exposure is outside the command effect.");
+    expect(recoveryPrompt).not.toContain("SENTINEL_PRIVATE_PROPOSAL_RELATION_UPDATE");
+    expect(recoveryPrompt).not.toContain("commandId");
+  });
 });
 
 function model(): LanguageModel {
@@ -4779,19 +4893,46 @@ describe("Campaign Play Game Master", () => {
         stakes: "Learn why crossings are delayed",
       },
     });
-    expect(() => createCampaignPlayGameMaster().compile(frame(), compoundRuling, resolution, null, {
+    const candidate = {
       elapsedMinutes: 5,
       effects: [
-        { kind: "move_actor", actorHandle: null },
+        { kind: "move_actor" as const, actorHandle: null },
         {
-          kind: "record_world_event",
-          eventClass: "dialogue",
+          kind: "record_world_event" as const,
+          eventClass: "dialogue" as const,
           performingActorHandle: "guard",
           summary: "At South Harbor, the player asks the guard about passage delays.",
           affectedHandles: ["you", "guard", "south"],
         },
       ],
-    })).toThrow(expect.objectContaining({ code: "rulebook_denied" }));
+    };
+    let thrown: unknown;
+    try {
+      createCampaignPlayGameMaster().compile(frame(), compoundRuling, resolution, null, candidate);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({
+      code: "model_contract_failed",
+      denial: {
+        code: "precondition_failed",
+        commandIndex: expect.any(Number),
+        commandId: expect.any(String),
+        detail: expect.any(String),
+      },
+    });
+    const feedback = getCampaignPlayGameMasterRecoveryFeedback(thrown);
+    expect(feedback).toEqual({
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [{
+        check: "rulebook_denied",
+        denialCode: "precondition_failed",
+        commandIndex: expect.any(Number),
+      }],
+    });
+    expect(JSON.stringify(feedback)).not.toContain("commandId");
+    expect(JSON.stringify(feedback)).not.toContain("detail");
+    expect(JSON.stringify(feedback)).not.toContain("At South Harbor");
   });
 
   it.each(["repair", "full_retry", "text_fallback"] as const)("rejects %s output strategy", async (strategy) => {
@@ -5316,23 +5457,47 @@ describe("Campaign Play Game Master contract rejection diagnostics", () => {
     }).plan({
       frame: frame(), ruling: compoundRuling, resolution, uncertaintyAuthority: null,
       model: model(), temperature: 0.2, budget,
-    })).rejects.toMatchObject({ code: "rulebook_denied" });
-
-    expect(gameMasterEvent).toHaveBeenCalledTimes(1);
-    const [, eventPayload] = gameMasterEvent.mock.calls[0]!;
-    expect(eventPayload).toMatchObject({
-      phase: "compilation",
-      errorCode: "rulebook_denied",
-      modelEvidenceErrorCode: "rulebook_denied",
-      safeGenerationCode: null,
-      recoveryDiagnostic: null,
-      failedChecks: [],
-      reviewFailedChecks: [],
+    })).rejects.toMatchObject({
+      code: "model_contract_failed",
       denial: {
         code: "precondition_failed",
         commandIndex: expect.any(Number),
         commandId: expect.any(String),
       },
+    });
+
+    expect(gameMasterEvent).toHaveBeenCalledTimes(1);
+    const [, eventPayload] = gameMasterEvent.mock.calls[0]!;
+    expect(eventPayload).toMatchObject({
+      phase: "compilation",
+      errorCode: "model_contract_failed",
+      modelEvidenceErrorCode: "model_contract_failed",
+      safeGenerationCode: null,
+      recoveryDiagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [{
+        check: "rulebook_denied",
+        denialCode: "precondition_failed",
+        commandIndex: expect.any(Number),
+      }],
+      reviewFailedChecks: [],
+      contractFailureDiagnostic: {
+        rejectionPhase: "compilation",
+        safeGenerationCode: null,
+        contractDiagnosticPhase: null,
+        contractDiagnosticCoordinate: null,
+        recoveryDiagnostic: "game_master_semantic_validation_mismatch",
+        failedChecks: [{
+          check: "rulebook_denied",
+          denialCode: "precondition_failed",
+          commandIndex: expect.any(Number),
+        }],
+        reviewFailedChecks: [],
+      },
+      denial: expect.objectContaining({
+        code: "precondition_failed",
+        commandIndex: expect.any(Number),
+        commandId: expect.any(String),
+      }),
     });
     expect(eventPayload.denial).not.toHaveProperty("detail");
     expect(JSON.stringify(eventPayload)).not.toContain("SENTINEL_RAW_EVENT_SUMMARY");
