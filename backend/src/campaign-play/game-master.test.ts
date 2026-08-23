@@ -778,7 +778,7 @@ describe("Campaign Play Game Master obligation authority prompt", () => {
     expect(initialReviewPrompt.match(/OBLIGATION_AUTHORITY=.*$/m)?.[0]).toBe(expected);
     expect(recoveryReviewPrompt.match(/OBLIGATION_AUTHORITY=.*$/m)?.[0]).toBe(expected);
     expect(recoveryPrompt).toContain(
-      "For obligation_authority_missing, follow OBLIGATION_AUTHORITY exactly. If kind is none, remove every claim that a debt, payment, fee liability, duty balance, or completed bargain changed; keep only the non-binding offer, request, promise, quoted terms, refusal, counteroffer, accepted assignment, or future plan established by the action. If kind is incur_actor_obligation or pay_actor_obligation, emit the one exact permitted typed effect and match its parties, handles, unit, and amount in the public consequence. Do not invent a second obligation or payment.",
+      "For obligation_authority_missing, follow OBLIGATION_AUTHORITY exactly. If kind is none, remove every claim that a debt, payment, fee liability, duty balance, or completed bargain changed; keep only the non-binding offer, request, promise, quoted terms, refusal, counteroffer, accepted assignment, future appointment, or future plan established by the action. An ordinary acknowledgement of future intent is not a tracked obligation. If kind is incur_actor_obligation or pay_actor_obligation, emit the one exact permitted typed effect and match its parties, handles, unit, and amount in the public consequence. Do not invent a second obligation or payment.",
     );
     expect(initialPrompt).not.toContain("For obligation_authority_missing,");
     expect(initialGenerateObject).toHaveBeenCalledTimes(2);
@@ -891,6 +891,65 @@ describe("Campaign Play Game Master obligation authority prompt", () => {
     expect(promptText).toContain("For obligation_authority_missing, follow OBLIGATION_AUTHORITY exactly.");
     expect(promptText).not.toContain("SENTINEL_RAW_PROPOSAL");
     expect(promptText).not.toContain("SENTINEL_REVIEW_REASON");
+  });
+
+  it("completes spoken future intent through acknowledgement without inventing a duty", async () => {
+    const spokenPromiseRuling = ruling({
+      normalizedIntent: {
+        originalText: "I'll be at the gate before first light with oakum in the yoke.",
+        source: "suggested",
+        choiceHandle: "choice-promise",
+        kind: "contact",
+        targets: [{ handle: "guard", kind: "actor" }],
+        method: "Tell Oren the player's intended arrival and supplies",
+        stakes: "Make sure Oren hears the plan",
+      },
+      requiredObligationEffect: { kind: "none" },
+    });
+    const combinedRecoveryFeedback = {
+      diagnostic: "game_master_semantic_validation_mismatch" as const,
+      failedChecks: [{
+        check: "mechanical_authority_rejected" as const,
+        reviewFailedChecks: [
+          "player_intent_unfulfilled" as const,
+          "obligation_authority_missing" as const,
+        ],
+      }],
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: proposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "Oren's grounded response completes the contact without changing an obligation.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+
+    await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: spokenPromiseRuling, resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget, recoveryFeedback: combinedRecoveryFeedback,
+    });
+
+    const proposerPrompt = String(generateObject.mock.calls[0]![0].prompt);
+    const reviewerPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    expect(proposerPrompt).toContain(
+      "Their acknowledgement proves that the contact occurred; do not repeat the player's wording or invent an agreement, debt, duty, payment, or obligation effect.",
+    );
+    expect(proposerPrompt).toContain(
+      "a grounded response from every required targeted actor proves completion without repeating the player's wording or creating a new agreement or obligation",
+    );
+    expect(proposerPrompt).toContain(
+      "An ordinary acknowledgement of future intent is not a tracked obligation.",
+    );
+    expect(reviewerPrompt).toContain(
+      "one grounded dialogue or interaction response from each required targeted actor proves that the contact and delivery occurred",
+    );
+    expect(reviewerPrompt).toContain('OBLIGATION_AUTHORITY={"kind":"none"}');
+    expect(generateObject).toHaveBeenCalledTimes(2);
   });
 
   it("keeps player-authored settlement words out of mechanical review while preserving a real handoff", async () => {
