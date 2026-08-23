@@ -391,7 +391,6 @@ function toolProposalFixture(): Record<string, unknown> {
     playerPremise: premise === null
       ? { state: "none" }
       : {
-          state: "motivated",
           motivationIndex: premise.motivationIndex,
           anchor: premise.anchor,
           eventClass: premise.eventClass,
@@ -664,7 +663,14 @@ describe("Campaign Play opening planner", () => {
       .toEqual([chosenConditions.immediateSituation]);
     expect(schema.properties.scene.properties.candidateId.enum)
       .toContain(proposalFixture().scene.candidateId);
-    expect(schema.properties.playerPremise.properties.state.enum).toEqual(["motivated"]);
+    expect(schema.properties.playerPremise.properties.state).toBeUndefined();
+    expect(schema.properties.playerPremise.required).toEqual([
+      "motivationIndex",
+      "anchor",
+      "eventClass",
+      "summary",
+      "routeRestriction",
+    ]);
     expect(schema.properties.playerPremise.properties.routeRestriction.required)
       .toEqual(["state", "reason"]);
     expect(options.schema.safeParse(toolProposalFixture()).success).toBe(true);

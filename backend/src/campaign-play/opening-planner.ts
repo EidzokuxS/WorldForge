@@ -119,7 +119,6 @@ function openingPlannerToolSchemaForFrame(
   const playerPremise = frame.player.motivations.length === 0
     ? z.object({ state: z.enum(["none"]) }).strict()
     : z.object({
-        state: z.enum(["motivated"]),
         motivationIndex: z.number().int().min(0)
           .max(frame.player.motivations.length - 1),
         anchor: z.enum(["openingActor", "supportActor"]),
@@ -144,7 +143,7 @@ function decodeOpeningPlannerToolResult(
   if (!transportResult.success) fail("model_contract_failed", transportResult.error);
 
   const transportPremise = transportResult.data.playerPremise;
-  const playerPremise = transportPremise.state === "none"
+  const playerPremise = "state" in transportPremise
     ? null
     : (() => {
         const route = transportPremise.routeRestriction;

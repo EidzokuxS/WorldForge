@@ -1159,6 +1159,15 @@ describe("CampaignPlayApplication", () => {
         requiredPurpose: "consequence",
       }],
     };
+    const schemaMismatch: CampaignPlayNarratorRecoveryFeedback = {
+      diagnostic: "narrator_generation_schema_mismatch",
+      failedChecks: [{ check: "generation_schema_invalid" }],
+      contractDiagnostic: {
+        phase: "provider_extraction",
+        coordinate: "selectedIntentKeys",
+      },
+      recoveryInstruction: "structured_output_tool_call",
+    };
 
     expect(accumulateCampaignPlayNarratorRecoveryFeedback(undefined, actorMismatch)).toEqual(
       actorMismatch,
@@ -1187,6 +1196,22 @@ describe("CampaignPlayApplication", () => {
     )).toEqual({
       diagnostic: "narrator_packet_validation_mismatch",
       failedChecks: [duplicateIntent.failedChecks[0], semanticOnly.failedChecks[0]],
+    });
+    expect(accumulateCampaignPlayNarratorRecoveryFeedback(
+      actorMismatch,
+      schemaMismatch,
+    )).toBe(actorMismatch);
+    expect(accumulateCampaignPlayNarratorRecoveryFeedback(
+      schemaMismatch,
+      actorMismatch,
+    )).toBe(actorMismatch);
+    expect(accumulateCampaignPlayNarratorRecoveryFeedback(
+      accumulateCampaignPlayNarratorRecoveryFeedback(actorMismatch, schemaMismatch),
+      duplicateIntent,
+    )).toEqual({
+      diagnostic: "narrator_packet_validation_mismatch",
+      failedChecks: [actorMismatch.failedChecks[0], duplicateIntent.failedChecks[0]],
+      contractDiagnostic: duplicateIntent.contractDiagnostic,
     });
   });
 

@@ -168,10 +168,12 @@ export function accumulateCampaignPlayNarratorRecoveryFeedback(
 ): CampaignPlayNarratorRecoveryFeedback | undefined {
   if (next === undefined) return accumulated;
   if (accumulated === undefined) return next;
-  if (
-    accumulated.diagnostic !== "narrator_packet_validation_mismatch"
-    || next.diagnostic !== "narrator_packet_validation_mismatch"
-  ) return next;
+  if (next.diagnostic !== "narrator_packet_validation_mismatch") {
+    return accumulated.diagnostic === "narrator_packet_validation_mismatch"
+      ? accumulated
+      : next;
+  }
+  if (accumulated.diagnostic !== "narrator_packet_validation_mismatch") return next;
 
   const failedChecks = new Map<string, typeof next.failedChecks[number]>();
   for (const check of [...accumulated.failedChecks, ...next.failedChecks]) {
