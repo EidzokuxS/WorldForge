@@ -1366,7 +1366,10 @@ function certifyPureRenderedContact(input: {
   if (!visibleActor) return null;
   const prefix = campaignPlaySuggestedActionLabelPrefix(packet, intent);
   if (!suggestion.label.startsWith(prefix)) return null;
-  const detail = suggestion.label.slice(prefix.length);
+  const renderedDetail = suggestion.label.slice(prefix.length);
+  const quotedDetail = /^“([^”]+)”$/u.exec(renderedDetail);
+  if (quotedDetail === null) return null;
+  const detail = quotedDetail[1]!;
   if (!/^ask (?:about|what|who|where|when|why|how|whether|if) [^\r\n]+$/.test(detail)) {
     return null;
   }

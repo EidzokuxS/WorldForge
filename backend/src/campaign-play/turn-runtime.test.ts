@@ -1085,7 +1085,7 @@ function renderedContactSuggestion(
   }>;
   const suggestion = suggestions.find((candidate) => contacts.some((contact) =>
     contact.handle === candidate.choiceHandle &&
-    (!requireQuestion || /^Talk to .+: ask /.test(candidate.label))));
+    (!requireQuestion || /^Talk to .+: “ask /i.test(candidate.label))));
   if (!suggestion) throw new Error("Opening fixture did not render a matching contact intent.");
   return suggestion;
 }
@@ -4136,7 +4136,7 @@ describe("Campaign Play player-action turn runtime", () => {
         ])].slice(0, expectedActionCount);
         const actionSelections = selectedIndexes.map((intentIndex) => ({
           intentIndex,
-          detail: intentIndex === requiredIndex ? "the immediate situation" : null,
+          detail: intentIndex === requiredIndex ? "Ask about the immediate situation" : null,
         }));
         const usesToolMode = (options.tools?.length ?? 0) > 0;
         observedStructuredOutputModes.push(usesToolMode ? "tool" : "auto");

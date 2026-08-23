@@ -1160,7 +1160,7 @@ describe("Campaign Play narrator", () => {
       beats,
       actionSelections: [1, 0, 2, 3].map((intentIndex) => ({
         intentIndex,
-        detail: intentIndex === 1 ? "accept the uncertain share" : null,
+        detail: intentIndex === 1 ? "I'll carry it straight to the clerk." : null,
       })),
     };
     const narrator = createCampaignPlayNarrator();
@@ -1171,7 +1171,7 @@ describe("Campaign Play narrator", () => {
         beats,
         actionSelections: [0, 2, 3, 1].map((intentIndex) => ({
           intentIndex,
-          detail: intentIndex === 1 ? "accept the uncertain share" : null,
+          detail: intentIndex === 1 ? "I'll carry it straight to the clerk." : null,
         })),
       },
       createdAt: 1_000,
@@ -1185,7 +1185,7 @@ describe("Campaign Play narrator", () => {
     });
     expect(result.narration.suggestedActions[0]).toEqual({
       choiceHandle: "choice_public_contact",
-      label: "Talk to Mara Venn: accept the uncertain share",
+      label: "Talk to Mara Venn: “I'll carry it straight to the clerk.”",
     });
 
     const generateObject = vi.fn(async (
@@ -1220,6 +1220,7 @@ describe("Campaign Play narrator", () => {
                 const?: number;
                 anyOf?: Array<{ const?: number }>;
               };
+              detail?: unknown;
             };
           }>;
         };
@@ -1231,6 +1232,25 @@ describe("Campaign Play narrator", () => {
     for (const item of schema.properties.actionSelections.prefixItems.slice(1)) {
       expect(item.properties.intentIndex.anyOf?.map((entry) => entry.const))
         .toEqual([0, 2, 3]);
+    }
+    const requiredReplyDetailSchema = schema.properties.actionSelections.prefixItems[0]?.properties.detail;
+    expect(requiredReplyDetailSchema).toBeDefined();
+    const requiredReplyDetailSchemaText = JSON.stringify(requiredReplyDetailSchema);
+    expect(requiredReplyDetailSchemaText).not.toContain("pattern");
+    const withReplyDetail = (detail: string) => ({
+      ...replyProposal,
+      actionSelections: replyProposal.actionSelections.map((selection, index) =>
+        index === 0 ? { ...selection, detail } : selection),
+    });
+    for (const detail of [
+      "I'll carry it straight to the clerk.",
+      "accept the uncertain share",
+      "Head out into the night streets of Vesper Quay toward the beacon terraces to look for porter work.",
+      "Nod to Tomasso, shoulder your carry-sack, and leave...",
+      "Ask Tomasso about the beacon and leave...",
+      "Answer Tomasso then depart...",
+    ]) {
+      expect(options.schema.safeParse(withReplyDetail(detail)).success).toBe(true);
     }
     expect(String(options.prompt)).toContain("REQUIRED_REPLY_INTENT_INDEX=1");
     expect(String(options.prompt)).toContain(
@@ -1246,7 +1266,7 @@ describe("Campaign Play narrator", () => {
       "the prose must make that reply legible before the choices appear",
     );
     expect(String(options.prompt)).toContain(
-      "that reply must answer the visible exchange with one concrete player-owned act",
+      "it contains only the player's exact spoken words and may not invent a missing value or outcome",
     );
     expect(String(options.prompt)).toContain(
       "Set detail=null for every application-owned optional intent",
@@ -1254,6 +1274,16 @@ describe("Campaign Play narrator", () => {
     expect(String(options.prompt)).toContain(
       "The model selects which frozen intents to publish but never writes, revises, or completes their wording",
     );
+    expect(String(options.prompt)).toContain(
+      "When requiredReplyDetail is present, it contains only the player's exact spoken words addressed to the required actor, preferably a concise first-person utterance.",
+    );
+    expect(String(options.prompt)).toContain(
+      "Do not include a speaker tag, quotation marks, stage direction, narrated movement, or an action instruction.",
+    );
+    expect(String(options.prompt)).toContain(
+      "The application adds quotation marks and binds this utterance to the contact intent.",
+    );
+    expect(String(options.prompt)).not.toContain("Start with one allowed reply verb");
   });
 
   it("excludes the required reply index from every r125-shaped trailing selection", async () => {
@@ -1298,6 +1328,7 @@ describe("Campaign Play narrator", () => {
           : basePacket.availableIntents[0]!.targets,
       })),
     };
+    const travelWorkUtterance = "Head out into the night streets of Vesper Quay toward the beacon terraces to look for porter work.";
     const proposal = {
       beats: [{
         purpose: "consequence" as const,
@@ -1306,13 +1337,13 @@ describe("Campaign Play narrator", () => {
       }],
       actionSelections: [5, 6, 0, 1].map((intentIndex) => ({
         intentIndex,
-        detail: intentIndex === 5 ? "accept the uncertain share" : null,
+        detail: intentIndex === 5 ? travelWorkUtterance : null,
       })),
     };
     const generateObject = vi.fn(async (
       _options: Parameters<typeof safeGenerateObject>[0],
     ) => ({ object: proposal, trace: trace() }));
-    await createCampaignPlayNarrator({
+    const result = await createCampaignPlayNarrator({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).narrate({
       narrationId: "narration-required-index-five",
@@ -1322,6 +1353,13 @@ describe("Campaign Play narrator", () => {
       temperature: 0.5,
       budget,
     });
+    expect(generateObject).toHaveBeenCalledTimes(1);
+    expect(result.narration.suggestedActions[0]).toEqual({
+      choiceHandle: "choice_public_5",
+      label: `Talk to Mara Venn: “${travelWorkUtterance}”`,
+    });
+    expect(result.narration.suggestedActions[0]!.label.length)
+      .toBeLessThanOrEqual(CAMPAIGN_PLAY_LIMITS.label);
     const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
     expect(options.schema.safeParse(proposal).success).toBe(true);
     expect(options.schema.safeParse({
@@ -3149,7 +3187,7 @@ END_RECOVERY_DIAGNOSTIC`);
       ],
       actionSelections: [3, 0, 1, 2].map((intentIndex) => ({
         intentIndex,
-        detail: intentIndex === 3 ? "accept the uncertain share" : null,
+        detail: intentIndex === 3 ? "I'll carry it straight to the clerk." : null,
       })),
     };
     const validTransport = {
@@ -3191,6 +3229,10 @@ END_RECOVERY_DIAGNOSTIC`);
       "choice_r216_1",
       "choice_r216_2",
     ]);
+    expect(validResult.narration.suggestedActions[0]).toEqual({
+      choiceHandle: "choice_r216_3",
+      label: "Talk to Mara Venn: “I'll carry it straight to the clerk.”",
+    });
     const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
     const providerSchema = z.toJSONSchema(options.schema) as unknown as {
       properties: {
@@ -3223,9 +3265,9 @@ END_RECOVERY_DIAGNOSTIC`);
     ]);
     expect(options.schema.safeParse(validTransport).success).toBe(true);
     const requiredReplyPrefix = "Talk to Mara Venn: ";
-    const maximumRequiredReplyDetail = "a".repeat(
-      CAMPAIGN_PLAY_LIMITS.label - requiredReplyPrefix.length,
-    );
+    const maximumRequiredReplyDetail = `accept ${"a".repeat(
+      CAMPAIGN_PLAY_LIMITS.label - requiredReplyPrefix.length - 2 - "accept ".length,
+    )}`;
     expect(options.schema.safeParse({
       ...validTransport,
       requiredReplyDetail: maximumRequiredReplyDetail,
@@ -3234,6 +3276,21 @@ END_RECOVERY_DIAGNOSTIC`);
       ...validTransport,
       requiredReplyDetail: `${maximumRequiredReplyDetail}a`,
     }).success).toBe(false);
+    for (const detail of [
+      "I'll carry it straight to the clerk.",
+      "accept the uncertain share",
+      "Ask Tomasso Gravelle about the beacon terrace",
+      "Nod to Mara Venn",
+      "Head out into the night streets of Vesper Quay toward the beacon terraces to look for porter work.",
+      "Nod to Tomasso, shoulder your carry-sack, and leave...",
+      "Ask Tomasso about the beacon and leave...",
+      "Answer Tomasso then depart...",
+    ]) {
+      expect(options.schema.safeParse({
+        ...validTransport,
+        requiredReplyDetail: detail,
+      }).success).toBe(true);
+    }
     generatedProposal = {
       ...validTransport,
       requiredReplyDetail: maximumRequiredReplyDetail,
@@ -3242,7 +3299,7 @@ END_RECOVERY_DIAGNOSTIC`);
       request("narration-r216-tool-reply-label-limit"),
     );
     expect(boundaryReply.narration.suggestedActions[0]!.label).toBe(
-      `${requiredReplyPrefix}${maximumRequiredReplyDetail}`,
+      `${requiredReplyPrefix}“${maximumRequiredReplyDetail}”`,
     );
     expect(boundaryReply.narration.suggestedActions[0]!.label).toHaveLength(
       CAMPAIGN_PLAY_LIMITS.label,
@@ -3263,8 +3320,18 @@ END_RECOVERY_DIAGNOSTIC`);
       "REQUIRED_REPLY_INTENT_INDEX=application-owned (absent from model output)",
     );
     expect(initialPrompt).toContain(
-      "requiredReplyDetail supplies only that immediate reply",
+      "requiredReplyDetail contains only the player's exact spoken words addressed to that actor as one non-empty single-line utterance",
     );
+    expect(initialPrompt).toContain(
+      "When requiredReplyDetail is present, it contains only the player's exact spoken words addressed to the required actor, preferably a concise first-person utterance.",
+    );
+    expect(initialPrompt).toContain(
+      "Do not include a speaker tag, quotation marks, stage direction, narrated movement, or an action instruction.",
+    );
+    expect(initialPrompt).toContain(
+      "The application adds quotation marks and binds this utterance to the contact intent.",
+    );
+    expect(initialPrompt).not.toContain("Start with one allowed reply verb");
     expect(initialPrompt).toContain(
       "selectedIntentKeys is a fixed-length array of application-owned keys from TOOL_INTENT_SELECTION_FRAME",
     );
@@ -3288,6 +3355,9 @@ END_RECOVERY_DIAGNOSTIC`);
     );
     expect(recoveryPrompt).toContain(
       "The required reply key is application-owned and absent from selectedIntentKeys.",
+    );
+    expect(recoveryPrompt).toContain(
+      "When requiredReplyDetail is present, it contains only the player's exact spoken words addressed to the required actor, preferably a concise first-person utterance.",
     );
     expect(recoveryPrompt).toContain(
       "Rebuild selectedIntentKeys from TOOL_INTENT_SELECTION_FRAME. Return exactly expectedSelectedCount distinct listed keys. Do not reuse a key.",
