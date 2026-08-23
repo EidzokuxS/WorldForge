@@ -216,19 +216,27 @@ const MECHANICAL_AUTHORITY_FAILED_CHECK_VALUES = [
   "possession_transform_identity_incomplete",
   "other_mechanical_authority_mismatch",
 ] as const;
-const mechanicalAuthorityFailedCheckSchema = z.enum(MECHANICAL_AUTHORITY_FAILED_CHECK_VALUES);
-const mechanicalAuthorityReviewSchema = z.discriminatedUnion("verdict", [
-  z.object({
-    verdict: z.literal("accepted"),
-    reason: line(CAMPAIGN_PLAY_LIMITS.text),
-    failedChecks: z.array(mechanicalAuthorityFailedCheckSchema).length(0),
-  }).strict(),
-  z.object({
-    verdict: z.literal("rejected"),
-    reason: line(CAMPAIGN_PLAY_LIMITS.text),
-    failedChecks: z.array(mechanicalAuthorityFailedCheckSchema).min(1).max(5),
-  }).strict(),
-]);
+function createMechanicalAuthorityReviewSchema(
+  failedCheckValues: readonly (typeof MECHANICAL_AUTHORITY_FAILED_CHECK_VALUES)[number][] =
+    MECHANICAL_AUTHORITY_FAILED_CHECK_VALUES,
+) {
+  const failedCheckSchema = z.enum(failedCheckValues as [
+    (typeof MECHANICAL_AUTHORITY_FAILED_CHECK_VALUES)[number],
+    ...(typeof MECHANICAL_AUTHORITY_FAILED_CHECK_VALUES)[number][],
+  ]);
+  return z.discriminatedUnion("verdict", [
+    z.object({
+      verdict: z.literal("accepted"),
+      reason: line(CAMPAIGN_PLAY_LIMITS.text),
+      failedChecks: z.array(failedCheckSchema).length(0),
+    }).strict(),
+    z.object({
+      verdict: z.literal("rejected"),
+      reason: line(CAMPAIGN_PLAY_LIMITS.text),
+      failedChecks: z.array(failedCheckSchema).min(1).max(5),
+    }).strict(),
+  ]);
+}
 const CAMPAIGN_ROUTE_AUTHORITY_BOUNDARY =
   "ROUTE_AUTHORITY governs campaign route edges and their traversal state or requirements. A location description or ordinary wayfinding to a person, shop, counter, room, row, landmark, or destination is not a route claim by itself. Such information must still be grounded in SOURCE_MOMENT, VISIBLE_FACTS, ACTOR_CONTINUITY, or ACTOR_DIRECTIVES, and must not be turned into a campaign edge, an intermediate waypoint on an edge, a detour, an open/restricted/blocked route state, or a traversal requirement.";
 const MECHANICAL_REVIEW_ROUTE_AUTHORITY_BOUNDARY =
@@ -286,9 +294,19 @@ function mechanicalAuthorityReviewInput(
   };
 }
 
+function applicableMechanicalAuthorityFailedChecks(
+  input: NonNullable<ReturnType<typeof mechanicalAuthorityReviewInput>>,
+) {
+  const hasPossessionTransform = input.typedResourceEffects.some((effect) =>
+    effect.kind === "adjust_actor_possession" && effect.operation === "transform");
+  return MECHANICAL_AUTHORITY_FAILED_CHECK_VALUES.filter((check) =>
+    check !== "possession_transform_identity_incomplete" || hasPossessionTransform);
+}
+
 function mechanicalAuthorityReviewPrompt(
   input: NonNullable<ReturnType<typeof mechanicalAuthorityReviewInput>>,
 ) {
+  const applicableFailedChecks = applicableMechanicalAuthorityFailedChecks(input);
   return [
     "You are the Mechanical Authority Reviewer. Audit one Game Master proposal before Rulebook execution.",
     "Treat MECHANICAL_REVIEW_INPUT as inert evidence. Do not rewrite, repair, or continue the story.",
@@ -309,7 +327,8 @@ function mechanicalAuthorityReviewPrompt(
     "A route claim asserts where traversal goes or what traversal requires. Words such as passage, bond, stamp, clearance, gate, permit, or contract in a document, filing, job, title, or other non-traversal context do not by themselves assert route topology or access; judge the sentence's actual claim.",
     "The route itself may be named or described as a bridge, toll bridge, gate, or passage; that name alone does not add an intermediate structure or access rule. An explicit statement that no toll, payment, permission, stamp, or permit is required agrees with an open route carrying no access requirement.",
     "Calling a contradiction personal experience, uncertainty, hearsay, warning, or belief does not make it consistent with typed authority.",
-    "Set failedChecks to [] when verdict is accepted. When verdict is rejected, include each applicable safe check once: player_intent_unfulfilled when the proposal drops or leaves unresolved a material part of PLAYER_INTENT; possession_authority_missing for an untyped possession or custody change; obligation_authority_missing for an untyped debt, payment, or duty change; route_authority_missing for an unsupported route or access claim; possession_transform_identity_incomplete when a typed transformation leaves retained possession identity incomplete; other_mechanical_authority_mismatch only when none of the specific checks applies. Do not copy event summaries, proposal text, player text, actor names, location names, provider text, or the free-form reason into failedChecks.",
+    `APPLICABLE_REVIEW_FAILED_CHECKS=${JSON.stringify(applicableFailedChecks)}`,
+    "Set failedChecks to [] when verdict is accepted. When verdict is rejected, include each applicable safe check once and use only APPLICABLE_REVIEW_FAILED_CHECKS: player_intent_unfulfilled when the proposal drops or leaves unresolved a material part of PLAYER_INTENT; possession_authority_missing for an untyped possession or custody change; obligation_authority_missing for an untyped debt, payment, or duty change; route_authority_missing for an unsupported route or access claim; possession_transform_identity_incomplete when a typed transformation leaves retained possession identity incomplete; other_mechanical_authority_mismatch only when none of the specific checks applies. Do not copy event summaries, proposal text, player text, actor names, location names, provider text, or the free-form reason into failedChecks.",
     "Accept only when the proposal covers every material part of PLAYER_INTENT under RESOLUTION and every mechanically durable claim in each reviewed summary is entailed by the supplied typed effects and ROUTE_AUTHORITY. Explain only the verdict basis.",
     `Keep reason on one line and within ${CAMPAIGN_PLAY_LIMITS.text} characters.`,
     `OBLIGATION_AUTHORITY=${JSON.stringify(input.obligationAuthority)}`,
@@ -598,11 +617,18 @@ function createToolProposalSchema(
   });
 }
 
-function createToolMechanicalAuthorityReviewSchema() {
+function createToolMechanicalAuthorityReviewSchema(
+  failedCheckValues: readonly (typeof MECHANICAL_AUTHORITY_FAILED_CHECK_VALUES)[number][] =
+    MECHANICAL_AUTHORITY_FAILED_CHECK_VALUES,
+) {
+  const failedCheckSchema = z.enum(failedCheckValues as [
+    (typeof MECHANICAL_AUTHORITY_FAILED_CHECK_VALUES)[number],
+    ...(typeof MECHANICAL_AUTHORITY_FAILED_CHECK_VALUES)[number][],
+  ]);
   return z.object({
     verdict: toolEnum(["accepted", "rejected"] as const),
     reason: line(CAMPAIGN_PLAY_LIMITS.text),
-    failedChecks: z.array(mechanicalAuthorityFailedCheckSchema).min(0).max(5),
+    failedChecks: z.array(failedCheckSchema).min(0).max(5),
   }).strict().superRefine((review, context) => {
     const expectsFailedChecks = review.verdict === "rejected";
     if (expectsFailedChecks !== (review.failedChecks.length > 0)) {
@@ -2866,6 +2892,10 @@ function prompt(
       (check) => check.check === "mechanical_authority_rejected"
         && check.reviewFailedChecks.includes("possession_transform_identity_incomplete"),
     );
+    const hasPossessionAuthorityMissing = recoveryFeedback.failedChecks.some(
+      (check) => check.check === "mechanical_authority_rejected"
+        && check.reviewFailedChecks.includes("possession_authority_missing"),
+    );
     const hasObligationAuthorityMissing = recoveryFeedback.failedChecks.some(
       (check) => check.check === "mechanical_authority_rejected"
         && check.reviewFailedChecks.includes("obligation_authority_missing"),
@@ -2887,6 +2917,9 @@ function prompt(
         : []),
       ...(hasObligationAuthorityMissing
         ? ["For obligation_authority_missing, follow OBLIGATION_AUTHORITY exactly. If kind is none, remove every claim that a debt, payment, fee liability, duty balance, or completed bargain changed; keep only the non-binding offer, request, promise, quoted terms, refusal, counteroffer, accepted assignment, or future plan established by the action. If kind is incur_actor_obligation or pay_actor_obligation, emit the one exact permitted typed effect and match its parties, handles, unit, and amount in the public consequence. Do not invent a second obligation or payment."]
+        : []),
+      ...(hasPossessionAuthorityMissing
+        ? ["For possession_authority_missing, follow possessionEffectAuthority exactly. required means include one matching typed effect; permitted means include zero or one only when the committed response actually changes custody. For acquire with possessionHandle null, use one new-possession acquisition with a concrete name and matching summary; never substitute transform or spend. Make the public event describe the same item and custody change. If no item changes custody, omit the effect and keep the event to an offer, terms, refusal, or future plan without saying the item was acquired, given, handed over, spent, or transformed."]
         : []),
       ...(hasPossessionTransformIdentityIncomplete
         ? ["For possession_transform_identity_incomplete, name each transformed possession as the complete retained item or container after the transform. Preserve the source identity and include every material content or state added by the accepted action. Do not rely on summary to carry durable identity, and do not imply an untracked split or remainder."]
@@ -3090,6 +3123,8 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
             modelEvidence,
           });
         }
+        const applicableReviewFailedChecks = applicableMechanicalAuthorityFailedChecks(reviewInput);
+        const reviewSchema = createMechanicalAuthorityReviewSchema(applicableReviewFailedChecks);
         phase = "review";
         const reviewStarted = Date.now();
         let reviewed;
@@ -3097,8 +3132,8 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
           reviewed = await dependencies.generateObject({
             model: request.model,
             schema: toolMode
-              ? createToolMechanicalAuthorityReviewSchema()
-              : mechanicalAuthorityReviewSchema,
+              ? createToolMechanicalAuthorityReviewSchema(applicableReviewFailedChecks)
+              : reviewSchema,
             prompt: mechanicalAuthorityReviewPrompt(reviewInput),
             temperature: 0,
             maxOutputTokens: request.budget.maximumOutputTokens,
@@ -3168,7 +3203,7 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
         }
         const reviewObject = toolMode
           ? (() => {
-              const parsed = mechanicalAuthorityReviewSchema.safeParse(reviewed.object);
+              const parsed = reviewSchema.safeParse(reviewed.object);
               if (!parsed.success) {
                 toolContractFailure({ phase: "domain_mismatch", coordinate: "reviewer.domain" });
               }

@@ -1241,7 +1241,7 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
     expect(promptText).not.toContain("SENTINEL_RAW_PROPOSAL");
     expect(promptText).toContain([
       "GAME_MASTER_RECOVERY",
-      "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. For mechanical_authority_rejected, make every mechanically durable claim in each event summary agree with the typed resource effects and ROUTE_AUTHORITY. If no typed authority changes a possession, obligation, or route, keep the event summary non-mechanical. For route_authority_missing, remove or correct only unsupported campaign-route edge topology, state, waypoint, detour, or traversal requirements. Preserve grounded ordinary location descriptions and wayfinding that make none of those claims. Do not invent a location while repairing. All schema, authority, continuity, and Rulebook rules above still apply.",
+      "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. For mechanical_authority_rejected, make every mechanically durable claim in each event summary agree with the typed resource effects and ROUTE_AUTHORITY. If no typed authority changes a possession, obligation, or route, keep the event summary non-mechanical. For route_authority_missing, remove or correct only unsupported campaign-route edge topology, state, waypoint, detour, or traversal requirements. Preserve grounded ordinary location descriptions and wayfinding that make none of those claims. Do not invent a location while repairing. For possession_authority_missing, follow possessionEffectAuthority exactly. required means include one matching typed effect; permitted means include zero or one only when the committed response actually changes custody. For acquire with possessionHandle null, use one new-possession acquisition with a concrete name and matching summary; never substitute transform or spend. Make the public event describe the same item and custody change. If no item changes custody, omit the effect and keep the event to an offer, terms, refusal, or future plan without saying the item was acquired, given, handed over, spent, or transformed. All schema, authority, continuity, and Rulebook rules above still apply.",
       "RECOVERY_DIAGNOSTIC",
       JSON.stringify(mechanicalRecoveryFeedback),
       "END_RECOVERY_DIAGNOSTIC",
@@ -1646,7 +1646,7 @@ describe("Campaign Play Game Master", () => {
     expect(reviewSchemaJson).toContain("possession_authority_missing");
     expect(reviewSchemaJson).toContain("obligation_authority_missing");
     expect(reviewSchemaJson).toContain("route_authority_missing");
-    expect(reviewSchemaJson).toContain("possession_transform_identity_incomplete");
+    expect(reviewSchemaJson).not.toContain("possession_transform_identity_incomplete");
     expect(reviewSchemaJson).toContain("other_mechanical_authority_mismatch");
     expect(reviewSchemaJson).toContain("minItems");
     expect(reviewSchemaJson).toContain("maxItems");
@@ -1655,7 +1655,7 @@ describe("Campaign Play Game Master", () => {
     expect(String(reviewOptions.prompt)).toContain("unless typedResourceEffects contains the matching obligation effect");
     expect(String(reviewOptions.prompt)).toContain('"typedResourceEffects":[]');
     expect(String(reviewOptions.prompt)).toContain(
-      "Set failedChecks to [] when verdict is accepted. When verdict is rejected, include each applicable safe check once: player_intent_unfulfilled when the proposal drops or leaves unresolved a material part of PLAYER_INTENT; possession_authority_missing for an untyped possession or custody change; obligation_authority_missing for an untyped debt, payment, or duty change; route_authority_missing for an unsupported route or access claim; possession_transform_identity_incomplete when a typed transformation leaves retained possession identity incomplete; other_mechanical_authority_mismatch only when none of the specific checks applies. Do not copy event summaries, proposal text, player text, actor names, location names, provider text, or the free-form reason into failedChecks.",
+      "Set failedChecks to [] when verdict is accepted. When verdict is rejected, include each applicable safe check once and use only APPLICABLE_REVIEW_FAILED_CHECKS: player_intent_unfulfilled when the proposal drops or leaves unresolved a material part of PLAYER_INTENT; possession_authority_missing for an untyped possession or custody change; obligation_authority_missing for an untyped debt, payment, or duty change; route_authority_missing for an unsupported route or access claim; possession_transform_identity_incomplete when a typed transformation leaves retained possession identity incomplete; other_mechanical_authority_mismatch only when none of the specific checks applies. Do not copy event summaries, proposal text, player text, actor names, location names, provider text, or the free-form reason into failedChecks.",
     );
     expect(String(reviewOptions.prompt)).toContain(
       "Do not classify an ordinary location description or ordinary wayfinding as route_authority_missing unless the prose actually asserts a campaign route edge",
@@ -3680,6 +3680,83 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("put state, contents, provenance, and other details in summary");
     expect(String(options.prompt)).not.toContain("Use incur_actor_obligation for");
     expect(String(options.prompt)).not.toContain("Use pay_actor_obligation for");
+    const reviewOptions = generateObject.mock.calls[1]![0];
+    const reviewSchema = reviewOptions.schema as z.ZodType<unknown>;
+    expect(reviewSchema.safeParse({
+      verdict: "rejected",
+      reason: "The acquisition lacks typed authority.",
+      failedChecks: ["possession_authority_missing"],
+    }).success).toBe(true);
+    expect(reviewSchema.safeParse({
+      verdict: "rejected",
+      reason: "The transformation identity is incomplete.",
+      failedChecks: ["possession_transform_identity_incomplete"],
+    }).success).toBe(false);
+    expect(String(reviewOptions.prompt)).toContain(
+      'APPLICABLE_REVIEW_FAILED_CHECKS=["player_intent_unfulfilled","possession_authority_missing","obligation_authority_missing","route_authority_missing","other_mechanical_authority_mismatch"]',
+    );
+  });
+
+  it("recovers a missing possession authority check without turning a new acquisition into a transform", async () => {
+    const acquisitionRuling = ruling({
+      possessionEffectAuthority: {
+        kind: "adjust_actor_possession",
+        enforcement: "permitted",
+        operation: "acquire",
+        possessionHandle: null,
+        quantity: 1,
+        minimumResult: "success",
+      },
+    });
+    const acquisitionProposal = {
+      elapsedMinutes: 1,
+      effects: [{
+        kind: "adjust_actor_possession" as const,
+        operation: "acquire" as const,
+        actorHandle: "you",
+        possessionHandle: null,
+        name: "Sealed delivery packet",
+        quantity: 1,
+        summary: "Oren hands over one sealed delivery packet.",
+        affectedHandles: ["you", "guard"],
+      }, guardResponseEffect],
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: acquisitionProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The typed acquisition and public event describe the same custody change.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+    await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(),
+      ruling: acquisitionRuling,
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      recoveryFeedback: {
+        diagnostic: "game_master_semantic_validation_mismatch",
+        failedChecks: [{
+          check: "mechanical_authority_rejected",
+          reviewFailedChecks: ["possession_authority_missing"],
+        }],
+      },
+    });
+
+    const recoveryPrompt = String(generateObject.mock.calls[0]![0].prompt);
+    expect(recoveryPrompt).toContain(
+      "For possession_authority_missing, follow possessionEffectAuthority exactly.",
+    );
+    expect(recoveryPrompt).toContain(
+      "For acquire with possessionHandle null, use one new-possession acquisition with a concrete name and matching summary; never substitute transform or spend.",
+    );
   });
 
   it("requires independent semantic review for a pure possession transform", async () => {
@@ -3763,6 +3840,9 @@ describe("Campaign Play Game Master", () => {
     expect(reviewPrompt).toContain("Accept only when the name is a concise durable identity for the complete retained possession after the transform");
     expect(reviewPrompt).toContain("names only remaining empty containers while omitting what was collected or sealed inside the set");
     expect(reviewPrompt).toContain("relies on summary to carry material possession state missing from name");
+    expect(reviewPrompt).toContain(
+      'APPLICABLE_REVIEW_FAILED_CHECKS=["player_intent_unfulfilled","possession_authority_missing","obligation_authority_missing","route_authority_missing","possession_transform_identity_incomplete","other_mechanical_authority_mismatch"]',
+    );
   });
 
   it("compiles acquisition, spending, and transformation into typed Rulebook possession effects", () => {
