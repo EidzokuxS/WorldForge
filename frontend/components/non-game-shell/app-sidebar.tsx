@@ -204,7 +204,7 @@ export function AppSidebar({ pathname }: AppSidebarProps) {
         <Link href="/" className="wf-sidebar-mark">
           World<span className="text-[var(--ember)]">Forge</span>
         </Link>
-        <span className="wf-sidebar-ver">v0.7.2</span>
+        <span className="wf-sidebar-ver">v1.0.0</span>
       </div>
 
       <div className="wf-sidebar-campaign">

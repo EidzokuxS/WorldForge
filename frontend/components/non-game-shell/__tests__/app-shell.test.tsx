@@ -86,6 +86,7 @@ describe("AppShell", () => {
     expect(screen.getByRole("main")).toHaveTextContent("Settings body");
     expect(screen.getByRole("main").closest(".wf-v4-stage")).not.toBeNull();
     expect(document.querySelector(".wf-v4-rail")).not.toBeNull();
+    expect(screen.getByText("v1.0.0")).toBeInTheDocument();
   });
 
   it("keeps route title and header actions as explicit shell inputs", () => {

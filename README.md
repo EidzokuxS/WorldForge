@@ -109,7 +109,7 @@ The backend remembers where people are, what exists, what changed, what is priva
 
 ## Current state
 
-WorldForge is in active development.
+WorldForge 1.0 is released.
 
 The app already has:
 
@@ -126,7 +126,9 @@ The app already has:
 
 Active play uses `gameplay-cycle-runtime`. The old V1/V2 gameplay runtime paths are archived or removed from the active tree. Normal play needs no runtime-selection environment flags.
 
-This is still an early project with sharp edges. The goal is a long-running RPG sandbox that can take strange player choices seriously.
+Campaign Play 1.0 is qualified on Z.AI Coding Plan with `glm-5.3`. The release completed two fresh 60-action campaigns through the built UI: one in a newly generated world and one from a provenance clone. Persistence, reload, replay, and integrity checks passed in both campaigns.
+
+Other provider and model combinations remain configurable, but they are not part of the Campaign Play 1.0 support claim.
 
 ## Quick start
 
