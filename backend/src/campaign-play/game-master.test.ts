@@ -1239,13 +1239,18 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
     });
     const promptText = String(generateObject.mock.calls[0]![0].prompt);
     expect(promptText).not.toContain("SENTINEL_RAW_PROPOSAL");
-    expect(promptText).toContain([
-      "GAME_MASTER_RECOVERY",
-      "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. For mechanical_authority_rejected, make every mechanically durable claim in each event summary agree with the typed resource effects and ROUTE_AUTHORITY. If no typed authority changes a possession, obligation, or route, keep the event summary non-mechanical. For route_authority_missing, remove or correct only unsupported campaign-route edge topology, state, waypoint, detour, or traversal requirements. Preserve grounded ordinary location descriptions and wayfinding that make none of those claims. Do not invent a location while repairing. For possession_authority_missing, follow possessionEffectAuthority exactly. required means include one matching typed effect; permitted means include zero or one only when the committed response actually changes custody. For acquire with possessionHandle null, use one new-possession acquisition with a concrete name and matching summary; never substitute transform or spend. Make the public event describe the same item and custody change. If no item changes custody, omit the effect and keep the event to an offer, terms, refusal, or future plan without saying the item was acquired, given, handed over, spent, or transformed. All schema, authority, continuity, and Rulebook rules above still apply.",
-      "RECOVERY_DIAGNOSTIC",
-      JSON.stringify(mechanicalRecoveryFeedback),
-      "END_RECOVERY_DIAGNOSTIC",
-    ].join("\n"));
+    expect(promptText).toContain("GAME_MASTER_RECOVERY");
+    expect(promptText).toContain(
+      "For route_authority_missing, remove or correct only unsupported campaign-route edge topology",
+    );
+    expect(promptText).toContain(
+      "For possession_authority_missing, follow possessionEffectAuthority exactly.",
+    );
+    expect(promptText).toContain(
+      "Inspection and signing are valid completed non-custodial outcomes",
+    );
+    expect(promptText).toContain(JSON.stringify(mechanicalRecoveryFeedback));
+    expect(promptText).toContain("END_RECOVERY_DIAGNOSTIC");
     expect(promptText).not.toContain(
       "For possession_transform_identity_incomplete, name each transformed possession as the complete retained item or container after the transform. Preserve the source identity and include every material content or state added by the accepted action. Do not rely on summary to carry durable identity, and do not imply an untracked split or remainder.",
     );
@@ -2433,13 +2438,53 @@ describe("Campaign Play Game Master", () => {
     expect(unavailableSchema.safeParse(illicitUnavailable).success).toBe(false);
   });
 
+  it("normalizes outer tool-text whitespace before exact domain validation", async () => {
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({
+        object: toolTransport(1, [{
+          ...guardResponseEffect,
+          summary: " The guard answers. ",
+        }]),
+        trace: trace("tool_mode", undefined, "tool"),
+      })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The response changes no mechanical authority.",
+          failedChecks: [],
+        },
+        trace: trace("tool_mode", undefined, "tool"),
+      });
+
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget, structuredOutputMode: "tool",
+    });
+
+    expect(candidate.batch.commands.find((command) => command.kind === "record_world_event"))
+      .toMatchObject({ summary: "The guard answers." });
+  });
+
   it("distinguishes provider extraction, private decode, and domain mismatch without retaining raw content", async () => {
     const domainMismatch = toolTransport(1, [{
+      kind: "materialize_support_actor",
+      actorHandle: "introduced-support-actor",
+      name: "Sella\nRook",
+      summary: "The guard answers.",
+      goal: "Keep the ropes ready.",
+      motivation: "The quay needs safe lines.",
+      nextIntentKind: "wait",
+      nextAction: "",
+      observableTrace: "Fresh coils remain beside the post.",
+      cadenceMinutes: 5,
+    }, {
       kind: "record_world_event",
       eventClass: "dialogue",
-      performingActorHandle: "guard",
-      summary: " The guard answers. ",
-      affectedHandles: ["you", "guard", "introduced-support-actor"],
+      performingActorHandle: "introduced-support-actor",
+      summary: "The guard answers.",
+      affectedHandles: ["you", "introduced-support-actor"],
     }]);
     const cases = [
       {
@@ -3757,6 +3802,71 @@ describe("Campaign Play Game Master", () => {
     expect(recoveryPrompt).toContain(
       "For acquire with possessionHandle null, use one new-possession acquisition with a concrete name and matching summary; never substitute transform or spend.",
     );
+    expect(recoveryPrompt).toContain(
+      "Inspection and signing are valid completed non-custodial outcomes",
+    );
+    expect(recoveryPrompt).toContain(
+      "current holder shows or presents the item and retains custody",
+    );
+    const reviewPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    expect(reviewPrompt).toContain(
+      "A completed inspection or signature does not itself transfer custody.",
+    );
+    expect(reviewPrompt).toContain(
+      "accept that non-custodial outcome instead of inventing a possession transition",
+    );
+  });
+
+  it("completes inspection and signing without acquisition when the holder retains custody", async () => {
+    const inspectionRuling = ruling({
+      normalizedIntent: {
+        originalText: "Show me the receipt and sealed parcel, and I'll sign.",
+        source: "suggested",
+        choiceHandle: "choice-inspect-and-sign",
+        kind: "contact",
+        targets: [{ handle: "guard", kind: "actor" }],
+        method: "Inspect the receipt and parcel, then sign while the guard keeps them",
+        stakes: "Accept the work after verifying its documents",
+      },
+      possessionEffectAuthority: {
+        kind: "adjust_actor_possession",
+        enforcement: "permitted",
+        operation: "acquire",
+        possessionHandle: null,
+        quantity: 1,
+        minimumResult: "success",
+      },
+    });
+    const inspectionEvent = {
+      ...guardResponseEffect,
+      summary: "Oren shows the receipt and sealed parcel; the player inspects and signs them, and Oren retains custody.",
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({
+        object: { elapsedMinutes: 1, effects: [inspectionEvent] },
+        trace: trace(),
+      })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The inspection and signature complete without a custody change.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(), ruling: inspectionRuling, resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget,
+    });
+
+    expect(candidate.batch.commands.some((command) => command.kind === "adjust_actor_possession"))
+      .toBe(false);
+    expect(candidate.batch.commands.find((command) => command.kind === "record_world_event"))
+      .toMatchObject({ summary: inspectionEvent.summary });
+    expect(String(generateObject.mock.calls[1]![0].prompt)).toContain('"typedResourceEffects":[]');
   });
 
   it("requires independent semantic review for a pure possession transform", async () => {
