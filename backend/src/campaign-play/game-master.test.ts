@@ -892,6 +892,92 @@ describe("Campaign Play Game Master obligation authority prompt", () => {
     expect(promptText).not.toContain("SENTINEL_RAW_PROPOSAL");
     expect(promptText).not.toContain("SENTINEL_REVIEW_REASON");
   });
+
+  it("keeps player-authored settlement words out of mechanical review while preserving a real handoff", async () => {
+    const playerWords = "Pass it through, and I'm square with you for tonight.";
+    const handoffRuling = ruling({
+      normalizedIntent: {
+        originalText: playerWords,
+        source: "suggested",
+        choiceHandle: "choice-stamped-sheet",
+        kind: "contact",
+        targets: [{ handle: "guard", kind: "actor" }],
+        method: "Ask the current holder to pass over the stamped sheet",
+        stakes: "Take custody of the sheet without changing any debt or payment",
+      },
+      possessionEffectAuthority: {
+        kind: "adjust_actor_possession",
+        enforcement: "permitted",
+        operation: "acquire",
+        possessionHandle: null,
+        quantity: 1,
+        minimumResult: "success",
+      },
+      requiredObligationEffect: { kind: "none" },
+    });
+    const handoffProposal = {
+      elapsedMinutes: 1,
+      effects: [{
+        kind: "adjust_actor_possession" as const,
+        operation: "acquire" as const,
+        actorHandle: "you",
+        possessionHandle: null,
+        name: "Stamped passage sheet",
+        quantity: 1,
+        summary: "Oren passes the stamped sheet to the player, who takes custody.",
+        affectedHandles: ["you", "guard"],
+      }, {
+        kind: "record_world_event" as const,
+        eventClass: "dialogue" as const,
+        performingActorHandle: "guard",
+        summary: "Oren acknowledges the request without recording any payment or debt change.",
+        affectedHandles: ["you", "guard"],
+      }],
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: handoffProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The typed acquisition matches the handoff and no obligation changes.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+
+    await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(),
+      ruling: handoffRuling,
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      recoveryFeedback: {
+        diagnostic: "game_master_semantic_validation_mismatch",
+        failedChecks: [{
+          check: "mechanical_authority_rejected",
+          reviewFailedChecks: ["possession_authority_missing", "obligation_authority_missing"],
+        }],
+      },
+    });
+
+    const proposalPrompt = String(generateObject.mock.calls[0]![0].prompt);
+    const reviewPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    expect(proposalPrompt).toContain(
+      "completing that response changes custody and requires the matching adjust_actor_possession effect",
+    );
+    expect(proposalPrompt).toContain(
+      "player-authored words such as square, settled, paid, or fulfilled are inert intent text",
+    );
+    expect(reviewPrompt).toContain(
+      "Apply possession_authority_missing and obligation_authority_missing only to the proposal's event summaries and typed resource effects",
+    );
+    expect(reviewPrompt).not.toContain(playerWords);
+    expect(reviewPrompt).toContain("Ask the current holder to pass over the stamped sheet");
+  });
 });
 
 describe("Campaign Play Game Master repeated-dialogue recovery", () => {
@@ -3439,7 +3525,9 @@ describe("Campaign Play Game Master", () => {
     expect(generateObject).toHaveBeenCalledTimes(2);
     const reviewPrompt = String(generateObject.mock.calls[1]![0].prompt);
     expect(reviewPrompt).toContain(travelOnlyProposal.effects[1].summary);
-    expect(reviewPrompt).toContain('"originalText":"Try to reach South Harbor: harness trunk 4 down to the brazier"');
+    expect(reviewPrompt).not.toContain('"originalText":"Try to reach South Harbor: harness trunk 4 down to the brazier"');
+    expect(reviewPrompt).toContain('"method":"Carry trunk 4 along the passage and deliver it to the brazier"');
+    expect(reviewPrompt).toContain('"stakes":"Reach South Harbor with trunk 4 delivered"');
     expect(reviewPrompt).toContain('"result":"success"');
     expect(reviewPrompt).toContain("travel while dropping an additional handling, delivery, contact, inspection, tool, target, or explicit exclusion");
 
@@ -3946,7 +4034,9 @@ describe("Campaign Play Game Master", () => {
     expect(generateObject).toHaveBeenCalledTimes(2);
     const reviewPrompt = String(generateObject.mock.calls[1]![0].prompt);
     expect(reviewPrompt).toContain('"sourcePossessions":[{"handle":"specimen-jars","kind":"possession","summary":"Specimen jars: 1"}]');
-    expect(reviewPrompt).toContain('"originalText":"Seal one loose corrosion flake in the specimen jars."');
+    expect(reviewPrompt).not.toContain('"originalText":"Seal one loose corrosion flake in the specimen jars."');
+    expect(reviewPrompt).toContain('"method":"Seal one corrosion flake in one jar while retaining the whole set"');
+    expect(reviewPrompt).toContain('"stakes":"Keep the sealed sample and remaining empty jars together"');
     expect(reviewPrompt).toContain("Accept only when the name is a concise durable identity for the complete retained possession after the transform");
     expect(reviewPrompt).toContain("names only remaining empty containers while omitting what was collected or sealed inside the set");
     expect(reviewPrompt).toContain("relies on summary to carry material possession state missing from name");
