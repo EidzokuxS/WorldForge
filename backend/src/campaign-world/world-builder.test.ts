@@ -7,23 +7,57 @@ import {
   rememberStructuredOutputModelMetadata,
 } from "../ai/structured-output-capabilities.js";
 import {
+  getSafeGenerateObjectSchemaDiagnostics,
   safeGenerateObject,
   type SafeGenerateTrace,
 } from "../ai/generate-object-safe.js";
 import type {
+  WorldCastDetailBatchPacket,
+  WorldCastDetailPacket,
   WorldCastPacket,
+  WorldCastSkeletonPacket,
+  WorldCastSkeletonTransportPacket,
   WorldConnectionsPacket,
+  WorldConnectionsTransportPacket,
   WorldFramePacket,
 } from "./contracts.js";
-import { worldFramePacketSchema } from "./contracts.js";
+import {
+  createWorldCastDetailBatchPacketSchema,
+  createWorldCastDetailPacketSchema,
+  createWorldCastPacketSchema,
+  createWorldCastSkeletonPacketSchema,
+  createWorldCastSkeletonTransportPacketSchema,
+  createWorldConnectionsPacketSchema,
+  createWorldConnectionsTransportPacketSchema,
+  decodeWorldCastSkeletonTransportPacket,
+  worldFramePacketSchema,
+} from "./contracts.js";
 import {
   CampaignWorldBuilderError,
+  CampaignWorldStageTimeoutError,
   createCampaignWorldStageEvidence,
   createCampaignWorldBuilder,
+  composeWorldConnectionsPacketFromTransport,
+  composeWorldCastPacketFromTransport,
+  decodeWorldFrameAndCastSkeletonToolPacket,
   decodeWorldFrameToolPacket,
+  splitWorldCastDetailActorIndices,
+  worldFrameAndCastSkeletonToolPacketSchema,
   worldFrameToolPacketSchema,
   type WorldFrameToolPacket,
+  type WorldFrameAndCastSkeletonToolPacket,
 } from "./world-builder.js";
+
+const { mockGenerateText } = vi.hoisted(() => ({
+  mockGenerateText: vi.fn(),
+}));
+
+vi.mock("../ai/raindrop-workshop.js", () => ({
+  generateText: (...args: unknown[]) => mockGenerateText(...args),
+  streamText: (...args: unknown[]) => {
+    throw new Error(`streamText is not expected in this test: ${String(args.length)}`);
+  },
+}));
 
 function sourceFixture(withDna: boolean): CampaignWorldSource {
   return {
@@ -158,17 +192,15 @@ function toolFramePacket(): WorldFrameToolPacket {
     worldSummary: frame.worldSummary,
     startingMacroIndex: macroLocations.findIndex((location) => location.isStarting),
     macroLocations: macroLocations.map((location) => ({
-      locationKey: location.locationRef.slice("location:".length),
       name: location.name,
       description: location.description,
-      tags: [...location.tags],
+      tags: [...location.tags, "world"],
     })),
     persistentLocations: persistentLocations.map((location) => ({
-      locationKey: location.locationRef.slice("location:".length),
       name: location.name,
       description: location.description,
       parentMacroIndex: macroIndexByRef.get(location.parentLocationRef!)!,
-      tags: [...location.tags],
+      tags: [...location.tags, "scene"],
     })),
     routes: frame.routes.map((route) => ({
       fromPersistentIndex: persistentIndexByRef.get(route.fromLocationRef)!,
@@ -223,6 +255,8 @@ function castPacket(): WorldCastPacket {
       },
       { actorRef: "actor:niko-salt", kind: "person", controller: "agent", role: "background", name: "Niko Salt", summary: "A dock medic who hears the crews' private fears.", traits: ["steady"], tags: ["medic"] },
       { actorRef: "actor:rhea-quill", kind: "person", controller: "agent", role: "key", name: "Rhea Quill", summary: "A route assessor who suspects the storms are directed.", traits: ["skeptical"], tags: ["assessor"] },
+      { actorRef: "actor:tavi-reed", kind: "person", controller: "agent", role: "key", name: "Tavi Reed", summary: "A tide cartographer who compares routes against old reef charts.", traits: ["restless"], tags: ["cartographer"] },
+      { actorRef: "actor:uma-vale", kind: "person", controller: "agent", role: "background", name: "Uma Vale", summary: "A lantern keeper who notices which docks go dark first.", traits: ["watchful"], tags: ["lanterns"] },
     ],
     goals: [
       { actorRef: "actor:mara-venn", objective: "Map the next route change.", motivation: "Keep North Harbor supplied.", horizon: "immediate", priority: 5, status: "active" },
@@ -231,6 +265,8 @@ function castPacket(): WorldCastPacket {
       { actorRef: "actor:ilya-venn", objective: "Recover the missing passage register.", motivation: "Prove the harbor records were altered.", horizon: "ongoing", priority: 4, status: "active" },
       { actorRef: "actor:niko-salt", objective: "Keep exhausted crews working.", motivation: "Prevent another dockside death.", horizon: "immediate", priority: 3, status: "active" },
       { actorRef: "actor:rhea-quill", objective: "Identify who redirects storm signals.", motivation: "Restore safe crossings before eclipse.", horizon: "ongoing", priority: 5, status: "active" },
+      { actorRef: "actor:tavi-reed", objective: "Compare the new route failures with the old reef charts.", motivation: "Find a safe crossing before the next storm.", horizon: "ongoing", priority: 4, status: "active" },
+      { actorRef: "actor:uma-vale", objective: "Track which lanterns fail during the false storms.", motivation: "Keep the night crossings visible.", horizon: "immediate", priority: 3, status: "active" },
     ],
     placements: [
       { actorRef: "actor:mara-venn", locationRef: "location:north-pier", placementKind: "present" },
@@ -239,6 +275,8 @@ function castPacket(): WorldCastPacket {
       { actorRef: "actor:ilya-venn", locationRef: "location:north-market", placementKind: "present" },
       { actorRef: "actor:niko-salt", locationRef: "location:glass-garden", placementKind: "present" },
       { actorRef: "actor:rhea-quill", locationRef: "location:bell-tower", placementKind: "present" },
+      { actorRef: "actor:tavi-reed", locationRef: "location:north-market", placementKind: "present" },
+      { actorRef: "actor:uma-vale", locationRef: "location:bell-quay", placementKind: "present" },
     ],
   };
 }
@@ -251,6 +289,8 @@ function connectionsPacket(): WorldConnectionsPacket {
       { sourceActorRef: "actor:sel-bell", targetActorRef: "actor:ilya-venn", relationType: "rivalry", summary: "Sel disputes Ilya's storm records.", intensity: 2 },
       { sourceActorRef: "actor:ilya-venn", targetActorRef: "actor:niko-salt", relationType: "association", summary: "Ilya trusts Niko with copied records.", intensity: 3 },
       { sourceActorRef: "actor:niko-salt", targetActorRef: "actor:rhea-quill", relationType: "dependency", summary: "Niko needs Rhea to keep relief crossings open.", intensity: 4 },
+      { sourceActorRef: "actor:tavi-reed", targetActorRef: "actor:uma-vale", relationType: "association", summary: "Tavi checks Uma's lantern observations against the reef charts.", intensity: 3 },
+      { sourceActorRef: "actor:uma-vale", targetActorRef: "actor:tavi-reed", relationType: "dependency", summary: "Uma relies on Tavi's charts to identify the safest lit crossing.", intensity: 3 },
     ],
     pressures: [
       {
@@ -258,7 +298,7 @@ function connectionsPacket(): WorldConnectionsPacket {
         description: "Safe sea lanes close earlier after every eclipse.",
         trajectory: "North Harbor loses supply access within two route cycles.",
         urgency: 5,
-        actorRefs: ["actor:mara-venn", "actor:ilya-venn", "actor:rhea-quill"],
+        actorRefs: ["actor:mara-venn", "actor:oren-tide", "actor:ilya-venn", "actor:rhea-quill"],
         locationRefs: ["location:north-pier"],
       },
       {
@@ -272,6 +312,274 @@ function connectionsPacket(): WorldConnectionsPacket {
     ],
   };
 }
+
+function skeletonPacket(): WorldCastSkeletonPacket {
+  const frame = framePacket();
+  const persistentLocations = frame.locations.filter((location) =>
+    location.kind === "persistent_sublocation"
+  );
+  const cast = castPacket();
+  return {
+    actors: cast.actors.map((actor, index) => {
+      const placement = cast.placements.find((entry) =>
+        entry.actorRef === actor.actorRef && entry.placementKind === "present"
+      );
+      const presentLocationIndex = persistentLocations.findIndex((location) =>
+        location.locationRef === placement?.locationRef
+      );
+      const goal = cast.goals.find((entry) => entry.actorRef === actor.actorRef)!;
+      return {
+        name: actor.name,
+        role: actor.role,
+        summary: actor.summary,
+        presentLocationIndex,
+        homeLocationIndex: null,
+        objective: goal.objective,
+      };
+    }),
+  };
+}
+
+function skeletonTransportPacket(): WorldCastSkeletonTransportPacket {
+  const actors = skeletonPacket().actors;
+  const ordinary = (actor: WorldCastSkeletonPacket["actors"][number]) => ({
+    name: actor.name,
+    role: actor.role,
+    summary: actor.summary,
+    presentLocationIndex: actor.presentLocationIndex,
+    homeLocationIndex: actor.homeLocationIndex ?? -1,
+    objective: actor.objective,
+  });
+  const anchor = (actor: WorldCastSkeletonPacket["actors"][number]) => ({
+    name: actor.name,
+    role: actor.role,
+    summary: actor.summary,
+    homeLocationIndex: actor.homeLocationIndex ?? -1,
+    objective: actor.objective,
+  });
+  return {
+    keyActorOne: { ...ordinary(actors[0]!), role: "key" },
+    keyActorTwo: { ...ordinary(actors[5]!), role: "key" },
+    startingSupport: { ...anchor(actors[1]!), role: "support" },
+    supportActor: { ...ordinary(actors[2]!), role: "support" },
+    remoteBackground: { ...anchor(actors[3]!), role: "background" },
+    backgroundActor: { ...ordinary(actors[4]!), role: "background" },
+    otherActorOne: ordinary(actors[6]!),
+    otherActorTwo: ordinary(actors[7]!),
+  };
+}
+
+function fixedSlotSkeletonPacket(): WorldCastSkeletonPacket {
+  return decodeWorldCastSkeletonTransportPacket(framePacket(), skeletonTransportPacket());
+}
+
+function detailPacket(): WorldCastDetailPacket {
+  const cast = castPacket();
+  return {
+    actors: cast.actors.map((actor, actorIndex) => {
+      const goal = cast.goals.find((entry) => entry.actorRef === actor.actorRef)!;
+      return {
+        actorIndex,
+        traits: [...actor.traits],
+        motivation: goal.motivation,
+        horizon: goal.horizon,
+        priority: goal.priority,
+        tags: [...actor.tags],
+        additionalGoals: [],
+      };
+    }),
+  };
+}
+
+function detailBatchPacket(globalActorIndices: readonly number[]): WorldCastDetailBatchPacket {
+  const detail = detailPacket();
+  return {
+    actors: globalActorIndices.map((actorIndex, detailSlotIndex) => {
+      const { actorIndex: _globalActorIndex, ...fields } = detail.actors[actorIndex]!;
+      return { detailSlotIndex, ...fields };
+    }),
+  };
+}
+
+function toolDetailBatchPacket(globalActorIndices: readonly number[]): WorldCastDetailBatchPacket {
+  const detailActors = detailPacket().actors;
+  return {
+    actors: globalActorIndices.map((actorIndex, detailSlotIndex) => {
+      const { actorIndex: _globalActorIndex, ...fields } = detailActors[actorIndex]!;
+      return { detailSlotIndex, ...fields };
+    }),
+  };
+}
+
+function connectionsTransportPacket(): WorldConnectionsTransportPacket {
+  const frame = framePacket();
+  const cast = castPacket();
+  const persistentLocations = frame.locations.filter((location) =>
+    location.kind === "persistent_sublocation"
+  );
+  const fixedActorRefs = [
+    cast.actors[0]!.actorRef,
+    cast.actors[5]!.actorRef,
+    cast.actors[1]!.actorRef,
+    cast.actors[2]!.actorRef,
+    cast.actors[3]!.actorRef,
+    cast.actors[4]!.actorRef,
+    cast.actors[6]!.actorRef,
+    cast.actors[7]!.actorRef,
+  ];
+  const actorIndexByRef = new Map(fixedActorRefs.map((actorRef, index) => [actorRef, index]));
+  const locationIndexByRef = new Map(
+    persistentLocations.map((location, index) => [location.locationRef, index]),
+  );
+  const connections = connectionsPacket();
+  const semanticRelations = [
+    ...connections.relations,
+    {
+      sourceActorRef: "actor:rhea-quill",
+      targetActorRef: "actor:mara-venn",
+      relationType: "association" as const,
+      summary: "Rhea needs Mara's route judgment.",
+      intensity: 3,
+    },
+  ];
+  return {
+    relations: semanticRelations.map((relation) => {
+      const relationSlotIndex = actorIndexByRef.get(relation.sourceActorRef)!;
+      const targetActorIndex = actorIndexByRef.get(relation.targetActorRef)!;
+      return {
+        relationSlotIndex,
+        targetActorIndex,
+        relationType: relation.relationType,
+        intensity: relation.intensity,
+      };
+    }),
+    pressures: [
+      ...connections.pressures,
+      {
+        name: "Tide Ledger",
+        description: "Route records disagree after the latest eclipse.",
+        trajectory: "Couriers lose confidence in the next crossing.",
+        urgency: 4,
+        actorRefs: ["actor:rhea-quill"],
+        locationRefs: ["location:glass-garden"],
+      },
+    ].map((pressure) => ({
+      name: pressure.name,
+      description: pressure.description,
+      trajectory: pressure.trajectory,
+      urgency: pressure.urgency,
+      actorIndices: pressure.actorRefs.map((ref) => actorIndexByRef.get(ref)!),
+      locationIndices: pressure.locationRefs.map((ref) => locationIndexByRef.get(ref)!),
+    })),
+  };
+}
+
+function toolConnectionsTransportPacket(): WorldConnectionsTransportPacket {
+  const base = connectionsTransportPacket();
+  return {
+    ...base,
+    pressures: [
+      {
+        ...base.pressures[0]!,
+        actorIndices: [0, 2, 4, 1],
+        locationIndices: [0],
+      },
+      {
+        ...base.pressures[1]!,
+        actorIndices: [3, 5],
+        locationIndices: [4],
+      },
+      {
+        ...base.pressures[2]!,
+        actorIndices: [1],
+        locationIndices: [3],
+      },
+    ],
+  };
+}
+
+describe("Campaign World connections transport", () => {
+  it("maps fixed relation slots and direct target indices to canonical actor references", () => {
+    const frame = framePacket();
+    const skeleton = fixedSlotSkeletonPacket();
+    const cast = composeWorldCastPacketFromTransport(frame, skeleton, detailPacket());
+    const transport = connectionsTransportPacket();
+    const composed = composeWorldConnectionsPacketFromTransport(frame, skeleton, transport);
+
+    expect(composed.relations).toHaveLength(cast.actors.length);
+    expect(composed.relations).toEqual(transport.relations.map((relation, relationIndex) => {
+      const sourceActorIndex = relation.relationSlotIndex;
+      const targetActorIndex = relation.targetActorIndex;
+      return {
+        sourceActorRef: cast.actors[sourceActorIndex]!.actorRef,
+        targetActorRef: cast.actors[targetActorIndex]!.actorRef,
+        relationType: relation.relationType,
+        summary: [
+          "Mara Venn answers to Ilya Venn's authority.",
+          "Oren Tide depends on Mara Venn.",
+          "Sel Bell and Ilya Venn are active rivals.",
+          "Ilya Venn is associated with Niko Salt.",
+          "Niko Salt depends on Rhea Quill.",
+          "Tavi Reed is associated with Uma Vale.",
+          "Uma Vale depends on Tavi Reed.",
+          "Rhea Quill is associated with Mara Venn.",
+        ][relationIndex]!,
+        intensity: relation.intensity,
+      };
+    }));
+    expect(composed.relations.every((relation) =>
+      relation.sourceActorRef !== relation.targetActorRef
+    )).toBe(true);
+    expect(createWorldConnectionsPacketSchema(frame, cast).safeParse(composed).success).toBe(true);
+  });
+
+  it("builds canonical relation summaries for every relation type from accepted actor names", () => {
+    const frame = framePacket();
+    const skeleton = fixedSlotSkeletonPacket();
+    const namedSkeleton: WorldCastSkeletonPacket = {
+      ...skeleton,
+      actors: skeleton.actors.map((actor, index) =>
+        index === 0
+          ? { ...actor, name: "Aldous Fenwick" }
+          : index === 1
+            ? { ...actor, name: "Griet Vandam" }
+            : actor
+      ),
+    };
+    const relationTypes = [
+      "alliance",
+      "rivalry",
+      "authority",
+      "dependency",
+      "kinship",
+      "association",
+      "hostility",
+      "alliance",
+    ] as const;
+    const transport = {
+      ...connectionsTransportPacket(),
+      relations: namedSkeleton.actors.map((_, relationSlotIndex) => ({
+        relationSlotIndex,
+        targetActorIndex: relationSlotIndex === 0 ? 1 : 0,
+        relationType: relationTypes[relationSlotIndex],
+        intensity: 1,
+      })),
+    } satisfies WorldConnectionsTransportPacket;
+
+    const composed = composeWorldConnectionsPacketFromTransport(frame, namedSkeleton, transport);
+
+    expect(composed.relations.map((relation) => relation.summary)).toEqual([
+      "Aldous Fenwick and Griet Vandam work as allies.",
+      "Griet Vandam and Aldous Fenwick are active rivals.",
+      "Oren Tide answers to Aldous Fenwick's authority.",
+      "Sel Bell depends on Aldous Fenwick.",
+      "Ilya Venn and Aldous Fenwick are kin.",
+      "Niko Salt is associated with Aldous Fenwick.",
+      "Tavi Reed is hostile toward Aldous Fenwick.",
+      "Uma Vale and Aldous Fenwick work as allies.",
+    ]);
+  });
+});
 
 function structuredModel(): LanguageModel {
   const model = {} as LanguageModel;
@@ -360,23 +668,32 @@ function successfulGenerateMock() {
   return vi
     .fn()
     .mockResolvedValueOnce({ object: framePacket(), trace: trace() })
-    .mockResolvedValueOnce({ object: castPacket(), trace: trace() })
-    .mockResolvedValueOnce({ object: connectionsPacket(), trace: trace() });
+    .mockResolvedValueOnce({ object: skeletonTransportPacket(), trace: trace() })
+    .mockResolvedValueOnce({ object: detailBatchPacket([0, 2, 4, 6]), trace: trace() })
+    .mockResolvedValueOnce({ object: detailBatchPacket([1, 3, 5, 7]), trace: trace() })
+    .mockResolvedValueOnce({ object: connectionsTransportPacket(), trace: trace() });
 }
 
 function successfulToolGenerateMock() {
   return vi
     .fn()
     .mockResolvedValueOnce({
-      object: toolFramePacket(),
+      object: {
+        ...toolFramePacket(),
+        ...combinedSkeletonTransportPacket(),
+      } satisfies WorldFrameAndCastSkeletonToolPacket,
       trace: trace("tool_mode", "tool_mode"),
     })
     .mockResolvedValueOnce({
-      object: castPacket(),
+      object: toolDetailBatchPacket([0, 2, 4, 6]),
       trace: trace("tool_mode", "tool_mode"),
     })
     .mockResolvedValueOnce({
-      object: connectionsPacket(),
+      object: toolDetailBatchPacket([1, 3, 5, 7]),
+      trace: trace("tool_mode", "tool_mode"),
+    })
+    .mockResolvedValueOnce({
+      object: toolConnectionsTransportPacket(),
       trace: trace("tool_mode", "tool_mode"),
     });
 }
@@ -388,11 +705,42 @@ function sequentialIdFactory(): () => string {
 
 type ToolFrameMutation = (packet: WorldFrameToolPacket) => void;
 
+type TestGenerateOptions = {
+  prompt: string;
+  abortSignal?: AbortSignal;
+  [key: string]: unknown;
+};
+
 function mutableToolFramePacket(): WorldFrameToolPacket {
   const packet = JSON.parse(JSON.stringify(toolFramePacket())) as WorldFrameToolPacket;
   packet.macroLocations[0]!.name = "MODEL_PRIVATE_LOCATION_NAME";
   packet.macroLocations[0]!.description = "MODEL_PRIVATE_DESCRIPTION";
-  packet.macroLocations[0]!.locationKey = "model-private-key";
+  return packet;
+}
+
+function combinedToolPacket(): WorldFrameAndCastSkeletonToolPacket {
+  return {
+    ...toolFramePacket(),
+    ...combinedSkeletonTransportPacket(),
+  };
+}
+
+function combinedSkeletonTransportPacket(): WorldCastSkeletonTransportPacket {
+  return skeletonTransportPacket();
+}
+
+function mutableCombinedToolPacket(): WorldFrameAndCastSkeletonToolPacket {
+  const packet = JSON.parse(JSON.stringify(combinedToolPacket())) as WorldFrameAndCastSkeletonToolPacket;
+  packet.macroLocations[0]!.name = "MODEL_PRIVATE_LOCATION_NAME";
+  packet.macroLocations[0]!.description = "MODEL_PRIVATE_DESCRIPTION";
+  return packet;
+}
+
+function combinedToolPacketForStartingMacro(
+  startingMacroIndex: 0 | 1 | 2,
+): WorldFrameAndCastSkeletonToolPacket {
+  const packet = JSON.parse(JSON.stringify(combinedToolPacket())) as WorldFrameAndCastSkeletonToolPacket;
+  packet.startingMacroIndex = startingMacroIndex;
   return packet;
 }
 
@@ -404,15 +752,328 @@ function recoveryIssuesFromPrompt(prompt: string): Array<Record<string, unknown>
   return JSON.parse(prompt.slice(start + "SAFE_ISSUES\n".length, end)) as Array<Record<string, unknown>>;
 }
 
+async function productionConnectionsSafeGenerateError(
+  schema: z.ZodType<WorldConnectionsTransportPacket>,
+  input: unknown,
+): Promise<unknown> {
+  mockGenerateText.mockReset();
+  mockGenerateText.mockResolvedValueOnce({
+    text: "",
+    finishReason: "tool-calls",
+    toolCalls: [{
+      type: "tool-call",
+      toolName: "structured_output",
+      invalid: true,
+      input,
+    }],
+  });
+
+  let captured: unknown;
+  try {
+    await safeGenerateObject({
+      model: toolStructuredModel(),
+      schema,
+      prompt: "Return the world-connections packet.",
+      mode: "tool",
+      retries: 1,
+      allowRepair: false,
+      allowTextFallback: false,
+      strictSchema: true,
+    });
+  } catch (error) {
+    captured = error;
+  }
+  expect(captured).toBeDefined();
+  expect(getSafeGenerateObjectSchemaDiagnostics(captured)).toMatchObject({
+    schemaParseOutcome: "invalid",
+    schemaIssueCount: expect.any(Number),
+    schemaIssues: expect.any(Array),
+  });
+  return captured;
+}
+
+async function productionCastSafeGenerateError(
+  schema: z.ZodType<WorldCastDetailBatchPacket>,
+  input: unknown,
+): Promise<unknown> {
+  mockGenerateText.mockReset();
+  mockGenerateText.mockResolvedValueOnce({
+    text: "",
+    finishReason: "tool-calls",
+    toolCalls: [{
+      type: "tool-call",
+      toolName: "structured_output",
+      invalid: true,
+      input,
+    }],
+  });
+
+  let captured: unknown;
+  try {
+    await safeGenerateObject({
+      model: toolStructuredModel(),
+      schema,
+      prompt: "Return the world-cast packet.",
+      mode: "tool",
+      retries: 1,
+      allowRepair: false,
+      allowTextFallback: false,
+      strictSchema: true,
+    });
+  } catch (error) {
+    captured = error;
+  }
+  expect(captured).toBeDefined();
+  expect(getSafeGenerateObjectSchemaDiagnostics(captured)).toMatchObject({
+    schemaParseOutcome: "invalid",
+    schemaIssueCount: expect.any(Number),
+    schemaIssues: expect.any(Array),
+  });
+  return captured;
+}
+
+async function productionCastSkeletonSafeGenerateError(
+  schema: z.ZodType<WorldCastSkeletonTransportPacket>,
+  input: unknown,
+): Promise<unknown> {
+  mockGenerateText.mockReset();
+  mockGenerateText.mockResolvedValueOnce({
+    text: "",
+    finishReason: "tool-calls",
+    toolCalls: [{
+      type: "tool-call",
+      toolName: "structured_output",
+      invalid: true,
+      input,
+    }],
+  });
+
+  let captured: unknown;
+  try {
+    await safeGenerateObject({
+      model: toolStructuredModel(),
+      schema,
+      prompt: "Return the world-cast skeleton packet.",
+      mode: "tool",
+      retries: 1,
+      allowRepair: false,
+      allowTextFallback: false,
+      strictSchema: true,
+    });
+  } catch (error) {
+    captured = error;
+  }
+  expect(captured).toBeDefined();
+  expect(getSafeGenerateObjectSchemaDiagnostics(captured)).toMatchObject({
+    schemaParseOutcome: "invalid",
+    schemaIssueCount: expect.any(Number),
+    schemaIssues: expect.any(Array),
+  });
+  return captured;
+}
+
 function stageErrorCause(error: unknown): Record<string, unknown> {
   return (error as { cause?: Record<string, unknown> }).cause ?? {};
 }
 
 describe("Campaign World staged builder", () => {
+  it("gives the frame wave up to 70 seconds and does not retry after its deadline", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    try {
+      const abortSignals: AbortSignal[] = [];
+      const generateMock = vi.fn(async (options: TestGenerateOptions) => {
+        abortSignals.push(options.abortSignal!);
+        return new Promise<never>(() => {});
+      });
+      const builder = createCampaignWorldBuilder({
+        generateObject: generateMock as unknown as typeof safeGenerateObject,
+      });
+      const buildPromise = builder.build({
+        source: sourceFixture(false),
+        model: structuredModel(),
+        temperature: 0.7,
+        maxOutputTokens: 8_000,
+      });
+      const rejectionPromise = buildPromise.catch((error: unknown) => error);
+      for (let tick = 0; tick < 10 && generateMock.mock.calls.length < 1; tick += 1) {
+        await Promise.resolve();
+      }
+      expect(generateMock).toHaveBeenCalledTimes(1);
+      expect(generateMock.mock.calls[0]![0].timeout).toEqual({ totalMs: 70_000 });
+      expect(abortSignals[0]!.aborted).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(69_999);
+      expect(abortSignals[0]!.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+
+      const rejection = await rejectionPromise;
+      expect(rejection).toMatchObject({
+        code: "model_contract_failed",
+        stage: "world_frame",
+        stageEvidence: [{ stage: "world_frame", totalAttempts: 1, retryUsed: false }],
+      });
+      expect(rejection).toBeInstanceOf(CampaignWorldBuilderError);
+      expect(stageErrorCause(rejection)).toBeInstanceOf(CampaignWorldStageTimeoutError);
+      expect(generateMock).toHaveBeenCalledTimes(1);
+      expect(abortSignals[0]!.aborted).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("starts a fresh 70-second skeleton wave after frame completion", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    try {
+      let resolveFrame!: (value: { object: WorldFramePacket; trace: SafeGenerateTrace }) => void;
+      const frameGate = new Promise<{ object: WorldFramePacket; trace: SafeGenerateTrace }>((resolve) => {
+        resolveFrame = resolve;
+      });
+      const skeletonSignals: AbortSignal[] = [];
+      const generateMock = vi.fn(async (options: TestGenerateOptions) => {
+        if (options.prompt.startsWith("You design the Campaign World frame.")) {
+          return frameGate;
+        }
+        if (options.prompt.startsWith("You design the compact starting Campaign World cast skeleton.")) {
+          skeletonSignals.push(options.abortSignal!);
+          return new Promise<never>(() => {});
+        }
+        throw new Error(`Unexpected Campaign World prompt: ${options.prompt.slice(0, 80)}`);
+      });
+      const builder = createCampaignWorldBuilder({
+        generateObject: generateMock as unknown as typeof safeGenerateObject,
+      });
+      const buildPromise = builder.build({
+        source: sourceFixture(false),
+        model: structuredModel(),
+        temperature: 0.7,
+        maxOutputTokens: 8_000,
+      });
+      const rejectionPromise = buildPromise.catch((error: unknown) => error);
+      for (let tick = 0; tick < 10 && generateMock.mock.calls.length < 1; tick += 1) {
+        await Promise.resolve();
+      }
+      expect(generateMock).toHaveBeenCalledTimes(1);
+      expect(generateMock.mock.calls[0]![0].timeout).toEqual({ totalMs: 70_000 });
+
+      await vi.advanceTimersByTimeAsync(27_000);
+      resolveFrame({ object: framePacket(), trace: trace() });
+      for (let tick = 0; tick < 10 && generateMock.mock.calls.length < 2; tick += 1) {
+        await Promise.resolve();
+      }
+      expect(generateMock).toHaveBeenCalledTimes(2);
+      expect(generateMock.mock.calls[1]![0].timeout).toEqual({ totalMs: 70_000 });
+      expect(skeletonSignals[0]!.aborted).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(Date.now()).toBe(87_000);
+      expect(skeletonSignals[0]!.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const rejection = await rejectionPromise;
+      expect(rejection).toMatchObject({
+        code: "model_contract_failed",
+        stage: "world_cast",
+        stageEvidence: [
+          { stage: "world_frame", totalAttempts: 1 },
+          { stage: "world_cast", totalAttempts: 1, retryUsed: false },
+        ],
+      });
+      expect(stageErrorCause(rejection)).toBeInstanceOf(CampaignWorldStageTimeoutError);
+      expect(generateMock).toHaveBeenCalledTimes(2);
+      expect(skeletonSignals[0]!.aborted).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the downstream branch wave alive for a 65.577-second call", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    try {
+      const connectionGate = (() => {
+        let resolve!: (value: {
+          object: WorldConnectionsTransportPacket;
+          trace: SafeGenerateTrace;
+        }) => void;
+        const promise = new Promise<{
+          object: WorldConnectionsTransportPacket;
+          trace: SafeGenerateTrace;
+        }>((resolvePromise) => {
+          resolve = resolvePromise;
+        });
+        return { promise, resolve };
+      })();
+      const branchSignals: AbortSignal[] = [];
+      const branchTimeouts: number[] = [];
+      const generateMock = vi.fn(async (options: TestGenerateOptions) => {
+        if (options.prompt.startsWith("You design the Campaign World frame.")) {
+          return { object: framePacket(), trace: trace() };
+        }
+        if (options.prompt.startsWith("You design the compact starting Campaign World cast skeleton.")) {
+          return { object: skeletonTransportPacket(), trace: trace() };
+        }
+        if (options.prompt.startsWith(
+          "You complete one assigned detail batch for an accepted Campaign World cast skeleton.",
+        )) {
+          branchSignals.push(options.abortSignal!);
+          branchTimeouts.push((options.timeout as { totalMs: number }).totalMs);
+          return {
+            object: options.prompt.includes('"actorIndex":0')
+              ? detailBatchPacket([0, 2, 4, 6])
+              : detailBatchPacket([1, 3, 5, 7]),
+            trace: trace(),
+          };
+        }
+        if (options.prompt.startsWith(
+          "You design Campaign World relations and starting pressures from an accepted cast skeleton.",
+        )) {
+          branchSignals.push(options.abortSignal!);
+          branchTimeouts.push((options.timeout as { totalMs: number }).totalMs);
+          return connectionGate.promise;
+        }
+        throw new Error(`Unexpected Campaign World prompt: ${options.prompt.slice(0, 80)}`);
+      });
+      const builder = createCampaignWorldBuilder({
+        generateObject: generateMock as unknown as typeof safeGenerateObject,
+        idFactory: sequentialIdFactory(),
+      });
+
+      const buildPromise = builder.build({
+        source: sourceFixture(false),
+        model: structuredModel(),
+        temperature: 0.7,
+        maxOutputTokens: 8_000,
+      });
+      for (let tick = 0; tick < 20 && generateMock.mock.calls.length < 5; tick += 1) {
+        await Promise.resolve();
+      }
+      expect(generateMock).toHaveBeenCalledTimes(5);
+      expect(branchSignals).toHaveLength(3);
+      expect(branchTimeouts).toEqual([70_000, 70_000, 70_000]);
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(branchSignals.every((signal) => !signal.aborted)).toBe(true);
+      await vi.advanceTimersByTimeAsync(5_577);
+      expect(Date.now()).toBe(65_577);
+      expect(branchSignals.every((signal) => !signal.aborted)).toBe(true);
+
+      connectionGate.resolve({ object: connectionsTransportPacket(), trace: trace() });
+      const candidate = await buildPromise;
+      expect(candidate.stageEvidence).toHaveLength(3);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     ["premise-only", false],
     ["World DNA", true],
-  ])("builds a valid %s world through three ordered strict calls", async (_label, withDna) => {
+  ])("builds a valid %s world through a frame, skeleton, detail, and connections calls", async (_label, withDna) => {
     const generateMock = successfulGenerateMock();
     const observer = {
       onStageStarted: vi.fn(),
@@ -431,9 +1092,9 @@ describe("Campaign World staged builder", () => {
       observer,
     });
 
-    expect(generateMock).toHaveBeenCalledTimes(3);
+    expect(generateMock).toHaveBeenCalledTimes(5);
     expect(generateMock.mock.calls[0]![0].schema).toBe(worldFramePacketSchema);
-    for (const call of generateMock.mock.calls) {
+    for (const [index, call] of generateMock.mock.calls.entries()) {
       expect(call[0]).toMatchObject({
         mode: "auto",
         strictSchema: true,
@@ -443,6 +1104,8 @@ describe("Campaign World staged builder", () => {
         temperature: 0.7,
         maxOutputTokens: 8_000,
       });
+      expect(call[0].timeout.totalMs).toBeGreaterThan(0);
+      expect(call[0].timeout.totalMs).toBeLessThanOrEqual(70_000);
     }
     const prompts = generateMock.mock.calls.map((call) => String(call[0].prompt));
     expect(prompts.every((prompt) => prompt.includes(sourceFixture(withDna).premise))).toBe(true);
@@ -452,49 +1115,39 @@ describe("Campaign World staged builder", () => {
     expect(prompts.every((prompt) => prompt.includes(
       "Keep each reference, name, tag, and trait on one line without line breaks.",
     ))).toBe(true);
-    expect(prompts[1]).toContain([
-      "ALLOWED_LOCATION_REFS",
-      JSON.stringify(framePacket().locations
-        .filter((location) => location.kind === "persistent_sublocation")
-        .map((location) => location.locationRef)),
-      "END_ALLOWED_LOCATION_REFS",
-    ].join("\n"));
-    expect(prompts[1]).toContain(
-      "Reuse each actors[].actorRef character-for-character in the matching goals[].actorRef and placements[].actorRef fields.",
-    );
-    expect(prompts[2]).toContain([
-      "ALLOWED_ACTOR_REFS",
-      JSON.stringify(castPacket().actors.map((actor) => actor.actorRef)),
-      "END_ALLOWED_ACTOR_REFS",
-    ].join("\n"));
-    expect(prompts[2]).toContain([
-      "REQUIRED_RELATION_ACTOR_REFS",
-      JSON.stringify(castPacket().actors
-        .map((actor) => actor.actorRef)),
-      "END_REQUIRED_RELATION_ACTOR_REFS",
-    ].join("\n"));
-    expect(prompts[2]).toContain([
-      "ALLOWED_LOCATION_REFS",
-      JSON.stringify(framePacket().locations
-        .filter((location) => location.kind === "persistent_sublocation")
-        .map((location) => location.locationRef)),
-      "END_ALLOWED_LOCATION_REFS",
-    ].join("\n"));
+    expect(prompts[1]).toContain("PERSISTENT_LOCATION_SLOTS");
+    expect(prompts[1]).toContain("presentLocationIndex");
+    expect(prompts[1]).toContain("never emit actorRef, locationRef, or any free-form reference");
+    expect(prompts[2]).toContain("ASSIGNED_ACTORS");
+    expect(prompts[2]).not.toContain("WORLD_CAST_SKELETON\n");
+    expect(prompts[2]).not.toContain("DETAIL_ACTOR_SLOTS\n");
     expect(prompts[2]).toContain(
-      "Every value in REQUIRED_RELATION_ACTOR_REFS must appear as a sourceActorRef or targetActorRef in at least one relation.",
+      "Fill exactly the detail fields traits, motivation, horizon, priority, tags, and additionalGoals.",
     );
+    expect(prompts[2]).toContain(
+      "For each actor, return 2-4 short traits and 2-4 short tags",
+    );
+    expect(prompts[2]).toContain("each trait and tag must be <=48 characters");
+    expect(prompts[2]).toContain("motivation as one concise sentence <=160 characters");
+    expect(prompts[3]).toContain("ASSIGNED_ACTORS");
+    expect(prompts[3]).not.toContain("WORLD_CAST_SKELETON\n");
+    expect(prompts[3]).not.toContain("DETAIL_ACTOR_SLOTS\n");
+    expect(prompts[3]).toContain(
+      "At most one actor in this batch may receive one additional goal",
+    );
+    expect(prompts[4]).toContain("WORLD_CAST_SKELETON");
+    expect(prompts[4]).toContain("RELATION_SLOTS");
+    expect(prompts[4]).toContain("relationSlotIndex");
+    expect(prompts[4]).toContain("targetActorIndex");
+    expect(prompts[4]).not.toContain("targetOffset");
+    expect(prompts[4]).toContain("locationIndices");
     expect(prompts[0]).toContain(
       "Set parentLocationRef to null for each macro region.",
     );
     expect(prompts[0]).toContain(
       "Give every persistent sublocation an existing macro region as its parent.",
     );
-    expect(prompts[2]).toContain(
-      "Set each relation intensity to an integer from 1 for a faint link through 5 for a defining force.",
-    );
-    expect(prompts[2]).toContain(
-      "Set each pressure urgency to an integer from 1 for slow pressure through 5 for immediate pressure.",
-    );
+    expect(prompts[4]).toContain("Set intensity and urgency from 1 through 5.");
     if (withDna) {
       expect(prompts.every((prompt) => prompt.includes("Salt-worn ritual"))).toBe(true);
     }
@@ -506,7 +1159,7 @@ describe("Campaign World staged builder", () => {
     expect(observer.onStageCompleted).toHaveBeenCalledTimes(3);
     expect(candidate.stageEvidence).toHaveLength(3);
     expect(candidate.contentHash).toHaveLength(64);
-    expect(candidate.draft.actors).toHaveLength(6);
+    expect(candidate.draft.actors).toHaveLength(8);
     expect(candidate.draft.actors.every((actor) => actor.kind === "person")).toBe(true);
     expect(candidate.draft.actors.every((actor) =>
       actor.controller === "agent" && String(actor.role) !== "player"
@@ -516,8 +1169,9 @@ describe("Campaign World staged builder", () => {
     )).toBe(true);
     expect(candidate.draft.pressures[0].actorIds).toEqual([
       candidate.draft.actors[0].id,
-      candidate.draft.actors[3].id,
-      candidate.draft.actors[5].id,
+      candidate.draft.actors[2].id,
+      candidate.draft.actors[4].id,
+      candidate.draft.actors[1].id,
     ]);
 
     const evidenceJson = JSON.stringify(candidate.stageEvidence);
@@ -544,6 +1198,545 @@ describe("Campaign World staged builder", () => {
     });
   });
 
+  it.each([
+    ["cast detail", "world_cast"],
+    ["connections", "world_connections"],
+  ] as const)("proves cast detail and connections overlap when %s resolves first", async (_label, firstStage) => {
+    const deferred = <T,>() => {
+      let resolve!: (value: T | PromiseLike<T>) => void;
+      let reject!: (reason?: unknown) => void;
+      const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+        resolve = resolvePromise;
+        reject = rejectPromise;
+      });
+      return { promise, resolve, reject };
+    };
+    const castStarted = deferred<void>();
+    const connectionsStarted = deferred<void>();
+    const castGateA = deferred<{
+      object: WorldCastDetailBatchPacket;
+      trace: SafeGenerateTrace;
+    }>();
+    const castGateB = deferred<{
+      object: WorldCastDetailBatchPacket;
+      trace: SafeGenerateTrace;
+    }>();
+    const connectionsGate = deferred<{
+      object: WorldConnectionsTransportPacket;
+      trace: SafeGenerateTrace;
+    }>();
+    const generateMock = vi.fn(async (options: TestGenerateOptions) => {
+      if (options.prompt.startsWith("You design the Campaign World frame.")) {
+        return { object: framePacket(), trace: trace() };
+      }
+      if (options.prompt.startsWith("You design the compact starting Campaign World cast skeleton.")) {
+        return { object: skeletonTransportPacket(), trace: trace() };
+      }
+      if (options.prompt.startsWith("You complete one assigned detail batch for an accepted Campaign World cast skeleton.")) {
+        castStarted.resolve();
+        return options.prompt.includes('"actorIndex":0')
+          ? castGateA.promise
+          : castGateB.promise;
+      }
+      if (options.prompt.startsWith("You design Campaign World relations and starting pressures from an accepted cast skeleton.")) {
+        connectionsStarted.resolve();
+        return connectionsGate.promise;
+      }
+      throw new Error(`Unexpected Campaign World prompt: ${options.prompt.slice(0, 80)}`);
+    });
+    const observer = {
+      onStageStarted: vi.fn(),
+      onStageCompleted: vi.fn(),
+    };
+    const builder = createCampaignWorldBuilder({
+      generateObject: generateMock as unknown as typeof safeGenerateObject,
+      idFactory: sequentialIdFactory(),
+    });
+
+    let settled = false;
+    let candidate: Awaited<ReturnType<typeof builder.build>> | undefined;
+    let failure: unknown;
+    const pending = builder.build({
+      source: sourceFixture(false),
+      model: structuredModel(),
+      temperature: 0.7,
+      maxOutputTokens: 8_000,
+      observer,
+    }).then(
+      (result) => {
+        candidate = result;
+        settled = true;
+      },
+      (error: unknown) => {
+        failure = error;
+        settled = true;
+      },
+    );
+
+    await Promise.all([castStarted.promise, connectionsStarted.promise]);
+    expect(generateMock).toHaveBeenCalledTimes(5);
+    expect(observer.onStageStarted.mock.calls.map((call) => call[0])).toEqual([
+      "world_frame",
+      "world_cast",
+      "world_connections",
+    ]);
+
+    if (firstStage === "world_cast") {
+      castGateA.resolve({ object: detailBatchPacket([0, 2, 4, 6]), trace: trace() });
+      castGateB.resolve({ object: detailBatchPacket([1, 3, 5, 7]), trace: trace() });
+    } else {
+      connectionsGate.resolve({ object: connectionsTransportPacket(), trace: trace() });
+    }
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(candidate).toBeUndefined();
+    expect(failure).toBeUndefined();
+
+    if (firstStage === "world_cast") {
+      connectionsGate.resolve({ object: connectionsTransportPacket(), trace: trace() });
+    } else {
+      castGateA.resolve({ object: detailBatchPacket([0, 2, 4, 6]), trace: trace() });
+      castGateB.resolve({ object: detailBatchPacket([1, 3, 5, 7]), trace: trace() });
+    }
+    await pending;
+
+    expect(failure).toBeUndefined();
+    expect(settled).toBe(true);
+    expect(candidate).toBeDefined();
+    expect(candidate!.draft.actors).toHaveLength(8);
+    expect(candidate!.draft.relations).toHaveLength(8);
+    expect(candidate!.draft.pressures).toHaveLength(3);
+    expect(candidate!.stageEvidence).toHaveLength(3);
+    expect(candidate!.stageEvidence.find((entry) => entry.stage === "world_cast")).toMatchObject({
+      stage: "world_cast",
+      totalAttempts: 3,
+      totalTokens: 450,
+    });
+    expect(candidate!.stageEvidence.find((entry) => entry.stage === "world_connections")).toMatchObject({
+      stage: "world_connections",
+      totalAttempts: 1,
+      totalTokens: 150,
+    });
+    expect(observer.onStageCompleted).toHaveBeenCalledTimes(3);
+    expect(observer.onStageCompleted.mock.calls.map((call) => call[0].stage)).toEqual([
+      "world_frame",
+      firstStage,
+      firstStage === "world_cast" ? "world_connections" : "world_cast",
+    ]);
+  });
+
+  it.each([
+    ["world_cast", "world_connections"],
+    ["world_connections", "world_cast"],
+  ] as const)(
+    "keeps the concurrent group atomic when %s fails and the sibling resolves late",
+    async (failedStage, siblingStage) => {
+      const deferred = <T,>() => {
+        let resolve!: (value: T | PromiseLike<T>) => void;
+        const promise = new Promise<T>((resolvePromise) => {
+          resolve = resolvePromise;
+        });
+        return { promise, resolve };
+      };
+      const failedStarted = deferred<void>();
+      const siblingStarted = deferred<void>();
+      const failureGate = deferred<void>();
+      const lateGate = deferred<{
+        object: WorldCastDetailBatchPacket | WorldConnectionsTransportPacket;
+        trace: SafeGenerateTrace;
+      }>();
+      const abortObserved = deferred<void>();
+      const generateMock = vi.fn(async (options: {
+        prompt: string;
+        abortSignal?: AbortSignal;
+      }) => {
+        if (options.prompt.startsWith("You design the Campaign World frame.")) {
+          return { object: framePacket(), trace: trace() };
+        }
+        if (options.prompt.startsWith("You design the compact starting Campaign World cast skeleton.")) {
+          return {
+            object: skeletonTransportPacket(),
+            trace: traceWithUsage("native_schema", "native_schema", 20, 10),
+          };
+        }
+        const isCastBatch = options.prompt.startsWith(
+          "You complete one assigned detail batch for an accepted Campaign World cast skeleton.",
+        );
+        const stage = isCastBatch
+          ? "world_cast"
+          : options.prompt.startsWith(
+            "You design Campaign World relations and starting pressures from an accepted cast skeleton.",
+          )
+            ? "world_connections"
+            : null;
+        if (stage === null) {
+          throw new Error(`Unexpected Campaign World prompt: ${options.prompt.slice(0, 80)}`);
+        }
+        const isFailedCall = stage === failedStage && (
+          stage !== "world_cast" || options.prompt.includes('"actorIndex":0')
+        );
+        if (isFailedCall) {
+          failedStarted.resolve();
+          await failureGate.promise;
+          return {
+            get object(): never {
+              throw new Error(`${failedStage} provider failure`);
+            },
+            trace: traceWithUsage(
+              "native_schema",
+              "native_schema",
+              failedStage === "world_cast" ? 30 : 40,
+              20,
+            ),
+          };
+        }
+        siblingStarted.resolve();
+        options.abortSignal?.addEventListener("abort", () => abortObserved.resolve(), { once: true });
+        return lateGate.promise;
+      });
+      const observer = {
+        onStageStarted: vi.fn(),
+        onStageCompleted: vi.fn(),
+      };
+      const builder = createCampaignWorldBuilder({
+        generateObject: generateMock as unknown as typeof safeGenerateObject,
+        idFactory: sequentialIdFactory(),
+      });
+      const buildPromise = builder.build({
+        source: sourceFixture(false),
+        model: structuredModel(),
+        temperature: 0.7,
+        maxOutputTokens: 8_000,
+        observer,
+      });
+
+      await Promise.all([failedStarted.promise, siblingStarted.promise]);
+      expect(observer.onStageStarted.mock.calls.map((call) => call[0])).toEqual([
+        "world_frame",
+        "world_cast",
+        "world_connections",
+      ]);
+      failureGate.resolve();
+      await abortObserved.promise;
+      expect(observer.onStageCompleted).toHaveBeenCalledTimes(1);
+      expect(observer.onStageCompleted.mock.calls[0]![0].stage).toBe("world_frame");
+
+      lateGate.resolve({
+        object: siblingStage === "world_cast"
+          ? detailBatchPacket([0, 2, 4, 6])
+          : connectionsTransportPacket(),
+        trace: trace(),
+      });
+      const expectedFailureEvidence = failedStage === "world_cast"
+        ? {
+          stage: failedStage,
+          totalAttempts: 4,
+          retryUsed: true,
+          inputTokens: 110,
+          outputTokens: 70,
+          totalTokens: 180,
+        }
+        : {
+          stage: failedStage,
+          totalAttempts: 3,
+          retryUsed: true,
+          inputTokens: 120,
+          outputTokens: 60,
+          totalTokens: 180,
+        };
+      await expect(buildPromise).rejects.toMatchObject({
+        code: "model_contract_failed",
+        stage: failedStage,
+        stageEvidence: [
+          { stage: "world_frame" },
+          expectedFailureEvidence,
+        ],
+      });
+      const error = await buildPromise.catch((value: unknown) => value);
+      expect(error).toBeInstanceOf(CampaignWorldBuilderError);
+      expect((error as CampaignWorldBuilderError).stageEvidence.map((entry) => entry.stage))
+        .not.toContain(siblingStage);
+      expect(observer.onStageCompleted).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("treats a local detail timeout as terminal, aborts sibling calls, and records no partial stage", async () => {
+    vi.useFakeTimers();
+    try {
+      const never = <T,>() => new Promise<T>(() => {});
+      const batchSignals: AbortSignal[] = [];
+      const connectionSignals: AbortSignal[] = [];
+      const branchTimeouts: number[] = [];
+      const generateMock = vi.fn(async (options: TestGenerateOptions) => {
+        if (options.prompt.startsWith("You design the Campaign World frame.")) {
+          return { object: framePacket(), trace: trace() };
+        }
+        if (options.prompt.startsWith("You design the compact starting Campaign World cast skeleton.")) {
+          return { object: skeletonTransportPacket(), trace: trace() };
+        }
+        if (options.prompt.startsWith(
+          "You complete one assigned detail batch for an accepted Campaign World cast skeleton.",
+        )) {
+          batchSignals.push(options.abortSignal!);
+          branchTimeouts.push((options.timeout as { totalMs: number }).totalMs);
+          return never<{
+            object: WorldCastDetailBatchPacket;
+            trace: SafeGenerateTrace;
+          }>();
+        }
+        if (options.prompt.startsWith(
+          "You design Campaign World relations and starting pressures from an accepted cast skeleton.",
+        )) {
+          connectionSignals.push(options.abortSignal!);
+          branchTimeouts.push((options.timeout as { totalMs: number }).totalMs);
+          return never<{
+            object: WorldConnectionsTransportPacket;
+            trace: SafeGenerateTrace;
+          }>();
+        }
+        throw new Error(`Unexpected Campaign World prompt: ${options.prompt.slice(0, 80)}`);
+      });
+      const observer = {
+        onStageStarted: vi.fn(),
+        onStageCompleted: vi.fn(),
+      };
+      const builder = createCampaignWorldBuilder({
+        generateObject: generateMock as unknown as typeof safeGenerateObject,
+        idFactory: sequentialIdFactory(),
+      });
+
+      const buildPromise = builder.build({
+        source: sourceFixture(false),
+        model: structuredModel(),
+        temperature: 0.7,
+        maxOutputTokens: 8_000,
+        observer,
+      });
+      const rejectionPromise = buildPromise.catch((error: unknown) => error);
+      for (let tick = 0; tick < 20 && generateMock.mock.calls.length < 5; tick += 1) {
+        await Promise.resolve();
+      }
+      expect(generateMock).toHaveBeenCalledTimes(5);
+      expect(batchSignals).toHaveLength(2);
+      expect(connectionSignals).toHaveLength(1);
+      expect(branchTimeouts).toEqual([70_000, 70_000, 70_000]);
+      expect(observer.onStageCompleted).toHaveBeenCalledTimes(1);
+      expect(observer.onStageCompleted.mock.calls[0]![0].stage).toBe("world_frame");
+
+      await vi.advanceTimersByTimeAsync(69_999);
+      expect(batchSignals.every((signal) => !signal.aborted)).toBe(true);
+      expect(connectionSignals[0]!.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+
+      const rejection = await rejectionPromise;
+      expect(rejection).toBeInstanceOf(CampaignWorldBuilderError);
+      expect(rejection).toMatchObject({
+        code: "model_contract_failed",
+        stage: "world_cast",
+        stageEvidence: [
+          { stage: "world_frame", totalAttempts: 1 },
+          { stage: "world_cast", totalAttempts: 2, retryUsed: false },
+        ],
+      });
+      const castFailure = stageErrorCause(rejection);
+      expect(castFailure.name).toBe("CampaignWorldStageFailure");
+      expect(castFailure.cause).toBeInstanceOf(CampaignWorldStageTimeoutError);
+      expect((castFailure.cause as CampaignWorldStageTimeoutError).stage).toBe("world_cast");
+      expect(batchSignals.every((signal) => signal.aborted)).toBe(true);
+      expect(connectionSignals[0]!.aborted).toBe(true);
+      expect(generateMock.mock.calls.filter(([call]) =>
+        String(call.prompt).startsWith("You complete one assigned detail batch"),
+      )).toHaveLength(2);
+      expect(observer.onStageCompleted).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("aggregates skeleton and detail retries as one truthful world-cast stage", async () => {
+    let detailAttemptsA = 0;
+    const generateMock = vi.fn(async (options: TestGenerateOptions) => {
+      if (options.prompt.startsWith("You design the Campaign World frame.")) {
+        return {
+          object: framePacket(),
+          trace: traceWithUsage("native_schema", "native_schema", 10, 5),
+        };
+      }
+      if (options.prompt.startsWith("You design the compact starting Campaign World cast skeleton.")) {
+        return {
+          object: skeletonTransportPacket(),
+          trace: traceWithUsage("native_schema", "native_schema", 20, 10),
+        };
+      }
+      if (options.prompt.startsWith("You complete one assigned detail batch")) {
+        if (options.prompt.includes('"actorIndex":0') && detailAttemptsA++ === 0) {
+          throw new Error("detail transport failure");
+        }
+        return {
+          object: options.prompt.includes('"actorIndex":0')
+            ? detailBatchPacket([0, 2, 4, 6])
+            : detailBatchPacket([1, 3, 5, 7]),
+          trace: options.prompt.includes('"actorIndex":0')
+            ? traceWithUsage("native_schema", "native_schema", 40, 20)
+            : traceWithUsage("native_schema", "native_schema", 50, 25),
+        };
+      }
+      if (options.prompt.startsWith("You design Campaign World relations and starting pressures")) {
+        return {
+          object: connectionsTransportPacket(),
+          trace: traceWithUsage("native_schema", "native_schema", 30, 15),
+        };
+      }
+      throw new Error(`Unexpected Campaign World prompt: ${options.prompt.slice(0, 80)}`);
+    });
+    const builder = createCampaignWorldBuilder({
+      generateObject: generateMock as unknown as typeof safeGenerateObject,
+      idFactory: sequentialIdFactory(),
+    });
+
+    const candidate = await builder.build({
+      source: sourceFixture(false),
+      model: structuredModel(),
+      temperature: 0.7,
+      maxOutputTokens: 8_000,
+    });
+
+    expect(generateMock).toHaveBeenCalledTimes(6);
+    expect(candidate.stageEvidence.find((entry) => entry.stage === "world_cast")).toMatchObject({
+      stage: "world_cast",
+      totalAttempts: 4,
+      retryUsed: true,
+      repairUsed: false,
+      textFallbackUsed: false,
+      inputTokens: null,
+      outputTokens: null,
+      totalTokens: null,
+    });
+    expect(candidate.stageEvidence.find((entry) => entry.stage === "world_connections")).toMatchObject({
+      stage: "world_connections",
+      totalAttempts: 1,
+      retryUsed: false,
+      inputTokens: 30,
+      outputTokens: 15,
+      totalTokens: 45,
+    });
+  });
+
+  it("composes keyed detail by actor index and preserves duplicate display names as distinct locations", () => {
+    const frame = framePacket();
+    const duplicateNameFrame: WorldFramePacket = {
+      ...frame,
+      locations: frame.locations.map((location) =>
+        location.locationRef === "location:north-market"
+          ? { ...location, name: "North Pier" }
+          : location,
+      ),
+    };
+    const detail = detailPacket();
+    detail.actors = [...detail.actors].reverse().map((actor) => ({
+      ...actor,
+      traits: [`trait-${actor.actorIndex}`],
+      motivation: `detail motivation ${actor.actorIndex}`,
+      horizon: actor.actorIndex % 2 === 0 ? "immediate" : "ongoing",
+      priority: (actor.actorIndex % 5) + 1,
+      tags: [`actor-index-${actor.actorIndex}`],
+    }));
+    const cast = composeWorldCastPacketFromTransport(
+      duplicateNameFrame,
+      skeletonPacket(),
+      detail,
+    );
+
+    expect(cast.actors.map((actor) => actor.tags)).toEqual(
+      cast.actors.map((_actor, index) => [`actor-index-${index}`]),
+    );
+    expect(cast.actors.map((actor) => actor.traits)).toEqual(
+      cast.actors.map((_actor, index) => [`trait-${index}`]),
+    );
+    expect(cast.goals.filter((goal) => goal.objective === "Map the next route change.")
+      .map((goal) => ({ motivation: goal.motivation, horizon: goal.horizon, priority: goal.priority })))
+      .toEqual([{ motivation: "detail motivation 0", horizon: "immediate", priority: 1 }]);
+    expect(cast.actors[3]!.summary).toBe(skeletonPacket().actors[3]!.summary);
+    expect(cast.placements.find((placement) =>
+      placement.actorRef === "actor:slot-4" && placement.placementKind === "present"
+    )?.locationRef).toBe("location:north-market");
+  });
+
+  it("partitions every supported cast size into deterministic balanced mixed detail batches", () => {
+    for (let actorCount = 6; actorCount <= 16; actorCount += 1) {
+      const groups = splitWorldCastDetailActorIndices(actorCount);
+      expect(groups).toHaveLength(2);
+      expect(groups[0]).toEqual(
+        Array.from({ length: Math.ceil(actorCount / 2) }, (_, index) => index * 2),
+      );
+      expect(groups[1]).toEqual(
+        Array.from({ length: Math.floor(actorCount / 2) }, (_, index) => index * 2 + 1),
+      );
+      expect(Math.abs(groups[0].length - groups[1].length)).toBeLessThanOrEqual(1);
+      expect([...groups[0], ...groups[1]].sort((left, right) => left - right)).toEqual(
+        Array.from({ length: actorCount }, (_, index) => index),
+      );
+    }
+  });
+
+  it("stops a late provider result after abort without decoding or advancing stages", async () => {
+    const abortController = new AbortController();
+    let resolveFrame!: (result: {
+      object: WorldFramePacket;
+      trace: SafeGenerateTrace;
+    }) => void;
+    const frameResult = new Promise<{
+      object: WorldFramePacket;
+      trace: SafeGenerateTrace;
+    }>((resolve) => {
+      resolveFrame = resolve;
+    });
+    let childSignal!: AbortSignal;
+    const generateMock = vi.fn(async (options: { abortSignal?: AbortSignal }) => {
+      childSignal = options.abortSignal!;
+      expect(childSignal).toBeInstanceOf(AbortSignal);
+      expect(childSignal).not.toBe(abortController.signal);
+      return frameResult;
+    });
+    const observer = {
+      onStageStarted: vi.fn(),
+      onStageCompleted: vi.fn(),
+    };
+    const builder = createCampaignWorldBuilder({
+      generateObject: generateMock as unknown as typeof safeGenerateObject,
+    });
+
+    const pending = builder.build({
+      source: sourceFixture(false),
+      model: structuredModel(),
+      temperature: 0.7,
+      maxOutputTokens: 8_000,
+      abortSignal: abortController.signal,
+      observer,
+    });
+    await Promise.resolve();
+    expect(generateMock).toHaveBeenCalledTimes(1);
+    const abortCallOptions = generateMock.mock.calls[0]![0] as TestGenerateOptions;
+    expect(abortCallOptions).toMatchObject({
+      abortSignal: expect.any(AbortSignal),
+    });
+    const abortTimeout = abortCallOptions.timeout as { totalMs: number };
+    expect(abortTimeout.totalMs).toBeGreaterThan(0);
+    expect(abortTimeout.totalMs).toBeLessThanOrEqual(70_000);
+    abortController.abort();
+    expect(childSignal.aborted).toBe(true);
+    resolveFrame({ object: framePacket(), trace: trace() });
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(observer.onStageStarted.mock.calls.map((call) => call[0])).toEqual([
+      "world_frame",
+    ]);
+    expect(observer.onStageCompleted).not.toHaveBeenCalled();
+    expect(generateMock).toHaveBeenCalledTimes(1);
+  });
+
   it("uses a provider-safe structural transport for Z.AI tool mode and decodes it before acceptance", async () => {
     const generateMock = successfulToolGenerateMock();
     const builder = createCampaignWorldBuilder({
@@ -558,20 +1751,34 @@ describe("Campaign World staged builder", () => {
       maxOutputTokens: 8_000,
     });
 
-    expect(generateMock).toHaveBeenCalledTimes(3);
-    expect(generateMock.mock.calls[0]![0].schema).toBe(worldFrameToolPacketSchema);
+    expect(generateMock).toHaveBeenCalledTimes(4);
+    expect(generateMock.mock.calls[0]![0].schema).toBe(worldFrameAndCastSkeletonToolPacketSchema);
     expect(generateMock.mock.calls[0]![0].schema).not.toBe(worldFramePacketSchema);
-    const schemaJson = JSON.stringify(z.toJSONSchema(worldFrameToolPacketSchema));
-    for (const forbidden of ["anyOf", "oneOf", "const", "prefixItems", "nullable", "location:"]) {
+    const schemaJson = JSON.stringify(z.toJSONSchema(worldFrameAndCastSkeletonToolPacketSchema));
+    for (const forbidden of ["anyOf", "oneOf", "prefixItems", "nullable", "location:", "locationKey"]) {
       expect(schemaJson).not.toContain(forbidden);
     }
-    expect(schemaJson).toContain("locationKey");
     expect(schemaJson).toContain("startingMacroIndex");
     expect(schemaJson).toContain("macroLocations");
     expect(schemaJson).toContain("persistentLocations");
     expect(schemaJson).toContain("parentMacroIndex");
     expect(schemaJson).toContain("fromPersistentIndex");
     expect(schemaJson).toContain("toPersistentIndex");
+    for (const slot of [
+      "keyActorOne",
+      "keyActorTwo",
+      "startingSupport",
+      "supportActor",
+      "remoteBackground",
+      "backgroundActor",
+      "otherActorOne",
+      "otherActorTwo",
+    ]) {
+      expect(schemaJson).toContain(slot);
+    }
+    for (const forbidden of ["keyActors", "supportActors", "backgroundActors", "otherActors"]) {
+      expect(schemaJson).not.toContain(forbidden);
+    }
     for (const forbiddenField of [
       "kind",
       "isStarting",
@@ -582,10 +1789,10 @@ describe("Campaign World staged builder", () => {
       expect(schemaJson).not.toContain(forbiddenField);
     }
     expect(String(generateMock.mock.calls[0]![0].prompt)).toContain(
-      "Return locationKey as lowercase kebab-case without the location: prefix.",
+      "Code assigns stable location references from array order, so never return locationKey or any other free-form reference.",
     );
     expect(String(generateMock.mock.calls[0]![0].prompt)).toContain(
-      "Return exactly three macroLocations, then six or seven persistentLocations.",
+      "Return exactly three macroLocations, then exactly six persistentLocations.",
     );
     expect(String(generateMock.mock.calls[0]![0].prompt)).toContain(
       "startingMacroIndex selects one macroLocations row.",
@@ -599,10 +1806,20 @@ describe("Campaign World staged builder", () => {
     expect(String(generateMock.mock.calls[0]![0].prompt)).toContain(
       "Do not return kind, isStarting, parentLocationRef, fromLocationRef, or toLocationRef in tool mode.",
     );
+    expect(String(generateMock.mock.calls[0]![0].prompt)).toContain(
+      "WORLD_CAST_SKELETON_IN_SAME_PACKET",
+    );
+    expect(String(generateMock.mock.calls[0]![0].prompt)).toContain(
+      "Named or unnamed incidental people and exchanges may remain atmospheric",
+    );
     expect(candidate.stageEvidence[0]).toMatchObject({
       primaryStrategy: "tool_mode",
       actualStrategy: "tool_mode",
       totalAttempts: 1,
+      retryUsed: false,
+    });
+    expect(candidate.stageEvidence.find((entry) => entry.stage === "world_cast")).toMatchObject({
+      totalAttempts: 2,
       retryUsed: false,
     });
     expect(candidate.draft.locations.map((location) => location.name)).toEqual(
@@ -611,25 +1828,134 @@ describe("Campaign World staged builder", () => {
     expect(candidate.draft.routes.map((route) => route.fromLocationId)).toHaveLength(6);
   });
 
+  it("requires the combined provider skeleton to use exactly the fixed actor slots", () => {
+    const base = combinedToolPacket();
+    const slots = [
+      "keyActorOne",
+      "keyActorTwo",
+      "startingSupport",
+      "supportActor",
+      "remoteBackground",
+      "backgroundActor",
+      "otherActorOne",
+      "otherActorTwo",
+    ] as const;
+
+    expect(worldFrameAndCastSkeletonToolPacketSchema.safeParse(base).success).toBe(true);
+    for (const slot of slots) {
+      const missing = { ...base } as Record<string, unknown>;
+      delete missing[slot];
+      expect(worldFrameAndCastSkeletonToolPacketSchema.safeParse(missing).success).toBe(false);
+    }
+    expect(worldFrameAndCastSkeletonToolPacketSchema.safeParse({
+      ...base,
+      unexpectedActor: base.otherActorOne,
+    }).success).toBe(false);
+    expect(worldFrameAndCastSkeletonToolPacketSchema.safeParse({
+      ...base,
+      keyActorOne: { ...base.keyActorOne, role: "support" },
+    }).success).toBe(false);
+    expect(worldFrameAndCastSkeletonToolPacketSchema.safeParse({
+      ...base,
+      startingSupport: { ...base.startingSupport, presentLocationIndex: 1 },
+    }).success).toBe(false);
+    expect(worldFrameAndCastSkeletonToolPacketSchema.safeParse({
+      ...base,
+      remoteBackground: { ...base.remoteBackground, presentLocationIndex: 0 },
+    }).success).toBe(false);
+    expect(worldFrameAndCastSkeletonToolPacketSchema.safeParse({
+      ...base,
+      otherActorTwo: { ...base.otherActorTwo, name: "  MARA   VENN " },
+    }).success).toBe(false);
+  });
+
+  it("allows provider world summaries through 400 characters while the domain target remains compact", () => {
+    const base = combinedToolPacket();
+    expect(worldFrameAndCastSkeletonToolPacketSchema.safeParse({
+      ...base,
+      worldSummary: "w".repeat(301),
+    }).success).toBe(true);
+    expect(worldFrameAndCastSkeletonToolPacketSchema.safeParse({
+      ...base,
+      worldSummary: "w".repeat(400),
+    }).success).toBe(true);
+    expect(worldFrameAndCastSkeletonToolPacketSchema.safeParse({
+      ...base,
+      worldSummary: "w".repeat(401),
+    }).success).toBe(false);
+  });
+
+  it("decodes the fixed combined anchor map for every starting macro and rejects anchor placement fields", () => {
+    const anchorMap = [
+      { startingMacroIndex: 0 as const, startingSupport: 0, remoteBackground: 2 },
+      { startingMacroIndex: 1 as const, startingSupport: 2, remoteBackground: 0 },
+      { startingMacroIndex: 2 as const, startingSupport: 4, remoteBackground: 0 },
+    ];
+
+    for (const expected of anchorMap) {
+      const packet = combinedToolPacketForStartingMacro(expected.startingMacroIndex);
+      const decoded = decodeWorldFrameAndCastSkeletonToolPacket(packet);
+
+      expect(decoded.skeleton.actors[2]!.presentLocationIndex).toBe(expected.startingSupport);
+      expect(decoded.skeleton.actors[4]!.presentLocationIndex).toBe(expected.remoteBackground);
+
+      const legacyAnchorPacket = {
+        ...JSON.parse(JSON.stringify(packet)),
+        remoteBackground: {
+          ...packet.remoteBackground,
+          presentLocationIndex: expected.remoteBackground,
+        },
+      };
+      expect(() => decodeWorldFrameAndCastSkeletonToolPacket(legacyAnchorPacket)).toThrow();
+    }
+  });
+
   it("decodes exact location order and leaves all domain invariants to the unchanged schema", () => {
     const decoded = decodeWorldFrameToolPacket(toolFramePacket());
     expect(decoded.locations.map((location) => location.locationRef)).toEqual(
-      framePacket().locations.map((location) => location.locationRef),
+      [
+        "location:macro-1",
+        "location:macro-2",
+        "location:macro-3",
+        "location:scene-1",
+        "location:scene-2",
+        "location:scene-3",
+        "location:scene-4",
+        "location:scene-5",
+        "location:scene-6",
+      ],
     );
     expect(decoded.locations.map((location) => location.parentLocationRef)).toEqual(
-      framePacket().locations.map((location) => location.parentLocationRef),
+      [
+        null,
+        null,
+        null,
+        "location:macro-1",
+        "location:macro-1",
+        "location:macro-2",
+        "location:macro-2",
+        "location:macro-3",
+        "location:macro-3",
+      ],
     );
-    expect(decoded.routes).toEqual(framePacket().routes);
+    expect(decoded.routes).toEqual([
+      { fromLocationRef: "location:scene-1", toLocationRef: "location:scene-2", travelCost: 2 },
+      { fromLocationRef: "location:scene-2", toLocationRef: "location:scene-3", travelCost: 3 },
+      { fromLocationRef: "location:scene-3", toLocationRef: "location:scene-4", travelCost: 4 },
+      { fromLocationRef: "location:scene-4", toLocationRef: "location:scene-5", travelCost: 5 },
+      { fromLocationRef: "location:scene-5", toLocationRef: "location:scene-6", travelCost: 6 },
+      { fromLocationRef: "location:scene-6", toLocationRef: "location:scene-1", travelCost: 1 },
+    ]);
   });
 
   it.each([
-    ["missing key", (packet: WorldFrameToolPacket) => {
+    ["missing name", (packet: WorldFrameToolPacket) => {
       const location = packet.persistentLocations[0]!;
-      delete (location as Partial<typeof location>).locationKey;
+      delete (location as Partial<typeof location>).name;
     }],
-    ["empty key", (packet: WorldFrameToolPacket) => { packet.persistentLocations[0]!.locationKey = ""; }],
-    ["invalid key", (packet: WorldFrameToolPacket) => { packet.persistentLocations[0]!.locationKey = "Not A Key"; }],
-    ["duplicate key", (packet: WorldFrameToolPacket) => { packet.persistentLocations[1]!.locationKey = packet.persistentLocations[0]!.locationKey; }],
+    ["empty name", (packet: WorldFrameToolPacket) => { packet.persistentLocations[0]!.name = ""; }],
+    ["invalid description", (packet: WorldFrameToolPacket) => { packet.persistentLocations[0]!.description = ""; }],
+    ["duplicate name", (packet: WorldFrameToolPacket) => { packet.persistentLocations[1]!.name = packet.persistentLocations[0]!.name; }],
     ["out-of-range parent index", (packet: WorldFrameToolPacket) => { packet.persistentLocations[0]!.parentMacroIndex = 99; }],
     ["starting macro index", (packet: WorldFrameToolPacket) => { packet.startingMacroIndex = -1; }],
     ["self route", (packet: WorldFrameToolPacket) => { packet.routes[0]!.toPersistentIndex = packet.routes[0]!.fromPersistentIndex; }],
@@ -648,8 +1974,8 @@ describe("Campaign World staged builder", () => {
   });
 
   it.each([
-    ["location_key", (packet: WorldFrameToolPacket) => {
-      packet.persistentLocations[1]!.locationKey = packet.persistentLocations[0]!.locationKey;
+    ["location_name", (packet: WorldFrameToolPacket) => {
+      packet.persistentLocations[1]!.name = packet.persistentLocations[0]!.name;
     }],
     ["location_count", (packet: WorldFrameToolPacket) => {
       packet.persistentLocations.pop();
@@ -682,20 +2008,34 @@ describe("Campaign World staged builder", () => {
       packet.macroLocations[0]!.description = "";
     }],
   ] as const)("feeds only sanitized %s recovery coordinates to the next tool attempt", async (expectedCheck, mutate) => {
-    const invalid = mutableToolFramePacket();
+    const invalid = mutableCombinedToolPacket();
     mutate(invalid);
-    const generateMock = vi
-      .fn()
-      .mockResolvedValueOnce({
-        object: invalid,
-        trace: traceWithUsage("tool_mode", "tool_mode", 11, 7),
-      })
-      .mockResolvedValueOnce({
-        object: toolFramePacket(),
-        trace: traceWithUsage("tool_mode", "tool_mode", 13, 9),
-      })
-      .mockResolvedValueOnce({ object: castPacket(), trace: trace("tool_mode", "tool_mode") })
-      .mockResolvedValueOnce({ object: connectionsPacket(), trace: trace("tool_mode", "tool_mode") });
+    let frameAttempts = 0;
+    const generateMock = vi.fn(async (options: TestGenerateOptions) => {
+      if (options.prompt.includes("WORLD_CAST_SKELETON_IN_SAME_PACKET")) {
+        return frameAttempts++ === 0
+          ? {
+            object: invalid,
+            trace: traceWithUsage("tool_mode", "tool_mode", 11, 7),
+          }
+          : {
+            object: combinedToolPacket(),
+            trace: traceWithUsage("tool_mode", "tool_mode", 13, 9),
+          };
+      }
+      if (options.prompt.startsWith("You complete one assigned detail batch")) {
+        return {
+          object: options.prompt.includes('"actorIndex":0')
+            ? toolDetailBatchPacket([0, 2, 4, 6])
+            : toolDetailBatchPacket([1, 3, 5, 7]),
+          trace: trace("tool_mode", "tool_mode"),
+        };
+      }
+      if (options.prompt.startsWith("You design Campaign World relations and starting pressures")) {
+        return { object: toolConnectionsTransportPacket(), trace: trace("tool_mode", "tool_mode") };
+      }
+      throw new Error(`Unexpected Campaign World prompt: ${options.prompt.slice(0, 80)}`);
+    });
     const builder = createCampaignWorldBuilder({
       generateObject: generateMock as unknown as typeof safeGenerateObject,
       idFactory: sequentialIdFactory(),
@@ -708,7 +2048,7 @@ describe("Campaign World staged builder", () => {
       maxOutputTokens: 8_000,
     });
 
-    expect(generateMock).toHaveBeenCalledTimes(4);
+    expect(generateMock).toHaveBeenCalledTimes(5);
     expect(candidate.stageEvidence[0]).toMatchObject({
       primaryStrategy: "tool_mode",
       actualStrategy: "tool_mode",
@@ -735,26 +2075,42 @@ describe("Campaign World staged builder", () => {
       Object.keys(issue).sort().join(",") === "check,code,issueIndex,path"
     )).toBe(true);
     const recoveryBlock = String(secondOptions.prompt).slice(
-      String(secondOptions.prompt).indexOf("WORLD_FRAME_RECOVERY:"),
+      String(secondOptions.prompt).indexOf("WORLD_FRAME_AND_CAST_RECOVERY:"),
     );
     expect(recoveryBlock).not.toContain("MODEL_PRIVATE_LOCATION_NAME");
     expect(recoveryBlock).not.toContain("MODEL_PRIVATE_DESCRIPTION");
     expect(recoveryBlock).not.toContain("model-private-key");
     expect(recoveryBlock).not.toContain("A route requires different origin and destination locations.");
     expect(recoveryBlock).not.toContain(JSON.stringify(invalid));
+    expect(recoveryBlock).toContain(
+      "Before returning, recheck that every mechanically active actor has a unique full name across all eight slots after normalizing letter case and whitespace (ignore case, trim surrounding whitespace, and collapse repeated spaces); names must identify distinct people rather than repeated aliases.",
+    );
   });
 
   it("uses an unknown safe coordinate for an opaque rejection without echoing the provider message", async () => {
     const privateMessage = "RAW_PROVIDER_MESSAGE MODEL_PRIVATE_LOCATION_NAME";
-    const generateMock = vi
-      .fn()
-      .mockRejectedValueOnce(new Error(privateMessage))
-      .mockResolvedValueOnce({
-        object: toolFramePacket(),
-        trace: traceWithUsage("tool_mode", "tool_mode", 13, 9),
-      })
-      .mockResolvedValueOnce({ object: castPacket(), trace: trace("tool_mode", "tool_mode") })
-      .mockResolvedValueOnce({ object: connectionsPacket(), trace: trace("tool_mode", "tool_mode") });
+    let frameAttempts = 0;
+    const generateMock = vi.fn(async (options: TestGenerateOptions) => {
+      if (options.prompt.includes("WORLD_CAST_SKELETON_IN_SAME_PACKET")) {
+        if (frameAttempts++ === 0) throw new Error(privateMessage);
+        return {
+          object: combinedToolPacket(),
+          trace: traceWithUsage("tool_mode", "tool_mode", 13, 9),
+        };
+      }
+      if (options.prompt.startsWith("You complete one assigned detail batch")) {
+        return {
+          object: options.prompt.includes('"actorIndex":0')
+            ? toolDetailBatchPacket([0, 2, 4, 6])
+            : toolDetailBatchPacket([1, 3, 5, 7]),
+          trace: trace("tool_mode", "tool_mode"),
+        };
+      }
+      if (options.prompt.startsWith("You design Campaign World relations and starting pressures")) {
+        return { object: toolConnectionsTransportPacket(), trace: trace("tool_mode", "tool_mode") };
+      }
+      throw new Error(`Unexpected Campaign World prompt: ${options.prompt.slice(0, 80)}`);
+    });
     const builder = createCampaignWorldBuilder({
       generateObject: generateMock as unknown as typeof safeGenerateObject,
       idFactory: sequentialIdFactory(),
@@ -783,8 +2139,656 @@ describe("Campaign World staged builder", () => {
     });
   });
 
+  it("keeps every uniform skeleton field required during semantic recovery", async () => {
+    const invalidSkeleton = JSON.parse(JSON.stringify(skeletonTransportPacket())) as Record<string, unknown>;
+    delete (invalidSkeleton.startingSupport as Record<string, unknown>).summary;
+    let skeletonAttempts = 0;
+    const generateMock = vi.fn(async (options: TestGenerateOptions) => {
+      const prompt = String(options.prompt);
+      if (prompt.startsWith("You design the Campaign World frame.")) {
+        return { object: framePacket(), trace: trace() };
+      }
+      if (prompt.startsWith("You design the compact starting Campaign World cast skeleton.")) {
+        if (skeletonAttempts++ === 0) {
+          return { object: invalidSkeleton, trace: trace() };
+        }
+        expect(prompt).toContain("WORLD_CAST_RECOVERY:");
+        expect(prompt).toContain(
+          "The startingSupport and remoteBackground anchor objects contain exactly name, role, summary, homeLocationIndex, and objective; the other six actor objects contain exactly name, role, summary, presentLocationIndex, homeLocationIndex, and objective.",
+        );
+        expect(prompt).toContain("keyActorOne and keyActorTwo use role key; startingSupport and supportActor use role support; remoteBackground and backgroundActor use role background; otherActorOne and otherActorTwo use role key, support, or background.");
+        expect(prompt).toContain(
+          "Code assigns both anchor present scenes from the accepted frame; do not emit, copy, infer, calculate, or mention a presentLocationIndex for either anchor.",
+        );
+        expect(prompt).not.toContain("Fixed groups omit role");
+        expect(prompt).not.toContain("omit presentLocationIndex");
+        return { object: skeletonTransportPacket(), trace: trace() };
+      }
+      if (prompt.startsWith("You complete one assigned detail batch")) {
+        return {
+          object: prompt.includes('"actorIndex":0')
+            ? detailBatchPacket([0, 2, 4, 6])
+            : detailBatchPacket([1, 3, 5, 7]),
+          trace: trace(),
+        };
+      }
+      if (prompt.startsWith("You design Campaign World relations and starting pressures")) {
+        return { object: connectionsTransportPacket(), trace: trace() };
+      }
+      throw new Error(`Unexpected Campaign World prompt: ${prompt.slice(0, 80)}`);
+    });
+    const builder = createCampaignWorldBuilder({
+      generateObject: generateMock as unknown as typeof safeGenerateObject,
+      idFactory: sequentialIdFactory(),
+    });
+
+    const candidate = await builder.build({
+      source: sourceFixture(false),
+      model: structuredModel(),
+      temperature: 0.7,
+      maxOutputTokens: 8_000,
+    });
+
+    expect(skeletonAttempts).toBe(2);
+    expect(generateMock).toHaveBeenCalledTimes(6);
+    expect(candidate.stageEvidence.find((entry) => entry.stage === "world_cast")).toMatchObject({
+      totalAttempts: 4,
+      retryUsed: true,
+      repairUsed: false,
+      textFallbackUsed: false,
+    });
+  });
+
+  it("recovers fixed-slot world-cast skeleton diagnostics with safe actor coordinates", async () => {
+    const invalid = JSON.parse(JSON.stringify(skeletonTransportPacket())) as WorldCastSkeletonTransportPacket & {
+      remoteBackground: WorldCastSkeletonTransportPacket["remoteBackground"] & { unexpectedField?: string };
+      supportActor: WorldCastSkeletonTransportPacket["supportActor"] & { unexpectedField?: string };
+    };
+    invalid.remoteBackground.unexpectedField = "PRIVATE_REMOTE_BACKGROUND_FIELD";
+    invalid.supportActor.unexpectedField = "PRIVATE_SUPPORT_ACTOR_FIELD";
+    const schema = createWorldCastSkeletonTransportPacketSchema(framePacket());
+    const providerError = await productionCastSkeletonSafeGenerateError(schema, invalid);
+    const providerDiagnostics = getSafeGenerateObjectSchemaDiagnostics(providerError);
+    expect(providerDiagnostics?.schemaIssues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "unrecognized_keys",
+        path: ["remoteBackground"],
+      }),
+      expect.objectContaining({
+        code: "unrecognized_keys",
+        path: ["supportActor"],
+      }),
+    ]));
+
+    let skeletonAttempts = 0;
+    const generateMock = vi.fn(async (options: TestGenerateOptions) => {
+      const prompt = String(options.prompt);
+      if (prompt.startsWith("You design the Campaign World frame.")) {
+        return { object: framePacket(), trace: trace() };
+      }
+      if (prompt.startsWith("You design the compact starting Campaign World cast skeleton.")) {
+        if (skeletonAttempts++ === 0) throw providerError;
+        return { object: skeletonTransportPacket(), trace: trace() };
+      }
+      if (prompt.startsWith("You complete one assigned detail batch")) {
+        return {
+          object: prompt.includes('"actorIndex":0')
+            ? detailBatchPacket([0, 2, 4, 6])
+            : detailBatchPacket([1, 3, 5, 7]),
+          trace: trace(),
+        };
+      }
+      if (prompt.startsWith("You design Campaign World relations and starting pressures")) {
+        return { object: connectionsTransportPacket(), trace: trace() };
+      }
+      throw new Error(`Unexpected prompt: ${prompt.slice(0, 80)}`);
+    });
+    const builder = createCampaignWorldBuilder({
+      generateObject: generateMock as unknown as typeof safeGenerateObject,
+      idFactory: sequentialIdFactory(),
+    });
+
+    const candidate = await builder.build({
+      source: sourceFixture(false),
+      model: structuredModel(),
+      temperature: 0.7,
+      maxOutputTokens: 8_000,
+    });
+
+    expect(skeletonAttempts).toBe(2);
+    expect(candidate.stageEvidence.find((entry) => entry.stage === "world_cast")).toMatchObject({
+      stage: "world_cast",
+      retryUsed: true,
+      repairUsed: false,
+      textFallbackUsed: false,
+    });
+    const skeletonCalls = generateMock.mock.calls.filter(([options]) =>
+      String(options.prompt).startsWith("You design the compact starting Campaign World cast skeleton."),
+    );
+    expect(skeletonCalls).toHaveLength(2);
+    const recoveryPrompt = String(skeletonCalls[1]![0].prompt);
+    expect(recoveryPrompt).toContain("WORLD_CAST_RECOVERY:");
+    expect(recoveryIssuesFromPrompt(recoveryPrompt)).toEqual(expect.arrayContaining([
+      {
+        issueIndex: expect.any(Number),
+        code: "unrecognized_keys",
+        path: ["remoteBackground"],
+        check: "actor_object_keys",
+      },
+      {
+        issueIndex: expect.any(Number),
+        code: "unrecognized_keys",
+        path: ["supportActor"],
+        check: "actor_object_keys",
+      },
+    ]));
+    expect(recoveryPrompt).not.toContain("PRIVATE_REMOTE_BACKGROUND_FIELD");
+    expect(recoveryPrompt).not.toContain("PRIVATE_SUPPORT_ACTOR_FIELD");
+    expect(recoveryPrompt).not.toContain(JSON.stringify(invalid));
+  });
+
+  it("sanitizes unknown world-cast skeleton coordinates without echoing provider data", async () => {
+    const privatePathSegment = "MODEL_PRIVATE_REMOTE_BACKGROUND";
+    const rejected = new z.ZodError(
+      Array.from({ length: 20 }, (_, index) => ({
+        code: "custom",
+        path: ["remoteBackground", privatePathSegment, ...Array.from({ length: 20 }, () => `private-${index}`)],
+        message: "PRIVATE_PROVIDER_MESSAGE",
+      })),
+    );
+    let skeletonAttempts = 0;
+    const generateMock = vi.fn(async (options: TestGenerateOptions) => {
+      const prompt = String(options.prompt);
+      if (prompt.startsWith("You design the Campaign World frame.")) {
+        return { object: framePacket(), trace: trace() };
+      }
+      if (prompt.startsWith("You design the compact starting Campaign World cast skeleton.")) {
+        if (skeletonAttempts++ === 0) throw rejected;
+        return { object: skeletonTransportPacket(), trace: trace() };
+      }
+      if (prompt.startsWith("You complete one assigned detail batch")) {
+        return {
+          object: prompt.includes('"actorIndex":0')
+            ? detailBatchPacket([0, 2, 4, 6])
+            : detailBatchPacket([1, 3, 5, 7]),
+          trace: trace(),
+        };
+      }
+      if (prompt.startsWith("You design Campaign World relations and starting pressures")) {
+        return { object: connectionsTransportPacket(), trace: trace() };
+      }
+      throw new Error(`Unexpected prompt: ${prompt.slice(0, 80)}`);
+    });
+    const builder = createCampaignWorldBuilder({
+      generateObject: generateMock as unknown as typeof safeGenerateObject,
+      idFactory: sequentialIdFactory(),
+    });
+
+    await builder.build({
+      source: sourceFixture(false),
+      model: structuredModel(),
+      temperature: 0.7,
+      maxOutputTokens: 8_000,
+    });
+
+    const skeletonCalls = generateMock.mock.calls.filter(([options]) =>
+      String(options.prompt).startsWith("You design the compact starting Campaign World cast skeleton."),
+    );
+    expect(skeletonCalls).toHaveLength(2);
+    const recoveryIssues = recoveryIssuesFromPrompt(String(skeletonCalls[1]![0].prompt));
+    expect(recoveryIssues).toHaveLength(8);
+    expect(recoveryIssues.every((issue) => issue.check === "actor_field")).toBe(true);
+    expect(recoveryIssues.every((issue) =>
+      Array.isArray(issue.path) &&
+      (issue.path as unknown[]).length <= 12 &&
+      (issue.path as unknown[]).includes("[dynamic]"),
+    )).toBe(true);
+    expect(String(skeletonCalls[1]![0].prompt)).not.toContain(privatePathSegment);
+    expect(String(skeletonCalls[1]![0].prompt)).not.toContain("PRIVATE_PROVIDER_MESSAGE");
+  });
+
+  it("recovers world connections from safe schema coordinates without changing generation options", async () => {
+    const invalid = JSON.parse(JSON.stringify(connectionsTransportPacket())) as WorldConnectionsTransportPacket;
+    invalid.relations[0]!.targetActorIndex = invalid.relations[0]!.relationSlotIndex;
+    const schema = createWorldConnectionsTransportPacketSchema(framePacket(), skeletonPacket());
+    const rejected = schema.safeParse(invalid);
+    expect(rejected.success).toBe(false);
+    if (rejected.success) throw new Error("fixture should fail the strict connections schema");
+
+    let connectionAttempts = 0;
+    const generateMock = vi.fn(async (options: TestGenerateOptions) => {
+      if (options.prompt.startsWith("You design the Campaign World frame.")) {
+        return { object: framePacket(), trace: trace() };
+      }
+      if (options.prompt.startsWith("You design the compact starting Campaign World cast skeleton.")) {
+        return { object: skeletonTransportPacket(), trace: trace() };
+      }
+      if (options.prompt.startsWith("You complete one assigned detail batch")) {
+        return {
+          object: options.prompt.includes('"actorIndex":0')
+            ? detailBatchPacket([0, 2, 4, 6])
+            : detailBatchPacket([1, 3, 5, 7]),
+          trace: trace(),
+        };
+      }
+      if (options.prompt.startsWith("You design Campaign World relations and starting pressures")) {
+        if (connectionAttempts++ === 0) throw rejected.error;
+        return { object: connectionsTransportPacket(), trace: trace() };
+      }
+      throw new Error(`Unexpected Campaign World prompt: ${options.prompt.slice(0, 80)}`);
+    });
+    const builder = createCampaignWorldBuilder({
+      generateObject: generateMock as unknown as typeof safeGenerateObject,
+      idFactory: sequentialIdFactory(),
+    });
+
+    const candidate = await builder.build({
+      source: sourceFixture(false),
+      model: structuredModel(),
+      temperature: 0.7,
+      maxOutputTokens: 8_000,
+    });
+
+    expect(candidate.stageEvidence[2]).toMatchObject({
+      stage: "world_connections",
+      totalAttempts: 2,
+      retryUsed: true,
+      repairUsed: false,
+      textFallbackUsed: false,
+    });
+    expect(generateMock).toHaveBeenCalledTimes(6);
+    const connectionCalls = generateMock.mock.calls.filter(([options]) =>
+      String(options.prompt).startsWith("You design Campaign World relations and starting pressures"),
+    );
+    const firstOptions = connectionCalls[0]![0];
+    const secondOptions = connectionCalls[1]![0];
+    expect(secondOptions.model).toBe(firstOptions.model);
+    expect(secondOptions.schema).toBe(firstOptions.schema);
+    expect(secondOptions.temperature).toBe(firstOptions.temperature);
+    expect(secondOptions.maxOutputTokens).toBe(firstOptions.maxOutputTokens);
+    expect(secondOptions.mode).toBe(firstOptions.mode);
+    expect(secondOptions.strictSchema).toBe(firstOptions.strictSchema);
+    expect(secondOptions.allowRepair).toBe(false);
+    expect(secondOptions.allowTextFallback).toBe(false);
+    expect(secondOptions.retries).toBe(firstOptions.retries);
+    expect(secondOptions.timeout).toEqual(firstOptions.timeout);
+    expect(secondOptions.prompt).not.toBe(firstOptions.prompt);
+
+    const secondPrompt = String(secondOptions.prompt);
+    expect(secondPrompt).toContain("WORLD_CONNECTIONS_RECOVERY:");
+    const recoveryIssues = recoveryIssuesFromPrompt(secondPrompt);
+    expect(recoveryIssues).toEqual([
+      {
+        issueIndex: 0,
+        code: "custom",
+        path: ["relations", 0],
+        check: "relation_self",
+      },
+    ]);
+    expect(secondPrompt).toContain("relationSlotIndex");
+    expect(secondPrompt).toContain("targetActorIndex");
+    expect(secondPrompt).not.toContain("targetOffset");
+    expect(secondPrompt).toContain("actorIndices");
+    expect(secondPrompt).toContain("locationIndices");
+    expect(secondPrompt).toContain("exactly one row for each fixed relationSlotIndex in RELATION_SLOTS");
+    expect(secondPrompt).toContain("targetActorIndex to a direct integer from the allowed actor-index list");
+    const recoveryBlock = secondPrompt.slice(secondPrompt.indexOf("WORLD_CONNECTIONS_RECOVERY:"));
+    expect(recoveryBlock).not.toContain("RAW_PROVIDER_MESSAGE");
+    expect(recoveryBlock).not.toContain("private model output");
+    expect(recoveryBlock).not.toContain("Invalid input");
+    expect(recoveryBlock).not.toContain(JSON.stringify(invalid));
+  });
+
+  it("recovers duplicate world-connection transport inside the stage retry", async () => {
+    const valid = connectionsTransportPacket();
+    const invalid: WorldConnectionsTransportPacket = {
+      ...valid,
+      relations: valid.relations.map((relation, index) => index === 1
+        ? { ...relation, relationSlotIndex: valid.relations[0]!.relationSlotIndex }
+        : relation),
+    };
+    const schema = createWorldConnectionsTransportPacketSchema(framePacket(), skeletonPacket());
+    const providerError = await productionConnectionsSafeGenerateError(schema, invalid);
+    const providerDiagnostics = getSafeGenerateObjectSchemaDiagnostics(providerError);
+    expect(providerDiagnostics).toMatchObject({
+      schemaParseOutcome: "invalid",
+      schemaIssueCount: 3,
+      schemaIssues: [
+        expect.objectContaining({ code: "custom", path: ["relations"] }),
+        expect.objectContaining({ code: "custom", path: ["relations"] }),
+        expect.objectContaining({ code: "custom", path: ["relations", 1] }),
+      ],
+    });
+
+    let connectionAttempts = 0;
+    const generateMock = vi.fn(async (options: TestGenerateOptions) => {
+      if (options.prompt.startsWith("You design the Campaign World frame.")) {
+        return { object: framePacket(), trace: trace() };
+      }
+      if (options.prompt.startsWith("You design the compact starting Campaign World cast skeleton.")) {
+        return { object: skeletonTransportPacket(), trace: trace() };
+      }
+      if (options.prompt.startsWith("You complete one assigned detail batch")) {
+        return {
+          object: options.prompt.includes('"actorIndex":0')
+            ? detailBatchPacket([0, 2, 4, 6])
+            : detailBatchPacket([1, 3, 5, 7]),
+          trace: trace(),
+        };
+      }
+      if (options.prompt.startsWith("You design Campaign World relations and starting pressures")) {
+        if (connectionAttempts++ === 0) throw providerError;
+        return { object: valid, trace: trace() };
+      }
+      throw new Error(`Unexpected Campaign World prompt: ${options.prompt.slice(0, 80)}`);
+    });
+    const builder = createCampaignWorldBuilder({
+      generateObject: generateMock as unknown as typeof safeGenerateObject,
+      idFactory: sequentialIdFactory(),
+    });
+
+    const candidate = await builder.build({
+      source: sourceFixture(false),
+      model: structuredModel(),
+      temperature: 0.7,
+      maxOutputTokens: 8_000,
+    });
+
+    expect(connectionAttempts).toBe(2);
+    expect(candidate.stageEvidence[2]).toMatchObject({
+      stage: "world_connections",
+      totalAttempts: 2,
+      retryUsed: true,
+      repairUsed: false,
+      textFallbackUsed: false,
+    });
+    const connectionCalls = generateMock.mock.calls.filter(([call]) =>
+      String(call.prompt).startsWith("You design Campaign World relations and starting pressures"),
+    );
+    expect(connectionCalls).toHaveLength(2);
+    const secondPrompt = String(connectionCalls[1]![0].prompt);
+    expect(secondPrompt).toContain("WORLD_CONNECTIONS_RECOVERY:");
+    expect(recoveryIssuesFromPrompt(secondPrompt)).toEqual([
+      {
+        issueIndex: 0,
+        code: "custom",
+        path: ["relations"],
+        check: "relation_duplicate",
+      },
+      {
+        issueIndex: 1,
+        code: "custom",
+        path: ["relations"],
+        check: "relation_participation",
+      },
+      {
+        issueIndex: 2,
+        code: "custom",
+        path: ["relations", 1],
+        check: "relation_self",
+      },
+    ]);
+    expect(secondPrompt).not.toContain(JSON.stringify(invalid));
+  });
+
+  it("recovers production-shaped world-cast diagnostics with safe actor object coordinates", async () => {
+    const invalid = JSON.parse(JSON.stringify(detailBatchPacket([0, 2, 4, 6]))) as WorldCastDetailBatchPacket & {
+      actors: Array<WorldCastDetailBatchPacket["actors"][number] & { unexpectedField?: string }>;
+    };
+    invalid.actors[1]!.unexpectedField = "PRIVATE_ACTOR_FIELD";
+    invalid.actors[0]!.traits = Array.from({ length: 21 }, (_, index) => `trait-${index}`);
+    invalid.actors[2]!.tags = [" tag with surrounding whitespace "];
+    const schema = createWorldCastDetailBatchPacketSchema(3);
+    const providerError = await productionCastSafeGenerateError(schema, invalid);
+    const providerDiagnostics = getSafeGenerateObjectSchemaDiagnostics(providerError);
+    expect(providerDiagnostics?.schemaIssues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "unrecognized_keys",
+        path: ["actors", 1],
+      }),
+    ]));
+
+    const generateMock = vi
+      .fn()
+      .mockResolvedValueOnce({ object: framePacket(), trace: trace() })
+      .mockResolvedValueOnce({ object: skeletonTransportPacket(), trace: trace() })
+      .mockImplementation(async (options: TestGenerateOptions) => {
+        const prompt = String(options.prompt);
+        if (prompt.includes("You complete one assigned detail batch")) {
+          if (prompt.includes('"actorIndex":0') && !prompt.includes("WORLD_CAST_RECOVERY:")) {
+            return Promise.reject(providerError);
+          }
+          if (prompt.includes('"actorIndex":0') && prompt.includes("WORLD_CAST_RECOVERY:")) {
+            return { object: detailBatchPacket([0, 2, 4, 6]), trace: trace() };
+          }
+          return { object: detailBatchPacket([1, 3, 5, 7]), trace: trace() };
+        }
+        if (prompt.startsWith("You design Campaign World relations and starting pressures")) {
+          return { object: connectionsTransportPacket(), trace: trace() };
+        }
+        throw new Error(`Unexpected prompt: ${prompt.slice(0, 80)}`);
+      });
+    const builder = createCampaignWorldBuilder({
+      generateObject: generateMock as unknown as typeof safeGenerateObject,
+      idFactory: sequentialIdFactory(),
+    });
+
+    const candidate = await builder.build({
+      source: sourceFixture(false),
+      model: structuredModel(),
+      temperature: 0.7,
+      maxOutputTokens: 8_000,
+    });
+
+    expect(generateMock).toHaveBeenCalledTimes(6);
+    expect(candidate.stageEvidence.find((entry) => entry.stage === "world_cast")).toMatchObject({
+      stage: "world_cast",
+      totalAttempts: 4,
+      retryUsed: true,
+      repairUsed: false,
+      textFallbackUsed: false,
+    });
+    const castDetailCalls = generateMock.mock.calls.filter(([options]) =>
+      String(options.prompt).includes("You complete one assigned detail batch"),
+    );
+    expect(castDetailCalls).toHaveLength(3);
+    const firstOptions = castDetailCalls[0]![0];
+    const retryOptions = castDetailCalls.find(([options]) =>
+      String(options.prompt).includes("WORLD_CAST_RECOVERY:"),
+    )![0];
+    expect(retryOptions.model).toBe(firstOptions.model);
+    expect(retryOptions.schema).toBe(firstOptions.schema);
+    expect(retryOptions.temperature).toBe(firstOptions.temperature);
+    expect(retryOptions.maxOutputTokens).toBe(firstOptions.maxOutputTokens);
+    expect(retryOptions.mode).toBe(firstOptions.mode);
+    expect(retryOptions.strictSchema).toBe(firstOptions.strictSchema);
+    expect(retryOptions.allowRepair).toBe(false);
+    expect(retryOptions.allowTextFallback).toBe(false);
+    expect(retryOptions.retries).toBe(firstOptions.retries);
+    expect(retryOptions.timeout).toEqual(firstOptions.timeout);
+
+    const firstPrompt = String(firstOptions.prompt);
+    const secondPrompt = String(retryOptions.prompt);
+    expect(secondPrompt).toContain("WORLD_CAST_RECOVERY:");
+    expect(secondPrompt).toContain(sourceFixture(false).premise);
+    expect(secondPrompt).toContain("ASSIGNED_ACTORS");
+    expect(secondPrompt).not.toContain("WORLD_CAST_SKELETON\n");
+    expect(secondPrompt).not.toContain("DETAIL_ACTOR_SLOTS\n");
+    expect(secondPrompt).toContain("detailSlotIndex");
+    for (const fragment of [
+      "For each actor, return 2-4 short traits and 2-4 short tags",
+      "each trait and tag must be <=48 characters",
+      "motivation as one concise sentence <=160 characters",
+      "Return additionalGoals: [] for every actor by default",
+      "At most one actor in this batch may receive one additional goal",
+      "objective and motivation are each one concise sentence <=140 characters",
+      "Every additional goal contains exactly objective, motivation, horizon, and priority",
+    ]) {
+      expect(secondPrompt).toContain(fragment);
+    }
+    const recoveryIssues = recoveryIssuesFromPrompt(secondPrompt);
+    expect(recoveryIssues).toEqual(expect.arrayContaining([
+      {
+        issueIndex: expect.any(Number),
+        code: "unrecognized_keys",
+        path: ["actors", 1],
+        check: "actor_object_keys",
+      },
+      {
+        issueIndex: expect.any(Number),
+        code: "too_big",
+        path: ["actors", 0, "traits"],
+        check: "actor_field",
+      },
+      {
+        issueIndex: expect.any(Number),
+        code: "custom",
+        path: ["actors", 2, "tags", 0],
+        check: "actor_field",
+      },
+    ]));
+    expect(recoveryIssues.every((issue) =>
+      Object.keys(issue).sort().join(",") === "check,code,issueIndex,path"
+    )).toBe(true);
+    expect(secondPrompt).not.toContain("PRIVATE_ACTOR_FIELD");
+    expect(secondPrompt).not.toContain(JSON.stringify(invalid));
+    expect(secondPrompt).not.toBe(firstPrompt);
+  });
+
+  it("recovers production-shaped world-connections diagnostics with nested safe coordinates", async () => {
+    const invalid = JSON.parse(JSON.stringify(connectionsTransportPacket())) as WorldConnectionsTransportPacket;
+    invalid.relations[0]!.relationSlotIndex = 99;
+    (invalid.relations[1] as Record<string, unknown>).relationType = "PRIVATE_RELATION_TYPE";
+    invalid.pressures[0]!.actorIndices[2] = 99;
+    const schema = createWorldConnectionsTransportPacketSchema(framePacket(), skeletonPacket());
+    const providerError = await productionConnectionsSafeGenerateError(schema, invalid);
+    const providerDiagnostics = getSafeGenerateObjectSchemaDiagnostics(providerError);
+    expect(providerDiagnostics?.schemaIssues.map((issue) => issue.path)).toEqual([
+      ["relations", 0, "relationSlotIndex"],
+      ["relations", 1, "relationType"],
+      ["pressures", 0, "actorIndices", 2],
+    ]);
+
+    const generateMock = vi
+      .fn()
+      .mockResolvedValueOnce({ object: framePacket(), trace: trace() })
+      .mockResolvedValueOnce({ object: skeletonTransportPacket(), trace: trace() })
+      .mockImplementation(async (options: TestGenerateOptions) => {
+        const prompt = String(options.prompt);
+        if (prompt.includes("You complete one assigned detail batch")) {
+          return prompt.includes('"actorIndex":0')
+            ? { object: detailBatchPacket([0, 2, 4, 6]), trace: trace() }
+            : { object: detailBatchPacket([1, 3, 5, 7]), trace: trace() };
+        }
+        if (prompt.startsWith("You design Campaign World relations and starting pressures") && !prompt.includes("WORLD_CONNECTIONS_RECOVERY:")) {
+          return Promise.reject(providerError);
+        }
+        if (prompt.includes("WORLD_CONNECTIONS_RECOVERY:")) {
+          return { object: connectionsTransportPacket(), trace: trace() };
+        }
+        throw new Error(`Unexpected prompt: ${prompt.slice(0, 80)}`);
+      });
+    const builder = createCampaignWorldBuilder({
+      generateObject: generateMock as unknown as typeof safeGenerateObject,
+      idFactory: sequentialIdFactory(),
+    });
+
+    await builder.build({
+      source: sourceFixture(false),
+      model: structuredModel(),
+      temperature: 0.7,
+      maxOutputTokens: 8_000,
+    });
+
+    const connectionCalls = generateMock.mock.calls.filter(([options]) =>
+      String(options.prompt).startsWith("You design Campaign World relations and starting pressures"),
+    );
+    expect(connectionCalls).toHaveLength(2);
+    const firstOptions = connectionCalls[0]![0];
+    const secondOptions = connectionCalls[1]![0];
+    expect(secondOptions.model).toBe(firstOptions.model);
+    expect(secondOptions.schema).toBe(firstOptions.schema);
+    expect(secondOptions.temperature).toBe(firstOptions.temperature);
+    expect(secondOptions.maxOutputTokens).toBe(firstOptions.maxOutputTokens);
+    expect(secondOptions.mode).toBe(firstOptions.mode);
+    expect(secondOptions.strictSchema).toBe(firstOptions.strictSchema);
+    expect(secondOptions.allowRepair).toBe(false);
+    expect(secondOptions.allowTextFallback).toBe(false);
+    expect(secondOptions.retries).toBe(firstOptions.retries);
+    expect(secondOptions.timeout).toEqual(firstOptions.timeout);
+
+    const secondPrompt = String(secondOptions.prompt);
+    const recoveryIssues = recoveryIssuesFromPrompt(secondPrompt);
+    expect(recoveryIssues).toEqual(expect.arrayContaining([
+      {
+        issueIndex: expect.any(Number),
+        code: "invalid_value",
+        path: ["relations", 1, "relationType"],
+        check: "relation_type",
+      },
+    ]));
+    expect(secondPrompt).not.toContain("PRIVATE_SOURCE_REF");
+    expect(secondPrompt).not.toContain("PRIVATE_RELATION_TYPE");
+    expect(secondPrompt).not.toContain("PRIVATE_PRESSURE_REF");
+    expect(secondPrompt).not.toContain("Return the world-connections packet.");
+  });
+
+  it("bounds and redacts unknown world-connections recovery coordinates", async () => {
+    const privatePathSegment = "MODEL_PRIVATE_LOCATION_NAME";
+    const rejected = new z.ZodError(
+      Array.from({ length: 20 }, (_, index) => ({
+        code: "custom",
+        path: ["relations", privatePathSegment, ...Array.from({ length: 20 }, () => `private-${index}`)],
+        message: "PRIVATE_PROVIDER_MESSAGE",
+      })),
+    );
+    const generateMock = vi
+      .fn()
+      .mockResolvedValueOnce({ object: framePacket(), trace: trace() })
+      .mockResolvedValueOnce({ object: skeletonTransportPacket(), trace: trace() })
+      .mockImplementation(async (options: TestGenerateOptions) => {
+        const prompt = String(options.prompt);
+        if (prompt.includes("You complete one assigned detail batch")) {
+          return prompt.includes('"actorIndex":0')
+            ? { object: detailBatchPacket([0, 2, 4, 6]), trace: trace() }
+            : { object: detailBatchPacket([1, 3, 5, 7]), trace: trace() };
+        }
+        if (prompt.startsWith("You design Campaign World relations and starting pressures") && !prompt.includes("WORLD_CONNECTIONS_RECOVERY:")) {
+          return Promise.reject(rejected);
+        }
+        if (prompt.includes("WORLD_CONNECTIONS_RECOVERY:")) {
+          return { object: connectionsTransportPacket(), trace: trace() };
+        }
+        throw new Error(`Unexpected prompt: ${prompt.slice(0, 80)}`);
+      });
+    const builder = createCampaignWorldBuilder({
+      generateObject: generateMock as unknown as typeof safeGenerateObject,
+      idFactory: sequentialIdFactory(),
+    });
+
+    await builder.build({
+      source: sourceFixture(false),
+      model: structuredModel(),
+      temperature: 0.7,
+      maxOutputTokens: 8_000,
+    });
+
+    const connectionCalls = generateMock.mock.calls.filter(([options]) =>
+      String(options.prompt).startsWith("You design Campaign World relations and starting pressures"),
+    );
+    expect(connectionCalls).toHaveLength(2);
+    const secondPrompt = String(connectionCalls[1]![0].prompt);
+    const recoveryIssues = recoveryIssuesFromPrompt(secondPrompt);
+    expect(recoveryIssues).toHaveLength(8);
+    expect(recoveryIssues.every((issue) => issue.check === "unknown_contract_issue")).toBe(true);
+    expect(recoveryIssues.every((issue) => Array.isArray(issue.path) && (issue.path as unknown[]).length <= 12)).toBe(true);
+    expect(recoveryIssues.every((issue) => (issue.path as unknown[]).includes("[dynamic]"))).toBe(true);
+    expect(secondPrompt).not.toContain(privatePathSegment);
+    expect(secondPrompt).not.toContain("PRIVATE_PROVIDER_MESSAGE");
+  });
+
   it("keeps safe terminal diagnostics after three local failures and makes no fourth attempt", async () => {
-    const invalid = mutableToolFramePacket();
+    const invalid = mutableCombinedToolPacket();
     invalid.routes[0]!.toPersistentIndex = invalid.routes[0]!.fromPersistentIndex;
     const generateMock = vi
       .fn()
@@ -910,8 +2914,19 @@ describe("Campaign World staged builder", () => {
         object: framePacket(),
         trace: traceWithUsage("native_schema", "native_schema", 13, 9),
       })
-      .mockResolvedValueOnce({ object: castPacket(), trace: trace() })
-      .mockResolvedValueOnce({ object: connectionsPacket(), trace: trace() });
+      .mockResolvedValueOnce({ object: skeletonTransportPacket(), trace: trace() })
+      .mockImplementation(async (options: TestGenerateOptions) => {
+        const prompt = String(options.prompt);
+        if (prompt.includes("You complete one assigned detail batch")) {
+          return prompt.includes('"actorIndex":0')
+            ? { object: detailBatchPacket([0, 2, 4, 6]), trace: trace() }
+            : { object: detailBatchPacket([1, 3, 5, 7]), trace: trace() };
+        }
+        if (prompt.startsWith("You design Campaign World relations and starting pressures")) {
+          return { object: connectionsTransportPacket(), trace: trace() };
+        }
+        throw new Error(`Unexpected prompt: ${prompt.slice(0, 80)}`);
+      });
     const builder = createCampaignWorldBuilder({
       generateObject: generateMock as unknown as typeof safeGenerateObject,
       idFactory: sequentialIdFactory(),
@@ -924,7 +2939,7 @@ describe("Campaign World staged builder", () => {
       maxOutputTokens: 8_000,
     });
 
-    expect(generateMock).toHaveBeenCalledTimes(4);
+    expect(generateMock).toHaveBeenCalledTimes(6);
     expect(candidate.stageEvidence[0]).toMatchObject({
       totalAttempts: 2,
       retryUsed: true,

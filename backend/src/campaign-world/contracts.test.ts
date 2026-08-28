@@ -1,9 +1,23 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
+  createWorldCastDetailPacketSchema,
+  createWorldCastDetailBatchPacketSchema,
   createWorldCastPacketSchema,
+  createWorldCastSkeletonPacketSchema,
+  createWorldCastSkeletonTransportPacketSchema,
   createWorldConnectionsPacketSchema,
+  createWorldConnectionsTransportPacketSchema,
+  decodeWorldCastSkeletonTransportPacket,
+  decodeWorldCastDetailBatchPacket,
+  worldCastSkeletonTransportPacketBaseSchema,
   worldFramePacketSchema,
+  type WorldCastDetailPacket,
+  type WorldCastDetailBatchPacket,
   type WorldCastPacket,
+  type WorldCastSkeletonPacket,
+  type WorldCastSkeletonTransportPacket,
+  type WorldConnectionsTransportPacket,
   type WorldConnectionsPacket,
   type WorldFramePacket,
 } from "./contracts.js";
@@ -62,8 +76,10 @@ function castFixture(): WorldCastPacket {
     "ilya-venn",
     "niko-salt",
     "rhea-quill",
+    "tavi-reed",
+    "uma-vale",
   ];
-  const roles = ["key", "support", "support", "background", "background", "key"] as const;
+  const roles = ["key", "support", "support", "background", "background", "key", "key", "background"] as const;
   const sceneRefs = [
     "north-dock",
     "signal-tower",
@@ -71,6 +87,8 @@ function castFixture(): WorldCastPacket {
     "tide-gate",
     "bell-foundry",
     "storm-shrine",
+    "north-dock",
+    "bell-foundry",
   ];
   return {
     actors: actorRefs.map((localName, index) => ({
@@ -107,6 +125,8 @@ function connectionsFixture(): WorldConnectionsPacket {
       ["sel-bell", "ilya-venn"],
       ["ilya-venn", "niko-salt"],
       ["niko-salt", "rhea-quill"],
+      ["tavi-reed", "uma-vale"],
+      ["uma-vale", "mara-venn"],
     ].map(([source, target]) => ({
       sourceActorRef: `actor:${source}`,
       targetActorRef: `actor:${target}`,
@@ -132,6 +152,142 @@ function connectionsFixture(): WorldConnectionsPacket {
         locationRefs: ["location:bell-foundry"],
       },
     ],
+  };
+}
+
+function skeletonFixture(): WorldCastSkeletonPacket {
+  const frame = frameFixture();
+  const persistentLocations = frame.locations.filter((location) =>
+    location.kind === "persistent_sublocation"
+  );
+  const cast = castFixture();
+  return {
+    actors: cast.actors.map((actor, index) => {
+      const placement = cast.placements.find((entry) =>
+        entry.actorRef === actor.actorRef && entry.placementKind === "present"
+      );
+      const goal = cast.goals.find((entry) => entry.actorRef === actor.actorRef)!;
+      return {
+        name: actor.name,
+        role: actor.role,
+        summary: actor.summary,
+        presentLocationIndex: persistentLocations.findIndex((location) =>
+          location.locationRef === placement?.locationRef
+        ),
+        homeLocationIndex: null,
+        objective: goal.objective,
+      };
+    }),
+  };
+}
+
+function skeletonTransportFixture(): WorldCastSkeletonTransportPacket {
+  const actors = skeletonFixture().actors;
+  const ordinary = (actor: WorldCastSkeletonPacket["actors"][number]) => ({
+    name: actor.name,
+    role: actor.role,
+    summary: actor.summary,
+    presentLocationIndex: actor.presentLocationIndex,
+    homeLocationIndex: actor.homeLocationIndex ?? -1,
+    objective: actor.objective,
+  });
+  const anchor = (actor: WorldCastSkeletonPacket["actors"][number]) => ({
+    name: actor.name,
+    role: actor.role,
+    summary: actor.summary,
+    homeLocationIndex: actor.homeLocationIndex ?? -1,
+    objective: actor.objective,
+  });
+  return {
+    keyActorOne: { ...ordinary(actors[0]!), role: "key" },
+    keyActorTwo: { ...ordinary(actors[5]!), role: "key" },
+    startingSupport: { ...anchor(actors[1]!), role: "support" },
+    supportActor: { ...ordinary(actors[2]!), role: "support" },
+    remoteBackground: { ...anchor(actors[3]!), role: "background" },
+    backgroundActor: { ...ordinary(actors[4]!), role: "background" },
+    otherActorOne: ordinary(actors[6]!),
+    otherActorTwo: ordinary(actors[7]!),
+  };
+}
+
+function connectionsTransportFixture(): WorldConnectionsTransportPacket {
+  const cast = castFixture();
+  const frame = frameFixture();
+  const actorIndexByRef = new Map(cast.actors.map((actor, index) => [actor.actorRef, index]));
+  const persistentLocations = frame.locations.filter((location) =>
+    location.kind === "persistent_sublocation"
+  );
+  const locationIndexByRef = new Map(
+    persistentLocations.map((location, index) => [location.locationRef, index]),
+  );
+  const connections = connectionsFixture();
+  const semanticRelations = [
+    ...connections.relations,
+    {
+      sourceActorRef: "actor:rhea-quill",
+      targetActorRef: "actor:mara-venn",
+      relationType: "association" as const,
+      summary: "rhea-quill relies on mara-venn.",
+      intensity: 3,
+    },
+  ];
+  return {
+    relations: semanticRelations.map((relation) => {
+      const relationSlotIndex = actorIndexByRef.get(relation.sourceActorRef)!;
+      const targetActorIndex = actorIndexByRef.get(relation.targetActorRef)!;
+      return {
+        relationSlotIndex,
+        targetActorIndex,
+        relationType: relation.relationType,
+        intensity: relation.intensity,
+      };
+    }),
+    pressures: [
+      ...connections.pressures,
+      {
+        name: "Tide Ledger",
+        description: "Route records disagree after the latest eclipse.",
+        trajectory: "Couriers lose confidence in the next crossing.",
+        urgency: 4,
+        actorRefs: ["actor:rhea-quill"],
+        locationRefs: ["location:tide-gate"],
+      },
+    ].map((pressure) => ({
+      name: pressure.name,
+      description: pressure.description,
+      trajectory: pressure.trajectory,
+      urgency: pressure.urgency,
+      actorIndices: pressure.actorRefs.map((actorRef) => actorIndexByRef.get(actorRef)!),
+      locationIndices: pressure.locationRefs.map((locationRef) => locationIndexByRef.get(locationRef)!),
+    })),
+  };
+}
+
+function detailFixture(): WorldCastDetailPacket {
+  const cast = castFixture();
+  return {
+    actors: cast.actors.map((actor, actorIndex) => {
+      const goal = cast.goals.find((entry) => entry.actorRef === actor.actorRef)!;
+      return {
+        actorIndex,
+        traits: [...actor.traits, "focused"],
+        motivation: goal.motivation,
+        horizon: goal.horizon,
+        priority: goal.priority,
+        tags: [`tag-${actorIndex + 1}`, "coast"],
+        additionalGoals: [],
+      };
+    }),
+  };
+}
+
+function detailBatchFixture(globalActorIndices: readonly number[]): WorldCastDetailBatchPacket {
+  const detail = detailFixture();
+  return {
+    actors: globalActorIndices.map((actorIndex, detailSlotIndex) => {
+      const { actorIndex: _globalActorIndex, ...fields } = detail.actors[actorIndex]!;
+      return { detailSlotIndex, ...fields };
+    }),
   };
 }
 
@@ -170,6 +326,23 @@ describe("Campaign World model contracts", () => {
     }
   });
 
+  it("rejects an exact normalized reserved full-name collision without blocking first-name matches", () => {
+    const frame = frameFixture();
+    const exact = createWorldCastPacketSchema(frame, { displayName: "  Mara   Venn " })
+      .safeParse(castFixture());
+    expect(exact.success).toBe(false);
+    if (!exact.success) {
+      expect(exact.error.issues).toContainEqual(expect.objectContaining({
+        path: ["actors", 0, "name"],
+        message: "Actor name conflicts with the reserved player identity.",
+      }));
+    }
+
+    const firstNameOnly = createWorldCastPacketSchema(frame, { displayName: "Mara" })
+      .safeParse(castFixture());
+    expect(firstNameOnly.success).toBe(true);
+  });
+
   it("requires a pressure anchored to the eligible starting support scene", () => {
     const frame = frameFixture();
     const cast = createWorldCastPacketSchema(frame).parse(castFixture());
@@ -187,9 +360,453 @@ describe("Campaign World model contracts", () => {
     if (!result.success) {
       expect(result.error.issues).toContainEqual(expect.objectContaining({
         path: ["pressures"],
-        message: "At least one pressure must anchor a persistent support scene under the starting macro.",
+        message: "At least one pressure must anchor both a starting-macro persistent scene and a support actor present in that scene.",
       }));
     }
+
+    const missingSupportActor = createWorldConnectionsPacketSchema(frame, cast).safeParse({
+      ...connections,
+      pressures: connections.pressures.map((pressure) =>
+        pressure.locationRefs.includes("location:signal-tower")
+          ? { ...pressure, actorRefs: ["actor:mara-venn"] }
+          : pressure
+      ),
+    });
+    expect(missingSupportActor.success).toBe(false);
+  });
+
+  it("requires keyed cast detail rows and an index-grounded starting support pressure", () => {
+    const frame = frameFixture();
+    const skeleton = createWorldCastSkeletonPacketSchema(frame).parse(skeletonFixture());
+    expect(createWorldCastSkeletonPacketSchema(frame).safeParse({
+      ...skeleton,
+      actors: skeleton.actors.map((actor, index) => index === 0
+        ? { ...actor, traits: ["detail-only"] }
+        : actor),
+    }).success).toBe(false);
+    const detail = createWorldCastDetailPacketSchema(skeleton);
+    const validDetail = detailFixture();
+    expect(detail.safeParse(validDetail).success).toBe(true);
+    expect(detail.safeParse({
+      ...validDetail,
+      actors: validDetail.actors.map((actor, index) => index === 0
+        ? (({ motivation: _motivation, ...withoutMotivation }) => withoutMotivation)(actor)
+        : actor),
+    }).success).toBe(false);
+    expect(detail.safeParse({ ...validDetail, actors: [...validDetail.actors].reverse() }).success).toBe(true);
+    expect(detail.safeParse({ ...validDetail, actors: validDetail.actors.slice(0, -1) }).success).toBe(false);
+    expect(detail.safeParse({
+      ...validDetail,
+      actors: validDetail.actors.map((actor, index) => index === 1
+        ? { ...actor, actorIndex: validDetail.actors[0]!.actorIndex }
+        : actor),
+    }).success).toBe(false);
+    expect(detail.safeParse({
+      ...validDetail,
+      actors: validDetail.actors.map((actor, index) => index === 0
+        ? { ...actor, actorIndex: skeleton.actors.length }
+        : actor),
+    }).success).toBe(false);
+
+    const transport = createWorldConnectionsTransportPacketSchema(frame, skeleton);
+    const validTransport = connectionsTransportFixture();
+    expect(transport.safeParse(validTransport).success).toBe(true);
+    const duplicateRelation = transport.safeParse({
+      ...validTransport,
+      relations: validTransport.relations.map((relation, index) => index === 1
+        ? { ...relation, relationSlotIndex: validTransport.relations[0]!.relationSlotIndex }
+        : relation),
+    });
+    expect(duplicateRelation.success).toBe(false);
+    if (!duplicateRelation.success) {
+      expect(duplicateRelation.error.issues).toContainEqual(expect.objectContaining({
+        path: ["relations"],
+        message: expect.stringContaining("Relation slots must be unique"),
+      }));
+    }
+    expect(transport.safeParse({
+      ...validTransport,
+      relations: validTransport.relations.map((relation, index) => index === 0
+        ? { ...relation, targetActorIndex: relation.relationSlotIndex }
+        : relation),
+    }).success).toBe(false);
+    const missingRelationSlot = transport.safeParse({
+      ...validTransport,
+      relations: validTransport.relations.map((relation, index) => index === 0
+        ? { ...relation, relationSlotIndex: 1 }
+        : relation),
+    });
+    expect(missingRelationSlot.success).toBe(false);
+    if (!missingRelationSlot.success) {
+      expect(missingRelationSlot.error.issues).toContainEqual(expect.objectContaining({
+        path: ["relations"],
+        message: "Relation slot 0 must appear exactly once.",
+      }));
+    }
+    expect(transport.safeParse({
+      ...validTransport,
+      pressures: validTransport.pressures.map((pressure, index) => index === 0
+        ? { ...pressure, actorIndices: [0] }
+        : pressure),
+    }).success).toBe(false);
+    expect(transport.safeParse({
+      ...validTransport,
+      pressures: validTransport.pressures.map((pressure, index) => index === 0
+        ? { ...pressure, locationIndices: [2] }
+        : pressure),
+    }).success).toBe(false);
+  });
+
+  it("keeps provider relation rows mechanical and rejects free-text summaries", () => {
+    const frame = frameFixture();
+    const skeleton = createWorldCastSkeletonPacketSchema(frame).parse(skeletonFixture());
+    const schema = createWorldConnectionsTransportPacketSchema(frame, skeleton);
+    const validTransport = connectionsTransportFixture();
+
+    expect(Object.keys(validTransport.relations[0]!).sort()).toEqual([
+      "intensity",
+      "relationSlotIndex",
+      "relationType",
+      "targetActorIndex",
+    ]);
+
+    const result = schema.safeParse({
+      ...validTransport,
+      relations: validTransport.relations.map((relation, index) => index === 0
+        ? { ...relation, summary: "Aldos Fenwick and Griet Vandam work as allies." }
+        : relation),
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toContainEqual(expect.objectContaining({
+        code: "unrecognized_keys",
+        path: ["relations", 0],
+        keys: ["summary"],
+      }));
+    }
+  });
+
+  it("keeps parallel detail transport local, exact, and strict", () => {
+    const valid = detailBatchFixture([0, 2, 4]);
+    const schema = createWorldCastDetailBatchPacketSchema(3);
+    expect(Object.keys(valid.actors[0]!).sort()).toEqual([
+      "additionalGoals",
+      "detailSlotIndex",
+      "horizon",
+      "motivation",
+      "priority",
+      "tags",
+      "traits",
+    ]);
+    expect(schema.safeParse(valid).success).toBe(true);
+    expect(schema.safeParse({ ...valid, actors: valid.actors.slice(0, 2) }).success).toBe(false);
+    expect(schema.safeParse({
+      ...valid,
+      actors: valid.actors.map((actor, index) => index === 1
+        ? { ...actor, detailSlotIndex: 0 }
+        : actor),
+    }).success).toBe(false);
+    expect(schema.safeParse({
+      ...valid,
+      actors: valid.actors.map((actor, index) => index === 1
+        ? { ...actor, detailSlotIndex: 3 }
+        : actor),
+    }).success).toBe(false);
+    expect(schema.safeParse({
+      ...valid,
+      actors: valid.actors.map((actor, index) => index === 0
+        ? { ...actor, actorIndex: 0 }
+        : actor),
+    }).success).toBe(false);
+  });
+
+  it("maps reversed local detail rows to their assigned global actor indices", () => {
+    const globalActorIndices = [4, 1, 5] as const;
+    const valid = detailBatchFixture(globalActorIndices);
+    const decoded = decodeWorldCastDetailBatchPacket(
+      { ...valid, actors: [...valid.actors].reverse() },
+      globalActorIndices,
+    );
+
+    expect(decoded.map((actor) => actor.actorIndex)).toEqual([...globalActorIndices]);
+    expect(decoded.map((actor) => actor.tags)).toEqual([["tag-5", "coast"], ["tag-2", "coast"], ["tag-6", "coast"]]);
+    expect(decoded.map((actor) => actor.traits)).toEqual([
+      ["watchful", "focused"],
+      ["watchful", "focused"],
+      ["watchful", "focused"],
+    ]);
+  });
+
+  it("makes exactly eight fixed actor slots provider-visible", () => {
+    const frame = frameFixture();
+    const schema = createWorldCastSkeletonTransportPacketSchema(frame);
+    const schemaJson = z.toJSONSchema(schema) as {
+      required?: string[];
+      properties?: Record<string, {
+        required?: string[];
+        properties?: Record<string, {
+          minimum?: number;
+          maximum?: number;
+          const?: string | number;
+          enum?: string[];
+        }>;
+      }>;
+    };
+    const slots = [
+      "keyActorOne",
+      "keyActorTwo",
+      "startingSupport",
+      "supportActor",
+      "remoteBackground",
+      "backgroundActor",
+      "otherActorOne",
+      "otherActorTwo",
+    ];
+    const ordinaryRowRequired = [
+      "name",
+      "role",
+      "summary",
+      "presentLocationIndex",
+      "homeLocationIndex",
+      "objective",
+    ];
+    const anchorRowRequired = [
+      "name",
+      "role",
+      "summary",
+      "homeLocationIndex",
+      "objective",
+    ];
+    const anchorSlots = ["startingSupport", "remoteBackground"];
+    expect(schemaJson.required).toEqual(slots);
+    expect(Object.keys(schemaJson.properties ?? {})).toEqual(slots);
+    for (const slot of slots) {
+      const row = schemaJson.properties?.[slot];
+      const rowRequired = anchorSlots.includes(slot) ? anchorRowRequired : ordinaryRowRequired;
+      expect(row?.required).toEqual(rowRequired);
+      expect(Object.keys(row?.properties ?? {})).toEqual(rowRequired);
+      expect(row?.properties?.homeLocationIndex).toMatchObject({ minimum: -1, maximum: 5 });
+    }
+    expect(schemaJson.properties?.keyActorOne?.properties?.role).toMatchObject({ const: "key" });
+    expect(schemaJson.properties?.keyActorTwo?.properties?.role).toMatchObject({ const: "key" });
+    expect(schemaJson.properties?.startingSupport?.properties?.role).toMatchObject({ const: "support" });
+    expect(schemaJson.properties?.supportActor?.properties?.role).toMatchObject({ const: "support" });
+    expect(schemaJson.properties?.remoteBackground?.properties?.role).toMatchObject({ const: "background" });
+    expect(schemaJson.properties?.backgroundActor?.properties?.role).toMatchObject({ const: "background" });
+    expect(schemaJson.properties?.otherActorOne?.properties?.role).toMatchObject({ enum: ["key", "support", "background"] });
+    expect(schemaJson.properties?.otherActorTwo?.properties?.role).toMatchObject({ enum: ["key", "support", "background"] });
+    expect(schemaJson.properties?.startingSupport?.properties?.presentLocationIndex).toBeUndefined();
+    expect(schemaJson.properties?.remoteBackground?.properties?.presentLocationIndex).toBeUndefined();
+    const serialized = JSON.stringify(schemaJson);
+    for (const forbidden of ["anyOf", "oneOf", "prefixItems"]) {
+      expect(serialized).not.toContain(forbidden);
+    }
+  });
+
+  it("requires every fixed slot, exact roles and anchors, and leaves domain range at six to sixteen", () => {
+    const frame = frameFixture();
+    const base = skeletonTransportFixture();
+    const slots = [
+      "keyActorOne",
+      "keyActorTwo",
+      "startingSupport",
+      "supportActor",
+      "remoteBackground",
+      "backgroundActor",
+      "otherActorOne",
+      "otherActorTwo",
+    ] as const;
+    expect(worldCastSkeletonTransportPacketBaseSchema.safeParse(base).success).toBe(true);
+    for (const slot of slots) {
+      const missing = { ...base } as Record<string, unknown>;
+      delete missing[slot];
+      expect(worldCastSkeletonTransportPacketBaseSchema.safeParse(missing).success).toBe(false);
+    }
+    expect(worldCastSkeletonTransportPacketBaseSchema.safeParse({
+      ...base,
+      unexpectedActor: base.otherActorOne,
+    }).success).toBe(false);
+    expect(createWorldCastSkeletonTransportPacketSchema(frame).safeParse({
+      ...base,
+      keyActorOne: { ...base.keyActorOne, role: "support" },
+    }).success).toBe(false);
+    expect(createWorldCastSkeletonTransportPacketSchema(frame).safeParse({
+      ...base,
+      startingSupport: { ...base.startingSupport, presentLocationIndex: 1 },
+    }).success).toBe(false);
+    expect(createWorldCastSkeletonTransportPacketSchema(frame).safeParse({
+      ...base,
+      remoteBackground: { ...base.remoteBackground, presentLocationIndex: 0 },
+    }).success).toBe(false);
+    expect(worldCastSkeletonTransportPacketBaseSchema.safeParse({
+      ...base,
+      otherActorTwo: { ...base.otherActorTwo, name: "  MARA   VENN " },
+    }).success).toBe(false);
+
+    const domain = skeletonFixture();
+    const domainEleven = {
+      actors: [
+        ...domain.actors,
+        ...Array.from({ length: 3 }, (_, index) => ({
+          ...domain.actors[index % domain.actors.length]!,
+          name: `Extra Person ${index + 1}`,
+          presentLocationIndex: index % 6,
+        })),
+      ],
+    };
+    expect(createWorldCastSkeletonPacketSchema(frame).safeParse(domainEleven).success).toBe(true);
+  });
+
+  it("accepts provider pressure descriptions through 220 characters and rejects 221", () => {
+    const frame = frameFixture();
+    const skeleton = skeletonFixture();
+    const schema = createWorldConnectionsTransportPacketSchema(frame, skeleton);
+    const valid = connectionsTransportFixture();
+    const withDescriptionLength = (length: number) => ({
+      ...valid,
+      pressures: valid.pressures.map((pressure, index) => index === 0
+        ? { ...pressure, description: "p".repeat(length) }
+        : pressure),
+    });
+
+    expect(schema.safeParse(withDescriptionLength(161)).success).toBe(true);
+    expect(schema.safeParse(withDescriptionLength(220)).success).toBe(true);
+    expect(schema.safeParse(withDescriptionLength(221)).success).toBe(false);
+  });
+
+  it("rejects a missing summary in every fixed skeleton slot", () => {
+    const frame = frameFixture();
+    const schema = createWorldCastSkeletonTransportPacketSchema(frame);
+    const valid = skeletonTransportFixture();
+    const slots = [
+      "keyActorOne",
+      "keyActorTwo",
+      "startingSupport",
+      "supportActor",
+      "remoteBackground",
+      "backgroundActor",
+      "otherActorOne",
+      "otherActorTwo",
+    ] as const;
+
+    for (const slot of slots) {
+      const invalid = JSON.parse(JSON.stringify(valid)) as Record<string, unknown>;
+      delete (invalid[slot] as Record<string, unknown>).summary;
+      const result = schema.safeParse(invalid);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues).toContainEqual(expect.objectContaining({
+          code: "invalid_type",
+          path: [slot, "summary"],
+        }));
+      }
+    }
+  });
+
+  it("decodes fixed anchors into flat roles, minima, and starting/remote placements", () => {
+    const frame = frameFixture();
+    const transport = skeletonTransportFixture();
+    const decoded = decodeWorldCastSkeletonTransportPacket(frame, transport);
+    const accepted = createWorldCastSkeletonPacketSchema(frame).parse(decoded);
+
+    expect(accepted.actors).toHaveLength(8);
+    expect(accepted.actors.filter((actor) => actor.role === "key")).toHaveLength(3);
+    expect(accepted.actors.filter((actor) => actor.role === "support")).toHaveLength(2);
+    expect(accepted.actors.filter((actor) => actor.role === "background")).toHaveLength(3);
+    expect(accepted.actors[2]?.role).toBe("support");
+    expect(accepted.actors[2]?.presentLocationIndex).toBe(0);
+    expect(accepted.actors[4]?.role).toBe("background");
+    expect(accepted.actors[4]?.presentLocationIndex).toBe(2);
+    expect(new Set(accepted.actors.map((actor) => actor.presentLocationIndex)).size).toBeGreaterThanOrEqual(2);
+    expect(accepted.actors.every((actor) => actor.homeLocationIndex === null)).toBe(true);
+  });
+
+  it("rejects fixed-slot actor names that collide after case and whitespace normalization", () => {
+    const frame = frameFixture();
+    const transport = skeletonTransportFixture();
+    const duplicateNameTransport: WorldCastSkeletonTransportPacket = {
+      ...transport,
+      supportActor: { ...transport.supportActor, name: "mara   VENN" },
+    };
+
+    expect(() => decodeWorldCastSkeletonTransportPacket(frame, duplicateNameTransport))
+      .toThrow(/Actor names must be unique/);
+  });
+
+  it("rejects out-of-range skeleton coordinates before decode", () => {
+    const frame = frameFixture();
+    const schema = createWorldCastSkeletonTransportPacketSchema(frame);
+    const valid = skeletonTransportFixture();
+    expect(schema.safeParse({
+      ...valid,
+      keyActorOne: { ...valid.keyActorOne, presentLocationIndex: 6 },
+    }).success).toBe(false);
+    expect(schema.safeParse({
+      ...valid,
+      startingSupport: { ...valid.startingSupport, homeLocationIndex: -2 },
+    }).success).toBe(false);
+    expect(schema.safeParse({
+      ...valid,
+      remoteBackground: { ...valid.remoteBackground, homeLocationIndex: 6 },
+    }).success).toBe(false);
+  });
+
+  it("exposes bounded detail and connections indices while keeping relational checks", () => {
+    const frame = frameFixture();
+    const skeleton = createWorldCastSkeletonPacketSchema(frame).parse(skeletonFixture());
+    const detailSchema = createWorldCastDetailPacketSchema(skeleton);
+    const connectionsSchema = createWorldConnectionsTransportPacketSchema(frame, skeleton);
+    const detailJson = z.toJSONSchema(detailSchema) as {
+      properties?: { actors?: { items?: { properties?: { actorIndex?: { minimum?: number; maximum?: number } } } } };
+    };
+    const connectionsJson = z.toJSONSchema(connectionsSchema) as {
+      properties?: {
+        relations?: {
+          minItems?: number;
+          maxItems?: number;
+          items?: { properties?: {
+            relationSlotIndex?: { minimum?: number; maximum?: number };
+            targetActorIndex?: { minimum?: number; maximum?: number };
+          } };
+        };
+        pressures?: { items?: { properties?: {
+          actorIndices?: { items?: { minimum?: number; maximum?: number } };
+          locationIndices?: { items?: { minimum?: number; maximum?: number } };
+        } } };
+      };
+    };
+    const serialized = `${JSON.stringify(detailJson)}${JSON.stringify(connectionsJson)}`;
+    for (const forbidden of ["anyOf", "oneOf", "prefixItems"]) {
+      expect(serialized).not.toContain(forbidden);
+    }
+    expect(detailJson.properties?.actors?.items?.properties?.actorIndex)
+      .toMatchObject({ minimum: 0, maximum: 7 });
+    expect(connectionsJson.properties?.relations)
+      .toMatchObject({ minItems: 8, maxItems: 8 });
+    expect(connectionsJson.properties?.relations?.items?.properties?.relationSlotIndex)
+      .toMatchObject({ minimum: 0, maximum: 7 });
+    expect(connectionsJson.properties?.relations?.items?.properties?.targetActorIndex)
+      .toMatchObject({ minimum: 0, maximum: 7 });
+    expect(connectionsJson.properties?.pressures?.items?.properties?.actorIndices?.items)
+      .toMatchObject({ minimum: 0, maximum: 7 });
+    expect(connectionsJson.properties?.pressures?.items?.properties?.locationIndices?.items)
+      .toMatchObject({ minimum: 0, maximum: 5 });
+
+    const validDetail = detailFixture();
+    expect(detailSchema.safeParse({
+      ...validDetail,
+      actors: validDetail.actors.map((actor, index) => index === 0
+        ? { ...actor, actorIndex: skeleton.actors.length }
+        : actor),
+    }).success).toBe(false);
+    const validConnections = connectionsTransportFixture();
+    expect(connectionsSchema.safeParse({
+      ...validConnections,
+      pressures: validConnections.pressures.map((pressure, index) => index === 0
+        ? { ...pressure, locationIndices: [6] }
+        : pressure),
+    }).success).toBe(false);
   });
 
   it("requires the concrete frame shape and direct macro children", () => {
@@ -449,6 +1066,13 @@ describe("Campaign World model contracts", () => {
     expect(createWorldConnectionsPacketSchema(frame, castFixture()).safeParse({
       ...connectionsFixture(),
       relations: connectionsFixture().relations.map((relation, index) => index === 0 ? { ...relation, targetActorRef: relation.sourceActorRef } : relation),
+    }).success).toBe(false);
+    expect(createWorldConnectionsPacketSchema(frame, castFixture()).safeParse({
+      ...connectionsFixture(),
+      relations: [
+        ...connectionsFixture().relations,
+        { ...connectionsFixture().relations[0]! },
+      ],
     }).success).toBe(false);
     expect(createWorldConnectionsPacketSchema(frame, castFixture()).safeParse({
       ...connectionsFixture(),

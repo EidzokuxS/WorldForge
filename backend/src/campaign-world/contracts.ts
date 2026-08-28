@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  normalizeCampaignIdentityName,
+  type CampaignPlayerIdentityClaim,
+} from "@worldforge/shared";
 
 const LOCAL_REFERENCE_MAX = 120;
 const LOCAL_REFERENCE_CHARACTERS = "abcdefghijklmnopqrstuvwxyz0123456789-";
@@ -42,6 +46,20 @@ const nameSchema = boundedStringSchema(NAME_MAX, true);
 const textSchema = boundedStringSchema(TEXT_MAX, false);
 const tagSchema = boundedStringSchema(TAG_MAX, true);
 const tagsSchema = z.array(tagSchema).max(TAG_COUNT_MAX);
+
+// These caps apply only to provider transport packets. The broader domain
+// schemas above remain unchanged so persisted data and decoded world content
+// keep their existing contract.
+const providerNameSchema = boundedStringSchema(80, true);
+const providerSummarySchema = boundedStringSchema(140, false);
+const providerObjectiveSchema = boundedStringSchema(140, false);
+const providerTagSchema = boundedStringSchema(48, true);
+const providerTagListSchema = z.array(providerTagSchema).min(1).max(4);
+const providerDetailMotivationSchema = boundedStringSchema(160, false);
+const providerAdditionalGoalTextSchema = boundedStringSchema(140, false);
+const providerPressureNameSchema = boundedStringSchema(64, true);
+const providerPressureDescriptionSchema = boundedStringSchema(220, false);
+const providerPressureTrajectorySchema = boundedStringSchema(120, false);
 
 function localReferenceSchema(prefix: "location" | "actor") {
   const marker = `${prefix}:`;
@@ -341,8 +359,761 @@ const worldCastPacketBaseSchema = z.object({
 export type WorldFramePacket = z.infer<typeof worldFramePacketBaseSchema>;
 export type WorldCastPacket = z.infer<typeof worldCastPacketBaseSchema>;
 
+/**
+ * Provider-safe cast transport. Actor and location references are assigned by
+ * code from the stable array slots after this packet passes its contract.
+ */
+const worldCastSkeletonActorSchema = z.object({
+  name: nameSchema,
+  role: z.enum(actorRoleValues),
+  summary: textSchema,
+  presentLocationIndex: z.number().int(),
+  homeLocationIndex: z.number().int().nullable(),
+  objective: textSchema,
+}).strict();
+
+const worldCastSkeletonPacketBaseSchema = z.object({
+  actors: z.array(worldCastSkeletonActorSchema).min(6).max(16),
+}).strict();
+
+export type WorldCastSkeletonPacket = z.infer<
+  typeof worldCastSkeletonPacketBaseSchema
+>;
+
+const worldCastSkeletonTransportActorFieldsSchema = z.object({
+  name: providerNameSchema,
+  role: z.enum(actorRoleValues),
+  summary: providerSummarySchema,
+  presentLocationIndex: z.number().int(),
+  homeLocationIndex: z.number().int(),
+  objective: providerObjectiveSchema,
+}).strict();
+
+const worldCastSkeletonTransportAnchorFieldsSchema = z.object({
+  name: providerNameSchema,
+  role: z.enum(actorRoleValues),
+  summary: providerSummarySchema,
+  homeLocationIndex: z.number().int(),
+  objective: providerObjectiveSchema,
+}).strict();
+
+const worldCastSkeletonTransportSlotNames = [
+  "keyActorOne",
+  "keyActorTwo",
+  "startingSupport",
+  "supportActor",
+  "remoteBackground",
+  "backgroundActor",
+  "otherActorOne",
+  "otherActorTwo",
+] as const;
+
+export type WorldCastSkeletonTransportSlotName =
+  (typeof worldCastSkeletonTransportSlotNames)[number];
+
+function duplicateTransportActorNames(packet: unknown): string[] {
+  if (packet === null || typeof packet !== "object") {
+    return [];
+  }
+  const record = packet as Record<string, unknown>;
+  const seen = new Map<string, string>();
+  const duplicates = new Set<string>();
+  for (const slotName of worldCastSkeletonTransportSlotNames) {
+    const actor = record[slotName];
+    if (actor === null || typeof actor !== "object") {
+      continue;
+    }
+    const name = (actor as Record<string, unknown>).name;
+    if (typeof name !== "string") {
+      continue;
+    }
+    const normalized = normalizeCampaignIdentityName(name);
+    const firstName = seen.get(normalized);
+    if (firstName !== undefined) {
+      duplicates.add(firstName);
+    } else {
+      seen.set(normalized, name);
+    }
+  }
+  return [...duplicates];
+}
+
+function addTransportActorNameCheck<
+  TSchema extends z.ZodObject<any>,
+>(schema: TSchema): TSchema {
+  return schema.check(({ value, issues }) => {
+    const duplicates = duplicateTransportActorNames(value);
+    if (duplicates.length > 0) {
+      issues.push({
+        code: "custom",
+        input: value,
+        path: ["actors"],
+        message: `Actor names must be unique: ${duplicates.join(", ")}.`,
+      });
+    }
+  }) as TSchema;
+}
+
+const transportKeyActorSchema = worldCastSkeletonTransportActorFieldsSchema.extend({
+  role: z.literal("key"),
+}).strict();
+const transportStartingSupportSchema = worldCastSkeletonTransportAnchorFieldsSchema.extend({
+  role: z.literal("support"),
+}).strict();
+const transportSupportActorSchema = worldCastSkeletonTransportActorFieldsSchema.extend({
+  role: z.literal("support"),
+}).strict();
+const transportRemoteBackgroundSchema = worldCastSkeletonTransportAnchorFieldsSchema.extend({
+  role: z.literal("background"),
+}).strict();
+const transportBackgroundActorSchema = worldCastSkeletonTransportActorFieldsSchema.extend({
+  role: z.literal("background"),
+}).strict();
+const transportOtherActorSchema = worldCastSkeletonTransportActorFieldsSchema.extend({
+  role: z.enum(actorRoleValues),
+}).strict();
+
+export const worldCastSkeletonTransportPacketBaseSchema = addTransportActorNameCheck(
+  z.object({
+    keyActorOne: transportKeyActorSchema,
+    keyActorTwo: transportKeyActorSchema,
+    startingSupport: transportStartingSupportSchema,
+    supportActor: transportSupportActorSchema,
+    remoteBackground: transportRemoteBackgroundSchema,
+    backgroundActor: transportBackgroundActorSchema,
+    otherActorOne: transportOtherActorSchema,
+    otherActorTwo: transportOtherActorSchema,
+  }).strict(),
+);
+
+export type WorldCastSkeletonTransportPacket = z.infer<
+  typeof worldCastSkeletonTransportPacketBaseSchema
+>;
+
+export function createWorldCastSkeletonTransportPacketSchema(
+  frame: Pick<WorldFramePacket, "locations">,
+): z.ZodType<WorldCastSkeletonTransportPacket> {
+  const persistentLocations = frame.locations.filter((location) =>
+    location.kind === "persistent_sublocation"
+  );
+  const persistentLocationMaxIndex = Math.max(0, persistentLocations.length - 1);
+  const presentLocationIndexSchema = z.number()
+    .int()
+    .min(0)
+    .max(persistentLocationMaxIndex);
+  const homeLocationIndexSchema = z.number()
+    .int()
+    .min(-1)
+    .max(persistentLocationMaxIndex);
+  const actorSchema = <
+    TRole extends z.ZodTypeAny,
+    TPresentLocationIndex extends z.ZodTypeAny,
+  >(
+    roleSchema: TRole,
+    presentLocationIndexSchema: TPresentLocationIndex,
+  ) =>
+    worldCastSkeletonTransportActorFieldsSchema.extend({
+      role: roleSchema,
+      presentLocationIndex: presentLocationIndexSchema,
+      homeLocationIndex: homeLocationIndexSchema,
+    }).strict();
+  const anchorSchema = <TRole extends z.ZodTypeAny>(roleSchema: TRole) =>
+    worldCastSkeletonTransportAnchorFieldsSchema.extend({
+      role: roleSchema,
+      homeLocationIndex: homeLocationIndexSchema,
+    }).strict();
+  const startingMacro = frame.locations.find((location) =>
+    location.kind === "macro" && location.isStarting
+  );
+  const startingSupportLocationIndex = persistentLocations.findIndex((location) =>
+    startingMacro !== undefined && location.parentLocationRef === startingMacro.locationRef
+  );
+  const remoteBackgroundLocationIndex = persistentLocations.findIndex((location) =>
+    startingMacro === undefined || location.parentLocationRef !== startingMacro.locationRef
+  );
+  if (startingSupportLocationIndex < 0 || remoteBackgroundLocationIndex < 0) {
+    throw new Error("World frame must expose starting and remote persistent cast slots.");
+  }
+
+  const keyActorSchema = actorSchema(z.literal("key"), presentLocationIndexSchema);
+  const startingSupportSchema = anchorSchema(z.literal("support"));
+  const supportActorSchema = actorSchema(z.literal("support"), presentLocationIndexSchema);
+  const remoteBackgroundSchema = anchorSchema(z.literal("background"));
+  const backgroundActorSchema = actorSchema(z.literal("background"), presentLocationIndexSchema);
+  const otherActorSchema = actorSchema(z.enum(actorRoleValues), presentLocationIndexSchema);
+
+  return addTransportActorNameCheck(
+    z.object({
+      keyActorOne: keyActorSchema,
+      keyActorTwo: keyActorSchema,
+      startingSupport: startingSupportSchema,
+      supportActor: supportActorSchema,
+      remoteBackground: remoteBackgroundSchema,
+      backgroundActor: backgroundActorSchema,
+      otherActorOne: otherActorSchema,
+      otherActorTwo: otherActorSchema,
+    }).strict(),
+  );
+}
+
+function transportHomeLocationIndex(homeLocationIndex: number): number | null {
+  return homeLocationIndex === -1 ? null : homeLocationIndex;
+}
+
+function transportActorWithRole(
+  actor: {
+    name: string;
+    role: (typeof actorRoleValues)[number];
+    summary: string;
+    presentLocationIndex: number;
+    homeLocationIndex: number;
+    objective: string;
+  },
+  role: (typeof actorRoleValues)[number],
+  presentLocationIndex: number,
+): WorldCastSkeletonPacket["actors"][number] {
+  if (actor.role !== role) {
+    throw new Error(`Transport actor role must be ${role}.`);
+  }
+  if (actor.presentLocationIndex !== presentLocationIndex) {
+    throw new Error("Transport actor present location must match its code-owned slot.");
+  }
+  return {
+    name: actor.name,
+    role,
+    summary: actor.summary,
+    presentLocationIndex,
+    homeLocationIndex: transportHomeLocationIndex(actor.homeLocationIndex),
+    objective: actor.objective,
+  };
+}
+
+function transportAnchorActorWithRole(
+  actor: {
+    name: string;
+    role: (typeof actorRoleValues)[number];
+    summary: string;
+    homeLocationIndex: number;
+    objective: string;
+  },
+  role: (typeof actorRoleValues)[number],
+  presentLocationIndex: number,
+): WorldCastSkeletonPacket["actors"][number] {
+  if (actor.role !== role) {
+    throw new Error(`Transport actor role must be ${role}.`);
+  }
+  return {
+    name: actor.name,
+    role,
+    summary: actor.summary,
+    presentLocationIndex,
+    homeLocationIndex: transportHomeLocationIndex(actor.homeLocationIndex),
+    objective: actor.objective,
+  };
+}
+
+export function decodeWorldCastSkeletonTransportPacket(
+  frame: Pick<WorldFramePacket, "locations">,
+  transport: WorldCastSkeletonTransportPacket,
+  playerIdentity?: Pick<CampaignPlayerIdentityClaim, "displayName">,
+): WorldCastSkeletonPacket {
+  const persistentLocations = frame.locations.filter((location) =>
+    location.kind === "persistent_sublocation"
+  );
+  const startingMacro = frame.locations.find((location) =>
+    location.kind === "macro" && location.isStarting
+  );
+  const startingSupportLocationIndex = persistentLocations.findIndex((location) =>
+    startingMacro !== undefined && location.parentLocationRef === startingMacro.locationRef
+  );
+  const remoteBackgroundLocationIndex = persistentLocations.findIndex((location) =>
+    startingMacro === undefined || location.parentLocationRef !== startingMacro.locationRef
+  );
+  if (startingSupportLocationIndex < 0 || remoteBackgroundLocationIndex < 0) {
+    throw new Error("World frame must expose starting and remote persistent cast slots.");
+  }
+
+  const actors: WorldCastSkeletonPacket["actors"] = [
+    transportActorWithRole(transport.keyActorOne, "key", transport.keyActorOne.presentLocationIndex),
+    transportActorWithRole(transport.keyActorTwo, "key", transport.keyActorTwo.presentLocationIndex),
+    transportAnchorActorWithRole(transport.startingSupport, "support", startingSupportLocationIndex),
+    transportActorWithRole(transport.supportActor, "support", transport.supportActor.presentLocationIndex),
+    transportAnchorActorWithRole(transport.remoteBackground, "background", remoteBackgroundLocationIndex),
+    transportActorWithRole(transport.backgroundActor, "background", transport.backgroundActor.presentLocationIndex),
+    transportActorWithRole(transport.otherActorOne, transport.otherActorOne.role, transport.otherActorOne.presentLocationIndex),
+    transportActorWithRole(transport.otherActorTwo, transport.otherActorTwo.role, transport.otherActorTwo.presentLocationIndex),
+  ];
+
+  return createWorldCastSkeletonPacketSchema(frame, playerIdentity).parse({ actors });
+}
+
+export function createWorldCastSkeletonPacketSchema(
+  frame: Pick<WorldFramePacket, "locations">,
+  playerIdentity?: Pick<CampaignPlayerIdentityClaim, "displayName">,
+): z.ZodType<WorldCastSkeletonPacket> {
+  const persistentLocations = frame.locations.filter((location) =>
+    location.kind === "persistent_sublocation"
+  );
+  const startingMacro = frame.locations.find((location) =>
+    location.kind === "macro" && location.isStarting
+  );
+  const startingMacroSceneIndices = new Set(
+    startingMacro === undefined
+      ? []
+      : persistentLocations.flatMap((location, index) =>
+        location.parentLocationRef === startingMacro.locationRef ? [index] : []
+      ),
+  );
+
+  return worldCastSkeletonPacketBaseSchema.superRefine((packet, context) => {
+    const names = packet.actors.map((actor) => normalizeCampaignIdentityName(actor.name));
+    addDuplicateIssues(names, context, ["actors"], "Actor names");
+
+    if (playerIdentity) {
+      const reservedName = normalizeCampaignIdentityName(playerIdentity.displayName);
+      packet.actors.forEach((actor, index) => {
+        if (normalizeCampaignIdentityName(actor.name) === reservedName) {
+          context.addIssue({
+            code: "custom",
+            path: ["actors", index, "name"],
+            message: "Actor name conflicts with the reserved player identity.",
+          });
+        }
+      });
+    }
+
+    const keyPeople = packet.actors.filter((actor) => actor.role === "key");
+    const supportPeople = packet.actors.filter((actor) => actor.role === "support");
+    const backgroundPeople = packet.actors.filter((actor) => actor.role === "background");
+    if (keyPeople.length < 1) {
+      context.addIssue({
+        code: "custom",
+        path: ["actors"],
+        message: "The cast requires at least one key person.",
+      });
+    }
+    if (supportPeople.length < 2) {
+      context.addIssue({
+        code: "custom",
+        path: ["actors"],
+        message: "The cast requires at least two support people.",
+      });
+    }
+    if (backgroundPeople.length < 2) {
+      context.addIssue({
+        code: "custom",
+        path: ["actors"],
+        message: "The cast requires at least two background people.",
+      });
+    }
+
+    const presentIndices = new Set<number>();
+    packet.actors.forEach((actor, index) => {
+      if (
+        actor.presentLocationIndex < 0 ||
+        actor.presentLocationIndex >= persistentLocations.length
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["actors", index, "presentLocationIndex"],
+          message: "Present location index must address a persistent sublocation.",
+        });
+      } else {
+        presentIndices.add(actor.presentLocationIndex);
+      }
+      if (
+        actor.homeLocationIndex !== null &&
+        (actor.homeLocationIndex < 0 ||
+          actor.homeLocationIndex >= persistentLocations.length)
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["actors", index, "homeLocationIndex"],
+          message: "Home location index must address a persistent sublocation.",
+        });
+      }
+    });
+    if (presentIndices.size < 2) {
+      context.addIssue({
+        code: "custom",
+        path: ["actors"],
+        message: "The cast requires present placements across at least two locations.",
+      });
+    }
+    if (
+      startingMacroSceneIndices.size > 0 &&
+      !packet.actors.some((actor) =>
+        actor.role === "support" && startingMacroSceneIndices.has(actor.presentLocationIndex)
+      )
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["actors"],
+        message: "The cast requires a present support person under the starting macro.",
+      });
+    }
+  });
+}
+
+const worldCastDetailActorSchema = z.object({
+  actorIndex: z.number().int(),
+  traits: tagsSchema,
+  motivation: textSchema,
+  horizon: z.enum(goalHorizonValues),
+  priority: z.number().int().min(1).max(5),
+  tags: tagsSchema,
+  additionalGoals: z.array(z.object({
+    objective: textSchema,
+    motivation: textSchema,
+    horizon: z.enum(goalHorizonValues),
+    priority: z.number().int().min(1).max(5),
+  }).strict()).max(2),
+}).strict();
+
+const worldCastDetailPacketBaseSchema = z.object({
+  actors: z.array(worldCastDetailActorSchema).min(6).max(16),
+}).strict();
+
+export type WorldCastDetailPacket = z.infer<
+  typeof worldCastDetailPacketBaseSchema
+>;
+
+export function createWorldCastDetailPacketSchema(
+  skeleton: Pick<WorldCastSkeletonPacket, "actors">,
+): z.ZodType<WorldCastDetailPacket> {
+  const actorSchema = worldCastDetailActorSchema.extend({
+    actorIndex: z.number().int().min(0).max(skeleton.actors.length - 1),
+  }).strict();
+  const packetSchema = worldCastDetailPacketBaseSchema.extend({
+    actors: z.array(actorSchema).min(6).max(16),
+  }).strict();
+  return packetSchema.superRefine((packet, context) => {
+    if (packet.actors.length !== skeleton.actors.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["actors"],
+        message: "Cast detail must contain exactly one row for every skeleton actor.",
+      });
+    }
+    const seen = new Set<number>();
+    packet.actors.forEach((actor, index) => {
+      if (actor.actorIndex < 0 || actor.actorIndex >= skeleton.actors.length) {
+        context.addIssue({
+          code: "custom",
+          path: ["actors", index, "actorIndex"],
+          message: "Cast detail actorIndex must address a skeleton actor.",
+        });
+      } else if (seen.has(actor.actorIndex)) {
+        context.addIssue({
+          code: "custom",
+          path: ["actors", index, "actorIndex"],
+          message: "Cast detail actorIndex values must be unique.",
+        });
+      }
+      seen.add(actor.actorIndex);
+    });
+    skeleton.actors.forEach((_, actorIndex) => {
+      if (!seen.has(actorIndex)) {
+        context.addIssue({
+          code: "custom",
+          path: ["actors"],
+          message: `Cast detail must include actorIndex ${actorIndex}.`,
+        });
+      }
+    });
+  });
+}
+
+/**
+ * Provider-facing transport for one parallel cast-detail batch.
+ *
+ * The provider only sees a batch-local slot. The builder maps that slot back
+ * to the accepted skeleton's global actor index after this strict transport
+ * contract has been accepted.
+ */
+const worldCastDetailBatchActorSchema = z.object({
+  detailSlotIndex: z.number().int(),
+  traits: providerTagListSchema,
+  motivation: providerDetailMotivationSchema,
+  horizon: z.enum(goalHorizonValues),
+  priority: z.number().int().min(1).max(5),
+  tags: providerTagListSchema,
+  additionalGoals: z.array(z.object({
+    objective: providerAdditionalGoalTextSchema,
+    motivation: providerAdditionalGoalTextSchema,
+    horizon: z.enum(goalHorizonValues),
+    priority: z.number().int().min(1).max(5),
+  }).strict()).max(1),
+}).strict();
+
+const worldCastDetailBatchPacketBaseSchema = z.object({
+  actors: z.array(worldCastDetailBatchActorSchema).min(1).max(8),
+}).strict();
+
+export type WorldCastDetailBatchPacket = z.infer<
+  typeof worldCastDetailBatchPacketBaseSchema
+>;
+
+export type WorldCastDetailBatchActor = WorldCastDetailBatchPacket["actors"][number];
+
+export function createWorldCastDetailBatchPacketSchema(
+  batchSize: number,
+): z.ZodType<WorldCastDetailBatchPacket> {
+  if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 8) {
+    throw new RangeError("Cast detail batch size must be an integer from 1 through 8.");
+  }
+  const actorSchema = worldCastDetailBatchActorSchema.extend({
+    detailSlotIndex: z.number().int().min(0).max(batchSize - 1),
+  }).strict();
+  const packetSchema = worldCastDetailBatchPacketBaseSchema.extend({
+    actors: z.array(actorSchema).length(batchSize),
+  }).strict();
+  return packetSchema.superRefine((packet, context) => {
+    const seen = new Set<number>();
+    packet.actors.forEach((actor, index) => {
+      if (seen.has(actor.detailSlotIndex)) {
+        context.addIssue({
+          code: "custom",
+          path: ["actors", index, "detailSlotIndex"],
+          message: "Cast detail batch detailSlotIndex values must be unique.",
+        });
+      }
+      seen.add(actor.detailSlotIndex);
+    });
+    for (let detailSlotIndex = 0; detailSlotIndex < batchSize; detailSlotIndex += 1) {
+      if (!seen.has(detailSlotIndex)) {
+        context.addIssue({
+          code: "custom",
+          path: ["actors"],
+          message: `Cast detail batch must include detailSlotIndex ${detailSlotIndex}.`,
+        });
+      }
+    }
+    const actorsWithAdditionalGoals = packet.actors.filter((actor) =>
+      actor.additionalGoals.length > 0
+    );
+    if (actorsWithAdditionalGoals.length > 1) {
+      context.addIssue({
+        code: "custom",
+        path: ["actors"],
+        message: "At most one actor in a detail batch may have an additional goal.",
+      });
+    }
+  });
+}
+
+function validateWorldCastDetailBatchActorIndices(
+  globalActorIndices: readonly number[],
+): void {
+  if (
+    globalActorIndices.length < 1 ||
+    globalActorIndices.length > 8 ||
+    globalActorIndices.some((actorIndex) =>
+      !Number.isInteger(actorIndex) || actorIndex < 0 || actorIndex > 15
+    ) ||
+    new Set(globalActorIndices).size !== globalActorIndices.length
+  ) {
+    throw new RangeError("Cast detail batch actor indices must be unique integers from 0 through 15.");
+  }
+}
+
+/**
+ * Decode one accepted batch by replacing its local detail slots with the
+ * deterministic global actor indices assigned by the builder.
+ */
+export function decodeWorldCastDetailBatchPacket(
+  input: unknown,
+  globalActorIndices: readonly number[],
+): WorldCastDetailPacket["actors"] {
+  validateWorldCastDetailBatchActorIndices(globalActorIndices);
+  const schema = createWorldCastDetailBatchPacketSchema(globalActorIndices.length);
+  const packet = schema.parse(input);
+  const actorBySlot = new Map(
+    packet.actors.map((actor) => [actor.detailSlotIndex, actor]),
+  );
+  return globalActorIndices.map((actorIndex, detailSlotIndex) => {
+    const actor = actorBySlot.get(detailSlotIndex);
+    if (actor === undefined) {
+      throw new Error(`Cast detail batch is missing detailSlotIndex ${detailSlotIndex}.`);
+    }
+    const {
+      detailSlotIndex: _detailSlotIndex,
+      ...detail
+    } = actor;
+    return {
+      actorIndex,
+      ...detail,
+    };
+  });
+}
+
+export function mapWorldCastDetailBatchPacketToGlobal(
+  input: unknown,
+  globalActorIndices: readonly number[],
+): WorldCastDetailPacket["actors"] {
+  return decodeWorldCastDetailBatchPacket(input, globalActorIndices);
+}
+
+const worldConnectionsTransportRelationSchema = z.object({
+  relationSlotIndex: z.number().int(),
+  targetActorIndex: z.number().int(),
+  relationType: z.enum(relationTypeValues),
+  intensity: z.number().int().min(1).max(5),
+}).strict();
+
+const worldConnectionsTransportPressureSchema = z.object({
+  name: providerPressureNameSchema,
+  description: providerPressureDescriptionSchema,
+  trajectory: providerPressureTrajectorySchema,
+  urgency: z.number().int().min(1).max(5),
+  actorIndices: z.array(z.number().int()).min(1).max(8),
+  locationIndices: z.array(z.number().int()).min(1).max(8),
+}).strict();
+
+const worldConnectionsTransportPacketBaseSchema = z.object({
+  relations: z.array(worldConnectionsTransportRelationSchema).min(3).max(32),
+  pressures: z.array(worldConnectionsTransportPressureSchema).min(3).max(4),
+}).strict();
+
+export type WorldConnectionsTransportPacket = z.infer<
+  typeof worldConnectionsTransportPacketBaseSchema
+>;
+
+export function createWorldConnectionsTransportPacketSchema(
+  frame: Pick<WorldFramePacket, "locations">,
+  skeleton: Pick<WorldCastSkeletonPacket, "actors">,
+): z.ZodType<WorldConnectionsTransportPacket> {
+  const persistentLocations = frame.locations.filter((location) =>
+    location.kind === "persistent_sublocation"
+  );
+  const actorIndexSchema = z.number()
+    .int()
+    .min(0)
+    .max(skeleton.actors.length - 1);
+  const locationIndexSchema = z.number()
+    .int()
+    .min(0)
+    .max(persistentLocations.length - 1);
+  const relationSchema = worldConnectionsTransportRelationSchema.extend({
+    relationSlotIndex: actorIndexSchema,
+    targetActorIndex: actorIndexSchema,
+  }).strict();
+  const pressureSchema = worldConnectionsTransportPressureSchema.extend({
+    actorIndices: z.array(actorIndexSchema).min(1).max(8),
+    locationIndices: z.array(locationIndexSchema).min(1).max(8),
+  }).strict();
+  const packetSchema = worldConnectionsTransportPacketBaseSchema.extend({
+    relations: z.array(relationSchema).length(skeleton.actors.length),
+    pressures: z.array(pressureSchema).min(3).max(4),
+  }).strict();
+  const startingMacro = frame.locations.find((location) =>
+    location.kind === "macro" && location.isStarting
+  );
+  const startingMacroSceneIndices = new Set(
+    startingMacro === undefined
+      ? []
+      : persistentLocations.flatMap((location, index) =>
+        location.parentLocationRef === startingMacro.locationRef ? [index] : []
+      ),
+  );
+  return packetSchema.superRefine((packet, context) => {
+    const relationSlotIndices = packet.relations.map((relation) =>
+      String(relation.relationSlotIndex)
+    );
+    addDuplicateIssues(
+      relationSlotIndices,
+      context,
+      ["relations"],
+      "Relation slots",
+    );
+    const relationSlots = new Set(packet.relations.map((relation) =>
+      relation.relationSlotIndex
+    ));
+    skeleton.actors.forEach((_, index) => {
+      if (!relationSlots.has(index)) {
+        context.addIssue({
+          code: "custom",
+          path: ["relations"],
+          message: `Relation slot ${index} must appear exactly once.`,
+        });
+      }
+    });
+    packet.relations.forEach((relation, index) => {
+      if (relation.targetActorIndex === relation.relationSlotIndex) {
+        context.addIssue({
+          code: "custom",
+          path: ["relations", index],
+          message: "Relation target actor must differ from its source actor.",
+        });
+      }
+    });
+
+    const anchorSets = new Set<string>();
+    packet.pressures.forEach((pressure, index) => {
+      addDuplicateIssues(
+        pressure.actorIndices.map(String),
+        context,
+        ["pressures", index, "actorIndices"],
+        "Pressure actor indices",
+      );
+      addDuplicateIssues(
+        pressure.locationIndices.map(String),
+        context,
+        ["pressures", index, "locationIndices"],
+        "Pressure location indices",
+      );
+      pressure.actorIndices.forEach((actorIndex, actorIndexPosition) => {
+        if (actorIndex < 0 || actorIndex >= skeleton.actors.length) {
+          context.addIssue({
+            code: "custom",
+            path: ["pressures", index, "actorIndices", actorIndexPosition],
+            message: "Pressure actor index must address a skeleton actor.",
+          });
+        }
+      });
+      pressure.locationIndices.forEach((locationIndex, locationIndexPosition) => {
+        if (locationIndex < 0 || locationIndex >= persistentLocations.length) {
+          context.addIssue({
+            code: "custom",
+            path: ["pressures", index, "locationIndices", locationIndexPosition],
+            message: "Pressure location index must address a persistent sublocation.",
+          });
+        }
+      });
+      anchorSets.add(JSON.stringify({
+        actorIndices: [...pressure.actorIndices].sort((a, b) => a - b),
+        locationIndices: [...pressure.locationIndices].sort((a, b) => a - b),
+      }));
+    });
+    if (anchorSets.size < 2) {
+      context.addIssue({
+        code: "custom",
+        path: ["pressures"],
+        message: "At least two pressures require different anchor sets.",
+      });
+    }
+    const hasStartingSupportPressure = packet.pressures.some((pressure) =>
+      pressure.locationIndices.some((locationIndex) =>
+        startingMacroSceneIndices.has(locationIndex)
+      ) && pressure.actorIndices.some((actorIndex) => {
+        const actor = skeleton.actors[actorIndex];
+        return actor?.role === "support" &&
+          pressure.locationIndices.includes(actor.presentLocationIndex);
+      })
+    );
+    if (startingMacroSceneIndices.size > 0 && !hasStartingSupportPressure) {
+      context.addIssue({
+        code: "custom",
+        path: ["pressures"],
+        message: "At least one pressure must anchor both a starting-macro persistent scene and a support actor present in that scene.",
+      });
+    }
+  });
+}
+
 export function createWorldCastPacketSchema(
   frame: Pick<WorldFramePacket, "locations" | "routes">,
+  playerIdentity?: Pick<CampaignPlayerIdentityClaim, "displayName">,
 ): z.ZodType<WorldCastPacket> {
   const locationRefs = new Set(
     frame.locations.map((location) => location.locationRef),
@@ -398,6 +1169,19 @@ export function createWorldCastPacketSchema(
         code: "custom",
         path: ["actors"],
         message: "The cast requires at least two background people.",
+      });
+    }
+
+    if (playerIdentity) {
+      const reservedName = normalizeCampaignIdentityName(playerIdentity.displayName);
+      packet.actors.forEach((actor, index) => {
+        if (normalizeCampaignIdentityName(actor.name) === reservedName) {
+          context.addIssue({
+            code: "custom",
+            path: ["actors", index, "name"],
+            message: "Actor name conflicts with the reserved player identity.",
+          });
+        }
       });
     }
 
@@ -705,13 +1489,20 @@ export function createWorldConnectionsPacketSchema(
       !packet.pressures.some((pressure) =>
         pressure.locationRefs.some((locationRef) =>
           eligibleStartingSupportSceneRefs.has(locationRef)
-        )
+        ) && pressure.actorRefs.some((actorRef) => {
+          const presentPlacement = cast.placements.find((placement) =>
+            placement.actorRef === actorRef && placement.placementKind === "present"
+          );
+          return supportActorRefs.has(actorRef) &&
+            presentPlacement !== undefined &&
+            pressure.locationRefs.includes(presentPlacement.locationRef);
+        })
       )
     ) {
       context.addIssue({
         code: "custom",
         path: ["pressures"],
-        message: "At least one pressure must anchor a persistent support scene under the starting macro.",
+        message: "At least one pressure must anchor both a starting-macro persistent scene and a support actor present in that scene.",
       });
     }
   });

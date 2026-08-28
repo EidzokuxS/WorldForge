@@ -18,13 +18,20 @@ import {
   createCampaignWorldBuildService,
   createCampaignWorldSourceService,
   openCampaignWorldDatabase,
+  type WorldFrameAndCastSkeletonToolPacket,
 } from "../campaign-world/index.js";
 import type {
+  WorldCastDetailBatchPacket,
+  WorldCastDetailPacket,
   WorldCastPacket,
+  WorldCastSkeletonPacket,
+  WorldCastSkeletonTransportPacket,
   WorldConnectionsPacket,
+  WorldConnectionsTransportPacket,
   WorldFramePacket,
 } from "../campaign-world/contracts.js";
 import { createCampaignWorldRoutes } from "./campaign-world.js";
+import { worldFrameAndCastSkeletonToolPacketSchema } from "../campaign-world/world-builder.js";
 
 const CAMPAIGN_ID = "33333333-3333-4333-8333-333333333333";
 
@@ -149,6 +156,41 @@ function framePacket(): WorldFramePacket {
   };
 }
 
+function toolFrameAndSkeletonPacket(): WorldFrameAndCastSkeletonToolPacket {
+  const frame = framePacket();
+  const macroLocations = frame.locations.filter((location) => location.kind === "macro");
+  const persistentLocations = frame.locations.filter((location) =>
+    location.kind === "persistent_sublocation"
+  );
+  const macroIndexByRef = new Map(
+    macroLocations.map((location, index) => [location.locationRef, index]),
+  );
+  const persistentIndexByRef = new Map(
+    persistentLocations.map((location, index) => [location.locationRef, index]),
+  );
+  return {
+    worldSummary: frame.worldSummary,
+    startingMacroIndex: macroLocations.findIndex((location) => location.isStarting),
+    macroLocations: macroLocations.map((location) => ({
+      name: location.name,
+      description: location.description,
+      tags: [...location.tags, "world"].slice(0, 4),
+    })),
+    persistentLocations: persistentLocations.map((location) => ({
+      name: location.name,
+      description: location.description,
+      parentMacroIndex: macroIndexByRef.get(location.parentLocationRef!)!,
+      tags: [...location.tags, "scene"].slice(0, 4),
+    })),
+    routes: frame.routes.map((route) => ({
+      fromPersistentIndex: persistentIndexByRef.get(route.fromLocationRef)!,
+      toPersistentIndex: persistentIndexByRef.get(route.toLocationRef)!,
+      travelCost: route.travelCost,
+    })),
+    ...toolSkeletonTransportPacket(),
+  };
+}
+
 function castPacket(): WorldCastPacket {
   return {
     actors: [
@@ -194,6 +236,8 @@ function castPacket(): WorldCastPacket {
       },
       { actorRef: "actor:niko-salt", kind: "person", controller: "agent", role: "background", name: "Niko Salt", summary: "A dock medic who hears crews' private fears.", traits: ["steady"], tags: ["medic"] },
       { actorRef: "actor:rhea-quill", kind: "person", controller: "agent", role: "key", name: "Rhea Quill", summary: "A route assessor who suspects the storms are directed.", traits: ["skeptical"], tags: ["assessor"] },
+      { actorRef: "actor:tavi-reed", kind: "person", controller: "agent", role: "key", name: "Tavi Reed", summary: "A tide recorder who keeps a second route ledger.", traits: ["careful"], tags: ["recorder"] },
+      { actorRef: "actor:uma-vale", kind: "person", controller: "agent", role: "background", name: "Uma Vale", summary: "A foundry runner who carries sealed bell parts.", traits: ["quick"], tags: ["runner"] },
     ],
     goals: [
       {
@@ -230,6 +274,8 @@ function castPacket(): WorldCastPacket {
       },
       { actorRef: "actor:niko-salt", objective: "Keep exhausted crews working.", motivation: "Prevent another dockside death.", horizon: "immediate", priority: 3, status: "active" },
       { actorRef: "actor:rhea-quill", objective: "Identify who redirects storm signals.", motivation: "Restore safe crossings before eclipse.", horizon: "ongoing", priority: 5, status: "active" },
+      { actorRef: "actor:tavi-reed", objective: "Compare the duplicate route ledgers.", motivation: "Find which crossing remains safe.", horizon: "ongoing", priority: 4, status: "active" },
+      { actorRef: "actor:uma-vale", objective: "Deliver the sealed bell parts.", motivation: "Keep the foundry's warning signal working.", horizon: "immediate", priority: 3, status: "active" },
     ],
     placements: [
       {
@@ -239,7 +285,7 @@ function castPacket(): WorldCastPacket {
       },
       {
         actorRef: "actor:oren-tide",
-        locationRef: "location:signal-tower",
+        locationRef: "location:north-dock",
         placementKind: "present",
       },
       {
@@ -249,11 +295,13 @@ function castPacket(): WorldCastPacket {
       },
       {
         actorRef: "actor:lantern-council",
-        locationRef: "location:tide-gate",
+        locationRef: "location:reef-market",
         placementKind: "present",
       },
       { actorRef: "actor:niko-salt", locationRef: "location:bell-foundry", placementKind: "present" },
       { actorRef: "actor:rhea-quill", locationRef: "location:storm-shrine", placementKind: "present" },
+      { actorRef: "actor:tavi-reed", locationRef: "location:north-dock", placementKind: "present" },
+      { actorRef: "actor:uma-vale", locationRef: "location:bell-foundry", placementKind: "present" },
     ],
   };
 }
@@ -284,6 +332,8 @@ function connectionsPacket(): WorldConnectionsPacket {
       },
       { sourceActorRef: "actor:lantern-council", targetActorRef: "actor:niko-salt", relationType: "association", summary: "Ilya trusts Niko with copied records.", intensity: 3 },
       { sourceActorRef: "actor:niko-salt", targetActorRef: "actor:rhea-quill", relationType: "dependency", summary: "Niko needs Rhea to keep relief routes open.", intensity: 4 },
+      { sourceActorRef: "actor:tavi-reed", targetActorRef: "actor:uma-vale", relationType: "association", summary: "Tavi checks the bell parts against the duplicate ledger.", intensity: 3 },
+      { sourceActorRef: "actor:uma-vale", targetActorRef: "actor:tavi-reed", relationType: "dependency", summary: "Uma needs Tavi's ledger before sealing the bell parts.", intensity: 3 },
     ],
     pressures: [
       {
@@ -291,8 +341,8 @@ function connectionsPacket(): WorldConnectionsPacket {
         description: "Safe sea lanes close earlier after every eclipse.",
         trajectory: "North Harbor loses supply access within two route cycles.",
         urgency: 5,
-        actorRefs: ["actor:mara-venn", "actor:lantern-council", "actor:rhea-quill"],
-        locationRefs: ["location:signal-tower"],
+        actorRefs: ["actor:mara-venn", "actor:oren-tide", "actor:lantern-council", "actor:rhea-quill"],
+        locationRefs: ["location:north-dock"],
       },
       {
         name: "False Bells",
@@ -301,6 +351,199 @@ function connectionsPacket(): WorldConnectionsPacket {
         urgency: 3,
         actorRefs: ["actor:sel-bell", "actor:niko-salt"],
         locationRefs: ["location:bell-foundry"],
+      },
+    ],
+  };
+}
+
+function skeletonPacket(): WorldCastSkeletonPacket {
+  const frame = framePacket();
+  const persistentLocations = frame.locations.filter((location) =>
+    location.kind === "persistent_sublocation"
+  );
+  const cast = castPacket();
+  return {
+    actors: cast.actors.map((actor) => {
+      const placement = cast.placements.find((entry) =>
+        entry.actorRef === actor.actorRef && entry.placementKind === "present"
+      );
+      const presentLocationIndex = persistentLocations.findIndex((location) =>
+        location.locationRef === placement?.locationRef
+      );
+      const goal = cast.goals.find((entry) => entry.actorRef === actor.actorRef)!;
+      return {
+        name: actor.name,
+        role: actor.role,
+        summary: actor.summary,
+        presentLocationIndex,
+        homeLocationIndex: null,
+        objective: goal.objective,
+      };
+    }),
+  };
+}
+
+function skeletonTransportPacket(): WorldCastSkeletonTransportPacket {
+  const actors = skeletonPacket().actors;
+  const ordinary = (actor: WorldCastSkeletonPacket["actors"][number]) => ({
+    name: actor.name,
+    role: actor.role,
+    summary: actor.summary,
+    presentLocationIndex: actor.presentLocationIndex,
+    homeLocationIndex: actor.homeLocationIndex ?? -1,
+    objective: actor.objective,
+  });
+  const anchor = (actor: WorldCastSkeletonPacket["actors"][number]) => ({
+    name: actor.name,
+    role: actor.role,
+    summary: actor.summary,
+    homeLocationIndex: actor.homeLocationIndex ?? -1,
+    objective: actor.objective,
+  });
+  return {
+    keyActorOne: { ...ordinary(actors[0]!), role: "key" },
+    keyActorTwo: { ...ordinary(actors[5]!), role: "key" },
+    startingSupport: { ...anchor(actors[1]!), role: "support" },
+    supportActor: { ...ordinary(actors[2]!), role: "support" },
+    remoteBackground: { ...anchor(actors[3]!), role: "background" },
+    backgroundActor: { ...ordinary(actors[4]!), role: "background" },
+    otherActorOne: { ...ordinary(actors[6]!), role: actors[6]!.role },
+    otherActorTwo: { ...ordinary(actors[7]!), role: actors[7]!.role },
+  };
+}
+
+function toolSkeletonTransportPacket(): WorldCastSkeletonTransportPacket {
+  return skeletonTransportPacket();
+}
+
+function detailPacket(): WorldCastDetailPacket {
+  const cast = castPacket();
+  return {
+    actors: cast.actors.map((actor, actorIndex) => {
+      const goal = cast.goals.find((entry) => entry.actorRef === actor.actorRef)!;
+      return {
+        actorIndex,
+        traits: [...actor.traits],
+        motivation: goal.motivation,
+        horizon: goal.horizon,
+        priority: goal.priority,
+        tags: [...actor.tags],
+        additionalGoals: [],
+      };
+    }),
+  };
+}
+
+function detailBatchPacket(globalActorIndices: readonly number[]): WorldCastDetailBatchPacket {
+  const detail = detailPacket();
+  return {
+    actors: globalActorIndices.map((actorIndex, detailSlotIndex) => {
+      const { actorIndex: _globalActorIndex, ...fields } = detail.actors[actorIndex]!;
+      return { detailSlotIndex, ...fields };
+    }),
+  };
+}
+
+function toolDetailBatchPacket(globalActorIndices: readonly number[]): WorldCastDetailBatchPacket {
+  const actors = detailPacket().actors;
+  return {
+    actors: globalActorIndices.map((actorIndex, detailSlotIndex) => {
+      const { actorIndex: _globalActorIndex, ...fields } = actors[actorIndex]!;
+      return { detailSlotIndex, ...fields };
+    }),
+  };
+}
+
+function connectionsTransportPacket(): WorldConnectionsTransportPacket {
+  const frame = framePacket();
+  const cast = castPacket();
+  const persistentLocations = frame.locations.filter((location) =>
+    location.kind === "persistent_sublocation"
+  );
+  const fixedActorRefs = [
+    cast.actors[0]!.actorRef,
+    cast.actors[5]!.actorRef,
+    cast.actors[1]!.actorRef,
+    cast.actors[2]!.actorRef,
+    cast.actors[3]!.actorRef,
+    cast.actors[4]!.actorRef,
+    cast.actors[6]!.actorRef,
+    cast.actors[7]!.actorRef,
+  ];
+  const actorIndexByRef = new Map(fixedActorRefs.map((actorRef, index) => [actorRef, index]));
+  const locationIndexByRef = new Map(
+    persistentLocations.map((location, index) => [location.locationRef, index]),
+  );
+  const connections = connectionsPacket();
+  const semanticRelations = [
+    ...connections.relations,
+    {
+      sourceActorRef: "actor:rhea-quill",
+      targetActorRef: "actor:mara-venn",
+      relationType: "association" as const,
+      summary: "Rhea needs Mara's route judgment.",
+      intensity: 3,
+    },
+  ];
+  return {
+    relations: semanticRelations.map((relation) => {
+      const relationSlotIndex = actorIndexByRef.get(relation.sourceActorRef)!;
+      const targetActorIndex = actorIndexByRef.get(relation.targetActorRef)!;
+      return {
+        relationSlotIndex,
+        targetActorIndex,
+        relationType: relation.relationType,
+        intensity: relation.intensity,
+      };
+    }),
+    pressures: connections.pressures.map((pressure) => ({
+      name: pressure.name,
+      description: pressure.description,
+      trajectory: pressure.trajectory,
+      urgency: pressure.urgency,
+      actorIndices: pressure.actorRefs.map((ref) => actorIndexByRef.get(ref)!),
+      locationIndices: pressure.locationRefs.map((ref) => locationIndexByRef.get(ref)!),
+    })),
+  };
+}
+
+function toolConnectionsTransportPacket(): WorldConnectionsTransportPacket {
+  const base = connectionsTransportPacket();
+  return {
+    ...base,
+    relations: [
+      ...base.relations,
+      {
+        relationSlotIndex: 6,
+        targetActorIndex: 1,
+        relationType: "association",
+        intensity: 3,
+      },
+      {
+        relationSlotIndex: 7,
+        targetActorIndex: 0,
+        relationType: "dependency",
+        intensity: 3,
+      },
+    ],
+    pressures: [
+      {
+        ...base.pressures[0]!,
+        actorIndices: [0, 2, 4, 1],
+        locationIndices: [0],
+      },
+      {
+        ...base.pressures[1]!,
+        actorIndices: [3, 5],
+        locationIndices: [4],
+      },
+      {
+        name: "Tide Ledger",
+        description: "Route records disagree after the latest eclipse.",
+        trajectory: "Couriers lose confidence in the next crossing.",
+        urgency: 4,
+        actorIndices: [1],
+        locationIndices: [3],
       },
     ],
   };
@@ -335,6 +578,23 @@ function successfulTrace(): SafeGenerateTrace {
   };
 }
 
+function successfulToolTrace(): SafeGenerateTrace {
+  const base = successfulTrace();
+  return {
+    ...base,
+    strategy: "tool_mode",
+    primaryStrategy: "tool_mode",
+    capability: {
+      ...base.capability,
+      requestedMode: "tool",
+      primaryStrategy: "tool_mode",
+      fallbackStrategy: "text_fallback",
+      actualMode: "tool_mode",
+      reason: "route tool-mode fixture",
+    },
+  };
+}
+
 function structuredModel(): LanguageModel {
   const model = {} as LanguageModel;
   rememberStructuredOutputModelMetadata(
@@ -351,14 +611,32 @@ function structuredModel(): LanguageModel {
   return model;
 }
 
+function toolStructuredModel(): LanguageModel {
+  const model = {} as LanguageModel;
+  rememberStructuredOutputModelMetadata(
+    model,
+    buildStructuredOutputModelMetadata({
+      providerId: "zai-coding-plan",
+      providerName: "Z.AI",
+      model: "glm-5.3",
+      protocol: "openai-compatible",
+      baseUrl: "https://api.z.ai/v1",
+      transport: "chat-completions",
+    }),
+  );
+  return model;
+}
+
 interface Gate {
   entered: Promise<void>;
   release(): void;
 }
 
-function controlledSuccessfulProvider(): {
+function controlledSuccessfulProvider(toolMode = false): {
   generateObject: typeof safeGenerateObject;
   gate: Gate;
+  prompts: string[];
+  schemas: unknown[];
 } {
   let enter!: () => void;
   let release!: () => void;
@@ -368,19 +646,60 @@ function controlledSuccessfulProvider(): {
   const released = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const packets = [framePacket(), castPacket(), connectionsPacket()];
-  let index = 0;
-  const generateObject = vi.fn(async () => {
-    if (index === 0) {
-      enter();
-      await released;
+  let frameEntered = false;
+  const prompts: string[] = [];
+  const schemas: unknown[] = [];
+  type GenerateOptions = { prompt?: string; [key: string]: unknown };
+  const generateObject = vi.fn(async ({ prompt, schema }: GenerateOptions) => {
+    prompts.push(prompt ?? "");
+    schemas.push(schema);
+    if (toolMode && prompt?.includes("WORLD_CAST_SKELETON_IN_SAME_PACKET")) {
+      if (!frameEntered) {
+        frameEntered = true;
+        enter();
+        await released;
+      }
+      return { object: toolFrameAndSkeletonPacket(), trace: successfulToolTrace() };
     }
-    const object = packets[index++];
-    return { object, trace: successfulTrace() };
+    if (prompt?.startsWith("You design the Campaign World frame.")) {
+      if (!frameEntered) {
+        frameEntered = true;
+        enter();
+        await released;
+      }
+      return toolMode
+        ? { object: toolFrameAndSkeletonPacket(), trace: successfulToolTrace() }
+        : { object: framePacket(), trace: successfulTrace() };
+    }
+    if (prompt?.startsWith("You design the compact starting Campaign World cast skeleton.")) {
+      return { object: skeletonTransportPacket(), trace: successfulTrace() };
+    }
+    if (prompt?.startsWith("You complete one assigned detail batch")) {
+      const globalActorIndices = prompt.includes('"actorIndex":0')
+        ? [0, 2, 4, 6]
+        : [1, 3, 5, 7];
+      return {
+        object: toolMode
+          ? toolDetailBatchPacket(prompt.includes('"actorIndex":0')
+            ? [0, 2, 4, 6]
+            : [1, 3, 5, 7])
+          : detailBatchPacket(globalActorIndices),
+        trace: successfulTrace(),
+      };
+    }
+    if (prompt?.startsWith("You design Campaign World relations and starting pressures from an accepted cast skeleton.")) {
+      return {
+        object: toolMode ? toolConnectionsTransportPacket() : connectionsTransportPacket(),
+        trace: successfulTrace(),
+      };
+    }
+    throw new Error("Unexpected Campaign World route prompt.");
   }) as unknown as typeof safeGenerateObject;
   return {
     generateObject,
     gate: { entered, release },
+    prompts,
+    schemas,
   };
 }
 
@@ -410,9 +729,10 @@ function controlledFailingProvider(): {
 interface RouteHarness {
   app: Hono;
   buildService: ReturnType<typeof createCampaignWorldBuildService>;
+  createModel: ReturnType<typeof vi.fn>;
 }
 
-function createHarness(generateObject: typeof safeGenerateObject): RouteHarness {
+function createHarness(generateObject: typeof safeGenerateObject, toolMode = false): RouteHarness {
   let entitySequence = 0;
   let buildSequence = 0;
   const sourceService = createCampaignWorldSourceService();
@@ -425,20 +745,21 @@ function createHarness(generateObject: typeof safeGenerateObject): RouteHarness 
     builder,
     idFactory: () => `route-build-${++buildSequence}`,
   });
-  const model = structuredModel();
+  const model = toolMode ? toolStructuredModel() : structuredModel();
+  const createModel = vi.fn(() => model);
   const routes = createCampaignWorldRoutes({
     sourceService,
     buildService,
-    createModel: () => model,
+    createModel,
     loadSettings: () => ({}) as never,
     resolveGenerator: () => ({
       resolved: {
         provider: {
-          id: "route-provider",
-          name: "Route Provider",
+          id: toolMode ? "zai-coding-plan" : "route-provider",
+          name: toolMode ? "Z.AI" : "Route Provider",
           baseUrl: "https://example.test/v1",
           apiKey: "route-key",
-          model: "route-model",
+          model: toolMode ? "glm-5.3" : "route-model",
         },
         temperature: 0.7,
         maxTokens: 8_000,
@@ -448,7 +769,7 @@ function createHarness(generateObject: typeof safeGenerateObject): RouteHarness 
   });
   const app = new Hono();
   app.route("/api/campaigns", routes);
-  return { app, buildService };
+  return { app, buildService, createModel };
 }
 
 interface SseRecord {
@@ -589,13 +910,54 @@ describe("Campaign World routes", () => {
     );
   });
 
-  it("replays a completed build, resumes by sequence, and accepts persisted review", async () => {
-    const provider = controlledSuccessfulProvider();
-    const { app, buildService } = createHarness(provider.generateObject);
+  it("runs the tool-mode world seed as one frame call before detail and connections", async () => {
+    const provider = controlledSuccessfulProvider(true);
+    const { app, buildService } = createHarness(provider.generateObject, true);
     const source = await loadSource(app);
     const startedResponse = await startBuild(app, source.sourceDigest);
     expect(startedResponse.status).toBe(202);
     const started = await startedResponse.json() as { buildId: string };
+
+    await provider.gate.entered;
+    expect(provider.prompts).toHaveLength(1);
+    expect(provider.prompts[0]).toContain("WORLD_CAST_SKELETON_IN_SAME_PACKET");
+    expect(provider.schemas[0]).toBe(worldFrameAndCastSkeletonToolPacketSchema);
+
+    const completion = buildService.waitForBuild(CAMPAIGN_ID, started.buildId);
+    provider.gate.release();
+    await completion;
+
+    expect(provider.prompts).toHaveLength(4);
+    expect(provider.prompts.filter((prompt) =>
+      prompt.startsWith("You design the compact starting Campaign World cast skeleton."),
+    )).toHaveLength(0);
+    expect(provider.prompts.slice(1).some((prompt) =>
+      prompt.includes("WORLD_CAST_SKELETON_IN_SAME_PACKET"),
+    )).toBe(false);
+
+    const events = parseSse(await (await app.request(
+      `/api/campaigns/${CAMPAIGN_ID}/world/builds/${started.buildId}/events`,
+    )).text());
+    expect(events.at(-1)).toMatchObject({
+      id: 12,
+      event: "build_completed",
+    });
+    expect(await (await app.request(
+      `/api/campaigns/${CAMPAIGN_ID}/world/state`,
+    )).json()).toMatchObject({ status: "review" });
+  });
+
+  it("replays a completed build, resumes by sequence, and accepts persisted review", async () => {
+    const provider = controlledSuccessfulProvider();
+    const { app, buildService, createModel } = createHarness(provider.generateObject);
+    const source = await loadSource(app);
+    const startedResponse = await startBuild(app, source.sourceDigest);
+    expect(startedResponse.status).toBe(202);
+    const started = await startedResponse.json() as { buildId: string };
+    expect(createModel).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "route-provider", model: "route-model" }),
+      { role: "generator", reasoningMode: "bypass" },
+    );
     await provider.gate.entered;
     expect(buildService.hasLiveCoordinator(CAMPAIGN_ID, started.buildId)).toBe(true);
     const liveEventsResponse = await app.request(
