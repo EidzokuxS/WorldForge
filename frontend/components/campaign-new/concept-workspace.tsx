@@ -71,7 +71,23 @@ export function ConceptWorkspace({ onContinue }: ConceptWorkspaceProps) {
             />
           </ForgeStep>
 
-          <ForgeStep number="iii." title="Franchise / IP" meta="optional" description="Optional source context for known worlds.">
+          <ForgeStep
+            number="iii."
+            title="Player character"
+            meta="optional"
+            description="Reserve the name of the character you’ll create or import after the world is accepted."
+          >
+            <Label htmlFor="player-identity" className="sr-only">Player character</Label>
+            <Input
+              id="player-identity"
+              maxLength={200}
+              value={w.playerIdentityName}
+              onChange={(event) => w.setPlayerIdentityName(event.target.value)}
+              placeholder="e.g. Brina Hael"
+            />
+          </ForgeStep>
+
+          <ForgeStep number="iv." title="Franchise / IP" meta="optional" description="Optional source context for known worlds.">
             <Input
               id="campaign-franchise"
               value={w.campaignFranchise}
@@ -98,7 +114,7 @@ export function ConceptWorkspace({ onContinue }: ConceptWorkspaceProps) {
           </ForgeStep>
 
           <ForgeStep
-            number="iv."
+            number="v."
             title="Sources"
             meta={`${w.selectedWorldbooks.length} selected`}
             description="Reusable worldbooks from the Library. Import accepts JSON today."
@@ -172,7 +188,7 @@ export function ConceptWorkspace({ onContinue }: ConceptWorkspaceProps) {
         <div className="wf-forge-sequence">
           <p className="wf-kicker wf-kicker-ember">Forge sequence</p>
           <div className="wf-stage-list">
-            <SequenceItem number="i" state="active" label="Concept" detail="Name, premise, sources" />
+            <SequenceItem number="i" state="active" label="Concept" detail="Name, premise, player identity" />
             <SequenceItem number="ii" state="pending" label="World DNA" detail="Six real seed cards" />
             <SequenceItem number="iii" state="pending" label="Campaign Kernel" detail="Draft shell" />
             <SequenceItem number="iv" state="pending" label="WorldGraph" detail="Causality map" />

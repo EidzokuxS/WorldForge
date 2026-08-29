@@ -115,9 +115,10 @@ export function CampaignPlayStage({
           <>
             <SceneCard
               actors={state.visibleActors}
-              consequences={state.consequences}
+              consequences={state.narration === null ? state.consequences : []}
               location={state.currentLocation}
               obligations={state.obligations}
+              commitments={state.commitments}
               possessions={state.possessions}
               pressures={state.visiblePressures}
               routes={state.visibleRoutes}

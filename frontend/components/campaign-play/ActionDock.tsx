@@ -1,7 +1,12 @@
 "use client";
 
 import type { KeyboardEvent, ReactNode, RefObject } from "react";
-import type { CampaignPlaySuggestedAction } from "@worldforge/shared";
+import type {
+  CampaignPlayCommitmentBinding,
+  CampaignPlayDecisionBinding,
+  CampaignPlayObligationBinding,
+  CampaignPlaySuggestedAction,
+} from "@worldforge/shared";
 
 export interface ActionDockProps {
   draft: string;
@@ -17,7 +22,12 @@ export interface ActionDockProps {
   onDraftChange: (value: string) => void;
   onJournalOpen: () => void;
   onSubmitFreeform: () => void;
-  onSubmitSuggested: (choiceHandle: string) => void;
+  onSubmitSuggested: (
+    choiceHandle: string,
+    decisionBinding?: CampaignPlayDecisionBinding,
+    commitmentBinding?: CampaignPlayCommitmentBinding,
+    obligationBinding?: CampaignPlayObligationBinding,
+  ) => void;
 }
 
 const CHOICE_KEYS = ["a", "b", "c", "d"] as const;
@@ -56,7 +66,17 @@ export function ActionDock({
                 data-choice-handle={action.choiceHandle}
                 disabled={inputLocked}
                 key={action.choiceHandle}
-                onClick={() => onSubmitSuggested(action.choiceHandle)}
+                onClick={() => {
+                  if (action.decisionBinding !== undefined) {
+                    onSubmitSuggested(action.choiceHandle, action.decisionBinding, action.commitmentBinding);
+                  } else if (action.commitmentBinding !== undefined) {
+                    onSubmitSuggested(action.choiceHandle, undefined, action.commitmentBinding);
+                  } else if (action.obligationBinding !== undefined) {
+                    onSubmitSuggested(action.choiceHandle, undefined, undefined, action.obligationBinding);
+                  } else {
+                    onSubmitSuggested(action.choiceHandle);
+                  }
+                }}
                 type="button"
               >
                 <span aria-hidden="true">{CHOICE_KEYS[index] ?? "·"}.</span>
@@ -74,7 +94,17 @@ export function ActionDock({
               data-choice-handle={action.choiceHandle}
               disabled={inputLocked}
               key={action.choiceHandle}
-              onClick={() => onSubmitSuggested(action.choiceHandle)}
+              onClick={() => {
+                if (action.decisionBinding !== undefined) {
+                  onSubmitSuggested(action.choiceHandle, action.decisionBinding, action.commitmentBinding);
+                } else if (action.commitmentBinding !== undefined) {
+                  onSubmitSuggested(action.choiceHandle, undefined, action.commitmentBinding);
+                } else if (action.obligationBinding !== undefined) {
+                  onSubmitSuggested(action.choiceHandle, undefined, undefined, action.obligationBinding);
+                } else {
+                  onSubmitSuggested(action.choiceHandle);
+                }
+              }}
               type="button"
             >
               <span aria-hidden="true">◷</span>

@@ -22,6 +22,7 @@ function readyState(
     visiblePressures: [],
     possessions: [],
     obligations: [],
+    commitments: [],
     narration: {
       narrationId,
       turnId: `turn-${narrationId}`,
@@ -34,6 +35,7 @@ function readyState(
     narrationOperation: null,
     utilityActions: [],
     consequences: [],
+    decisionOutcomes: [],
     activeTurn: null,
     journalCursor: 0,
     projectionHash: "a".repeat(64),
@@ -77,6 +79,54 @@ describe("CampaignPlayStage", () => {
     expect(screen.getByText("Mara")).toBeInTheDocument();
     expect(screen.getByText("Cartographer")).toBeInTheDocument();
     expect(container.querySelector(".campaign-play-stage")).not.toHaveAttribute("data-effects");
+  });
+
+  it("wires public commitments into the Work region", () => {
+    const state = readyState();
+    state.commitments = [{
+      handle: "commitment-stage-public",
+      kind: "paid_delivery",
+      status: "active",
+      counterpartyHandle: "counterparty-stage-public",
+      counterpartyName: "Orsa Pell",
+      title: "Carry the sealed dispatch",
+      subjectName: "Sealed dispatch",
+      destinationHandle: "destination-stage-public",
+      destinationName: "North Cut",
+      feeUnit: "copper",
+      feeAmount: 16,
+      paymentTiming: "on_completion",
+      dueWorldTimeLabel: "Before dawn",
+    }];
+
+    render(<CampaignPlayStage state={state} />);
+
+    const work = screen.getByRole("region", { name: "Work" });
+    expect(work).toHaveTextContent("Carry the sealed dispatch");
+    expect(work).toHaveTextContent("Sealed dispatch · to North Cut");
+    expect(work).toHaveTextContent("For Orsa Pell");
+    expect(work).toHaveTextContent("16 copper · on completion");
+    expect(work).toHaveTextContent("Due Before dawn");
+    expect(work.textContent).not.toContain("commitment-stage-public");
+  });
+
+  it("keeps accepted narration as the single scene telling instead of repeating its source consequence", () => {
+    const state = readyState();
+    state.consequences = [{
+      observationHandle: "observation-1",
+      performingActorHandle: null,
+      performingActorName: null,
+      whatChanged: "The signal wakes in the rain.",
+      whereOrRoute: "Signal Yard",
+      worldTimeLabel: "Before dawn",
+      causalCue: "your_action",
+    }];
+
+    render(<CampaignPlayStage state={state} />);
+
+    expect(screen.getByText("The signal wakes.")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "What changed" })).not.toBeInTheDocument();
+    expect(screen.queryByText("The signal wakes in the rain.")).not.toBeInTheDocument();
   });
 
   it("plays a newly accepted artifact once, retriggers the same kind, and suppresses it after remount", async () => {

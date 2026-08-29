@@ -91,6 +91,12 @@ function sources(partial: Partial<IngestionSources> = {}): IngestionSources {
   } as IngestionSources;
 }
 
+function getGenerationSchema() {
+  const schema = mockGenerateObject.mock.calls[0]?.[0]?.schema;
+  expect(schema).toBeDefined();
+  return schema as typeof richCharacterSchema;
+}
+
 describe("synthesizeDraftFromSources personality lift", () => {
   beforeEach(() => {
     mockGenerateObject.mockReset();
@@ -203,7 +209,6 @@ describe("synthesizeDraftFromSources personality lift", () => {
         tags: '["Scout","Veteran","Pragmatic"]',
         equippedItems: '["Field Knife","Compass"]',
         personalityContradictions: '["Plans every risk","Moves before the plan is complete"]',
-        personalitySampleLines: '["State your business.","We move at dawn."]',
       },
     });
 
@@ -228,6 +233,80 @@ describe("synthesizeDraftFromSources personality lift", () => {
       "State your business.",
       "We move at dawn.",
     ]);
+  });
+
+  it("rejects a scalar stringified personality sample array at the generation schema", async () => {
+    await synthesizeDraftFromSources({
+      sources: sources(),
+      classification,
+      researchDigest: null,
+      ctx,
+    });
+
+    const result = getGenerationSchema().safeParse({
+      ...richOutput,
+      personalitySampleLines: '["State your business.","We move at dawn."]',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error?.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: ["personalitySampleLines"] }),
+    ]));
+  });
+
+  it("rejects a malformed aggregate inside personality sample lines", async () => {
+    await synthesizeDraftFromSources({
+      sources: sources(),
+      classification,
+      researchDigest: null,
+      ctx,
+    });
+
+    const malformedAggregate =
+      `["I'll carry it, but if the water's over the landing stage by noon, I'm setting it down somewhere dry and that's that.", ` +
+      `"You want it at the warehouse door or the customs lane? Not both for one fee.", ` +
+      `"I don't ask what's in the bundle. I ask where it's going and whether the door's watched for me.`;
+    expect(malformedAggregate).toHaveLength(297);
+
+    const result = getGenerationSchema().safeParse({
+      ...richOutput,
+      personalitySampleLines: [malformedAggregate],
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error?.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: ["personalitySampleLines", 0],
+        message: "one spoken line is required, not encoded array/object data",
+      }),
+    ]));
+  });
+
+  it("accepts separate spoken sample lines and preserves them in the draft", async () => {
+    const sampleLines = [
+      "I'll carry it straight to the clerk.",
+      '"You want it at the warehouse door?"',
+    ];
+    mockGenerateObject.mockResolvedValueOnce({
+      object: {
+        ...richOutput,
+        personalitySampleLines: sampleLines,
+      },
+    });
+
+    const draft = await synthesizeDraftFromSources({
+      sources: sources(),
+      classification,
+      researchDigest: null,
+      ctx,
+    });
+
+    const result = getGenerationSchema().safeParse({
+      ...richOutput,
+      personalitySampleLines: sampleLines,
+    });
+    expect(result.success).toBe(true);
+    expect(draft.identity.personality?.sampleLines).toEqual(sampleLines);
   });
 
   it("forces imported characters to start at 5 hp even if the model returns a lower value", async () => {

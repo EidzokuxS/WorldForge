@@ -357,6 +357,7 @@ export function createCampaignWorldRoutes(
         modelName: generator.resolved.provider.model,
         model: dependencies.createModel(generator.resolved.provider, {
           role: "generator",
+          reasoningMode: "bypass",
         }),
         temperature: generator.resolved.temperature,
         maxOutputTokens: generator.resolved.maxTokens,

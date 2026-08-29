@@ -1,7 +1,11 @@
 import { z } from "zod";
 import {
   CAMPAIGN_PLAY_CONSEQUENCE_CUE_VALUES,
+  CAMPAIGN_PLAY_DECISION_DISPOSITION_VALUES,
+  CAMPAIGN_PLAY_DECISION_KIND_VALUES,
+  CAMPAIGN_PLAY_DECISION_STATUS_VALUES,
   CAMPAIGN_PLAY_CHARACTER_SOURCE_VALUES,
+  CAMPAIGN_PLAY_COMMITMENT_ACTION_VALUES,
   CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES,
   CAMPAIGN_PLAY_EFFECT_KIND_VALUES,
   CAMPAIGN_PLAY_INTENT_SOURCE_VALUES,
@@ -20,6 +24,14 @@ import {
   type CampaignPlayErrorResponse,
   type CampaignPlayActionContext,
   type CampaignPlayAvailableIntent,
+  type CampaignPlayDecisionBinding,
+  type CampaignPlayCommitmentBinding,
+  type CampaignPlayObligationBinding,
+  type CampaignPlayDecisionAcceptEffect,
+  type CampaignPlayDecisionObservation,
+  type CampaignPlayDecisionOutcome,
+  type CampaignPlayObligationSettlement,
+  type CampaignPlayPlayerCommitment,
   type CampaignPlayCharacterDraft,
   type CampaignPlayCharacterDraftResponse,
   type CampaignPlayCharacterResearch,
@@ -32,6 +44,7 @@ import {
   type CampaignPlayNarrationRecoveryRequest,
   type CampaignPlayNarrationRecoveryResponse,
   type CampaignPlayNarratorPacket,
+  type CampaignPlayOpeningDecision,
   type CampaignPlayOpeningAdmissionRequest,
   type CampaignPlayOpeningDetailOption,
   type CampaignPlayOpeningLocationOption,
@@ -43,6 +56,7 @@ import {
   type CampaignPlaySseEvent,
   type CampaignPlayStartingConditions,
   type CampaignPlayState,
+  type CampaignPlayVisibleCommitment,
   type CampaignPlayTurnAdmissionRequest,
   type CampaignPlayTurnAdmissionResponse,
   type CampaignPlayTurnReadResponse,
@@ -108,8 +122,13 @@ export const CAMPAIGN_PLAY_COMMAND_KIND_VALUES = [
   "adjust_actor_possession",
   "incur_actor_obligation",
   "pay_actor_obligation",
+  "settle_player_receivable",
   "materialize_support_actor",
   "record_world_event",
+  "decision_open",
+  "decision_resolve",
+  "create_player_commitment",
+  "complete_player_commitment",
 ] as const;
 
 export const CAMPAIGN_PLAY_BOOTSTRAP_COMMAND_KIND_VALUES = [
@@ -134,8 +153,14 @@ export const CAMPAIGN_PLAY_WORLD_EVENT_KIND_VALUES = [
   "actor_obligation_incurred",
   "actor_possession_adjusted",
   "actor_obligation_payment_applied",
+  "player_receivable_settled",
   "support_actor_materialized",
   "scene_recorded",
+  "decision_opened",
+  "decision_accepted",
+  "decision_declined",
+  "player_commitment_created",
+  "player_commitment_completed",
 ] as const;
 
 export const CAMPAIGN_PLAY_ACTOR_JOB_STAGE_VALUES = [
@@ -174,6 +199,8 @@ export const CAMPAIGN_PLAY_ENTITY_REF_KIND_VALUES = [
   "possession",
   "obligation",
   "world_event",
+  "decision",
+  "commitment",
 ] as const;
 
 export const CAMPAIGN_PLAY_CAUSAL_PARENT_KIND_VALUES = [
@@ -194,6 +221,7 @@ export const CAMPAIGN_PLAY_SYSTEM_SOURCE_VALUES = [
   "opening_bootstrap",
   "game_master",
   "actor_scheduler",
+  "commitment_executor",
 ] as const;
 
 export const CAMPAIGN_PLAY_EXPOSURE_POLICY_MODE_VALUES = [
@@ -298,6 +326,7 @@ const idempotencyKeySchema = boundedStringSchema(
   CAMPAIGN_PLAY_LIMITS.idempotencyKey,
   { singleLine: true, characters: ID_CHARACTERS },
 );
+
 const nameSchema = boundedStringSchema(CAMPAIGN_PLAY_LIMITS.name, {
   singleLine: true,
 });
@@ -310,6 +339,147 @@ const shortTextSchema = boundedStringSchema(CAMPAIGN_PLAY_LIMITS.shortText, {
 const textSchema = boundedStringSchema(CAMPAIGN_PLAY_LIMITS.text, {
   singleLine: false,
 });
+const safeIntegerSchema = z.number().int().safe();
+const positiveIntegerSchema = safeIntegerSchema.min(1);
+const nonnegativeIntegerSchema = safeIntegerSchema.min(0);
+const timestampSchema = nonnegativeIntegerSchema;
+const worldTimeSchema = nonnegativeIntegerSchema.max(
+  CAMPAIGN_PLAY_LIMITS.worldTimeMinutes,
+);
+
+const campaignPlayGrantPossessionAcceptEffectSchema = z.object({
+  kind: z.literal("grant_player_possession"),
+  name: nameSchema,
+}).strict();
+
+const campaignPlayUnpaidDeliveryAcceptEffectSchema = z.object({
+  kind: z.literal("unpaid_delivery"),
+  title: labelSchema,
+  subjectName: nameSchema,
+  destinationHandle: handleSchema,
+  dueInMinutes: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes)
+    .optional(),
+}).strict();
+
+const campaignPlayPaidDeliveryAcceptEffectSchema = z.object({
+  kind: z.literal("paid_delivery"),
+  title: labelSchema,
+  subjectName: nameSchema,
+  destinationHandle: handleSchema,
+  feeUnit: z.literal("copper"),
+  feeAmount: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  paymentTiming: z.literal("on_completion"),
+  dueInMinutes: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes)
+    .optional(),
+}).strict();
+
+export const campaignPlayDecisionAcceptEffectSchema:
+  z.ZodType<CampaignPlayDecisionAcceptEffect> = z.union([
+    campaignPlayGrantPossessionAcceptEffectSchema,
+    campaignPlayPaidDeliveryAcceptEffectSchema,
+    campaignPlayUnpaidDeliveryAcceptEffectSchema,
+  ]);
+
+const campaignPlayPlayerCommitmentBaseShape = {
+  commitmentId: idSchema,
+  campaignId: idSchema,
+  performerActorId: idSchema,
+  counterpartyActorId: idSchema,
+  status: z.enum(["active", "completed"]),
+  title: labelSchema,
+  subjectName: nameSchema,
+  destinationHandle: handleSchema,
+  acceptedWorldTimeMinutes: worldTimeSchema,
+  dueWorldTimeMinutes: worldTimeSchema.min(1).nullable(),
+  sourceDecisionKey: idSchema,
+  sourceTurnId: idSchema,
+  sourceReceiptId: idSchema,
+  completionTurnId: idSchema.nullable(),
+  completionReceiptId: idSchema.nullable(),
+  worldVersion: positiveIntegerSchema,
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema,
+};
+
+const campaignPlayPaidPlayerCommitmentSchema = z.object({
+  ...campaignPlayPlayerCommitmentBaseShape,
+  kind: z.literal("paid_delivery"),
+  feeUnit: z.literal("copper"),
+  feeAmount: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  paymentTiming: z.literal("on_completion"),
+}).strict();
+
+const campaignPlayUnpaidPlayerCommitmentSchema = z.object({
+  ...campaignPlayPlayerCommitmentBaseShape,
+  kind: z.literal("unpaid_delivery"),
+}).strict();
+
+export const campaignPlayPlayerCommitmentSchema:
+  z.ZodType<CampaignPlayPlayerCommitment> = z.discriminatedUnion("kind", [
+    campaignPlayPaidPlayerCommitmentSchema,
+    campaignPlayUnpaidPlayerCommitmentSchema,
+  ]);
+
+export const campaignPlayDecisionBindingSchema: z.ZodType<CampaignPlayDecisionBinding> =
+  z.object({
+    decisionKey: idSchema,
+    actorHandle: handleSchema,
+    kind: z.enum(CAMPAIGN_PLAY_DECISION_KIND_VALUES),
+    disposition: z.enum(CAMPAIGN_PLAY_DECISION_DISPOSITION_VALUES),
+  }).strict();
+
+export const campaignPlayCommitmentBindingSchema:
+  z.ZodType<CampaignPlayCommitmentBinding> = z.object({
+    commitmentHandle: handleSchema,
+    action: z.enum(CAMPAIGN_PLAY_COMMITMENT_ACTION_VALUES),
+    counterpartyHandle: handleSchema,
+    subjectName: nameSchema,
+    destinationHandle: handleSchema,
+  }).strict();
+
+export const campaignPlayObligationBindingSchema:
+  z.ZodType<CampaignPlayObligationBinding> = z.object({
+    obligationHandle: handleSchema,
+    debtorHandle: handleSchema,
+    creditorHandle: handleSchema,
+    unitKey: z.literal("copper"),
+    amount: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  }).strict();
+
+export const campaignPlayDecisionOutcomeSchema: z.ZodType<CampaignPlayDecisionOutcome> =
+  z.object({
+    decisionKey: idSchema,
+    actorHandle: handleSchema,
+    kind: z.enum(CAMPAIGN_PLAY_DECISION_KIND_VALUES),
+    disposition: z.enum(CAMPAIGN_PLAY_DECISION_DISPOSITION_VALUES),
+    status: z.enum(["accepted", "declined"]),
+    sourceTurnId: idSchema,
+    summary: textSchema,
+    acceptEffect: campaignPlayDecisionAcceptEffectSchema.nullable(),
+  }).strict();
+
+export const campaignPlayOpeningDecisionSchema: z.ZodType<CampaignPlayOpeningDecision> =
+  z.object({
+    decisionKey: idSchema,
+    actorName: nameSchema,
+    actorHandle: handleSchema,
+    kind: z.enum(CAMPAIGN_PLAY_DECISION_KIND_VALUES),
+    summary: textSchema,
+    acceptLabel: labelSchema,
+    declineLabel: labelSchema,
+    acceptEffect: campaignPlayDecisionAcceptEffectSchema.nullable().optional(),
+  }).strict();
+
+export const campaignPlayDecisionObservationSchema: z.ZodType<CampaignPlayDecisionObservation> =
+  z.object({
+    decisionKey: idSchema,
+    actorName: nameSchema,
+    actorHandle: handleSchema,
+    kind: z.enum(CAMPAIGN_PLAY_DECISION_KIND_VALUES),
+    disposition: z.enum(CAMPAIGN_PLAY_DECISION_DISPOSITION_VALUES),
+    summary: textSchema,
+    selectedLabel: labelSchema,
+  }).strict();
 const reasoningTextSchema = boundedStringSchema(
   CAMPAIGN_PLAY_LIMITS.narrationText,
   { singleLine: false },
@@ -339,14 +509,6 @@ const hashSchema = z.string().length(64).refine(
     LOWER_HEX_CHARACTERS.includes(character)),
   { message: "Hash must contain 64 lowercase hexadecimal characters." },
 );
-const safeIntegerSchema = z.number().int().safe();
-const positiveIntegerSchema = safeIntegerSchema.min(1);
-const nonnegativeIntegerSchema = safeIntegerSchema.min(0);
-const timestampSchema = nonnegativeIntegerSchema;
-const worldTimeSchema = nonnegativeIntegerSchema.max(
-  CAMPAIGN_PLAY_LIMITS.worldTimeMinutes,
-);
-
 function addDuplicateIssue(
   values: readonly string[],
   context: z.RefinementCtx,
@@ -360,6 +522,81 @@ function addDuplicateIssue(
       message: `${label} must be unique.`,
     });
   }
+}
+
+function sameDecisionBinding(
+  left: CampaignPlayDecisionBinding,
+  right: CampaignPlayDecisionBinding,
+): boolean {
+  return left.decisionKey === right.decisionKey &&
+    left.actorHandle === right.actorHandle &&
+    left.kind === right.kind &&
+    left.disposition === right.disposition;
+}
+
+function sameCommitmentBinding(
+  left: CampaignPlayCommitmentBinding,
+  right: CampaignPlayCommitmentBinding,
+): boolean {
+  return left.commitmentHandle === right.commitmentHandle &&
+    left.action === right.action &&
+    left.counterpartyHandle === right.counterpartyHandle &&
+    left.subjectName === right.subjectName &&
+    left.destinationHandle === right.destinationHandle;
+}
+
+function sameObligationBinding(
+  left: CampaignPlayObligationBinding,
+  right: CampaignPlayObligationBinding,
+): boolean {
+  return left.obligationHandle === right.obligationHandle &&
+    left.debtorHandle === right.debtorHandle &&
+    left.creditorHandle === right.creditorHandle &&
+    left.unitKey === right.unitKey &&
+    left.amount === right.amount;
+}
+
+function compareNullableCommitmentDueLabel(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): number {
+  if (left === right) return 0;
+  if (left === null || left === undefined) return 1;
+  if (right === null || right === undefined) return -1;
+  return left < right ? -1 : 1;
+}
+
+/**
+ * Return commitment-bound intent indexes in the publication order shared by
+ * visibility, native Narrator output, and tool output. Deliver controls lead
+ * collect controls; ties use the frozen due label, public handle, and intent
+ * handle so the order remains stable without exposing private identifiers.
+ */
+export function campaignPlayCommitmentIntentIndexes(
+  packet: CampaignPlayNarratorPacket,
+): number[] {
+  const dueLabelByHandle = new Map(
+    packet.commitments.map((commitment) => [commitment.handle, commitment.dueWorldTimeLabel]),
+  );
+  return packet.availableIntents
+    .map((intent, intentIndex) => ({ intent, intentIndex }))
+    .filter(({ intent }) => intent.commitmentBinding !== undefined)
+    .sort((left, right) => {
+      const leftBinding = left.intent.commitmentBinding!;
+      const rightBinding = right.intent.commitmentBinding!;
+      const actionOrder = (leftBinding.action === "deliver" ? 0 : 1) -
+        (rightBinding.action === "deliver" ? 0 : 1);
+      if (actionOrder !== 0) return actionOrder;
+      const dueOrder = compareNullableCommitmentDueLabel(
+        dueLabelByHandle.get(leftBinding.commitmentHandle),
+        dueLabelByHandle.get(rightBinding.commitmentHandle),
+      );
+      if (dueOrder !== 0) return dueOrder;
+      return leftBinding.commitmentHandle.localeCompare(rightBinding.commitmentHandle) ||
+        left.intent.handle.localeCompare(right.intent.handle) ||
+        left.intentIndex - right.intentIndex;
+    })
+    .map(({ intentIndex }) => intentIndex);
 }
 
 function jsonByteLength(value: unknown): number {
@@ -466,6 +703,18 @@ export const campaignPlayVisibleObligationSchema = z.object({
   outstandingAmount: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
 }).strict();
 
+export const campaignPlayObligationSettlementSchema:
+  z.ZodType<CampaignPlayObligationSettlement> = z.object({
+    obligationHandle: handleSchema,
+    debtorHandle: handleSchema,
+    creditorHandle: handleSchema,
+    unitKey: z.literal("copper"),
+    amount: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+    status: z.literal("settled"),
+    sourceTurnId: idSchema,
+    summary: labelSchema,
+  }).strict();
+
 export const campaignPlayConsequenceSchema = z.object({
   observationHandle: handleSchema,
   performingActorHandle: handleSchema.nullable(),
@@ -509,6 +758,8 @@ export const campaignPlayJournalEntrySchema = z.object({
   whereOrRoute: labelSchema.nullable(),
   worldTimeLabel: labelSchema,
   consequence: campaignPlayConsequenceSchema.nullable(),
+  decision: campaignPlayOpeningDecisionSchema.optional(),
+  decisionOutcome: campaignPlayDecisionObservationSchema.optional(),
 }).strict().superRefine((entry, context) => {
   if (
     entry.consequence !== null &&
@@ -528,12 +779,60 @@ export const campaignPlayAvailableIntentSchema = z.object({
   kind: z.enum(WORLD_INTENT_KIND_VALUES),
   targets: z.array(campaignPlayVisibleTargetSchema)
     .max(CAMPAIGN_PLAY_LIMITS.targets),
+  decisionBinding: campaignPlayDecisionBindingSchema.optional(),
+  commitmentBinding: campaignPlayCommitmentBindingSchema.optional(),
+  obligationBinding: campaignPlayObligationBindingSchema.optional(),
+}).strict().superRefine((intent, context) => {
+  const bindingCount = [
+    intent.decisionBinding,
+    intent.commitmentBinding,
+    intent.obligationBinding,
+  ].filter((binding) => binding !== undefined).length;
+  if (bindingCount > 1) {
+    context.addIssue({
+      code: "custom",
+      path: ["obligationBinding"],
+      message: "An intent cannot carry more than one typed binding.",
+    });
+  }
+});
+
+const campaignPlayVisibleCommitmentBaseShape = {
+  handle: handleSchema,
+  status: z.enum(["active", "completed"]),
+  counterpartyHandle: handleSchema,
+  counterpartyName: nameSchema,
+  title: labelSchema,
+  subjectName: nameSchema,
+  destinationHandle: handleSchema,
+  destinationName: nameSchema,
+  dueWorldTimeLabel: labelSchema.nullable(),
+};
+
+const campaignPlayPaidVisibleCommitmentSchema = z.object({
+  ...campaignPlayVisibleCommitmentBaseShape,
+  kind: z.literal("paid_delivery"),
+  feeUnit: z.literal("copper"),
+  feeAmount: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  paymentTiming: z.literal("on_completion"),
 }).strict();
+
+const campaignPlayUnpaidVisibleCommitmentSchema = z.object({
+  ...campaignPlayVisibleCommitmentBaseShape,
+  kind: z.literal("unpaid_delivery"),
+}).strict();
+
+export const campaignPlayVisibleCommitmentSchema:
+  z.ZodType<CampaignPlayVisibleCommitment> = z.discriminatedUnion("kind", [
+    campaignPlayPaidVisibleCommitmentSchema,
+    campaignPlayUnpaidVisibleCommitmentSchema,
+  ]);
 
 export const campaignPlayOpeningContextSchema = z.object({
   role: shortTextSchema,
   arrivalMode: shortTextSchema,
   immediateSituation: textSchema,
+  decision: campaignPlayOpeningDecisionSchema.nullable().optional(),
 }).strict();
 
 export const campaignPlayActionContextSchema:
@@ -543,6 +842,9 @@ export const campaignPlayActionContextSchema:
     disposition: z.enum(CAMPAIGN_PLAY_JUDGMENT_DISPOSITION_VALUES),
     result: z.enum(CAMPAIGN_PLAY_RESULT_TIER_VALUES),
     clarificationQuestion: shortTextSchema.nullable(),
+    decisionBinding: campaignPlayDecisionBindingSchema.optional(),
+    decisionOutcome: campaignPlayDecisionOutcomeSchema.optional(),
+    obligationSettlement: campaignPlayObligationSettlementSchema.optional(),
   }).strict().superRefine((action, context) => {
     const requiresQuestion = action.disposition === "clarification_required";
     if (requiresQuestion !== (action.clarificationQuestion !== null)) {
@@ -561,6 +863,52 @@ export const campaignPlayActionContextSchema:
         path: ["result"],
         message: "Impossible and clarification actions have no mechanical result.",
       });
+    }
+    if ((action.decisionBinding === undefined) !== (action.decisionOutcome === undefined)) {
+      context.addIssue({
+        code: "custom",
+        path: ["decisionOutcome"],
+        message: "Decision binding and settled outcome must be provided together.",
+      });
+    }
+    if (action.decisionBinding !== undefined && action.decisionOutcome !== undefined) {
+      const binding = action.decisionBinding;
+      const outcome = action.decisionOutcome;
+      if (
+        outcome.decisionKey !== binding.decisionKey ||
+        outcome.actorHandle !== binding.actorHandle ||
+        outcome.kind !== binding.kind ||
+        outcome.disposition !== binding.disposition ||
+        outcome.status !== (binding.disposition === "accept" ? "accepted" : "declined")
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["decisionOutcome"],
+          message: "Settled decision outcome must match its binding.",
+        });
+      }
+    }
+    if (action.obligationSettlement !== undefined) {
+      if (
+        action.intentKind !== "contact" ||
+        action.disposition !== "deterministic" ||
+        action.result !== "success" ||
+        action.decisionBinding !== undefined ||
+        action.decisionOutcome !== undefined
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["obligationSettlement"],
+          message: "A receivable settlement belongs only to a successful deterministic contact action.",
+        });
+      }
+      if (action.obligationSettlement.summary !== action.submittedText) {
+        context.addIssue({
+          code: "custom",
+          path: ["obligationSettlement", "summary"],
+          message: "Receivable settlement summary must match the admitted action text.",
+        });
+      }
     }
   });
 
@@ -585,6 +933,8 @@ const campaignPlayNarratorPacketBaseSchema =
       .max(CAMPAIGN_PLAY_LIMITS.visiblePossessions),
     obligations: z.array(campaignPlayVisibleObligationSchema)
       .max(CAMPAIGN_PLAY_LIMITS.visibleObligations),
+    commitments: z.array(campaignPlayVisibleCommitmentSchema)
+      .max(CAMPAIGN_PLAY_LIMITS.visibleCommitments),
     newObservations: z.array(campaignPlayJournalEntrySchema)
       .max(CAMPAIGN_PLAY_LIMITS.newObservations),
     consequences: z.array(campaignPlayConsequenceSchema)
@@ -599,6 +949,9 @@ const campaignPlayNarratorPacketBaseSchema =
     ),
     availableIntents: z.array(campaignPlayAvailableIntentSchema)
       .max(CAMPAIGN_PLAY_LIMITS.availableIntents),
+    decisionOutcomes: z.array(campaignPlayDecisionOutcomeSchema)
+      .max(CAMPAIGN_PLAY_LIMITS.continuityEntries)
+      .optional(),
   }).strict();
 
 export const campaignPlayNarratorPacketSchema:
@@ -625,11 +978,15 @@ export const campaignPlayNarratorPacketSchema:
         message: "Opening cannot have prior player actions.",
       });
     }
-    if ((packet.turnKind === "player_action") !== (packet.sourceMoment !== null)) {
+    const successfulMove = packet.turnKind === "player_action" &&
+      packet.actionContext?.intentKind === "move" &&
+      packet.actionContext.result === "success";
+    const requiresSourceMoment = packet.turnKind === "player_action" && !successfulMove;
+    if (requiresSourceMoment !== (packet.sourceMoment !== null)) {
       context.addIssue({
         code: "custom",
         path: ["sourceMoment"],
-        message: "The exact prior public moment belongs to every player action and never to an opening.",
+        message: "The exact prior public moment belongs to player actions that remain in place, while openings and successful moves have no immediate source moment.",
       });
     }
     if (packet.worldVersion < packet.acceptedWorldVersion) {
@@ -684,6 +1041,12 @@ export const campaignPlayNarratorPacketSchema:
       "Visible obligation handles",
     );
     addDuplicateIssue(
+      packet.commitments.map((commitment) => commitment.handle),
+      context,
+      ["commitments"],
+      "Visible commitment handles",
+    );
+    addDuplicateIssue(
       packet.newObservations.map((entry) => entry.observationHandle),
       context,
       ["newObservations"],
@@ -707,6 +1070,34 @@ export const campaignPlayNarratorPacketSchema:
       ["availableIntents"],
       "Available intent handles",
     );
+    const decisionGroups = new Map<string, CampaignPlayDecisionBinding[]>();
+    packet.availableIntents.forEach((intent) => {
+      const binding = intent.decisionBinding;
+      if (binding === undefined) return;
+      const group = decisionGroups.get(binding.decisionKey) ?? [];
+      group.push(binding);
+      decisionGroups.set(binding.decisionKey, group);
+    });
+    decisionGroups.forEach((bindings, decisionKey) => {
+      const first = bindings[0];
+      const dispositions = new Set(bindings.map((binding) => binding.disposition));
+      const validPair = bindings.length === 2 &&
+        first !== undefined &&
+        dispositions.size === 2 &&
+        dispositions.has("accept") &&
+        dispositions.has("decline") &&
+        bindings.every((binding) =>
+          binding.decisionKey === decisionKey &&
+          binding.actorHandle === first.actorHandle &&
+          binding.kind === first.kind);
+      if (!validPair) {
+        context.addIssue({
+          code: "custom",
+          path: ["availableIntents"],
+          message: "Each open decision must expose exactly one accept and one decline intent with the same key, actor, and kind.",
+        });
+      }
+    });
     packet.availableIntents.forEach((intent, index) => {
       addDuplicateIssue(
         intent.targets.map((target) => target.handle),
@@ -717,15 +1108,80 @@ export const campaignPlayNarratorPacketSchema:
       const routeTargets = intent.targets.filter((target) => target.kind === "route");
       const routeTargetIsVisible = routeTargets.every((target) =>
         packet.visibleRoutes.some((route) => route.handle === target.handle));
+      const commitmentBinding = intent.commitmentBinding;
+      const commitment = commitmentBinding === undefined
+        ? undefined
+        : packet.commitments.find((candidate) => candidate.handle === commitmentBinding.commitmentHandle);
+      const commitmentTarget = commitmentBinding === undefined
+        ? undefined
+        : intent.targets.find((target) =>
+          commitmentBinding.action === "collect"
+            ? target.kind === "actor" && target.handle === commitmentBinding.counterpartyHandle
+            : target.kind === "location" && target.handle === commitmentBinding.destinationHandle);
+      const hasMatchingPossession = commitment !== undefined && packet.possessions.some((possession) =>
+        possession.name === commitment.subjectName && possession.quantity > 0);
+      const commitmentBindingValid = commitmentBinding === undefined
+        ? true
+        : commitment !== undefined &&
+          commitment.status === "active" &&
+          commitmentBinding.counterpartyHandle === commitment.counterpartyHandle &&
+          commitmentBinding.subjectName === commitment.subjectName &&
+          commitmentBinding.destinationHandle === commitment.destinationHandle &&
+          intent.label === (commitmentBinding.action === "collect"
+            ? `Ask ${commitment.counterpartyName} for ${commitment.subjectName}`
+            : `Deliver ${commitment.subjectName} at ${commitment.destinationName}`) &&
+          ((commitmentBinding.action === "collect" &&
+            intent.kind === "contact" && intent.targets.length === 1 &&
+            commitmentTarget !== undefined &&
+            packet.visibleActors.some((actor) =>
+              actor.handle === commitmentBinding.counterpartyHandle) &&
+            !hasMatchingPossession) ||
+            (commitmentBinding.action === "deliver" &&
+              intent.kind === "attempt" && intent.targets.length === 1 &&
+              commitmentTarget !== undefined &&
+              packet.currentLocation !== null &&
+              packet.currentLocation.handle === commitment.destinationHandle &&
+              hasMatchingPossession));
+      const obligationBinding = intent.obligationBinding;
+      const obligation = obligationBinding === undefined
+        ? undefined
+        : packet.obligations.find((candidate) =>
+          candidate.handle === obligationBinding.obligationHandle);
+      const obligationTarget = obligationBinding === undefined
+        ? undefined
+        : intent.targets.find((target) =>
+          target.kind === "actor" && target.handle === obligationBinding.debtorHandle);
+      const obligationBindingValid = obligationBinding === undefined
+        ? true
+        : obligation !== undefined &&
+          obligation.direction === "receivable" &&
+          obligation.unitKey === "copper" &&
+          obligation.outstandingAmount === obligationBinding.amount &&
+          obligation.counterpartyHandle === obligationBinding.debtorHandle &&
+          intent.label === `Collect ${obligationBinding.amount} copper from ${obligation.counterpartyName}` &&
+          intent.kind === "contact" &&
+          intent.targets.length === 1 &&
+          obligationTarget !== undefined &&
+          packet.visibleActors.some((actor) =>
+            actor.handle === obligationBinding.debtorHandle);
+      const requiresVisibleRoute = intent.decisionBinding === undefined &&
+        intent.commitmentBinding === undefined &&
+        intent.obligationBinding === undefined &&
+        (intent.kind === "move" || intent.kind === "attempt");
       if (
-        !routeTargetIsVisible
-        || (intent.kind === "move" && routeTargets.length !== 1)
-        || (intent.kind === "attempt" && routeTargets.length !== 1)
+        (requiresVisibleRoute && !routeTargetIsVisible) ||
+        (requiresVisibleRoute && routeTargets.length !== 1) ||
+        !commitmentBindingValid ||
+        !obligationBindingValid
       ) {
         context.addIssue({
           code: "custom",
           path: ["availableIntents", index, "targets"],
-          message: "Available move and attempt intents require exactly one frozen visible route.",
+          message: obligationBinding !== undefined
+            ? "Receivable-bound intent does not match one exact visible copper obligation."
+            : commitmentBinding === undefined
+            ? "Available move and attempt intents require exactly one frozen visible route."
+            : "Commitment-bound intent does not match an active visible commitment and its exact eligibility.",
         });
       }
     });
@@ -758,7 +1214,23 @@ export const campaignPlayNarrationBeatSchema = z.object({
 export const campaignPlaySuggestedActionSchema = z.object({
   choiceHandle: handleSchema,
   label: labelSchema,
-}).strict();
+  decisionBinding: campaignPlayDecisionBindingSchema.optional(),
+  commitmentBinding: campaignPlayCommitmentBindingSchema.optional(),
+  obligationBinding: campaignPlayObligationBindingSchema.optional(),
+}).strict().superRefine((action, context) => {
+  const bindingCount = [
+    action.decisionBinding,
+    action.commitmentBinding,
+    action.obligationBinding,
+  ].filter((binding) => binding !== undefined).length;
+  if (bindingCount > 1) {
+    context.addIssue({
+      code: "custom",
+      path: ["obligationBinding"],
+      message: "A suggested action cannot carry more than one typed binding.",
+    });
+  }
+});
 
 export const campaignPlayStageEffectSchema = z.object({
   kind: z.enum(CAMPAIGN_PLAY_EFFECT_KIND_VALUES),
@@ -868,6 +1340,13 @@ export function campaignPlaySuggestedActionLabelPrefix(
   packet: CampaignPlayNarratorPacket,
   intent: CampaignPlayAvailableIntent,
 ): string {
+  if (
+    intent.decisionBinding !== undefined ||
+    intent.commitmentBinding !== undefined ||
+    intent.obligationBinding !== undefined
+  ) {
+    return intent.label;
+  }
   switch (intent.kind) {
     case "observe": return "Examine ";
     case "wait": return `Wait ${CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES} minutes`;
@@ -914,11 +1393,33 @@ export function buildCampaignPlaySuggestedActionLabel(
   detail: string | null,
 ): string {
   const prefix = campaignPlaySuggestedActionLabelPrefix(packet, intent);
-  if (intent.kind === "move" || intent.kind === "wait") {
+  if (
+    intent.decisionBinding !== undefined ||
+    intent.commitmentBinding !== undefined ||
+    intent.obligationBinding !== undefined
+  ) {
     if (detail !== null) {
       throw new CampaignPlayContractError(
         "narration_invalid",
-        "Code-owned action labels cannot include model-authored detail.",
+        "Code-owned typed labels cannot include model-authored detail.",
+      );
+    }
+    return prefix;
+  }
+  if (intent.kind === "wait") {
+    if (detail !== null) {
+      throw new CampaignPlayContractError(
+        "narration_invalid",
+        "Wait action labels cannot include model-authored detail.",
+      );
+    }
+    return prefix;
+  }
+  if (intent.kind === "move") {
+    if (detail !== null) {
+      throw new CampaignPlayContractError(
+        "narration_invalid",
+        "Move action labels cannot include model-authored detail.",
       );
     }
     return prefix;
@@ -932,7 +1433,30 @@ export function buildCampaignPlaySuggestedActionLabel(
       "Suggested action detail must be one trimmed line.",
     );
   }
-  return `${prefix}${detail}`;
+  return detail;
+}
+
+function requiredReplyIntentIndexForPacket(
+  packet: CampaignPlayNarratorPacket,
+): number | null {
+  if (packet.actionContext?.intentKind === "contact") return null;
+  for (let consequenceIndex = packet.consequences.length - 1;
+    consequenceIndex >= 0;
+    consequenceIndex -= 1) {
+    const actorHandle = packet.consequences[consequenceIndex]?.performingActorHandle;
+    if (
+      actorHandle === null || actorHandle === undefined ||
+      !packet.visibleActors.some((actor) => actor.handle === actorHandle)
+    ) continue;
+    const intentIndex = packet.availableIntents.findIndex((intent) =>
+      intent.decisionBinding === undefined &&
+      intent.commitmentBinding === undefined &&
+      intent.obligationBinding === undefined &&
+      intent.kind === "contact" && intent.targets.some((target) =>
+        target.kind === "actor" && target.handle === actorHandle));
+    if (intentIndex >= 0) return intentIndex;
+  }
+  return null;
 }
 
 export function validateNarrationAgainstPacket(
@@ -962,19 +1486,106 @@ export function validateNarrationAgainstPacket(
     const prefix = available
       ? campaignPlaySuggestedActionLabelPrefix(packet, available)
       : null;
+    const contactActor = available?.kind === "contact"
+      ? packet.visibleActors.find((actor) => available.targets.some((target) =>
+        target.kind === "actor" && target.handle === actor.handle))
+      : undefined;
+    const isOneTrimmedLine = action.label.length > 0 && action.label === action.label.trim() &&
+      !action.label.includes("\n") && !action.label.includes("\r");
+    const hasCodeOwnedDetailedLabel = available?.kind === "observe"
+      ? ["Examine ", "Inspect ", "Read ", "Listen to ", "Check "].some((verb) =>
+        action.label.startsWith(verb) && action.label.length > verb.length)
+      : available?.kind === "attempt"
+        ? action.label.startsWith("Try ") && action.label.length > 4
+          : available?.kind === "contact" && contactActor !== undefined
+          ? [`Ask ${contactActor.name}: `, `Tell ${contactActor.name}: `].some((start) =>
+            action.label.startsWith(start) && action.label.length > start.length)
+          : false;
+    const hasCodeOwnedTypedLabel = available?.obligationBinding !== undefined &&
+      action.label === available.label;
     const hasExactBinding = available !== undefined && (
-      action.label === available.label ||
-      (available.kind === "move" || available.kind === "wait"
+      available.obligationBinding !== undefined
+        ? hasCodeOwnedTypedLabel
+        : available.commitmentBinding !== undefined
+        ? action.label === available.label
+        : action.label === available.label ||
+      (available.decisionBinding === undefined && (available.kind === "wait"
         ? action.label === prefix
-        : prefix !== null && action.label.startsWith(prefix) && action.label.length > prefix.length)
+        : available.kind === "move"
+          ? action.label === prefix
+          : available.kind === "contact" && prefix !== null &&
+              action.label.startsWith(`${prefix}“`) && action.label.endsWith("”") &&
+              action.label.length > prefix.length + 2
+            ? true
+            : isOneTrimmedLine && hasCodeOwnedDetailedLabel))
     );
-    if (!available || available.handle !== action.choiceHandle || !hasExactBinding) {
+    const bindingMatches = available?.obligationBinding !== undefined
+      ? action.decisionBinding === undefined &&
+        action.commitmentBinding === undefined &&
+        action.obligationBinding !== undefined &&
+        sameObligationBinding(action.obligationBinding, available.obligationBinding)
+      : available?.commitmentBinding !== undefined
+      ? action.decisionBinding === undefined && action.commitmentBinding !== undefined &&
+        sameCommitmentBinding(action.commitmentBinding, available.commitmentBinding)
+      : available?.decisionBinding === undefined
+        ? action.decisionBinding === undefined &&
+          action.commitmentBinding === undefined &&
+          action.obligationBinding === undefined
+        : action.decisionBinding !== undefined && action.commitmentBinding === undefined &&
+          action.obligationBinding === undefined &&
+          sameDecisionBinding(action.decisionBinding, available.decisionBinding);
+    if (!available || available.handle !== action.choiceHandle || !hasExactBinding || !bindingMatches) {
       throw new CampaignPlayContractError(
         "narration_invalid",
         `Suggested action ${action.choiceHandle} has no exact available intent binding.`,
       );
     }
   });
+  const decisionIntents = packet.availableIntents
+    .filter((intent) => intent.decisionBinding !== undefined)
+    .sort((left, right) => {
+      const leftBinding = left.decisionBinding!;
+      const rightBinding = right.decisionBinding!;
+      return leftBinding.decisionKey.localeCompare(rightBinding.decisionKey) ||
+        (leftBinding.disposition === rightBinding.disposition
+          ? 0
+          : leftBinding.disposition === "accept" ? -1 : 1);
+    });
+  if (decisionIntents.length > 0) {
+    const expectedDecisionHandles = decisionIntents.map((intent) => intent.handle);
+    const actualDecisionHandles = narration.suggestedActions
+      .slice(0, expectedDecisionHandles.length)
+      .map((action) => action.choiceHandle);
+    if (actualDecisionHandles.length !== expectedDecisionHandles.length ||
+        actualDecisionHandles.some((handle, index) => handle !== expectedDecisionHandles[index])) {
+      throw new CampaignPlayContractError(
+        "narration_invalid",
+        "Narration must publish every open decision accept/decline control in stable order.",
+      );
+    }
+  }
+  const requiredReplyIndex = requiredReplyIntentIndexForPacket(packet);
+  const commitmentCapacity = Math.max(
+    0,
+    expectedCount - decisionIntents.length - (requiredReplyIndex === null ? 0 : 1),
+  );
+  const expectedCommitmentHandles = campaignPlayCommitmentIntentIndexes(packet)
+    .slice(0, commitmentCapacity)
+    .map((intentIndex) => packet.availableIntents[intentIndex]!.handle);
+  if (expectedCommitmentHandles.length > 0) {
+    const commitmentStart = decisionIntents.length + (requiredReplyIndex === null ? 0 : 1);
+    const actualCommitmentHandles = narration.suggestedActions
+      .slice(commitmentStart, commitmentStart + expectedCommitmentHandles.length)
+      .map((action) => action.choiceHandle);
+    if (actualCommitmentHandles.length !== expectedCommitmentHandles.length ||
+        actualCommitmentHandles.some((handle, index) =>
+          handle !== expectedCommitmentHandles[index])) {
+      throw new CampaignPlayContractError(
+        "narration_invalid",
+        "Narration must publish eligible commitment controls in stable order before generic intents.",
+      );
+    }
+  }
   if (narration.effects.length !== 1 || narration.effects[0]!.beatId === null) {
     throw new CampaignPlayContractError(
       "narration_invalid",
@@ -1114,11 +1725,15 @@ const campaignPlayStateBaseSchema = campaignPlayPublicVersionsBaseSchema.extend(
     .max(CAMPAIGN_PLAY_LIMITS.visiblePossessions),
   obligations: z.array(campaignPlayVisibleObligationSchema)
     .max(CAMPAIGN_PLAY_LIMITS.visibleObligations),
+  commitments: z.array(campaignPlayVisibleCommitmentSchema)
+    .max(CAMPAIGN_PLAY_LIMITS.visibleCommitments),
   narration: campaignPlayNarrationSchema.nullable(),
   narrationOperation: campaignPlayNarrationOperationSchema.nullable(),
   utilityActions: z.array(campaignPlaySuggestedActionSchema).max(1),
   consequences: z.array(campaignPlayConsequenceSchema)
     .max(CAMPAIGN_PLAY_LIMITS.newObservations),
+  decisionOutcomes: z.array(campaignPlayDecisionOutcomeSchema)
+    .max(CAMPAIGN_PLAY_LIMITS.continuityEntries),
   activeTurn: campaignPlayPublicTurnSchema.nullable(),
   journalCursor: nonnegativeIntegerSchema,
   projectionHash: hashSchema,
@@ -1333,8 +1948,7 @@ export const campaignPlayVersionExpectationSchema:
     expectedRuntimeRevision: positiveIntegerSchema,
   }).strict();
 
-export const campaignPlayTurnAdmissionRequestSchema:
-  z.ZodType<CampaignPlayTurnAdmissionRequest> = z.discriminatedUnion("source", [
+const campaignPlayTurnAdmissionRequestBaseSchema = z.discriminatedUnion("source", [
     z.object({
       source: z.literal("freeform"),
       idempotencyKey: idempotencyKeySchema,
@@ -1346,10 +1960,29 @@ export const campaignPlayTurnAdmissionRequestSchema:
       source: z.literal("suggested"),
       idempotencyKey: idempotencyKeySchema,
       choiceHandle: handleSchema,
+      decisionBinding: campaignPlayDecisionBindingSchema.optional(),
+      commitmentBinding: campaignPlayCommitmentBindingSchema.optional(),
+      obligationBinding: campaignPlayObligationBindingSchema.optional(),
       expectedWorldVersion: positiveIntegerSchema,
       expectedRuntimeRevision: positiveIntegerSchema,
     }).strict(),
   ]);
+
+export const campaignPlayTurnAdmissionRequestSchema:
+  z.ZodType<CampaignPlayTurnAdmissionRequest> = campaignPlayTurnAdmissionRequestBaseSchema
+    .superRefine((request, context) => {
+      if (request.source === "suggested" && [
+        request.decisionBinding,
+        request.commitmentBinding,
+        request.obligationBinding,
+      ].filter((binding) => binding !== undefined).length > 1) {
+        context.addIssue({
+          code: "custom",
+          path: ["obligationBinding"],
+          message: "A suggested request cannot carry more than one typed binding.",
+        });
+      }
+    });
 
 export const campaignPlayStartingConditionsSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("delegate") }).strict(),
@@ -2356,9 +2989,8 @@ export const campaignPlayCertifiedContactSchema = z.object({
   publicResult: campaignPlayJudgePublicResultSchema,
 }).strict().superRefine((certificate, context) => {
   const intent = certificate.ruling.normalizedIntent;
-  const detailMatches = /^ask (?:about|what|who|where|when|why|how|whether|if) [^\r\n]+$/.test(
-    certificate.detail,
-  );
+  const terminalPunctuation = certificate.detail.at(-1);
+  const quotedDetailSuffix = `: “${certificate.detail}”`;
   if (
     certificate.ruling.disposition !== "deterministic" ||
     intent.source !== "suggested" || intent.kind !== "contact" ||
@@ -2367,6 +2999,9 @@ export const campaignPlayCertifiedContactSchema = z.object({
     intent.targets.length !== 1 || intent.targets[0]?.kind !== "actor" ||
     intent.targets[0]?.handle !== certificate.targetActorHandle ||
     intent.method !== certificate.detail || intent.stakes !== null ||
+    !certificate.label.endsWith(quotedDetailSuffix) ||
+    certificate.label.length <= quotedDetailSuffix.length ||
+    ![".", "?", "!"].includes(terminalPunctuation ?? "") ||
     certificate.ruling.movementRouteHandle !== null ||
     certificate.ruling.possessionEffectAuthority.kind !== "none" ||
     certificate.ruling.requiredObligationEffect.kind !== "none" ||
@@ -2376,7 +3011,6 @@ export const campaignPlayCertifiedContactSchema = z.object({
     certificate.ruling.resultBounds.maximum !== "success" ||
     certificate.ruling.elapsedBounds.minimumMinutes !== 1 ||
     certificate.ruling.elapsedBounds.maximumMinutes !== 1 ||
-    !detailMatches ||
     certificate.resolution.kind !== "deterministic" ||
     certificate.resolution.result !== "success" ||
     certificate.publicResult.intentKind !== "contact" ||
@@ -2387,7 +3021,70 @@ export const campaignPlayCertifiedContactSchema = z.object({
     context.addIssue({
       code: "custom",
       path: ["ruling"],
-      message: "Certified contact authority must describe one deterministic one-minute question delivery.",
+      message: "Certified contact authority must describe one deterministic one-minute spoken delivery.",
+    });
+  }
+});
+
+export const campaignPlayCertifiedDecisionSchema = z.object({
+  actionSchemaVersion: z.literal(1),
+  resolver: z.literal("code_owned"),
+  campaignId: idSchema,
+  turnId: idSchema,
+  sourceTurnId: idSchema,
+  sourceMomentId: idSchema,
+  sourceMomentHash: hashSchema,
+  sourcePacketHash: hashSchema,
+  acceptedWorldVersion: positiveIntegerSchema,
+  baseWorldVersion: positiveIntegerSchema,
+  baseRuntimeRevision: positiveIntegerSchema,
+  actorId: idSchema,
+  actorHandle: handleSchema,
+  choiceHandle: handleSchema,
+  label: labelSchema,
+  decisionBinding: campaignPlayDecisionBindingSchema,
+  decisionActorId: idSchema,
+  decisionSourceTurnId: idSchema,
+  decisionStatus: z.literal("open"),
+  decisionSummary: textSchema,
+  acceptLabel: labelSchema,
+  declineLabel: labelSchema,
+  acceptEffect: campaignPlayDecisionAcceptEffectSchema.nullable().optional(),
+  ruling: campaignPlayJudgeRulingSchema,
+  resolution: campaignPlayUncertaintyResolutionSchema,
+  publicResult: campaignPlayJudgePublicResultSchema,
+}).strict().superRefine((certificate, context) => {
+  const intent = certificate.ruling.normalizedIntent;
+  const binding = certificate.decisionBinding;
+  if (
+    certificate.ruling.disposition !== "deterministic" ||
+    intent.source !== "suggested" || intent.kind !== "contact" ||
+    intent.choiceHandle !== certificate.choiceHandle ||
+    intent.originalText !== certificate.label ||
+    intent.targets.length !== 1 || intent.targets[0]?.kind !== "actor" ||
+    intent.targets[0]?.handle !== binding.actorHandle ||
+    intent.method !== null || intent.stakes !== null ||
+    certificate.ruling.movementRouteHandle !== null ||
+    certificate.ruling.possessionEffectAuthority.kind !== "none" ||
+    certificate.ruling.requiredObligationEffect.kind !== "none" ||
+    certificate.ruling.citedVisibleFactHandles.length !== 1 ||
+    certificate.ruling.citedVisibleFactHandles[0] !== binding.actorHandle ||
+    certificate.ruling.uncertainty.kind !== "none" ||
+    certificate.ruling.resultBounds.minimum !== "success" ||
+    certificate.ruling.resultBounds.maximum !== "success" ||
+    certificate.ruling.elapsedBounds.minimumMinutes !== 1 ||
+    certificate.ruling.elapsedBounds.maximumMinutes !== 1 ||
+    certificate.resolution.kind !== "deterministic" ||
+    certificate.resolution.result !== "success" ||
+    certificate.publicResult.intentKind !== "contact" ||
+    certificate.publicResult.disposition !== "deterministic" ||
+    certificate.publicResult.result !== "success" ||
+    certificate.publicResult.clarificationQuestion !== null
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["ruling"],
+      message: "Certified decision authority must describe one deterministic one-minute typed decision.",
     });
   }
 });
@@ -2452,6 +3149,137 @@ export const campaignPlayCertifiedObserveSchema = z.object({
   }
 });
 
+const campaignPlayCertifiedCommitmentBaseShape = {
+  actionSchemaVersion: z.literal(1),
+  resolver: z.literal("code_owned"),
+  campaignId: idSchema,
+  turnId: idSchema,
+  sourceTurnId: idSchema,
+  sourceMomentId: idSchema,
+  sourceMomentHash: hashSchema,
+  sourcePacketHash: hashSchema,
+  acceptedWorldVersion: positiveIntegerSchema,
+  baseWorldVersion: positiveIntegerSchema,
+  baseRuntimeRevision: positiveIntegerSchema,
+  actorId: idSchema,
+  actorHandle: handleSchema,
+  choiceHandle: handleSchema,
+  label: labelSchema,
+  commitmentId: idSchema,
+  commitmentHandle: handleSchema,
+  action: z.enum(CAMPAIGN_PLAY_COMMITMENT_ACTION_VALUES),
+  commitmentBinding: campaignPlayCommitmentBindingSchema,
+  counterpartyActorId: idSchema,
+  counterpartyActorHandle: handleSchema,
+  subjectName: nameSchema,
+  destinationLocationId: idSchema,
+  destinationHandle: handleSchema,
+  commitmentWorldVersion: positiveIntegerSchema,
+  commitmentSourceDecisionKey: idSchema,
+  commitmentSourceTurnId: idSchema,
+  commitmentSourceReceiptId: idSchema,
+  possessionId: idSchema.nullable(),
+  possessionHandle: handleSchema.nullable(),
+};
+
+const campaignPlayPaidCertifiedCommitmentSchema = z.object({
+  ...campaignPlayCertifiedCommitmentBaseShape,
+  feeUnit: z.literal("copper"),
+  feeAmount: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+}).strict();
+
+const campaignPlayUnpaidCertifiedCommitmentSchema = z.object({
+  ...campaignPlayCertifiedCommitmentBaseShape,
+}).strict();
+
+export const campaignPlayCertifiedCommitmentSchema = z.union([
+  campaignPlayPaidCertifiedCommitmentSchema,
+  campaignPlayUnpaidCertifiedCommitmentSchema,
+]).superRefine((certificate, context) => {
+  const binding = certificate.commitmentBinding;
+  if (
+    binding.action !== certificate.action ||
+    binding.commitmentHandle !== certificate.commitmentHandle ||
+    binding.counterpartyHandle !== certificate.counterpartyActorHandle ||
+    binding.subjectName !== certificate.subjectName ||
+    binding.destinationHandle !== certificate.destinationHandle
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["commitmentBinding"],
+      message: "Certified commitment binding must match its mirrored fields.",
+    });
+  }
+  if (certificate.action === "collect" &&
+    (certificate.possessionId !== null || certificate.possessionHandle !== null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["possessionId"],
+      message: "Collect commitments carry no possession.",
+    });
+  }
+  if (certificate.action === "deliver" &&
+    (certificate.possessionId === null || certificate.possessionHandle === null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["possessionId"],
+      message: "Deliver commitments require a possession.",
+    });
+  }
+});
+
+export const campaignPlayCertifiedObligationSchema = z.object({
+  actionSchemaVersion: z.literal(1),
+  resolver: z.literal("code_owned"),
+  campaignId: idSchema,
+  turnId: idSchema,
+  sourceTurnId: idSchema,
+  sourceMomentId: idSchema,
+  sourceMomentHash: hashSchema,
+  sourcePacketHash: hashSchema,
+  acceptedWorldVersion: positiveIntegerSchema,
+  baseWorldVersion: positiveIntegerSchema,
+  baseRuntimeRevision: positiveIntegerSchema,
+  actorId: idSchema,
+  actorHandle: handleSchema,
+  choiceHandle: handleSchema,
+  label: labelSchema,
+  obligationId: idSchema,
+  obligationHandle: handleSchema,
+  obligationBinding: campaignPlayObligationBindingSchema,
+  debtorActorId: idSchema,
+  debtorActorHandle: handleSchema,
+  debtorName: nameSchema,
+  creditorActorId: idSchema,
+  creditorActorHandle: handleSchema,
+  unitKey: z.literal("copper"),
+  amount: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  locationId: idSchema,
+  locationHandle: handleSchema,
+  creditorPossessionId: idSchema,
+  creditorPossessionKey: labelSchema,
+  creditorPossessionName: nameSchema,
+}).strict().superRefine((certificate, context) => {
+  const binding = certificate.obligationBinding;
+  if (
+    binding.obligationHandle !== certificate.obligationHandle ||
+    binding.debtorHandle !== certificate.debtorActorHandle ||
+    binding.creditorHandle !== certificate.creditorActorHandle ||
+    binding.unitKey !== certificate.unitKey ||
+    binding.amount !== certificate.amount ||
+    certificate.label !== `Collect ${certificate.amount} copper from ${certificate.debtorName}` ||
+    certificate.actorId !== certificate.creditorActorId ||
+    certificate.creditorPossessionKey !== "copper" ||
+    certificate.creditorPossessionName !== "Copper"
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["obligationBinding"],
+      message: "Certified receivable authority must match the exact visible copper obligation.",
+    });
+  }
+});
+
 export const campaignPlayActionExecutionRouteSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("full_authority") }).strict(),
   z.object({
@@ -2470,8 +3298,23 @@ export const campaignPlayActionExecutionRouteSchema = z.discriminatedUnion("kind
     certificateHash: hashSchema,
   }).strict(),
   z.object({
+    kind: z.literal("certified_decision"),
+    certificate: campaignPlayCertifiedDecisionSchema,
+    certificateHash: hashSchema,
+  }).strict(),
+  z.object({
     kind: z.literal("certified_observe"),
     certificate: campaignPlayCertifiedObserveSchema,
+    certificateHash: hashSchema,
+  }).strict(),
+  z.object({
+    kind: z.literal("certified_commitment"),
+    certificate: campaignPlayCertifiedCommitmentSchema,
+    certificateHash: hashSchema,
+  }).strict(),
+  z.object({
+    kind: z.literal("certified_obligation"),
+    certificate: campaignPlayCertifiedObligationSchema,
     certificateHash: hashSchema,
   }).strict(),
 ]);
@@ -2486,6 +3329,8 @@ export const campaignPlayEntityRefSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("possession"), id: idSchema }).strict(),
   z.object({ kind: z.literal("obligation"), id: idSchema }).strict(),
   z.object({ kind: z.literal("world_event"), id: idSchema }).strict(),
+  z.object({ kind: z.literal("decision"), id: idSchema }).strict(),
+  z.object({ kind: z.literal("commitment"), id: idSchema }).strict(),
 ]);
 
 export const campaignPlayCommandSourceSchema = z.discriminatedUnion("kind", [
@@ -2838,6 +3683,98 @@ export const initializePressureStateCommandSchema = z.object({
   status: campaignPlayPressureStatusSchema,
 }).strict();
 
+export const settlePlayerReceivableCommandSchema = z.object({
+  ...campaignPlayCommandBaseShape,
+  kind: z.literal("settle_player_receivable"),
+  debtorActorId: idSchema,
+  creditorActorId: idSchema,
+  obligationId: idSchema,
+  creditorPossessionId: idSchema,
+  creditorPossessionKey: labelSchema,
+  creditorPossessionName: nameSchema,
+  unitKey: z.literal("copper"),
+  amount: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  summary: textSchema,
+  affectedRefs: z.array(campaignPlayEntityRefSchema)
+    .min(1)
+    .max(CAMPAIGN_PLAY_LIMITS.affectedRefs),
+}).strict();
+
+// Keep decision command schemas above the discriminated command unions.  These
+// unions are evaluated during module initialization, so referencing a later
+// const would trigger a temporal-dead-zone failure before any contract could
+// be parsed.
+export const decisionOpenCommandSchema = z.object({
+  ...campaignPlayCommandBaseShape,
+  kind: z.literal("decision_open"),
+  decisionKey: idSchema,
+  actorId: idSchema,
+  actorHandle: handleSchema,
+  decisionKind: z.enum(CAMPAIGN_PLAY_DECISION_KIND_VALUES),
+  sourceTurnId: idSchema,
+  summary: textSchema,
+  acceptLabel: labelSchema,
+  declineLabel: labelSchema,
+  acceptEffect: campaignPlayDecisionAcceptEffectSchema.nullable().optional(),
+}).strict();
+
+export const decisionResolveCommandSchema = z.object({
+  ...campaignPlayCommandBaseShape,
+  kind: z.literal("decision_resolve"),
+  decisionKey: idSchema,
+  actorId: idSchema,
+  actorHandle: handleSchema,
+  decisionKind: z.enum(CAMPAIGN_PLAY_DECISION_KIND_VALUES),
+  sourceTurnId: idSchema,
+  summary: textSchema,
+  selectedLabel: labelSchema,
+  disposition: z.enum(CAMPAIGN_PLAY_DECISION_DISPOSITION_VALUES),
+}).strict();
+
+const createPlayerCommitmentCommandBaseShape = {
+  ...campaignPlayCommandBaseShape,
+  kind: z.literal("create_player_commitment"),
+  commitmentId: idSchema,
+  sourceDecisionKey: idSchema,
+  sourceTurnId: idSchema,
+  performerActorId: idSchema,
+  counterpartyActorId: idSchema,
+  title: labelSchema,
+  subjectName: nameSchema,
+  destinationHandle: handleSchema,
+  acceptedWorldTimeMinutes: worldTimeSchema,
+  dueWorldTimeMinutes: worldTimeSchema.nullable(),
+  affectedRefs: z.array(campaignPlayEntityRefSchema)
+    .min(1)
+    .max(CAMPAIGN_PLAY_LIMITS.affectedRefs),
+};
+
+export const createPlayerCommitmentCommandSchema = z.discriminatedUnion("commitmentKind", [
+  z.object({
+    ...createPlayerCommitmentCommandBaseShape,
+    commitmentKind: z.literal("paid_delivery"),
+    feeUnit: z.literal("copper"),
+    feeAmount: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+    paymentTiming: z.literal("on_completion"),
+  }).strict(),
+  z.object({
+    ...createPlayerCommitmentCommandBaseShape,
+    commitmentKind: z.literal("unpaid_delivery"),
+  }).strict(),
+]);
+
+export const completePlayerCommitmentCommandSchema = z.object({
+  ...campaignPlayCommandBaseShape,
+  kind: z.literal("complete_player_commitment"),
+  commitmentId: idSchema,
+  performerActorId: idSchema,
+  counterpartyActorId: idSchema,
+  deliveryPossessionId: idSchema,
+  affectedRefs: z.array(campaignPlayEntityRefSchema)
+    .min(1)
+    .max(CAMPAIGN_PLAY_LIMITS.affectedRefs),
+}).strict();
+
 export const campaignPlayCommandSchema = z.discriminatedUnion("kind", [
   advanceWorldTimeCommandSchema,
   moveActorCommandSchema,
@@ -2849,8 +3786,13 @@ export const campaignPlayCommandSchema = z.discriminatedUnion("kind", [
   adjustActorPossessionCommandSchema,
   incurActorObligationCommandSchema,
   payActorObligationCommandSchema,
+  settlePlayerReceivableCommandSchema,
   materializeSupportActorCommandSchema,
   recordWorldEventCommandSchema,
+  decisionOpenCommandSchema,
+  decisionResolveCommandSchema,
+  createPlayerCommitmentCommandSchema,
+  completePlayerCommitmentCommandSchema,
 ]);
 
 export const campaignPlayBootstrapCommandSchema = z.discriminatedUnion("kind", [
@@ -2871,12 +3813,17 @@ export const rulebookBatchCommandSchema = z.discriminatedUnion("kind", [
   adjustActorPossessionCommandSchema,
   incurActorObligationCommandSchema,
   payActorObligationCommandSchema,
+  settlePlayerReceivableCommandSchema,
   materializeSupportActorCommandSchema,
   recordWorldEventCommandSchema,
   createPlayerActorCommandSchema,
   initializePlayerPlacementCommandSchema,
   initializeWorldTimeCommandSchema,
   initializePressureStateCommandSchema,
+  decisionOpenCommandSchema,
+  decisionResolveCommandSchema,
+  createPlayerCommitmentCommandSchema,
+  completePlayerCommitmentCommandSchema,
 ]);
 
 export type CampaignPlayCommand = z.infer<typeof campaignPlayCommandSchema>;
@@ -3288,6 +4235,107 @@ export const sceneRecordedEventSchema = z.object({
   }
 });
 
+export const playerReceivableSettledEventSchema = z.object({
+  ...campaignPlayWorldEventBaseShape,
+  kind: z.literal("player_receivable_settled"),
+  debtorActorId: idSchema,
+  creditorActorId: idSchema,
+  obligationId: idSchema,
+  creditorPossessionId: idSchema,
+  creditorPossessionKey: labelSchema,
+  creditorPossessionName: nameSchema,
+  unitKey: z.literal("copper"),
+  amount: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  priorOutstandingAmount: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  resultOutstandingAmount: nonnegativeIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  priorCreditorQuantity: nonnegativeIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  resultCreditorQuantity: nonnegativeIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  summary: textSchema,
+}).strict().superRefine((event, context) => {
+  if (
+    event.debtorActorId === event.creditorActorId ||
+    event.creditorPossessionKey !== "copper" ||
+    event.creditorPossessionName !== "Copper" ||
+    event.resultOutstandingAmount !== event.priorOutstandingAmount - event.amount ||
+    event.resultCreditorQuantity !== event.priorCreditorQuantity + event.amount ||
+    event.amount > event.priorOutstandingAmount
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["resultOutstandingAmount"],
+      message: "Receivable settlement must collect one exact positive copper amount.",
+    });
+  }
+});
+
+const campaignPlayDecisionEventBaseShape = {
+  ...campaignPlayWorldEventBaseShape,
+  decisionKey: idSchema,
+  actorId: idSchema,
+  actorHandle: handleSchema,
+  decisionKind: z.enum(CAMPAIGN_PLAY_DECISION_KIND_VALUES),
+  sourceTurnId: idSchema,
+  summary: textSchema,
+};
+
+export const decisionOpenedEventSchema = z.object({
+  ...campaignPlayDecisionEventBaseShape,
+  kind: z.literal("decision_opened"),
+  acceptLabel: labelSchema,
+  declineLabel: labelSchema,
+}).strict();
+
+export const decisionAcceptedEventSchema = z.object({
+  ...campaignPlayDecisionEventBaseShape,
+  kind: z.literal("decision_accepted"),
+  disposition: z.literal("accept"),
+}).strict();
+
+export const decisionDeclinedEventSchema = z.object({
+  ...campaignPlayDecisionEventBaseShape,
+  kind: z.literal("decision_declined"),
+  disposition: z.literal("decline"),
+}).strict();
+
+const playerCommitmentCreatedEventBaseShape = {
+  ...campaignPlayWorldEventBaseShape,
+  kind: z.literal("player_commitment_created"),
+  commitmentId: idSchema,
+  sourceDecisionKey: idSchema,
+  sourceTurnId: idSchema,
+  performerActorId: idSchema,
+  counterpartyActorId: idSchema,
+  title: labelSchema,
+  subjectName: nameSchema,
+  destinationHandle: handleSchema,
+  acceptedWorldTimeMinutes: worldTimeSchema,
+  dueWorldTimeMinutes: worldTimeSchema.nullable(),
+};
+
+export const playerCommitmentCreatedEventSchema = z.discriminatedUnion("commitmentKind", [
+  z.object({
+    ...playerCommitmentCreatedEventBaseShape,
+    commitmentKind: z.literal("paid_delivery"),
+    feeUnit: z.literal("copper"),
+    feeAmount: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+    paymentTiming: z.literal("on_completion"),
+  }).strict(),
+  z.object({
+    ...playerCommitmentCreatedEventBaseShape,
+    commitmentKind: z.literal("unpaid_delivery"),
+  }).strict(),
+]);
+
+export const playerCommitmentCompletedEventSchema = z.object({
+  ...campaignPlayWorldEventBaseShape,
+  kind: z.literal("player_commitment_completed"),
+  commitmentId: idSchema,
+  performerActorId: idSchema,
+  counterpartyActorId: idSchema,
+  priorStatus: z.literal("active"),
+  resultStatus: z.literal("completed"),
+}).strict();
+
 const campaignPlayWorldEventUnionSchema = z.union([
   playerActorCreatedEventSchema,
   supportActorMaterializedEventSchema,
@@ -3304,7 +4352,13 @@ const campaignPlayWorldEventUnionSchema = z.union([
   actorPossessionAdjustedEventSchema,
   actorObligationIncurredEventSchema,
   actorObligationPaymentAppliedEventSchema,
+  playerReceivableSettledEventSchema,
   sceneRecordedEventSchema,
+  decisionOpenedEventSchema,
+  decisionAcceptedEventSchema,
+  decisionDeclinedEventSchema,
+  playerCommitmentCreatedEventSchema,
+  playerCommitmentCompletedEventSchema,
 ]);
 
 export const campaignPlayWorldEventSchema =
@@ -4008,6 +5062,21 @@ export const CAMPAIGN_PLAY_MODEL_STAGE_KIND_VALUES = [
   "narrator",
 ] as const;
 
+function modelStageContractFailureDiagnosticOwner(
+  value: string,
+): "game_master" | "narrator" | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+    if ("owner" in parsed) {
+      return parsed.owner === "narrator" ? "narrator" : null;
+    }
+    return "game_master";
+  } catch {
+    return null;
+  }
+}
+
 const modelStageArtifactJsonSchema = z.string().min(1).superRefine(
   (artifactJson, context) => {
     try {
@@ -4108,7 +5177,10 @@ export const campaignPlayModelStageSchema = z.object({
   }
   if (
     stage.contractFailureDiagnosticJson !== null &&
-    (stage.kind !== "game_master" ||
+    (modelStageContractFailureDiagnosticOwner(stage.contractFailureDiagnosticJson) === null ||
+      (modelStageContractFailureDiagnosticOwner(stage.contractFailureDiagnosticJson) === "game_master"
+        ? stage.kind !== "game_master"
+        : stage.kind !== "narrator") ||
       (stage.status !== "interrupted" && stage.status !== "failed") ||
       stage.schemaOutcome !== "invalid" ||
       stage.errorCode !== "model_contract_invalid")
@@ -4136,8 +5208,14 @@ export const CAMPAIGN_PLAY_WORLD_EVENT_METADATA = {
   actor_obligation_incurred: { commandKind: "incur_actor_obligation" },
   actor_possession_adjusted: { commandKind: "adjust_actor_possession" },
   actor_obligation_payment_applied: { commandKind: "pay_actor_obligation" },
+  player_receivable_settled: { commandKind: "settle_player_receivable" },
   support_actor_materialized: { commandKind: "materialize_support_actor" },
   scene_recorded: { commandKind: "record_world_event" },
+  decision_opened: { commandKind: "decision_open" },
+  decision_accepted: { commandKind: "decision_resolve" },
+  decision_declined: { commandKind: "decision_resolve" },
+  player_commitment_created: { commandKind: "create_player_commitment" },
+  player_commitment_completed: { commandKind: "complete_player_commitment" },
 } as const satisfies Record<
   CampaignPlayWorldEventKind,
   { commandKind: RulebookBatchCommandKind }
@@ -4281,8 +5359,14 @@ export type CampaignPlayCertifiedWait =
   z.infer<typeof campaignPlayCertifiedWaitSchema>;
 export type CampaignPlayCertifiedContact =
   z.infer<typeof campaignPlayCertifiedContactSchema>;
+export type CampaignPlayCertifiedDecision =
+  z.infer<typeof campaignPlayCertifiedDecisionSchema>;
 export type CampaignPlayCertifiedObserve =
   z.infer<typeof campaignPlayCertifiedObserveSchema>;
+export type CampaignPlayCertifiedCommitment =
+  z.infer<typeof campaignPlayCertifiedCommitmentSchema>;
+export type CampaignPlayCertifiedObligation =
+  z.infer<typeof campaignPlayCertifiedObligationSchema>;
 export type CampaignPlayActionExecutionRoute =
   z.infer<typeof campaignPlayActionExecutionRouteSchema>;
 export type CampaignPlayGameMasterArtifact =
@@ -4490,8 +5574,13 @@ export const CAMPAIGN_PLAY_COMMAND_METADATA = {
   adjust_actor_possession: { modelVisible: true, mechanicalMutation: true },
   incur_actor_obligation: { modelVisible: true, mechanicalMutation: true },
   pay_actor_obligation: { modelVisible: true, mechanicalMutation: true },
+  settle_player_receivable: { modelVisible: false, mechanicalMutation: true },
   materialize_support_actor: { modelVisible: true, mechanicalMutation: true },
   record_world_event: { modelVisible: true, mechanicalMutation: false },
+  decision_open: { modelVisible: false, mechanicalMutation: true },
+  decision_resolve: { modelVisible: false, mechanicalMutation: true },
+  create_player_commitment: { modelVisible: false, mechanicalMutation: true },
+  complete_player_commitment: { modelVisible: false, mechanicalMutation: true },
   create_player_actor: { modelVisible: false, mechanicalMutation: true },
   initialize_player_placement: { modelVisible: false, mechanicalMutation: true },
   initialize_world_time: { modelVisible: false, mechanicalMutation: true },

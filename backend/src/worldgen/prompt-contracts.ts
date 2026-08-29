@@ -27,13 +27,32 @@ export function buildSeedSuggestionPromptContract(): string {
     "Required fields for sequential DNA calls: value and reasoning.",
     "Required fields for single-seed calls: value.",
     "Shape for geography, politicalStructure, centralConflict, environment, and wildcard: { \"value\": \"1-2 concrete sentences\", \"reasoning\": \"one short reason\" }.",
-    "Shape for culturalFlavor: { \"value\": [\"specific inspiration\", \"specific inspiration\"], \"reasoning\": \"one short reason\" }.",
+    "Shape for culturalFlavor: { \"value\": [\"compact in-world practice\", \"compact in-world practice\"], \"reasoning\": \"one short reason\" }.",
     "Caps: value string max 260 chars; reasoning max 220 chars; culturalFlavor value array min 2, max 3; each culturalFlavor item max 80 chars.",
+    "Cultural Flavor rule: each item is a compact diegetic fact naming a ritual, custom, value, language habit, or material practice plus a situation or consequence tied to the premise/world. Use no real-world culture names, genre/style labels, or inspiration lists.",
     "Nullable/optional rules (nullable/optional): do not emit null for value; reasoning is required only when the schema requests it; do not return a string when value must be an array.",
     "Minimal valid output: { \"value\": \"A rain-lashed volcanic coast.\", \"reasoning\": \"It follows the premise's island hazard.\" }",
-    "Valid example: { \"value\": [\"Heian court intrigue\", \"urban occult horror\"], \"reasoning\": \"The premise mixes formal ritual and modern supernatural pressure.\" }",
-    "Invalid example: { \"value\": \"Heian court intrigue, urban occult horror\", \"reasoning\": \"array collapsed into one string\" }",
+    "Valid example: { \"value\": [\"Dockhands knot three ash loops before lifts; a cut knot voids a debt\", \"At low tide, ferry families burn brass threads and recite unpaid names\"], \"reasoning\": \"These practices make the premise's hazards and debts visible in daily life.\" }",
+    "Invalid example: { \"value\": \"Dockhands knot three ash loops before lifts; a cut knot voids a debt\", \"reasoning\": \"array collapsed into one string\" }",
     "No stale legacy source authority: when a research artifact is present, follow artifact source usage rules and ignore legacy ipContext premise canon.",
+    buildWorldgenSourceRuleAuthorityContract(),
+  ].join("\n");
+}
+
+export function buildWorldDnaPacketPromptContract(): string {
+  return [
+    "STRUCTURED_OUTPUT_CONTRACT: world-dna-packet.v1",
+    "Return exactly one World DNA packet object with these six nested fields in this canonical order: geography, politicalStructure, centralConflict, culturalFlavor, environment, wildcard.",
+    "Required nested shape: { \"geography\": { \"value\": \"...\", \"reasoning\": \"...\" }, \"politicalStructure\": { \"value\": \"...\", \"reasoning\": \"...\" }, \"centralConflict\": { \"value\": \"...\", \"reasoning\": \"...\" }, \"culturalFlavor\": { \"value\": [\"...\", \"...\"], \"reasoning\": \"...\" }, \"environment\": { \"value\": \"...\", \"reasoning\": \"...\" }, \"wildcard\": { \"value\": \"...\", \"reasoning\": \"...\" } }.",
+    "Every nested category requires exactly value and reasoning; do not add, omit, flatten, or rename fields.",
+    "Caps: each non-cultural value string is 1-260 characters; each reasoning string is 1-220 characters; culturalFlavor value has 2-3 items; each culturalFlavor item is 1-80 characters.",
+    "Nullable/optional rules (nullable/optional): no category or nested field may be null or omitted; culturalFlavor.value must remain an array; do not emit extra fields.",
+    "Player-facing values must be diegetic prose only; never copy backend redaction placeholders such as [backend ref hidden] into any value; when context is redacted, express the premise without naming the hidden reference.",
+    "Minimal valid output: { \"geography\": { \"value\": \"A rain-lashed volcanic coast.\", \"reasoning\": \"It follows the premise's island hazard.\" }, \"politicalStructure\": { \"value\": \"Harbor councils ration safe passage.\", \"reasoning\": \"The coast's hazards make local navigation authority decisive.\" }, \"centralConflict\": { \"value\": \"Rival ports fight over the only stable channel.\", \"reasoning\": \"The channel links survival to political control.\" }, \"culturalFlavor\": { \"value\": [\"Dockhands knot three ash loops before lifts; a cut knot voids a debt\", \"At low tide, ferry families burn brass threads and recite unpaid names\"], \"reasoning\": \"These practices make survival and obligation visible in daily life.\" }, \"environment\": { \"value\": \"Salt fog and black rain obscure the cliffs each evening.\", \"reasoning\": \"The weather makes the volcanic coast physically dangerous.\" }, \"wildcard\": { \"value\": \"Every lighthouse remembers one sailor's name.\", \"reasoning\": \"The memorial phenomenon adds a distinct mystery without replacing the core conflict.\" } }",
+    "Cultural Flavor rule: use only compact diegetic facts. Each of its 2-3 items names a ritual, custom, value, language habit, or material practice plus a situation or consequence tied to the premise/world. Use no real-world culture names, genre/style labels, or inspiration lists.",
+    "Valid example: keep all six categories mutually consistent while separating landscape, power, conflict, culture, physical environment, and one unique wildcard.",
+    "Invalid example: { \"geography\": { \"value\": \"mountains\", \"reasoning\": \"terrain\" }, \"culturalFlavor\": { \"value\": \"Dockhands knot ash loops\", \"reasoning\": \"one practice\" } } because categories are missing and culturalFlavor.value is not an array.",
+    "Source authority: use only the explicit premise, approved research context, and artifact/source usage rules supplied to this call.",
     buildWorldgenSourceRuleAuthorityContract(),
   ].join("\n");
 }

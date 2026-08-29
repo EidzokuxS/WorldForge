@@ -33,6 +33,17 @@ import { createCampaignPlayStateRepository } from "./campaign-play-state-reposit
 import type { CampaignPlayMutationContext } from "./campaign-play-state-repository.js";
 import { campaignPlayResponseModelMatches } from "./model-identity.js";
 import type { CampaignPlayGameMasterContractFailureDiagnostic } from "./game-master.js";
+import {
+  CAMPAIGN_PLAY_NARRATOR_CONTRACT_DIAGNOSTIC_COORDINATES,
+  CAMPAIGN_PLAY_NARRATOR_CONTRACT_DIAGNOSTIC_PHASES,
+  campaignPlayNarratorRecoveryFeedbackSchema,
+  type CampaignPlayNarratorContractFailureCheck,
+  type CampaignPlayNarratorContractFailureDiagnostic,
+} from "./narrator.js";
+
+type CampaignPlayContractFailureDiagnostic =
+  | CampaignPlayGameMasterContractFailureDiagnostic
+  | CampaignPlayNarratorContractFailureDiagnostic;
 
 export type CampaignPlayTurnRepositoryErrorCode =
   | "turn_not_found"
@@ -185,6 +196,7 @@ export type AcceptCampaignPlayModelArtifactInput =
     });
 
 export type CampaignPlayDeterministicTransition =
+  | "certified_planned"
   | "primary_settled"
   | "actor_job_transitioned"
   | "actors_settled"
@@ -223,7 +235,7 @@ export interface CampaignPlayModelFailureEvidence {
   durationMs: number;
   finishReason: string | null;
   schemaOutcome: "invalid" | "transport_error";
-  contractFailureDiagnostic?: CampaignPlayGameMasterContractFailureDiagnostic | null;
+  contractFailureDiagnostic?: CampaignPlayContractFailureDiagnostic | null;
 }
 
 export interface FailCampaignPlayTurnInput {
@@ -254,7 +266,7 @@ export interface CampaignPlayExternalInterruptionEvidence {
     | "stage_timeout"
     | "rulebook_denied"
     | "narration_invalid";
-  contractFailureDiagnostic?: CampaignPlayGameMasterContractFailureDiagnostic | null;
+  contractFailureDiagnostic?: CampaignPlayContractFailureDiagnostic | null;
 }
 
 export interface InterruptCampaignPlayExternalInput {
@@ -580,7 +592,9 @@ function parseModelSelection(value: string, turnKind: TurnRow["turnKind"]): Camp
     isRequestedModel(record.narrator) &&
     (record.routeKind === undefined || record.routeKind === "full_authority" ||
       record.routeKind === "certified_move" || record.routeKind === "certified_wait" ||
-      record.routeKind === "certified_contact" || record.routeKind === "certified_observe")
+      record.routeKind === "certified_contact" || record.routeKind === "certified_decision" ||
+      record.routeKind === "certified_observe" || record.routeKind === "certified_commitment" ||
+      record.routeKind === "certified_obligation")
   ) {
     return record as unknown as CampaignPlayTurnModelSelection;
   }
@@ -622,12 +636,24 @@ function resolveActionExecutionRoute(
         ? "campaign_play_certified_wait"
         : route.kind === "certified_contact"
           ? "campaign_play_certified_contact"
-          : "campaign_play_certified_observe";
+          : route.kind === "certified_decision"
+            ? "campaign_play_certified_decision"
+            : route.kind === "certified_observe"
+              ? "campaign_play_certified_observe"
+              : route.kind === "certified_commitment"
+                ? "campaign_play_certified_commitment"
+                : "campaign_play_certified_obligation";
     if (route.certificateHash !== hashCampaignPlayProjection({ domain, certificate: route.certificate })) {
       throw new Error("certified route hash is invalid");
     }
   }
   return route.kind;
+}
+
+function usesCodeOwnedCertifiedPlanning(routeKind: CampaignPlayActionExecutionRouteKind): boolean {
+  return routeKind !== "full_authority" &&
+    routeKind !== "certified_contact" &&
+    routeKind !== "certified_observe";
 }
 
 function validateModelSelection(selection: CampaignPlayTurnModelSelection, turnKind: TurnRow["turnKind"]): void {
@@ -679,13 +705,23 @@ function resolveStageClaimRoute(
 ): StageClaimRoute {
   if (
     turnKind === "player_action" && selection.turnKind === "player_action" &&
-    (selection.routeKind === "certified_move" || selection.routeKind === "certified_wait" ||
-      selection.routeKind === "certified_contact" || selection.routeKind === "certified_observe") &&
-    stage === "admitted"
+    selection.routeKind === "certified_contact" && stage === "admitted"
   ) {
     return {
       progress: "interpreting",
       model: { kind: "game_master", requested: selection.gameMaster },
+    };
+  }
+  if (
+    turnKind === "player_action" && selection.turnKind === "player_action" &&
+    (selection.routeKind === "certified_move" || selection.routeKind === "certified_wait" ||
+      selection.routeKind === "certified_decision" || selection.routeKind === "certified_commitment" ||
+      selection.routeKind === "certified_obligation") &&
+    stage === "admitted"
+  ) {
+    return {
+      progress: "interpreting",
+      model: null,
     };
   }
   if (stage === "planned") return { progress: "settling", model: null };
@@ -872,7 +908,7 @@ const contractFailureDiagnosticFailedChecksSchema = z.discriminatedUnion("check"
     maximumAffectedRefCount: z.number().int().nonnegative().max(CAMPAIGN_PLAY_LIMITS.affectedRefs),
   }).strict(),
 ]);
-const contractFailureDiagnosticSchema = z.object({
+const gameMasterContractFailureDiagnosticSchema = z.object({
   rejectionPhase: z.enum(["generation", "evidence", "compilation", "review"]),
   safeGenerationCode: z.enum([
     "missing_structured_tool_call",
@@ -905,11 +941,104 @@ const contractFailureDiagnosticSchema = z.object({
   }
 });
 
+const narratorContractFailureDiagnosticSchema = z.object({
+  owner: z.literal("narrator"),
+  rejectionPhase: z.enum(["generation", "evidence", "semantic"]),
+  safeGenerationCode: z.enum([
+    "missing_structured_tool_call",
+    "invalid_structured_tool_call",
+    "schema_validation_failed",
+    "text_fallback_disabled",
+    "native_output_unavailable",
+    "invalid_json",
+    "full_retry_exhausted",
+  ]).nullable(),
+  contractDiagnosticPhase: z.enum(CAMPAIGN_PLAY_NARRATOR_CONTRACT_DIAGNOSTIC_PHASES).nullable(),
+  contractDiagnosticCoordinate: z.enum(CAMPAIGN_PLAY_NARRATOR_CONTRACT_DIAGNOSTIC_COORDINATES).nullable(),
+  recoveryDiagnostic: z.enum([
+    "narrator_generation_schema_mismatch",
+    "narrator_packet_validation_mismatch",
+  ]).nullable(),
+  failedChecks: z.array(z.unknown())
+    .max(CAMPAIGN_PLAY_LIMITS.narrationBeats + CAMPAIGN_PLAY_LIMITS.suggestedActions + 8),
+}).strict().superRefine((diagnostic, context) => {
+  if ((diagnostic.contractDiagnosticPhase === null) !== (diagnostic.contractDiagnosticCoordinate === null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["contractDiagnosticCoordinate"],
+      message: "Contract diagnostic phase and coordinate must be paired.",
+    });
+  }
+  if (diagnostic.recoveryDiagnostic === null && diagnostic.failedChecks.length > 0) {
+    context.addIssue({
+      code: "custom",
+      path: ["failedChecks"],
+      message: "Failed checks require the bounded recovery diagnostic literal.",
+    });
+    return;
+  }
+  if (diagnostic.recoveryDiagnostic === null) return;
+  const feedback = campaignPlayNarratorRecoveryFeedbackSchema.safeParse({
+    diagnostic: diagnostic.recoveryDiagnostic,
+    failedChecks: diagnostic.failedChecks,
+    ...(diagnostic.contractDiagnosticPhase === null
+      ? {}
+      : {
+          contractDiagnostic: {
+            phase: diagnostic.contractDiagnosticPhase,
+            coordinate: diagnostic.contractDiagnosticCoordinate,
+          },
+        }),
+  });
+  if (!feedback.success) {
+    context.addIssue({
+      code: "custom",
+      path: ["failedChecks"],
+      message: "Narrator contract failure checks are outside their bounded recovery shape.",
+    });
+  }
+});
+
+const contractFailureDiagnosticSchema = z.union([
+  gameMasterContractFailureDiagnosticSchema,
+  narratorContractFailureDiagnosticSchema,
+]);
+
 function canonicalizeContractFailureDiagnostic(value: unknown): string | null {
   if (value === undefined || value === null) return null;
   const parsed = contractFailureDiagnosticSchema.safeParse(value);
   if (!parsed.success) {
     throw stageInvalid("Campaign Play contract failure diagnostic is outside its bounded shape.");
+  }
+  if ("owner" in parsed.data) {
+    const narratorFeedback = parsed.data.recoveryDiagnostic === null
+      ? null
+      : campaignPlayNarratorRecoveryFeedbackSchema.parse({
+          diagnostic: parsed.data.recoveryDiagnostic,
+          failedChecks: parsed.data.failedChecks,
+          ...(parsed.data.contractDiagnosticPhase === null
+            ? {}
+            : {
+                contractDiagnostic: {
+                  phase: parsed.data.contractDiagnosticPhase,
+                  coordinate: parsed.data.contractDiagnosticCoordinate,
+                },
+              }),
+        });
+    const canonical = {
+      owner: "narrator" as const,
+      rejectionPhase: parsed.data.rejectionPhase,
+      safeGenerationCode: parsed.data.safeGenerationCode,
+      contractDiagnosticPhase: parsed.data.contractDiagnosticPhase,
+      contractDiagnosticCoordinate: parsed.data.contractDiagnosticCoordinate,
+      recoveryDiagnostic: parsed.data.recoveryDiagnostic,
+      failedChecks: narratorFeedback?.failedChecks ?? [],
+    } satisfies CampaignPlayNarratorContractFailureDiagnostic;
+    const json = JSON.stringify(canonical);
+    if (Buffer.byteLength(json, "utf8") > CAMPAIGN_PLAY_CONTRACT_FAILURE_DIAGNOSTIC_MAX_BYTES) {
+      throw stageInvalid("Campaign Play contract failure diagnostic exceeds its bounded size.");
+    }
+    return json;
   }
   const canonical = {
     rejectionPhase: parsed.data.rejectionPhase,
@@ -946,6 +1075,13 @@ function parseStoredContractFailureDiagnostic(
   } catch (error) {
     throw corrupt(`${label} contains invalid contract failure diagnostic bytes.`, error);
   }
+}
+
+function contractFailureDiagnosticOwner(
+  value: CampaignPlayContractFailureDiagnostic | null | undefined,
+): "game_master" | "narrator" | null {
+  if (value === undefined || value === null) return null;
+  return "owner" in value ? value.owner : "game_master";
 }
 
 function validateExecutionEvidence(evidence: CampaignPlayModelExecutionEvidence): void {
@@ -1040,14 +1176,18 @@ function validateModelFailureEvidence(evidence: CampaignPlayModelFailureEvidence
 }
 
 interface DeterministicTransitionRoute {
-  expectedStage: "planned" | "primary_settled" | "actors_settled";
-  nextStage: "primary_settled" | "actors_settled" | "visibility_projected";
-  eventKind: "primary_settled" | "actor_job_transitioned" | "visibility_projected";
+  expectedStage: "admitted" | "planned" | "primary_settled" | "actors_settled";
+  nextStage: "planned" | "primary_settled" | "actors_settled" | "visibility_projected";
+  eventKind: "stage_accepted" | "primary_settled" | "actor_job_transitioned" |
+    "visibility_projected";
 }
 
 function resolveDeterministicTransition(
   transition: CampaignPlayDeterministicTransition,
 ): DeterministicTransitionRoute {
+  if (transition === "certified_planned") {
+    return { expectedStage: "admitted", nextStage: "planned", eventKind: "stage_accepted" };
+  }
   if (transition === "primary_settled") {
     return { expectedStage: "planned", nextStage: "primary_settled", eventKind: "primary_settled" };
   }
@@ -1073,7 +1213,8 @@ function validateDeterministicTransitionInput(input: CommitCampaignPlayDetermini
     throw stageInvalid("Campaign Play deterministic transition has an invalid world-version advance.");
   }
   if (
-    (input.transition === "actors_settled" || input.transition === "visibility_projected") &&
+    (input.transition === "certified_planned" || input.transition === "actors_settled" ||
+      input.transition === "visibility_projected") &&
     input.worldVersionAdvance > 0
   ) {
     throw stageInvalid("Campaign Play runtime-only deterministic boundary cannot advance mechanical authority.");
@@ -1103,13 +1244,16 @@ function nextStageAfterAcceptedModel(
     if (!judge.success) {
       throw stageInvalid("Campaign Play Judge artifact is invalid.");
     }
+    if (authorityKind === "certified_observe" && judge.data.primaryPlan.kind === "no_effect") {
+      throw stageInvalid("Campaign Play certified observe Judge result must require Game Master planning.");
+    }
     return judge.data.primaryPlan.kind === "no_effect" ? "planned" : "judged";
   }
   if (
     turnKind === "player_action" && kind === "game_master" &&
-    ((authorityKind === "full_authority" && stage === "judged") ||
+    (((authorityKind === "full_authority" || authorityKind === "certified_observe") && stage === "judged") ||
       ((authorityKind === "certified_move" || authorityKind === "certified_wait" ||
-        authorityKind === "certified_contact" || authorityKind === "certified_observe") &&
+        authorityKind === "certified_contact" || authorityKind === "certified_decision") &&
         stage === "admitted"))
   ) {
     const gameMaster = campaignPlayGameMasterArtifactSchema.safeParse(artifact);
@@ -1119,7 +1263,7 @@ function nextStageAfterAcceptedModel(
     if (acceptedAuthorityHash === null) {
       throw stageInvalid("Campaign Play Game Master artifact has no immutable authority.");
     }
-    if (authorityKind !== "full_authority") {
+    if (authorityKind !== "full_authority" && authorityKind !== "certified_observe") {
       const authorityMatches = authorityKind === "certified_move"
         ? "certifiedMoveHash" in gameMaster.data &&
           gameMaster.data.certifiedMoveHash === acceptedAuthorityHash
@@ -1129,8 +1273,12 @@ function nextStageAfterAcceptedModel(
           : authorityKind === "certified_contact"
             ? "certifiedContactHash" in gameMaster.data &&
               gameMaster.data.certifiedContactHash === acceptedAuthorityHash
-            : "certifiedObserveHash" in gameMaster.data &&
-              gameMaster.data.certifiedObserveHash === acceptedAuthorityHash;
+            : authorityKind === "certified_decision"
+              ? false
+              : authorityKind === "certified_observe"
+                ? "certifiedObserveHash" in gameMaster.data &&
+                  gameMaster.data.certifiedObserveHash === acceptedAuthorityHash
+                : false;
       if (!authorityMatches) {
         throw stageInvalid("Campaign Play Game Master artifact references another certified route.");
       }
@@ -1335,10 +1483,14 @@ function telemetryStageForProgress(
     attempt.workerEpoch === workerEpoch &&
     (attempt.kind === "opening_planner" || attempt.kind === "judge" || attempt.kind === "game_master")
   );
+  if (interpreting.length === 0 && usesCodeOwnedCertifiedPlanning(routeKind)) {
+    return "admitted";
+  }
   if (interpreting.length !== 1) {
     throw corrupt("Campaign Play interpreting telemetry lacks one durable model-stage owner.");
   }
-  return interpreting[0]!.kind === "game_master" && routeKind === "full_authority"
+  return interpreting[0]!.kind === "game_master" &&
+    (routeKind === "full_authority" || routeKind === "certified_observe")
     ? "judged"
     : "admitted";
 }
@@ -1377,6 +1529,14 @@ function validateModelStages(
   selection: CampaignPlayTurnModelSelection,
 ): ModelStageRow[] {
   const stages = selectModelStages(handle, row.turnId);
+  const document = parseDocument(row);
+  const routeKind = resolveActionExecutionRoute(document, selection);
+  if (
+    (routeKind === "certified_commitment" || routeKind === "certified_obligation") &&
+    stages.some((stage) => stage.kind === "judge" || stage.kind === "game_master")
+  ) {
+    throw corrupt("Campaign Play certified code-owned route cannot retain Judge or Game Master evidence.");
+  }
   const stageById = new Map(stages.map((stage) => [stage.id, stage]));
   const grouped = new Map<string, ModelStageRow[]>();
   const actorReplannerStages = new Map(
@@ -1853,6 +2013,9 @@ function validateAcceptedStageProgress(
         JSON.parse(acceptedJudge.artifactJson ?? ""),
       ).primaryPlan.kind === "game_master_required";
   const routeKind = resolveActionExecutionRoute(document, selection);
+  if (routeKind === "certified_observe" && acceptedJudge !== undefined && !judgeRequiresGameMaster) {
+    throw corrupt("Campaign Play certified observe Judge result must require Game Master planning.");
+  }
   const hasSeparateNarrationOperation = row.turnKind === "player_action" &&
     handle.sqlite.prepare(`SELECT 1 FROM campaign_play_narration_operations
       WHERE campaign_id = ? AND turn_id = ? LIMIT 1`).get(
@@ -1865,13 +2028,21 @@ function validateAcceptedStageProgress(
         { kind: "narrator" as const, rank: 6 },
       ]
     : [
-        { kind: "judge" as const, rank: routeKind === "full_authority" ? 1 : 7 },
-        { kind: "game_master" as const, rank: routeKind !== "full_authority"
+        { kind: "judge" as const, rank: routeKind === "full_authority" || routeKind === "certified_observe" ? 1 : 7 },
+        { kind: "game_master" as const, rank: routeKind === "certified_contact"
           ? 2
-          : judgeRequiresGameMaster ? 2 : 7 },
+          : routeKind === "full_authority" || routeKind === "certified_observe"
+            ? judgeRequiresGameMaster ? 2 : 7
+            : 7 },
         { kind: "narrator" as const, rank: hasSeparateNarrationOperation ? 7 : 6 },
       ];
   for (const evidence of required) {
+    if (evidence.kind === "game_master" && usesCodeOwnedCertifiedPlanning(routeKind)) {
+      if (acceptedKinds.has(evidence.kind) && rank < stageProgressRank("planned")) {
+        throw corrupt("Campaign Play certified planning evidence precedes its turn progress.");
+      }
+      continue;
+    }
     if (acceptedKinds.has(evidence.kind) !== (rank >= evidence.rank)) {
       throw corrupt("Campaign Play accepted model evidence disagrees with turn progress.");
     }
@@ -1892,8 +2063,18 @@ function validateAcceptedStageEvents(
     WHERE campaign_id = ? AND turn_id = ? AND kind = 'stage_accepted'
     ORDER BY sequence
   `).all(handle.campaignId, row.turnId) as Array<{ workerEpoch: number | null }>;
+  const document = parseDocument(row);
+  const selection = parseModelSelection(row.modelSelectionJson, row.turnKind);
+  const routeKind = resolveActionExecutionRoute(document, selection);
+  const acceptedEpochs = new Set(acceptedAttempts.map((attempt) => attempt.workerEpoch));
+  const deterministicStageEvents = stageEvents.filter((event) =>
+    event.workerEpoch !== null && !acceptedEpochs.has(event.workerEpoch));
+  const permitsDeterministicPlanning = row.turnKind === "player_action" &&
+    usesCodeOwnedCertifiedPlanning(routeKind) &&
+    acceptedAttempts.every((attempt) => attempt.kind !== "game_master");
   if (
-    acceptedAttempts.length !== stageEvents.length ||
+    acceptedAttempts.length + deterministicStageEvents.length !== stageEvents.length ||
+    deterministicStageEvents.length > (permitsDeterministicPlanning ? 1 : 0) ||
     acceptedAttempts.some((attempt) =>
       !stageEvents.some((event) => event.workerEpoch === attempt.workerEpoch)
     )
@@ -1994,13 +2175,19 @@ function advanceReplayStageForAcceptedModel(
     kind: CampaignPlayTurnModelStageKind;
     artifactJson: string | null;
   }>;
-  if (accepted.length !== 1) {
-    throw corrupt("Campaign Play accepted stage event has no unique model result.");
-  }
-  const kind = accepted[0].kind;
   const document = parseDocument(row);
   const selection = parseModelSelection(row.modelSelectionJson, row.turnKind);
   const routeKind = resolveActionExecutionRoute(document, selection);
+  if (
+    accepted.length === 0 && row.turnKind === "player_action" &&
+    currentStage === "admitted" && usesCodeOwnedCertifiedPlanning(routeKind)
+  ) {
+    return "planned";
+  }
+  if (accepted.length !== 1) {
+    throw corrupt("Campaign Play accepted stage event has no unique stage result.");
+  }
+  const kind = accepted[0].kind;
   if (row.turnKind === "opening" && currentStage === "admitted" && kind === "opening_planner") {
     return "planned";
   }
@@ -2008,12 +2195,15 @@ function advanceReplayStageForAcceptedModel(
     const artifact = campaignPlayJudgeArtifactSchema.parse(
       JSON.parse(accepted[0].artifactJson ?? ""),
     );
+    if (routeKind === "certified_observe" && artifact.primaryPlan.kind === "no_effect") {
+      throw corrupt("Campaign Play certified observe Judge result must require Game Master planning.");
+    }
     return artifact.primaryPlan.kind === "no_effect" ? "planned" : "judged";
   }
   if (
     row.turnKind === "player_action" && kind === "game_master" &&
-    ((routeKind === "full_authority" && currentStage === "judged") ||
-      (routeKind !== "full_authority" && currentStage === "admitted"))
+    (((routeKind === "full_authority" || routeKind === "certified_observe") && currentStage === "judged") ||
+      (routeKind !== "full_authority" && routeKind !== "certified_observe" && currentStage === "admitted"))
   ) {
     try {
       const artifact = campaignPlayGameMasterArtifactSchema.parse(
@@ -2022,7 +2212,7 @@ function advanceReplayStageForAcceptedModel(
       if (hashCampaignPlayProjection(artifact.batch) !== artifact.batchHash) {
         throw new Error("game master batch hash");
       }
-      if (routeKind !== "full_authority") {
+      if (routeKind !== "full_authority" && routeKind !== "certified_observe") {
         const route = campaignPlayActionExecutionRouteSchema.parse(document.frame.executionRoute);
         if (
           route.kind !== routeKind ||
@@ -2032,7 +2222,9 @@ function advanceReplayStageForAcceptedModel(
               ? !("certifiedWaitHash" in artifact) || artifact.certifiedWaitHash !== route.certificateHash
               : routeKind === "certified_contact"
                 ? !("certifiedContactHash" in artifact) || artifact.certifiedContactHash !== route.certificateHash
-                : !("certifiedObserveHash" in artifact) || artifact.certifiedObserveHash !== route.certificateHash)
+              : routeKind === "certified_decision"
+                  ? false
+                  : false)
         ) {
           throw new Error("game master certified route authority");
         }
@@ -2504,7 +2696,8 @@ function loadRow(handle: CampaignPlayDatabaseHandle, row: TurnRow): LoadedCampai
         const route = campaignPlayActionExecutionRouteSchema.parse(document.frame.executionRoute);
         if (
           route.kind !== routeKind ||
-          route.certificate.publicResult.disposition !== "deterministic"
+          (route.kind !== "certified_commitment" && route.kind !== "certified_obligation" &&
+            route.certificate.publicResult.disposition !== "deterministic")
         ) {
           throw corrupt("Campaign Play terminal certified route authority is invalid.");
         }
@@ -2619,6 +2812,7 @@ export function createCampaignPlayTurnRepository(
     },
   ): LoadedCampaignPlayTurn => {
     const contractFailureDiagnosticJson = validateInterruptionEvidence(input.evidence);
+    const diagnosticOwner = contractFailureDiagnosticOwner(input.evidence.contractFailureDiagnostic);
     if (
       !isNonemptyText(input.turnId) || !isNonemptyText(input.owner) ||
       !isPositiveInteger(input.epoch) || !isNonnegativeInteger(input.leaseExpiresAt) ||
@@ -2637,8 +2831,8 @@ export function createCampaignPlayTurnRepository(
     if (route.model === null) {
       throw stageInvalid("Campaign Play interruption requires an external model stage.");
     }
-    if (contractFailureDiagnosticJson !== null && route.model.kind !== "game_master") {
-      throw stageInvalid("Campaign Play contract failure diagnostics belong only to Game Master stages.");
+    if (diagnosticOwner !== null && route.model.kind !== diagnosticOwner) {
+      throw stageInvalid("Campaign Play contract failure diagnostics must match their model stage owner.");
     }
     if (
       preflight.stage !== input.stage || preflight.workerLeaseOwner !== input.owner ||
@@ -2684,8 +2878,8 @@ export function createCampaignPlayTurnRepository(
         ) {
           throw fenceLost("Campaign Play interruption lost its exact worker lease.");
         }
-        if (contractFailureDiagnosticJson !== null && currentRoute.model.kind !== "game_master") {
-          throw stageInvalid("Campaign Play contract failure diagnostics belong only to Game Master stages.");
+        if (diagnosticOwner !== null && currentRoute.model.kind !== diagnosticOwner) {
+          throw stageInvalid("Campaign Play contract failure diagnostics must match their model stage owner.");
         }
         if (
           (input.expiryMode === "live" && input.occurredAt >= input.leaseExpiresAt) ||
@@ -3178,7 +3372,7 @@ export function createCampaignPlayTurnRepository(
         const acceptedJudges = selectModelStages(handle, input.token.turnId).filter(
           (attempt) => attempt.kind === "judge" && attempt.status === "accepted",
         );
-        if (authorityKind !== "full_authority") {
+        if (authorityKind !== "full_authority" && authorityKind !== "certified_observe") {
           if (acceptedJudges.length !== 0) {
             throw stageInvalid("Campaign Play certified route cannot retain Judge evidence.");
           }
@@ -3749,6 +3943,7 @@ export function createCampaignPlayTurnRepository(
       const modelFailureDiagnosticJson = input.modelEvidence === null
         ? null
         : validateModelFailureEvidence(input.modelEvidence);
+      const diagnosticOwner = contractFailureDiagnosticOwner(input.modelEvidence?.contractFailureDiagnostic);
       const preflight = loadTurn(input.token.turnId);
       if (!preflight) {
         throw new CampaignPlayTurnRepositoryError("turn_not_found", "Campaign Play turn was not found.");
@@ -3775,9 +3970,9 @@ export function createCampaignPlayTurnRepository(
       }
       if (
         modelFailureDiagnosticJson !== null &&
-        (input.errorCode !== "model_contract_invalid" || route.model?.kind !== "game_master")
+        (input.errorCode !== "model_contract_invalid" || route.model?.kind !== diagnosticOwner)
       ) {
-        throw stageInvalid("Campaign Play contract failure diagnostics belong only to failed Game Master contract stages.");
+        throw stageInvalid("Campaign Play contract failure diagnostics must match their model stage owner.");
       }
       const stageId = route.model === null
         ? null
@@ -3830,9 +4025,9 @@ export function createCampaignPlayTurnRepository(
           }
           if (
             modelFailureDiagnosticJson !== null &&
-            (currentRoute.model?.kind !== "game_master" || input.errorCode !== "model_contract_invalid")
+            (currentRoute.model?.kind !== diagnosticOwner || input.errorCode !== "model_contract_invalid")
           ) {
-            throw stageInvalid("Campaign Play contract failure diagnostics belong only to failed Game Master contract stages.");
+            throw stageInvalid("Campaign Play contract failure diagnostics must match their model stage owner.");
           }
           assertMutationIdUnused(handle, input.mutationId);
           if (currentRoute.model !== null && input.modelEvidence !== null) {

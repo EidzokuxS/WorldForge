@@ -132,6 +132,16 @@ describe("Campaign World source", () => {
     expect(first.sourceDigest).toHaveLength(64);
   });
 
+  it("carries a structured player identity through source and digest authority", () => {
+    const withoutClaim = createCampaignWorldSourceService().load(CAMPAIGN_ID);
+    writeConfig({ playerIdentity: { displayName: "Brina Hael" } });
+    const service = createCampaignWorldSourceService();
+    const claimed = service.load(CAMPAIGN_ID);
+
+    expect(claimed.playerIdentity).toEqual({ displayName: "Brina Hael" });
+    expect(claimed.sourceDigest).not.toBe(withoutClaim.sourceDigest);
+  });
+
   it("builds from one captured config revision when the file changes after the read", () => {
     writeConfig({
       premise: "Revision A keeps the archipelago supplied.",
@@ -155,7 +165,10 @@ describe("Campaign World source", () => {
 
     expect(readConfigSnapshot).toHaveBeenCalledOnce();
     expect(source.premise).toBe("Revision A keeps the archipelago supplied.");
-    expect(source.dna).toEqual(DNA);
+    expect(source.dna).toEqual({
+      ...DNA,
+      culturalFlavor: "Salt-worn ritual\nBrass instruments, communal songs",
+    });
     expect(JSON.parse(
       fs.readFileSync(path.join(campaignDirectory(), "config.json"), "utf-8"),
     ).premise).toBe("Revision B replaces the world after capture.");
@@ -187,7 +200,10 @@ describe("Campaign World source", () => {
     });
     const changed = service.load(CAMPAIGN_ID);
 
-    expect(initial.dna).toEqual(DNA);
+    expect(initial.dna).toEqual({
+      ...DNA,
+      culturalFlavor: "Salt-worn ritual\nBrass instruments, communal songs",
+    });
     expect(changed.sourceDigest).not.toBe(initial.sourceDigest);
   });
 
@@ -328,7 +344,7 @@ describe("Campaign World source", () => {
     expect(service.load(CAMPAIGN_ID).sourceDigest).not.toBe(first.sourceDigest);
   });
 
-  it("saves DNA once, preserves commas, and leaves kernel.json byte-identical", async () => {
+  it("saves DNA once, preserves punctuation, and leaves kernel.json byte-identical", async () => {
     const kernelPath = path.join(campaignDirectory(), "kernel.json");
     const kernelBytes = Buffer.from('{"phase":"draft","worldGraph":{"nodes":[]}}\n');
     fs.writeFileSync(kernelPath, kernelBytes);
@@ -348,10 +364,49 @@ describe("Campaign World source", () => {
     expect(saveSeeds).toHaveBeenCalledOnce();
     expect(source.dna).toEqual(DNA);
     expect(JSON.parse(fs.readFileSync(path.join(campaignDirectory(), "config.json"), "utf-8")).seeds.culturalFlavor).toEqual([
-      "Salt-worn ritual",
-      "Brass instruments, communal songs",
+      DNA.culturalFlavor,
     ]);
     expect(fs.readFileSync(kernelPath)).toEqual(kernelBytes);
+  });
+
+  it("loads semicolon punctuation as newline-separated DNA and round-trips it exactly", async () => {
+    const storedPractices = [
+      "Salt-worn ritual; kept at dawn",
+      "Brass instruments; communal songs",
+      "Ancestor oaths; shared at tide changes",
+    ];
+    const expectedCulturalFlavor = storedPractices.join("\n");
+    writeConfig({
+      seeds: {
+        geography: DNA.geography,
+        politicalStructure: DNA.politicalStructure,
+        centralConflict: DNA.centralConflict,
+        culturalFlavor: storedPractices,
+        environment: DNA.environment,
+        wildcard: DNA.wildcard,
+      },
+    });
+    const service = createCampaignWorldSourceService();
+
+    const loaded = service.load(CAMPAIGN_ID);
+    expect(loaded.dna).toEqual({
+      ...DNA,
+      culturalFlavor: expectedCulturalFlavor,
+    });
+
+    const saved = await service.saveDna({
+      campaignId: CAMPAIGN_ID,
+      dna: loaded.dna!,
+      assertWritable: vi.fn(),
+    });
+
+    expect(saved.dna?.culturalFlavor).toBe(expectedCulturalFlavor);
+    expect(JSON.parse(fs.readFileSync(path.join(campaignDirectory(), "config.json"), "utf-8")).seeds.culturalFlavor).toEqual([
+      expectedCulturalFlavor,
+    ]);
+    expect(service.load(CAMPAIGN_ID).dna?.culturalFlavor).toBe(
+      expectedCulturalFlavor,
+    );
   });
 
   it.each([
@@ -370,17 +425,6 @@ describe("Campaign World source", () => {
         wildcard: DNA.wildcard,
       },
     },
-    {
-      label: "reserved delimiter inside stored entry",
-      seeds: {
-        geography: DNA.geography,
-        politicalStructure: DNA.politicalStructure,
-        centralConflict: DNA.centralConflict,
-        culturalFlavor: ["Salt-worn; ritual"],
-        environment: DNA.environment,
-        wildcard: DNA.wildcard,
-      },
-    },
   ])("rejects $label", ({ seeds }) => {
     writeConfig({ seeds });
     const service = createCampaignWorldSourceService();
@@ -388,16 +432,16 @@ describe("Campaign World source", () => {
     expect(() => service.load(CAMPAIGN_ID)).toThrow(CampaignWorldSourceError);
   });
 
-  it("rejects an empty cultural flavor segment during DNA save", async () => {
+  it("rejects an empty cultural flavor text block during DNA save", async () => {
     const service = createCampaignWorldSourceService();
 
     await expect(
       service.saveDna({
         campaignId: CAMPAIGN_ID,
-        dna: { ...DNA, culturalFlavor: "Salt-worn ritual; ; communal songs" },
+        dna: { ...DNA, culturalFlavor: " \n\t " },
         assertWritable: vi.fn(),
       }),
-    ).rejects.toMatchObject({ code: "campaign_dna_invalid" });
+    ).rejects.toMatchObject({ code: "campaign_source_invalid" });
   });
 
   it("rejects invalid campaign source JSON", () => {

@@ -73,9 +73,13 @@ import {
   campaignPlayCommandSourceSchema,
   campaignPlayCausalParentSchema,
   campaignPlayConsequenceSchema,
+  campaignPlayDecisionOutcomeSchema,
+  campaignPlayActionContextSchema,
   campaignPlayCharacterDraftResponseSchema,
   campaignPlayCharacterDraftSchema,
   campaignPlayCharacterResearchResponseSchema,
+  campaignPlayCertifiedCommitmentSchema,
+  campaignPlayActionExecutionRouteSchema,
   campaignPlayGeneratePlayerDraftRequestSchema,
   campaignPlayElapsedBoundsSchema,
   campaignPlayEntityRefSchema,
@@ -146,6 +150,7 @@ import {
 
 const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);
+const HASH_C = "c".repeat(64);
 
 interface Parser {
   parse(input: unknown): unknown;
@@ -253,6 +258,7 @@ function narratorPacketFixture(): CampaignPlayNarratorPacket {
     }],
     possessions: [],
     obligations: [],
+    commitments: [],
     newObservations: [journalEntryFixture()],
     consequences: [consequenceFixture()],
     continuity: [journalEntryFixture()],
@@ -272,6 +278,24 @@ function attemptIntentFixture() {
     label: "Try the immediate next step",
     kind: "attempt" as const,
     targets: [{ handle: "location_bridge", kind: "location" as const }],
+  };
+}
+
+function visibleCommitmentFixture(status: "active" | "completed" = "active") {
+  return {
+    handle: "commitment_bridge_delivery",
+    kind: "paid_delivery" as const,
+    status,
+    counterpartyHandle: "actor_guard",
+    counterpartyName: "Mara Venn",
+    title: "Carry the sealed dispatch",
+    subjectName: "Sealed dispatch",
+    destinationHandle: "location_bridge",
+    destinationName: "East Bridge",
+    feeUnit: "copper" as const,
+    feeAmount: 16,
+    paymentTiming: "on_completion" as const,
+    dueWorldTimeLabel: "Day 1, 00:30",
   };
 }
 
@@ -316,10 +340,12 @@ function stateFixture(): CampaignPlayState {
     visiblePressures: packet.visiblePressures,
     possessions: packet.possessions,
     obligations: packet.obligations,
+    commitments: packet.commitments,
     narration: narrationFixture(),
     narrationOperation: null,
     utilityActions: [],
     consequences: packet.consequences,
+    decisionOutcomes: [],
     activeTurn: {
       turnId: packet.turnId,
       turnKind: packet.turnKind,
@@ -478,6 +504,37 @@ function commandFixtures(): RulebookBatchCommand[] {
     },
     {
       ...commandBase(),
+      kind: "settle_player_receivable",
+      debtorActorId: "actor_guard",
+      creditorActorId: "actor_player",
+      obligationId: "obligation_guard_player_copper",
+      creditorPossessionId: "possession_player_copper",
+      creditorPossessionKey: "copper",
+      creditorPossessionName: "Copper",
+      unitKey: "copper",
+      amount: 8,
+      summary: "The traveler collects eight copper owed for the completed delivery.",
+      readScope: [
+        { kind: "actor", id: "actor_guard" },
+        { kind: "actor", id: "actor_player" },
+        { kind: "possession", id: "possession_player_copper" },
+        { kind: "obligation", id: "obligation_guard_player_copper" },
+        { kind: "location", id: "location_bridge" },
+      ],
+      writeScope: [
+        { kind: "possession", id: "possession_player_copper" },
+        { kind: "obligation", id: "obligation_guard_player_copper" },
+      ],
+      affectedRefs: [
+        { kind: "actor", id: "actor_guard" },
+        { kind: "actor", id: "actor_player" },
+        { kind: "possession", id: "possession_player_copper" },
+        { kind: "obligation", id: "obligation_guard_player_copper" },
+        { kind: "location", id: "location_bridge" },
+      ],
+    },
+    {
+      ...commandBase(),
       kind: "materialize_support_actor",
       actorId: "actor_rope_mender",
       placementId: "placement_rope_mender_bridge",
@@ -513,6 +570,83 @@ function commandFixtures(): RulebookBatchCommand[] {
       summary: "A fresh barricade appears at the bridge.",
       observableTrace: null,
       affectedRefs: [{ kind: "route", id: "route_market" }],
+    },
+    {
+      ...commandBase(),
+      kind: "decision_open",
+      decisionKey: "decision_bridge_guard",
+      actorId: "actor_guard",
+      actorHandle: "actor_guard",
+      decisionKind: "yes_no",
+      sourceTurnId: "turn_1",
+      summary: "The guard asks whether the traveler will help at the bridge.",
+      acceptLabel: "Help at the bridge",
+      declineLabel: "Leave the bridge offer",
+    },
+    {
+      ...commandBase(),
+      kind: "decision_resolve",
+      decisionKey: "decision_bridge_guard",
+      actorId: "actor_guard",
+      actorHandle: "actor_guard",
+      decisionKind: "yes_no",
+      sourceTurnId: "turn_1",
+      summary: "The guard asks whether the traveler will help at the bridge.",
+      selectedLabel: "Help at the bridge",
+      disposition: "accept",
+    },
+    {
+      ...commandBase(),
+      kind: "create_player_commitment",
+      source: { kind: "system", system: "game_master" },
+      readScope: [
+        { kind: "actor", id: "actor_player" },
+        { kind: "actor", id: "actor_guard" },
+        { kind: "decision", id: "decision_bridge_guard" },
+        { kind: "location", id: "location_market" },
+      ],
+      writeScope: [{ kind: "commitment", id: "commitment_bridge_delivery" }],
+      commitmentId: "commitment_bridge_delivery",
+      sourceDecisionKey: "decision_bridge_guard",
+      sourceTurnId: "turn_1",
+      performerActorId: "actor_player",
+      counterpartyActorId: "actor_guard",
+      commitmentKind: "paid_delivery",
+      title: "Bridge delivery",
+      subjectName: "Sealed parcel",
+      destinationHandle: "location_market",
+      feeUnit: "copper",
+      feeAmount: 8,
+      paymentTiming: "on_completion",
+      acceptedWorldTimeMinutes: 480,
+      dueWorldTimeMinutes: 600,
+      affectedRefs: [
+        { kind: "commitment", id: "commitment_bridge_delivery" },
+        { kind: "actor", id: "actor_player" },
+        { kind: "actor", id: "actor_guard" },
+        { kind: "decision", id: "decision_bridge_guard" },
+        { kind: "location", id: "location_market" },
+      ],
+    },
+    {
+      ...commandBase(),
+      kind: "complete_player_commitment",
+      source: { kind: "system", system: "game_master" },
+      readScope: [
+        { kind: "commitment", id: "commitment_bridge_delivery" },
+        { kind: "actor", id: "actor_player" },
+        { kind: "actor", id: "actor_guard" },
+      ],
+      writeScope: [{ kind: "commitment", id: "commitment_bridge_delivery" }],
+      commitmentId: "commitment_bridge_delivery",
+      performerActorId: "actor_player",
+      counterpartyActorId: "actor_guard",
+      deliveryPossessionId: "possession_bridge_delivery",
+      affectedRefs: [
+        { kind: "commitment", id: "commitment_bridge_delivery" },
+        { kind: "actor", id: "actor_player" },
+        { kind: "actor", id: "actor_guard" },
+      ],
     },
     {
       ...commandBase(),
@@ -694,6 +828,33 @@ function worldEventFixtures() {
     },
     {
       ...base,
+      kind: "player_receivable_settled",
+      eventId: "event_receivable_settled",
+      commandId: "command_settle_receivable",
+      receiptId: "receipt_settle_receivable",
+      exposures: [],
+      affectedRefs: [
+        { kind: "actor", id: "actor_guard" },
+        { kind: "actor", id: "actor_player" },
+        { kind: "possession", id: "possession_player_copper" },
+        { kind: "obligation", id: "obligation_guard_player_copper" },
+      ],
+      debtorActorId: "actor_guard",
+      creditorActorId: "actor_player",
+      obligationId: "obligation_guard_player_copper",
+      creditorPossessionId: "possession_player_copper",
+      creditorPossessionKey: "copper",
+      creditorPossessionName: "Copper",
+      unitKey: "copper",
+      amount: 8,
+      priorOutstandingAmount: 8,
+      resultOutstandingAmount: 0,
+      priorCreditorQuantity: 0,
+      resultCreditorQuantity: 8,
+      summary: "The traveler collects eight copper owed for the completed delivery.",
+    },
+    {
+      ...base,
       kind: "support_actor_materialized",
       actorId: "actor_rope_mender",
       locationId: "location_bridge",
@@ -705,6 +866,89 @@ function worldEventFixtures() {
       eventClass: "discovery",
       performingActorId: null,
       summary: "A fresh barricade appears at the bridge.",
+    },
+    {
+      ...base,
+      kind: "decision_opened",
+      decisionKey: "decision_bridge_guard",
+      actorId: "actor_guard",
+      actorHandle: "actor_guard",
+      decisionKind: "yes_no",
+      sourceTurnId: "turn_1",
+      summary: "The guard asks whether the traveler will help at the bridge.",
+      acceptLabel: "Help at the bridge",
+      declineLabel: "Leave the bridge offer",
+    },
+    {
+      ...base,
+      kind: "decision_accepted",
+      decisionKey: "decision_bridge_guard",
+      actorId: "actor_guard",
+      actorHandle: "actor_guard",
+      decisionKind: "yes_no",
+      sourceTurnId: "turn_1",
+      summary: "The guard asks whether the traveler will help at the bridge.",
+      disposition: "accept",
+    },
+    {
+      ...base,
+      kind: "decision_declined",
+      decisionKey: "decision_bridge_guard",
+      actorId: "actor_guard",
+      actorHandle: "actor_guard",
+      decisionKind: "yes_no",
+      sourceTurnId: "turn_1",
+      summary: "The guard asks whether the traveler will help at the bridge.",
+      disposition: "decline",
+    },
+    {
+      ...base,
+      kind: "player_commitment_created",
+      source: { kind: "system", system: "game_master" },
+      eventId: "event_commitment_created",
+      commandId: "command_create_commitment",
+      receiptId: "receipt_create_commitment",
+      exposures: [],
+      affectedRefs: [
+        { kind: "commitment", id: "commitment_bridge_delivery" },
+        { kind: "actor", id: "actor_player" },
+        { kind: "actor", id: "actor_guard" },
+        { kind: "decision", id: "decision_bridge_guard" },
+        { kind: "location", id: "location_market" },
+      ],
+      commitmentId: "commitment_bridge_delivery",
+      sourceDecisionKey: "decision_bridge_guard",
+      sourceTurnId: "turn_1",
+      performerActorId: "actor_player",
+      counterpartyActorId: "actor_guard",
+      commitmentKind: "paid_delivery",
+      title: "Bridge delivery",
+      subjectName: "Sealed parcel",
+      destinationHandle: "location_market",
+      feeUnit: "copper",
+      feeAmount: 8,
+      paymentTiming: "on_completion",
+      acceptedWorldTimeMinutes: 480,
+      dueWorldTimeMinutes: 600,
+    },
+    {
+      ...base,
+      kind: "player_commitment_completed",
+      source: { kind: "system", system: "game_master" },
+      eventId: "event_commitment_completed",
+      commandId: "command_complete_commitment",
+      receiptId: "receipt_complete_commitment",
+      exposures: [],
+      affectedRefs: [
+        { kind: "commitment", id: "commitment_bridge_delivery" },
+        { kind: "actor", id: "actor_player" },
+        { kind: "actor", id: "actor_guard" },
+      ],
+      commitmentId: "commitment_bridge_delivery",
+      performerActorId: "actor_player",
+      counterpartyActorId: "actor_guard",
+      priorStatus: "active",
+      resultStatus: "completed",
     },
   ];
 }
@@ -770,6 +1014,277 @@ describe("Campaign Play shared public contracts", () => {
         intentFixture(kind, "suggested"),
       );
     }
+  });
+
+  it("accepts only accepted or declined decision outcomes", () => {
+    const outcome = {
+      decisionKey: "decision_bridge_guard",
+      actorHandle: "actor_guard",
+      kind: "yes_no" as const,
+      disposition: "accept" as const,
+      status: "accepted" as const,
+      sourceTurnId: "turn_1",
+      summary: "The bridge guard asks for a toll.",
+      acceptEffect: null,
+    };
+    expect(campaignPlayDecisionOutcomeSchema.safeParse(outcome).success).toBe(true);
+    expect(campaignPlayDecisionOutcomeSchema.safeParse({
+      ...outcome,
+      disposition: "decline",
+      status: "declined",
+    }).success).toBe(true);
+    expect(campaignPlayDecisionOutcomeSchema.safeParse({
+      ...outcome,
+      status: "closed",
+    }).success).toBe(false);
+  });
+
+  it("accepts only an exact successful copper receivable settlement context", () => {
+    const settlement = {
+      obligationHandle: "obligation_aldous_receivable",
+      debtorHandle: "actor_aldous_crane",
+      creditorHandle: "actor_player",
+      unitKey: "copper" as const,
+      amount: 12,
+      status: "settled" as const,
+      sourceTurnId: "turn_collect_aldous",
+      summary: "Collect 12 copper from Aldous Crane",
+    };
+    const action = {
+      submittedText: settlement.summary,
+      intentKind: "contact" as const,
+      disposition: "deterministic" as const,
+      result: "success" as const,
+      clarificationQuestion: null,
+      obligationSettlement: settlement,
+    };
+    expect(campaignPlayActionContextSchema.safeParse(action).success).toBe(true);
+    expect(campaignPlayActionContextSchema.safeParse({
+      ...action,
+      submittedText: "Talk to Aldous Crane",
+    }).success).toBe(false);
+    expect(campaignPlayActionContextSchema.safeParse({
+      ...action,
+      disposition: "uncertain",
+    }).success).toBe(false);
+    expect(campaignPlayActionContextSchema.safeParse({
+      ...action,
+      obligationSettlement: { ...settlement, unitKey: "silver" },
+    }).success).toBe(false);
+    expect(campaignPlayActionContextSchema.safeParse({
+      ...action,
+      obligationSettlement: { ...settlement, amount: 0 },
+    }).success).toBe(false);
+  });
+
+  it("accepts only coherent certified commitment authorities", () => {
+    const base = {
+      actionSchemaVersion: 1 as const,
+      resolver: "code_owned" as const,
+      campaignId: "campaign_1",
+      turnId: "turn_1",
+      sourceTurnId: "turn_source",
+      sourceMomentId: "moment_1",
+      sourceMomentHash: HASH_A,
+      sourcePacketHash: HASH_B,
+      acceptedWorldVersion: 10,
+      baseWorldVersion: 11,
+      baseRuntimeRevision: 29,
+      actorId: "actor_player",
+      actorHandle: "actor_player",
+      choiceHandle: "choice_commitment",
+      label: "Ask Mara Venn for Sealed dispatch",
+      commitmentId: "commitment_dispatch",
+      commitmentHandle: "commitment_dispatch",
+      counterpartyActorId: "actor_mara",
+      counterpartyActorHandle: "actor_mara",
+      subjectName: "Sealed dispatch",
+      destinationLocationId: "location_bridge",
+      destinationHandle: "location_bridge",
+      feeUnit: "copper" as const,
+      feeAmount: 16,
+      commitmentWorldVersion: 12,
+      commitmentSourceDecisionKey: "decision_dispatch",
+      commitmentSourceTurnId: "turn_source",
+      commitmentSourceReceiptId: "receipt_dispatch",
+    };
+    const collectBinding = {
+      commitmentHandle: base.commitmentHandle,
+      action: "collect" as const,
+      counterpartyHandle: base.counterpartyActorHandle,
+      subjectName: base.subjectName,
+      destinationHandle: base.destinationHandle,
+    };
+    const collect = {
+      ...base,
+      action: "collect" as const,
+      commitmentBinding: collectBinding,
+      possessionId: null,
+      possessionHandle: null,
+    };
+    expect(campaignPlayCertifiedCommitmentSchema.safeParse(collect).success).toBe(true);
+    expect(campaignPlayActionExecutionRouteSchema.safeParse({
+      kind: "certified_commitment",
+      certificate: collect,
+      certificateHash: HASH_C,
+    }).success).toBe(true);
+
+    const deliverBinding = { ...collectBinding, action: "deliver" as const };
+    const deliver = {
+      ...base,
+      label: "Deliver Sealed dispatch at East Bridge",
+      action: "deliver" as const,
+      commitmentBinding: deliverBinding,
+      possessionId: "possession_dispatch",
+      possessionHandle: "possession_dispatch",
+    };
+    expect(campaignPlayCertifiedCommitmentSchema.safeParse(deliver).success).toBe(true);
+    expect(campaignPlayCertifiedCommitmentSchema.safeParse({
+      ...collect,
+      commitmentBinding: { ...collectBinding, subjectName: "Other dispatch" },
+    }).success).toBe(false);
+    expect(campaignPlayCertifiedCommitmentSchema.safeParse({
+      ...collect,
+      possessionId: "possession_dispatch",
+      possessionHandle: "possession_dispatch",
+    }).success).toBe(false);
+    expect(campaignPlayCertifiedCommitmentSchema.safeParse({
+      ...deliver,
+      possessionId: null,
+      possessionHandle: null,
+    }).success).toBe(false);
+  });
+
+  it("exposes only eligible typed controls for an active paid delivery", () => {
+    const commitment = visibleCommitmentFixture();
+    const binding = {
+      commitmentHandle: commitment.handle,
+      action: "collect" as const,
+      counterpartyHandle: commitment.counterpartyHandle,
+      subjectName: commitment.subjectName,
+      destinationHandle: commitment.destinationHandle,
+    };
+    const collectIntent = {
+      handle: "choice_collect_dispatch",
+      label: "Ask Mara Venn for Sealed dispatch",
+      kind: "contact" as const,
+      targets: [{ handle: commitment.counterpartyHandle, kind: "actor" as const }],
+      commitmentBinding: binding,
+    };
+    const collectPacket = {
+      ...narratorPacketFixture(),
+      commitments: [commitment],
+      possessions: [],
+      availableIntents: [collectIntent],
+    };
+    expect(campaignPlayNarratorPacketSchema.safeParse(collectPacket).success).toBe(true);
+
+    const deliverBinding = { ...binding, action: "deliver" as const };
+    const deliverIntent = {
+      handle: "choice_deliver_dispatch",
+      label: "Deliver Sealed dispatch at East Bridge",
+      kind: "attempt" as const,
+      targets: [{ handle: commitment.destinationHandle, kind: "location" as const }],
+      commitmentBinding: deliverBinding,
+    };
+    const deliverPacket = {
+      ...collectPacket,
+      possessions: [{ handle: "possession_dispatch", name: commitment.subjectName, quantity: 1 }],
+      availableIntents: [deliverIntent],
+    };
+    expect(campaignPlayNarratorPacketSchema.safeParse(deliverPacket).success).toBe(true);
+
+    expect(campaignPlayNarratorPacketSchema.safeParse({
+      ...collectPacket,
+      commitments: [visibleCommitmentFixture("completed")],
+    }).success).toBe(false);
+    expect(campaignPlayNarratorPacketSchema.safeParse({
+      ...collectPacket,
+      availableIntents: [{
+        ...collectIntent,
+        label: "Ask Mara Venn for another dispatch",
+        commitmentBinding: { ...binding, subjectName: "Another dispatch" },
+      }],
+    }).success).toBe(false);
+    expect(campaignPlayNarratorPacketSchema.safeParse({
+      ...collectPacket,
+      possessions: [{ handle: "possession_dispatch", name: commitment.subjectName, quantity: 1 }],
+    }).success).toBe(false);
+    expect(campaignPlayNarratorPacketSchema.safeParse({
+      ...deliverPacket,
+      possessions: [],
+    }).success).toBe(false);
+    expect(campaignPlayNarratorPacketSchema.safeParse({
+      ...deliverPacket,
+      currentLocation: {
+        handle: "location_market",
+        name: "Flood Market",
+        description: "A crowded market under the rain.",
+      },
+    }).success).toBe(false);
+    expect(campaignPlayNarratorPacketSchema.safeParse({
+      ...collectPacket,
+      commitments: [{ ...commitment, commitmentId: "internal_commitment" }],
+    }).success).toBe(false);
+
+    const suggested = {
+      source: "suggested" as const,
+      idempotencyKey: "action_collect",
+      choiceHandle: collectIntent.handle,
+      commitmentBinding: binding,
+      expectedWorldVersion: 11,
+      expectedRuntimeRevision: 29,
+    };
+    expect(campaignPlayTurnAdmissionRequestSchema.safeParse(suggested).success).toBe(true);
+    expect(campaignPlayTurnAdmissionRequestSchema.safeParse({
+      ...suggested,
+      decisionBinding: {
+        decisionKey: "decision_bridge_guard",
+        actorHandle: commitment.counterpartyHandle,
+        kind: "offer",
+        disposition: "accept",
+      },
+    }).success).toBe(false);
+    expect(campaignPlaySuggestedActionSchema.safeParse({
+      choiceHandle: collectIntent.handle,
+      label: collectIntent.label,
+      commitmentBinding: { ...binding, commitmentId: "internal_commitment" },
+    }).success).toBe(false);
+  });
+
+  it("bounds visible commitment history without reusing the continuity limit", () => {
+    const commitments = Array.from(
+      { length: CAMPAIGN_PLAY_LIMITS.visibleCommitments },
+      (_value, index) => ({
+        ...visibleCommitmentFixture("completed"),
+        handle: `commitment_history_${index}`,
+      }),
+    );
+    const packet = {
+      ...narratorPacketFixture(),
+      commitments,
+      availableIntents: [],
+    };
+    const state = {
+      ...stateFixture(),
+      commitments,
+    };
+    expect(campaignPlayNarratorPacketSchema.safeParse(packet).success).toBe(true);
+    expect(campaignPlayStateSchema.safeParse(state).success).toBe(true);
+    expect(campaignPlayNarratorPacketSchema.safeParse({
+      ...packet,
+      commitments: [...commitments, {
+        ...visibleCommitmentFixture("completed"),
+        handle: "commitment_history_overflow",
+      }],
+    }).success).toBe(false);
+    expect(campaignPlayStateSchema.safeParse({
+      ...state,
+      commitments: [...commitments, {
+        ...visibleCommitmentFixture("completed"),
+        handle: "commitment_history_overflow",
+      }],
+    }).success).toBe(false);
   });
 
   it("round-trips every public visual and action discriminator", () => {
@@ -1525,6 +2040,29 @@ describe("Campaign Play shared public contracts", () => {
       turnKind: "opening",
       openingContext,
     }).success).toBe(false);
+    const successfulMove = {
+      ...packet,
+      actionContext: {
+        ...packet.actionContext!,
+        intentKind: "move" as const,
+        result: "success" as const,
+      },
+      sourceMoment: null,
+    };
+    expect(campaignPlayNarratorPacketSchema.safeParse(successfulMove).success).toBe(true);
+    expect(campaignPlayNarratorPacketSchema.safeParse({
+      ...successfulMove,
+      sourceMoment: packet.sourceMoment,
+    }).success).toBe(false);
+    expect(campaignPlayNarratorPacketSchema.safeParse({
+      ...successfulMove,
+      actionContext: {
+        ...successfulMove.actionContext,
+        disposition: "impossible" as const,
+        result: "no_effect" as const,
+      },
+      sourceMoment: packet.sourceMoment,
+    }).success).toBe(true);
     expect(playerIntentSchema.safeParse({
       ...intentFixture(),
       kind: "teleport",
@@ -1908,23 +2446,90 @@ describe("Campaign Play shared public contracts", () => {
     )).toThrow(CampaignPlayContractError);
   });
 
-  it("renders attempt choices as grammatical infinitives", () => {
+  it("publishes complete player-facing attempt labels without adding a second verb", () => {
     expect(buildCampaignPlaySuggestedActionLabel(
       narratorPacketFixture(),
       attemptIntentFixture(),
-      "stow the tools and chit in the locker",
-    )).toBe("Try to stow the tools and chit in the locker");
+      "Stow the tools and chit in the locker",
+    )).toBe("Stow the tools and chit in the locker");
     expect(buildCampaignPlaySuggestedActionLabel(
       narratorPacketFixture(),
       {
         ...attemptIntentFixture(),
         targets: [{ handle: "route_market", kind: "route" }],
       },
-      "shove off on Netta's signal",
-    )).toBe("Try to reach Flood Market: shove off on Netta's signal");
+      "Shove off on Netta's signal",
+    )).toBe("Shove off on Netta's signal");
   });
 
-  it("renders ordinary moves only from frozen route authority", () => {
+  it("publishes complete observe and contact labels without duplicating their verbs", () => {
+    const packet = narratorPacketFixture();
+    expect(buildCampaignPlaySuggestedActionLabel(
+      packet,
+      packet.availableIntents[0]!,
+      "Inspect the open gate ledger",
+    )).toBe("Inspect the open gate ledger");
+    const contact = {
+      handle: "choice_contact_keeper",
+      label: "Talk to Mara Venn",
+      kind: "contact" as const,
+      targets: [{ handle: "actor_guard", kind: "actor" as const }],
+    };
+    expect(buildCampaignPlaySuggestedActionLabel(
+      packet,
+      contact,
+      "Ask Mara Venn what work needs doing",
+    )).toBe("Ask Mara Venn what work needs doing");
+    const decision = {
+      handle: "choice_decision_decline",
+      label: "Decline — Leave the bridge offer",
+      kind: "contact" as const,
+      targets: [{ handle: "actor_guard", kind: "actor" as const }],
+      decisionBinding: {
+        decisionKey: "decision_bridge_guard",
+        actorHandle: "actor_guard",
+        kind: "offer" as const,
+        disposition: "decline" as const,
+      },
+    };
+    expect(buildCampaignPlaySuggestedActionLabel(packet, decision, null)).toBe(
+      "Decline — Leave the bridge offer",
+    );
+    expect(() => buildCampaignPlaySuggestedActionLabel(
+      packet,
+      decision,
+      "Leave the bridge offer",
+    )).toThrow(CampaignPlayContractError);
+  });
+
+  it("rejects model-authored detail appended to a decision label", () => {
+    const decisionBinding = {
+      decisionKey: "decision_bridge_guard",
+      actorHandle: "actor_guard",
+      kind: "offer" as const,
+      disposition: "accept" as const,
+    };
+    const decisionIntent = {
+      handle: "choice_decision_accept",
+      label: "Accept — Help at the bridge",
+      kind: "contact" as const,
+      targets: [{ handle: "actor_guard", kind: "actor" as const }],
+      decisionBinding,
+    };
+    expect(() => validateNarrationAgainstPacket({
+      ...narrationFixture(),
+      suggestedActions: [{
+        choiceHandle: decisionIntent.handle,
+        label: "Accept — Help at the bridge“Absolutely”",
+        decisionBinding,
+      }],
+    }, {
+      ...narratorPacketFixture(),
+      availableIntents: [decisionIntent],
+    })).toThrow(CampaignPlayContractError);
+  });
+
+  it("publishes generic moves only as the code-owned frozen route label", () => {
     const packet = narratorPacketFixture();
     const moveIntent = {
       handle: "choice_move_market",
@@ -1940,8 +2545,18 @@ describe("Campaign Play shared public contracts", () => {
     expect(() => buildCampaignPlaySuggestedActionLabel(
       packet,
       moveIntent,
-      "toward another scene's documents",
+      "Bring the guard's warning to the Flood Market clerk",
     )).toThrow(CampaignPlayContractError);
+    expect(() => validateNarrationAgainstPacket({
+      ...narrationFixture(),
+      suggestedActions: [{
+        choiceHandle: moveIntent.handle,
+        label: "Go to Flood Market: Bring the guard's warning to the Flood Market clerk",
+      }],
+    }, {
+      ...packet,
+      availableIntents: [moveIntent],
+    })).toThrow(CampaignPlayContractError);
   });
 
   it("rejects stale mechanical and runtime expectations contextually", () => {
@@ -2293,6 +2908,10 @@ describe("Campaign Play Judge and Rulebook contracts", () => {
         system,
       }).success).toBe(true);
     }
+    expect(campaignPlayCommandSourceSchema.safeParse({
+      kind: "system",
+      system: "commitment_executor",
+    }).success).toBe(true);
     expect(campaignPlayExposurePolicySchema.safeParse({
       mode: "projectable",
       predicates: [{

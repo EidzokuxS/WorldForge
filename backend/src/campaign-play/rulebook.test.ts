@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { CAMPAIGN_PLAY_LIMITS, type CampaignWorldReview } from "@worldforge/shared";
 import {
   preflightCampaignPlayRulebook,
+  deriveCampaignPlayCommitmentId,
+  deriveCampaignPlayDecisionKey,
   type CampaignPlayRulebookAuthority,
   type CampaignPlayRulebookFrame,
 } from "./rulebook.js";
@@ -10,6 +12,7 @@ import {
   deriveCampaignPlayObligationId,
   deriveCampaignPlayPossessionId,
   deriveCampaignPlayPossessionKey,
+  deriveCampaignPlayPublicHandle,
 } from "./campaign-play-projection.js";
 import type { RulebookCommandBatch } from "./contracts.js";
 
@@ -196,6 +199,7 @@ function frameFixture(
     actorConditions: [],
     possessions: [],
     obligations: [],
+    commitments: [],
     pressureStates: setupPhase === "ready" ? [{
       pressureId: "pressure-passage",
       progress: 80,
@@ -483,6 +487,271 @@ function openingBatchWithPremise(): RulebookCommandBatch {
   return batch;
 }
 
+function decisionFrame(): CampaignPlayRulebookFrame {
+  const frame = frameFixture();
+  frame.pendingDecisions = [{
+    decisionKey: "decision-open",
+    actorId: "actor-key",
+    actorHandle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-key"),
+    kind: "offer",
+    status: "open",
+    sourceTurnId: "turn-opening",
+    summary: "Mara offers a signal token.",
+    acceptLabel: "Take the signal token",
+    declineLabel: "Leave the token",
+    acceptEffect: null,
+    resolutionEventId: null,
+    resolutionTurnId: null,
+    resolutionDisposition: null,
+    worldVersion: READY_VERSION,
+  }];
+  return frame;
+}
+
+function paidDeliveryDecisionOpenBatch(overrides: Record<string, unknown> = {}) {
+  const decisionKind = "offer" as const;
+  const decisionKey = deriveCampaignPlayDecisionKey(
+    CAMPAIGN_ID,
+    TURN_ID,
+    "actor-key",
+    decisionKind,
+  );
+  const destinationHandle = deriveCampaignPlayPublicHandle(
+    "location",
+    CAMPAIGN_ID,
+    "location-b",
+  );
+  return {
+    batchId: BATCH_ID,
+    baseWorldVersion: READY_VERSION,
+    commands: [{
+      ...commandBase(0, READY_VERSION),
+      kind: "decision_open" as const,
+      decisionKey,
+      actorId: "actor-key",
+      actorHandle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-key"),
+      decisionKind,
+      sourceTurnId: TURN_ID,
+      summary: "Mara offers a sealed parcel delivery.",
+      acceptLabel: "Take the delivery",
+      declineLabel: "Leave the delivery",
+      acceptEffect: {
+        kind: "paid_delivery" as const,
+        title: "Carry the sealed parcel",
+        subjectName: "a sealed parcel",
+        destinationHandle,
+        feeUnit: "copper" as const,
+        feeAmount: 3,
+        paymentTiming: "on_completion" as const,
+        dueInMinutes: 35,
+      },
+      readScope: [{ kind: "actor" as const, id: "actor-key" }],
+      writeScope: [{ kind: "decision" as const, id: decisionKey }],
+      ...overrides,
+    }],
+  } satisfies RulebookCommandBatch;
+}
+
+function acceptedPaidDeliveryBatch() {
+  const openBatch = paidDeliveryDecisionOpenBatch();
+  const open = openBatch.commands[0]!;
+  const decisionKey = open.decisionKey;
+  const destinationHandle = deriveCampaignPlayPublicHandle(
+    "location",
+    CAMPAIGN_ID,
+    "location-b",
+  );
+  const commitmentId = deriveCampaignPlayCommitmentId(CAMPAIGN_ID, decisionKey);
+  const targetRef = { kind: "actor" as const, id: "actor-key" };
+  const playerRef = { kind: "actor" as const, id: PLAYER_ID };
+  const decisionRef = { kind: "decision" as const, id: decisionKey };
+  const destinationRef = { kind: "location" as const, id: "location-b" };
+  const commitmentRef = { kind: "commitment" as const, id: commitmentId };
+  const resolve = {
+    ...commandBase(1, READY_VERSION + 1),
+    kind: "decision_resolve" as const,
+    decisionKey,
+    actorId: targetRef.id,
+    actorHandle: open.actorHandle,
+    decisionKind: "offer" as const,
+    sourceTurnId: TURN_ID,
+    summary: open.summary,
+    selectedLabel: open.acceptLabel,
+    disposition: "accept" as const,
+    readScope: [targetRef, decisionRef],
+    writeScope: [decisionRef],
+  };
+  const create = {
+    ...commandBase(2, READY_VERSION + 2),
+    kind: "create_player_commitment" as const,
+    commitmentId,
+    sourceDecisionKey: decisionKey,
+    sourceTurnId: TURN_ID,
+    performerActorId: PLAYER_ID,
+    counterpartyActorId: targetRef.id,
+    commitmentKind: "paid_delivery" as const,
+    title: "Carry the sealed parcel",
+    subjectName: "a sealed parcel",
+    destinationHandle,
+    acceptedWorldTimeMinutes: 10,
+    dueWorldTimeMinutes: 45,
+    feeUnit: "copper" as const,
+    feeAmount: 3,
+    paymentTiming: "on_completion" as const,
+    readScope: [playerRef, targetRef, decisionRef, destinationRef],
+    writeScope: [commitmentRef],
+    affectedRefs: [commitmentRef, playerRef, targetRef, decisionRef, destinationRef],
+  };
+  return {
+    frame: frameFixture(),
+    authority: playerAuthority(),
+    decisionKey,
+    commitmentId,
+    batch: {
+      batchId: BATCH_ID,
+      baseWorldVersion: READY_VERSION,
+      commands: [open, resolve, create],
+    } satisfies RulebookCommandBatch,
+  };
+}
+
+function commitmentExecutionFixture(action: "collect" | "deliver") {
+  const frame = decisionFrame();
+  const decision = frame.pendingDecisions![0]!;
+  const destinationHandle = deriveCampaignPlayPublicHandle("location", CAMPAIGN_ID, "location-b");
+  decision.status = "accepted";
+  decision.acceptEffect = {
+    kind: "paid_delivery",
+    title: "Carry the statue",
+    subjectName: "a stone statue",
+    destinationHandle,
+    feeUnit: "copper",
+    feeAmount: 3,
+    paymentTiming: "on_completion",
+    dueInMinutes: 35,
+  };
+  decision.resolutionEventId = "event-decision-accepted";
+  decision.resolutionTurnId = TURN_ID;
+  decision.resolutionDisposition = "accept";
+  const paidDelivery = decision.acceptEffect;
+  if (paidDelivery === null || paidDelivery.kind !== "paid_delivery") {
+    throw new Error("Expected a paid-delivery commitment fixture.");
+  }
+  const commitmentId = deriveCampaignPlayCommitmentId(CAMPAIGN_ID, decision.decisionKey);
+  const possessionKey = deriveCampaignPlayPossessionKey(paidDelivery.subjectName);
+  const possessionId = deriveCampaignPlayPossessionId(CAMPAIGN_ID, PLAYER_ID, possessionKey);
+  frame.commitments = [{
+    commitmentId,
+    campaignId: CAMPAIGN_ID,
+    performerActorId: PLAYER_ID,
+    counterpartyActorId: decision.actorId,
+    kind: "paid_delivery",
+    status: "active",
+    title: paidDelivery.title,
+    subjectName: paidDelivery.subjectName,
+    destinationHandle,
+    feeUnit: "copper",
+    feeAmount: paidDelivery.feeAmount,
+    paymentTiming: "on_completion",
+    acceptedWorldTimeMinutes: 10,
+    dueWorldTimeMinutes: 45,
+    sourceDecisionKey: decision.decisionKey,
+    sourceTurnId: decision.sourceTurnId,
+    sourceReceiptId: "receipt-commitment",
+    completionTurnId: null,
+    completionReceiptId: null,
+    worldVersion: READY_VERSION,
+    createdAt: 0,
+    updatedAt: 0,
+  }];
+  if (action === "deliver") {
+    frame.placements = frame.placements.map((placement) =>
+      placement.actorId === PLAYER_ID && placement.placementKind === "present"
+        ? { ...placement, locationId: "location-b" }
+        : placement);
+    frame.possessions = [{
+      possessionId,
+      actorId: PLAYER_ID,
+      possessionKey,
+      name: decision.acceptEffect.subjectName,
+      quantity: 1,
+    }];
+  }
+  const obligationId = deriveCampaignPlayObligationId(
+    CAMPAIGN_ID,
+    decision.actorId,
+    PLAYER_ID,
+    "copper",
+  );
+  const authority: CampaignPlayRulebookAuthority = {
+    purpose: "commitment_execution",
+    turnId: TURN_ID,
+    actorId: PLAYER_ID,
+    rootParent: { kind: "turn", turnId: TURN_ID },
+    authorizedRefs: [
+      { kind: "actor", id: PLAYER_ID },
+      { kind: "actor", id: decision.actorId },
+      { kind: "commitment", id: commitmentId },
+      { kind: "location", id: "location-b" },
+      ...(action === "deliver" ? [{ kind: "possession" as const, id: possessionId }] : []),
+      { kind: "obligation", id: obligationId },
+    ],
+    witnessActorIds: [],
+    knownWorldEventIds: [],
+    commitmentExecution: {
+      action,
+      commitmentKind: "paid_delivery",
+      commitmentId,
+      performerActorId: PLAYER_ID,
+      counterpartyActorId: decision.actorId,
+      subjectName: paidDelivery.subjectName,
+      destinationLocationId: "location-b",
+      destinationHandle,
+      feeUnit: "copper",
+      feeAmount: paidDelivery.feeAmount,
+      possessionId: action === "collect" ? null : possessionId,
+      sourceDecisionKey: decision.decisionKey,
+      sourceTurnId: decision.sourceTurnId,
+      sourceReceiptId: "receipt-commitment",
+      commitmentWorldVersion: READY_VERSION,
+    },
+  };
+  return { frame, authority, commitmentId, possessionId, possessionKey, obligationId, decision, paidDelivery };
+}
+
+function decisionResolveBatch(
+  disposition: "accept" | "decline",
+  selectedLabel: string,
+): RulebookCommandBatch {
+  const decisionKey = "decision-open";
+  return {
+    batchId: BATCH_ID,
+    baseWorldVersion: READY_VERSION,
+    commands: [{
+      ...commandBase(0, READY_VERSION),
+      source: { kind: "actor", actorId: PLAYER_ID },
+      kind: "decision_resolve",
+      decisionKey,
+      actorId: "actor-key",
+      actorHandle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-key"),
+      decisionKind: "offer",
+      sourceTurnId: "turn-opening",
+      summary: "Mara offers a signal token.",
+      selectedLabel,
+      disposition,
+      readScope: [
+        { kind: "actor", id: "actor-key" },
+        { kind: "decision", id: decisionKey },
+      ],
+      writeScope: [{ kind: "decision", id: decisionKey }],
+      exposure: {
+        mode: "projectable",
+        predicates: [{ channel: "direct_perception", locationId: "location-a" }],
+      },
+    }],
+  };
+}
+
 describe("Campaign Play Rulebook preflight", () => {
   it("derives the opening base version from exact positive player starting possessions", () => {
     const frame = frameFixture("opening_required");
@@ -582,6 +851,1165 @@ describe("Campaign Play Rulebook preflight", () => {
       quantity: 2,
     }]);
     expect(frame).toEqual(before);
+  });
+
+  it("denies a decision label mismatch before mutation and accepts each canonical disposition label", () => {
+    const frame = decisionFrame();
+    const authority = playerAuthority();
+    authority.authorizedRefs.push({ kind: "decision", id: "decision-open" });
+    const before = structuredClone(frame);
+
+    expect(preflightCampaignPlayRulebook({
+      frame,
+      authority,
+      batch: decisionResolveBatch("accept", "Wrong label"),
+    })).toMatchObject({
+      accepted: false,
+      denial: { code: "precondition_failed", commandIndex: 0 },
+    });
+    expect(frame).toEqual(before);
+
+    expect(preflightCampaignPlayRulebook({
+      frame,
+      authority,
+      batch: decisionResolveBatch("accept", "Take the signal token"),
+    })).toMatchObject({ accepted: true });
+    expect(preflightCampaignPlayRulebook({
+      frame,
+      authority,
+      batch: decisionResolveBatch("decline", "Leave the token"),
+    })).toMatchObject({ accepted: true });
+    expect(frame).toEqual(before);
+  });
+
+  it("accepts one code-owned paid-delivery offer from the current Game Master turn", () => {
+    const frame = frameFixture();
+    const result = preflightCampaignPlayRulebook({
+      frame,
+      authority: playerAuthority(),
+      batch: paidDeliveryDecisionOpenBatch(),
+    });
+    expect(result).toMatchObject({ accepted: true });
+    if (!result.accepted) return;
+    expect(result.simulation.pendingDecisions).toEqual([expect.objectContaining({
+      status: "open",
+      actorId: "actor-key",
+      kind: "offer",
+      acceptEffect: expect.objectContaining({
+        kind: "paid_delivery",
+        destinationHandle: deriveCampaignPlayPublicHandle("location", CAMPAIGN_ID, "location-b"),
+      }),
+    })]);
+    expect(result.simulation.commitments).toEqual([]);
+  });
+
+  it("accepts a same-batch player proposal, NPC acceptance, and typed commitment", () => {
+    const { frame, authority, batch, decisionKey, commitmentId } = acceptedPaidDeliveryBatch();
+    const result = preflightCampaignPlayRulebook({ frame, authority, batch });
+    expect(result).toMatchObject({ accepted: true });
+    if (!result.accepted) return;
+    expect(result.simulation.pendingDecisions).toEqual([expect.objectContaining({
+      decisionKey,
+      actorId: "actor-key",
+      status: "accepted",
+      resolutionDisposition: "accept",
+    })]);
+    expect(result.simulation.commitments).toEqual([expect.objectContaining({
+      commitmentId,
+      performerActorId: PLAYER_ID,
+      counterpartyActorId: "actor-key",
+      kind: "paid_delivery",
+      status: "active",
+      destinationHandle: deriveCampaignPlayPublicHandle("location", CAMPAIGN_ID, "location-b"),
+      feeUnit: "copper",
+      feeAmount: 3,
+      paymentTiming: "on_completion",
+    })]);
+  });
+
+  it("denies reordered or source-less same-batch decision and commitment commands", () => {
+    const reorderedResolve = acceptedPaidDeliveryBatch();
+    reorderedResolve.batch.commands = [
+      reorderedResolve.batch.commands[1]!,
+      reorderedResolve.batch.commands[0]!,
+      reorderedResolve.batch.commands[2]!,
+    ].map((command, order) => ({
+      ...command,
+      order,
+      commandId: `command-${order}`,
+      expectedWorldVersion: READY_VERSION + order,
+      causalParent: order === 0
+        ? playerAuthority().rootParent
+        : { kind: "command" as const, commandId: `command-${order - 1}` },
+    }));
+    expect(preflightCampaignPlayRulebook(reorderedResolve)).toMatchObject({
+      accepted: false,
+      denial: { code: "unauthorized_reference", commandIndex: 0 },
+    });
+
+    const createBeforeResolve = acceptedPaidDeliveryBatch();
+    createBeforeResolve.batch.commands = [
+      createBeforeResolve.batch.commands[0]!,
+      createBeforeResolve.batch.commands[2]!,
+      createBeforeResolve.batch.commands[1]!,
+    ].map((command, order) => ({
+      ...command,
+      order,
+      commandId: `command-${order}`,
+      expectedWorldVersion: READY_VERSION + order,
+      causalParent: order === 0
+        ? playerAuthority().rootParent
+        : { kind: "command" as const, commandId: `command-${order - 1}` },
+    }));
+    expect(preflightCampaignPlayRulebook(createBeforeResolve)).toMatchObject({
+      accepted: false,
+      denial: { code: "precondition_failed", commandIndex: 1 },
+    });
+
+    const missingOpen = acceptedPaidDeliveryBatch();
+    missingOpen.batch.commands = [{
+      ...missingOpen.batch.commands[1]!,
+      order: 0,
+      commandId: "command-0",
+      expectedWorldVersion: READY_VERSION,
+      causalParent: playerAuthority().rootParent,
+    }];
+    expect(preflightCampaignPlayRulebook(missingOpen)).toMatchObject({
+      accepted: false,
+      denial: { code: "unauthorized_reference", commandIndex: 0 },
+    });
+  });
+
+  it("accepts a null-effect Game Master offer without applying a consequence before acceptance", () => {
+    const frame = frameFixture();
+    const before = structuredClone(frame);
+    const result = preflightCampaignPlayRulebook({
+      frame,
+      authority: playerAuthority(),
+      batch: paidDeliveryDecisionOpenBatch({
+        summary: "Mara will advance the papers if the traveler brings the ledger.",
+        acceptLabel: "Bring the ledger",
+        declineLabel: "Leave the matter",
+        acceptEffect: null,
+      }),
+    });
+    expect(result).toMatchObject({ accepted: true });
+    if (!result.accepted) return;
+    expect(result.simulation.pendingDecisions).toEqual([expect.objectContaining({
+      status: "open",
+      actorId: "actor-key",
+      kind: "offer",
+      summary: "Mara will advance the papers if the traveler brings the ledger.",
+      acceptLabel: "Bring the ledger",
+      declineLabel: "Leave the matter",
+      acceptEffect: null,
+    })]);
+    expect(result.simulation.possessions).toEqual(frame.possessions);
+    expect(result.simulation.obligations).toEqual(frame.obligations);
+    expect(result.simulation.commitments).toEqual(frame.commitments);
+    expect(frame).toEqual(before);
+  });
+
+  it("rejects a player-action offer with an omitted accept effect", () => {
+    const frame = frameFixture();
+    const before = structuredClone(frame);
+    const batch = paidDeliveryDecisionOpenBatch();
+    Reflect.deleteProperty(batch.commands[0]!, "acceptEffect");
+    expect(preflightCampaignPlayRulebook({
+      frame,
+      authority: playerAuthority(),
+      batch,
+    })).toMatchObject({
+      accepted: false,
+      denial: { code: "precondition_failed", commandIndex: 0 },
+    });
+    expect(frame).toEqual(before);
+  });
+
+  it("rejects a player-action offer carrying a possession effect", () => {
+    const frame = frameFixture();
+    const before = structuredClone(frame);
+    const batch = paidDeliveryDecisionOpenBatch({
+      acceptEffect: {
+        kind: "grant_player_possession" as const,
+        name: "Sealed route map",
+      },
+    });
+    expect(preflightCampaignPlayRulebook({
+      frame,
+      authority: playerAuthority(),
+      batch,
+    })).toMatchObject({
+      accepted: false,
+      denial: { code: "precondition_failed", commandIndex: 0 },
+    });
+    expect(frame).toEqual(before);
+  });
+
+  it("rejects a player-authored decision open even when its paid-delivery fields are otherwise valid", () => {
+    const frame = frameFixture();
+    const batch = paidDeliveryDecisionOpenBatch();
+    batch.commands[0]!.source = { kind: "actor", actorId: PLAYER_ID } as never;
+    expect(preflightCampaignPlayRulebook({
+      frame,
+      authority: playerAuthority(),
+      batch,
+    })).toMatchObject({
+      accepted: false,
+      denial: { code: "precondition_failed", commandId: "command-0" },
+    });
+  });
+
+  it("rejects a paid-delivery offer with stale identity, hidden destination, or an existing open decision", () => {
+    const authority = playerAuthority();
+    const stale = paidDeliveryDecisionOpenBatch();
+    stale.commands[0]!.sourceTurnId = "turn-stale";
+    expect(preflightCampaignPlayRulebook({
+      frame: frameFixture(),
+      authority,
+      batch: stale,
+    })).toMatchObject({ accepted: false, denial: { code: "unauthorized_reference" } });
+
+    const hiddenDestination = paidDeliveryDecisionOpenBatch();
+    const paidEffect = hiddenDestination.commands[0]!.acceptEffect!;
+    if (paidEffect.kind !== "paid_delivery") throw new Error("Expected paid-delivery effect.");
+    hiddenDestination.commands[0]!.acceptEffect = {
+      ...paidEffect,
+      destinationHandle: deriveCampaignPlayPublicHandle("location", CAMPAIGN_ID, "location-c"),
+    };
+    const hiddenAuthority = playerAuthority();
+    hiddenAuthority.authorizedRefs = hiddenAuthority.authorizedRefs.filter((reference) =>
+      !(reference.kind === "location" && reference.id === "location-c"));
+    expect(preflightCampaignPlayRulebook({
+      frame: frameFixture(),
+      authority: hiddenAuthority,
+      batch: hiddenDestination,
+    })).toMatchObject({ accepted: false, denial: { code: "precondition_failed" } });
+
+    const duplicateFrame = frameFixture();
+    const duplicate = paidDeliveryDecisionOpenBatch();
+    const decisionKey = duplicate.commands[0]!.decisionKey;
+    duplicateFrame.pendingDecisions = [{
+      decisionKey,
+      actorId: "actor-key",
+      actorHandle: duplicate.commands[0]!.actorHandle,
+      kind: "offer",
+      status: "open",
+      sourceTurnId: TURN_ID,
+      summary: "An existing offer.",
+      acceptLabel: duplicate.commands[0]!.acceptLabel,
+      declineLabel: duplicate.commands[0]!.declineLabel,
+      acceptEffect: duplicate.commands[0]!.acceptEffect ?? null,
+      resolutionEventId: null,
+      resolutionTurnId: null,
+      resolutionDisposition: null,
+      worldVersion: READY_VERSION,
+    }];
+    expect(preflightCampaignPlayRulebook({
+      frame: duplicateFrame,
+      authority,
+      batch: duplicate,
+    })).toMatchObject({ accepted: false, denial: { code: "unauthorized_reference" } });
+  });
+
+  it("keeps completed commitment history while bounding active work", () => {
+    const frame = frameFixture();
+    const destinationHandle = deriveCampaignPlayPublicHandle(
+      "location",
+      CAMPAIGN_ID,
+      "location-b",
+    );
+    const existing = Array.from(
+      { length: CAMPAIGN_PLAY_LIMITS.visibleCommitments },
+      (_value, index) => {
+        const decisionKey = `decision-existing-${index}`;
+        const sourceTurnId = `turn-existing-${index}`;
+        const title = `Carry dispatch ${index}`;
+        return {
+          decision: {
+            decisionKey,
+            actorId: "actor-key",
+            actorHandle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-key"),
+            kind: "offer" as const,
+            status: "accepted" as const,
+            sourceTurnId,
+            summary: `Mara asks for dispatch ${index}.`,
+            acceptLabel: `Carry dispatch ${index}`,
+            declineLabel: `Decline dispatch ${index}`,
+            acceptEffect: {
+              kind: "unpaid_delivery" as const,
+              title,
+              subjectName: `Dispatch ${index}`,
+              destinationHandle,
+            },
+            resolutionEventId: `event-existing-${index}`,
+            resolutionTurnId: `turn-resolution-${index}`,
+            resolutionDisposition: "accept" as const,
+            worldVersion: READY_VERSION,
+          },
+          commitment: {
+            commitmentId: deriveCampaignPlayCommitmentId(CAMPAIGN_ID, decisionKey),
+            campaignId: CAMPAIGN_ID,
+            performerActorId: PLAYER_ID,
+            counterpartyActorId: "actor-key",
+            kind: "unpaid_delivery" as const,
+            status: "active" as const,
+            title,
+            subjectName: `Dispatch ${index}`,
+            destinationHandle,
+            acceptedWorldTimeMinutes: 10,
+            dueWorldTimeMinutes: null,
+            sourceDecisionKey: decisionKey,
+            sourceTurnId,
+            sourceReceiptId: `receipt-existing-${index}`,
+            completionTurnId: null,
+            completionReceiptId: null,
+            worldVersion: READY_VERSION,
+            createdAt: 0,
+            updatedAt: 0,
+          },
+        };
+      },
+    );
+    const decisionKey = "decision-new-work";
+    const title = "Carry the final dispatch";
+    const sourceTurnId = "turn-new-work";
+    const nextDecision = {
+      decisionKey,
+      actorId: "actor-key",
+      actorHandle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-key"),
+      kind: "offer" as const,
+      status: "accepted" as const,
+      sourceTurnId,
+      summary: "Mara asks for one more dispatch.",
+      acceptLabel: "Carry the final dispatch",
+      declineLabel: "Decline the final dispatch",
+      acceptEffect: {
+        kind: "unpaid_delivery" as const,
+        title,
+        subjectName: "Final dispatch",
+        destinationHandle,
+      },
+      resolutionEventId: "event-new-work",
+      resolutionTurnId: "turn-resolution-new-work",
+      resolutionDisposition: "accept" as const,
+      worldVersion: READY_VERSION,
+    };
+    frame.pendingDecisions = [...existing.map((row) => row.decision), nextDecision];
+    frame.commitments = existing.map((row) => row.commitment);
+    const commitmentId = deriveCampaignPlayCommitmentId(CAMPAIGN_ID, decisionKey);
+    const command = {
+      ...commandBase(0, READY_VERSION),
+      kind: "create_player_commitment" as const,
+      commitmentId,
+      sourceDecisionKey: decisionKey,
+      sourceTurnId,
+      performerActorId: PLAYER_ID,
+      counterpartyActorId: "actor-key",
+      commitmentKind: "unpaid_delivery" as const,
+      title,
+      subjectName: "Final dispatch",
+      destinationHandle,
+      acceptedWorldTimeMinutes: 10,
+      dueWorldTimeMinutes: null,
+      readScope: [
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "actor" as const, id: "actor-key" },
+        { kind: "decision" as const, id: decisionKey },
+        { kind: "location" as const, id: "location-b" },
+      ],
+      writeScope: [{ kind: "commitment" as const, id: commitmentId }],
+      affectedRefs: [
+        { kind: "commitment" as const, id: commitmentId },
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "actor" as const, id: "actor-key" },
+        { kind: "decision" as const, id: decisionKey },
+        { kind: "location" as const, id: "location-b" },
+      ],
+    };
+    const authority = playerAuthority();
+    authority.authorizedRefs.push({ kind: "decision", id: decisionKey });
+    expect(preflightCampaignPlayRulebook({
+      frame,
+      authority,
+      batch: { batchId: BATCH_ID, baseWorldVersion: READY_VERSION, commands: [command] },
+    })).toMatchObject({
+      accepted: false,
+      denial: { code: "precondition_failed" },
+    });
+
+    frame.commitments[0] = {
+      ...frame.commitments[0]!,
+      status: "completed",
+      completionTurnId: "turn-completed-work",
+      completionReceiptId: "receipt-completed-work",
+    };
+    expect(preflightCampaignPlayRulebook({
+      frame,
+      authority,
+      batch: { batchId: BATCH_ID, baseWorldVersion: READY_VERSION, commands: [command] },
+    })).toMatchObject({ accepted: true });
+  });
+
+  it("settles a paid-delivery commitment only with exact cargo, destination, and employer obligation companions", () => {
+    const frame = decisionFrame();
+    const decision = frame.pendingDecisions![0]!;
+    decision.status = "accepted";
+    decision.acceptEffect = {
+      kind: "paid_delivery",
+      title: "Carry the statue",
+      subjectName: "a stone statue",
+      destinationHandle: deriveCampaignPlayPublicHandle("location", CAMPAIGN_ID, "location-b"),
+      feeUnit: "copper",
+      feeAmount: 3,
+      paymentTiming: "on_completion",
+      dueInMinutes: 35,
+    };
+    decision.resolutionEventId = "event-decision-accepted";
+    decision.resolutionTurnId = "turn-opening";
+    decision.resolutionDisposition = "accept";
+    const authority = playerAuthority();
+    authority.authorizedRefs.push({ kind: "decision", id: decision.decisionKey });
+    const commitmentId = deriveCampaignPlayCommitmentId(CAMPAIGN_ID, decision.decisionKey);
+    const destinationHandle = decision.acceptEffect.destinationHandle;
+    const createCommand = {
+      ...commandBase(0, READY_VERSION),
+      kind: "create_player_commitment" as const,
+      commitmentId,
+      sourceDecisionKey: decision.decisionKey,
+      sourceTurnId: decision.sourceTurnId,
+      performerActorId: PLAYER_ID,
+      counterpartyActorId: decision.actorId,
+      commitmentKind: "paid_delivery" as const,
+      title: decision.acceptEffect.title,
+      subjectName: decision.acceptEffect.subjectName,
+      destinationHandle,
+      feeUnit: "copper" as const,
+      feeAmount: decision.acceptEffect.feeAmount,
+      paymentTiming: "on_completion" as const,
+      acceptedWorldTimeMinutes: 10,
+      dueWorldTimeMinutes: 45,
+      readScope: [
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "actor" as const, id: decision.actorId },
+        { kind: "decision" as const, id: decision.decisionKey },
+        { kind: "location" as const, id: "location-b" },
+      ],
+      writeScope: [{ kind: "commitment" as const, id: commitmentId }],
+      affectedRefs: [
+        { kind: "commitment" as const, id: commitmentId },
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "actor" as const, id: decision.actorId },
+        { kind: "decision" as const, id: decision.decisionKey },
+        { kind: "location" as const, id: "location-b" },
+      ],
+    };
+    const created = preflightCampaignPlayRulebook({
+      frame,
+      authority,
+      batch: {
+        batchId: BATCH_ID,
+        baseWorldVersion: READY_VERSION,
+        commands: [createCommand],
+      },
+    });
+    expect(created).toMatchObject({ accepted: true });
+    if (!created.accepted) return;
+    expect(created.simulation.commitments).toEqual([expect.objectContaining({
+      commitmentId,
+      status: "active",
+      sourceReceiptId: expect.any(String),
+      completionTurnId: null,
+      completionReceiptId: null,
+    })]);
+    expect(created.simulation.obligations).toEqual([]);
+    expect(created.simulation.possessions).toEqual([]);
+    authority.authorizedRefs.push({ kind: "commitment", id: commitmentId });
+
+    const duplicateCreate = preflightCampaignPlayRulebook({
+      frame: { ...frame, ...created.simulation },
+      authority,
+      batch: {
+        batchId: BATCH_ID,
+        baseWorldVersion: READY_VERSION + 1,
+        commands: [{ ...createCommand, expectedWorldVersion: READY_VERSION + 1 }],
+      },
+    });
+    expect(duplicateCreate).toMatchObject({
+      accepted: false,
+      denial: { code: "precondition_failed" },
+    });
+
+    const completedFrame: CampaignPlayRulebookFrame = {
+      ...frame,
+      ...created.simulation,
+    };
+    const deliveryPossessionKey = deriveCampaignPlayPossessionKey(decision.acceptEffect.subjectName);
+    const deliveryPossessionId = deriveCampaignPlayPossessionId(
+      CAMPAIGN_ID,
+      PLAYER_ID,
+      deliveryPossessionKey,
+    );
+    const obligationId = deriveCampaignPlayObligationId(
+      CAMPAIGN_ID,
+      decision.actorId,
+      PLAYER_ID,
+      "copper",
+    );
+    completedFrame.possessions = [{
+      possessionId: deliveryPossessionId,
+      actorId: PLAYER_ID,
+      possessionKey: deliveryPossessionKey,
+      name: decision.acceptEffect.subjectName,
+      quantity: 1,
+    }];
+    completedFrame.placements = completedFrame.placements.map((placement) =>
+      placement.actorId === PLAYER_ID && placement.placementKind === "present"
+        ? { ...placement, locationId: "location-b" }
+        : placement);
+    authority.authorizedRefs.push(
+      { kind: "possession", id: deliveryPossessionId },
+      { kind: "obligation", id: obligationId },
+    );
+    const completeBatchId = "batch-complete-commitment";
+    const spendCommand = {
+      ...commandBase(0, READY_VERSION + 1),
+      batchId: completeBatchId,
+      kind: "adjust_actor_possession" as const,
+      actorId: PLAYER_ID,
+      possessionId: deliveryPossessionId,
+      possessionKey: deliveryPossessionKey,
+      name: decision.acceptEffect.subjectName,
+      quantityDelta: -1,
+      summary: "The traveler delivers the sealed statue.",
+      readScope: [
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "possession" as const, id: deliveryPossessionId },
+      ],
+      writeScope: [{ kind: "possession" as const, id: deliveryPossessionId }],
+      affectedRefs: [
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "possession" as const, id: deliveryPossessionId },
+      ],
+    };
+    const incurCommand = {
+      ...commandBase(1, READY_VERSION + 2),
+      batchId: completeBatchId,
+      causalParent: { kind: "command" as const, commandId: spendCommand.commandId },
+      kind: "incur_actor_obligation" as const,
+      debtorActorId: decision.actorId,
+      creditorActorId: PLAYER_ID,
+      obligationId,
+      unitKey: "copper" as const,
+      amount: decision.acceptEffect.feeAmount,
+      summary: "The employer owes the agreed delivery fee.",
+      readScope: [
+        { kind: "actor" as const, id: decision.actorId },
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "obligation" as const, id: obligationId },
+      ],
+      writeScope: [{ kind: "obligation" as const, id: obligationId }],
+      affectedRefs: [
+        { kind: "actor" as const, id: decision.actorId },
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "obligation" as const, id: obligationId },
+      ],
+    };
+    const completeCommand = {
+      ...commandBase(2, READY_VERSION + 3),
+      batchId: completeBatchId,
+      causalParent: { kind: "command" as const, commandId: incurCommand.commandId },
+      kind: "complete_player_commitment" as const,
+      commitmentId,
+      performerActorId: PLAYER_ID,
+      counterpartyActorId: decision.actorId,
+      deliveryPossessionId,
+      readScope: [
+        { kind: "commitment" as const, id: commitmentId },
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "actor" as const, id: decision.actorId },
+        { kind: "possession" as const, id: deliveryPossessionId },
+        { kind: "location" as const, id: "location-b" },
+        { kind: "obligation" as const, id: obligationId },
+      ],
+      writeScope: [
+        { kind: "possession" as const, id: deliveryPossessionId },
+        { kind: "obligation" as const, id: obligationId },
+        { kind: "commitment" as const, id: commitmentId },
+      ],
+      affectedRefs: [
+        { kind: "commitment" as const, id: commitmentId },
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "actor" as const, id: decision.actorId },
+        { kind: "possession" as const, id: deliveryPossessionId },
+        { kind: "location" as const, id: "location-b" },
+        { kind: "obligation" as const, id: obligationId },
+      ],
+    };
+    const completed = preflightCampaignPlayRulebook({
+      frame: completedFrame,
+      authority,
+      batch: {
+        batchId: completeBatchId,
+        baseWorldVersion: READY_VERSION + 1,
+        commands: [spendCommand, incurCommand, completeCommand],
+      },
+    });
+    expect(completed).toMatchObject({ accepted: true });
+    if (!completed.accepted) return;
+    expect(completed.simulation.commitments).toEqual([expect.objectContaining({
+      commitmentId,
+      status: "completed",
+      completionTurnId: TURN_ID,
+      completionReceiptId: expect.any(String),
+    })]);
+    expect(completed.simulation.obligations).toEqual([expect.objectContaining({
+      obligationId,
+      debtorActorId: decision.actorId,
+      creditorActorId: PLAYER_ID,
+      unitKey: "copper",
+      principalAmount: decision.acceptEffect.feeAmount,
+      outstandingAmount: decision.acceptEffect.feeAmount,
+    })]);
+    expect(completed.simulation.possessions).toEqual([expect.objectContaining({
+      possessionId: deliveryPossessionId,
+      quantity: 0,
+    })]);
+
+    const duplicateComplete = preflightCampaignPlayRulebook({
+      frame: { ...completedFrame, ...completed.simulation },
+      authority,
+      batch: {
+        batchId: completeBatchId,
+        baseWorldVersion: READY_VERSION + 4,
+        commands: [{
+          ...completeCommand,
+          expectedWorldVersion: READY_VERSION + 4,
+          causalParent: authority.rootParent,
+        }],
+      },
+    });
+    expect(duplicateComplete).toMatchObject({
+      accepted: false,
+      denial: { code: "invalid_batch" },
+    });
+    const missingCompanion = preflightCampaignPlayRulebook({
+      frame: completedFrame,
+      authority,
+      batch: {
+        batchId: "batch-missing-companion",
+        baseWorldVersion: READY_VERSION + 1,
+        commands: [{
+          ...completeCommand,
+          commandId: "command-missing-companion",
+          batchId: "batch-missing-companion",
+          causalParent: authority.rootParent,
+          expectedWorldVersion: READY_VERSION + 1,
+        }],
+      },
+    });
+    expect(missingCompanion).toMatchObject({
+      accepted: false,
+      denial: { code: "invalid_batch" },
+    });
+    const settlementFrameBeforeInvalidProbes = structuredClone(completedFrame);
+    const settlementProbe = (
+      batchId: string,
+      probeFrame: CampaignPlayRulebookFrame,
+      overrides: {
+        spend?: Partial<typeof spendCommand>;
+        incur?: Partial<typeof incurCommand>;
+        complete?: Partial<typeof completeCommand>;
+      } = {},
+    ) => {
+      const probeSpend = {
+        ...spendCommand,
+        ...overrides.spend,
+        commandId: `${batchId}-spend`,
+        batchId,
+        causalParent: authority.rootParent,
+      };
+      const probeIncur = {
+        ...incurCommand,
+        ...overrides.incur,
+        commandId: `${batchId}-incur`,
+        batchId,
+        causalParent: { kind: "command" as const, commandId: probeSpend.commandId },
+      };
+      const probeComplete = {
+        ...completeCommand,
+        ...overrides.complete,
+        commandId: `${batchId}-complete`,
+        batchId,
+        causalParent: { kind: "command" as const, commandId: probeIncur.commandId },
+      };
+      return preflightCampaignPlayRulebook({
+        frame: probeFrame,
+        authority,
+        batch: {
+          batchId,
+          baseWorldVersion: READY_VERSION + 1,
+          commands: [probeSpend, probeIncur, probeComplete],
+        },
+      });
+    };
+    const absentCargoFrame = structuredClone(completedFrame);
+    absentCargoFrame.possessions = [];
+    expect(settlementProbe("batch-absent-cargo", absentCargoFrame)).toMatchObject({
+      accepted: false,
+      denial: { code: "precondition_failed" },
+    });
+    expect(settlementProbe("batch-wrong-cargo", completedFrame, {
+      spend: { name: "a different cargo" },
+    })).toMatchObject({
+      accepted: false,
+      denial: { code: "precondition_failed" },
+    });
+    expect(settlementProbe("batch-wrong-parties", completedFrame, {
+      incur: {
+        debtorActorId: PLAYER_ID,
+        creditorActorId: decision.actorId,
+      },
+    })).toMatchObject({
+      accepted: false,
+      denial: { code: "precondition_failed" },
+    });
+    expect(settlementProbe("batch-wrong-completion-party", completedFrame, {
+      complete: { counterpartyActorId: PLAYER_ID },
+    })).toMatchObject({
+      accepted: false,
+      denial: { code: "precondition_failed" },
+    });
+    const wrongLocationFrame = structuredClone(completedFrame);
+    wrongLocationFrame.placements = wrongLocationFrame.placements.map((placement) =>
+      placement.actorId === PLAYER_ID && placement.placementKind === "present"
+        ? { ...placement, locationId: "location-a" }
+        : placement);
+    expect(preflightCampaignPlayRulebook({
+      frame: wrongLocationFrame,
+      authority,
+      batch: {
+        batchId: "batch-wrong-location",
+        baseWorldVersion: READY_VERSION + 1,
+        commands: [
+          { ...spendCommand, commandId: "wrong-location-spend", batchId: "batch-wrong-location", causalParent: authority.rootParent },
+          { ...incurCommand, commandId: "wrong-location-incur", batchId: "batch-wrong-location", causalParent: { kind: "command", commandId: "wrong-location-spend" } },
+          { ...completeCommand, commandId: "wrong-location-complete", batchId: "batch-wrong-location", causalParent: { kind: "command", commandId: "wrong-location-incur" } },
+        ],
+      },
+    })).toMatchObject({ accepted: false, denial: { code: "precondition_failed" } });
+    const wrongFee = {
+      ...incurCommand,
+      amount: decision.acceptEffect.feeAmount + 1,
+    };
+    expect(preflightCampaignPlayRulebook({
+      frame: completedFrame,
+      authority,
+      batch: {
+        batchId: "batch-wrong-fee",
+        baseWorldVersion: READY_VERSION + 1,
+        commands: [
+          { ...spendCommand, commandId: "wrong-fee-spend", batchId: "batch-wrong-fee", causalParent: authority.rootParent },
+          { ...wrongFee, commandId: "wrong-fee-incur", batchId: "batch-wrong-fee", causalParent: { kind: "command", commandId: "wrong-fee-spend" } },
+          { ...completeCommand, commandId: "wrong-fee-complete", batchId: "batch-wrong-fee", causalParent: { kind: "command", commandId: "wrong-fee-incur" } },
+        ],
+      },
+    })).toMatchObject({ accepted: false, denial: { code: "precondition_failed" } });
+    expect(completedFrame).toEqual(settlementFrameBeforeInvalidProbes);
+    expect(destinationHandle).toContain("location");
+  });
+
+  it("executes an exact commitment collect without completing the commitment", () => {
+    const fixture = commitmentExecutionFixture("collect");
+    const command = {
+      ...commandBase(0, READY_VERSION),
+      source: { kind: "system" as const, system: "commitment_executor" as const },
+      kind: "adjust_actor_possession" as const,
+      actorId: PLAYER_ID,
+      possessionId: fixture.possessionId,
+      possessionKey: fixture.possessionKey,
+      name: fixture.paidDelivery.subjectName,
+      quantityDelta: 1,
+      summary: "The employer hands over the sealed statue.",
+      readScope: [
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "possession" as const, id: fixture.possessionId },
+      ],
+      writeScope: [{ kind: "possession" as const, id: fixture.possessionId }],
+      affectedRefs: [
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "possession" as const, id: fixture.possessionId },
+      ],
+    };
+    const result = preflightCampaignPlayRulebook({
+      frame: fixture.frame,
+      authority: fixture.authority,
+      batch: { batchId: BATCH_ID, baseWorldVersion: READY_VERSION, commands: [command] },
+    });
+    expect(result).toMatchObject({ accepted: true });
+    if (!result.accepted) return;
+    expect(result.simulation.possessions).toEqual([expect.objectContaining({
+      possessionId: fixture.possessionId,
+      quantity: 1,
+    })]);
+    expect(result.simulation.commitments).toEqual([expect.objectContaining({
+      commitmentId: fixture.commitmentId,
+      status: "active",
+    })]);
+    expect(result.simulation.obligations).toEqual([]);
+  });
+
+  it("settles a completed paid-delivery receivable exactly once and rejects partial collection", () => {
+    const fixture = commitmentExecutionFixture("collect");
+    const commitment = fixture.frame.commitments[0]!;
+    commitment.status = "completed";
+    commitment.completionTurnId = TURN_ID;
+    commitment.completionReceiptId = "receipt-completed";
+    const obligationId = fixture.obligationId;
+    fixture.frame.obligations.push({
+      obligationId,
+      debtorActorId: fixture.decision.actorId,
+      creditorActorId: PLAYER_ID,
+      unitKey: "copper",
+      principalAmount: fixture.paidDelivery.feeAmount,
+      outstandingAmount: fixture.paidDelivery.feeAmount,
+    });
+    const authority = playerAuthority();
+    authority.authorizedRefs.push({ kind: "obligation", id: obligationId });
+    const creditorPossessionId = deriveCampaignPlayPossessionId(
+      CAMPAIGN_ID,
+      PLAYER_ID,
+      "copper",
+    );
+    const command = {
+      ...commandBase(0, READY_VERSION),
+      kind: "settle_player_receivable" as const,
+      debtorActorId: fixture.decision.actorId,
+      creditorActorId: PLAYER_ID,
+      obligationId,
+      creditorPossessionId,
+      creditorPossessionKey: "copper",
+      creditorPossessionName: "Copper",
+      unitKey: "copper" as const,
+      amount: fixture.paidDelivery.feeAmount,
+      summary: "The player collects the exact copper owed for the completed delivery.",
+      readScope: [
+        { kind: "actor" as const, id: fixture.decision.actorId },
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "possession" as const, id: creditorPossessionId },
+        { kind: "obligation" as const, id: obligationId },
+      ],
+      writeScope: [
+        { kind: "possession" as const, id: creditorPossessionId },
+        { kind: "obligation" as const, id: obligationId },
+      ],
+      affectedRefs: [
+        { kind: "actor" as const, id: fixture.decision.actorId },
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "possession" as const, id: creditorPossessionId },
+        { kind: "obligation" as const, id: obligationId },
+      ],
+    };
+    const before = structuredClone(fixture.frame);
+    const accepted = preflightCampaignPlayRulebook({
+      frame: fixture.frame,
+      authority,
+      batch: { batchId: BATCH_ID, baseWorldVersion: READY_VERSION, commands: [command] },
+    });
+    expect(accepted).toMatchObject({ accepted: true });
+    if (!accepted.accepted) return;
+    expect(accepted.simulation.obligations).toEqual([expect.objectContaining({
+      obligationId,
+      outstandingAmount: 0,
+    })]);
+    expect(accepted.simulation.possessions).toContainEqual({
+      possessionId: creditorPossessionId,
+      actorId: PLAYER_ID,
+      possessionKey: "copper",
+      name: "Copper",
+      quantity: fixture.paidDelivery.feeAmount,
+    });
+    expect(accepted.simulation.commitments).toContainEqual(expect.objectContaining({
+      commitmentId: fixture.commitmentId,
+      status: "completed",
+    }));
+    expect(fixture.frame).toEqual(before);
+
+    const retryFrame: CampaignPlayRulebookFrame = {
+      ...fixture.frame,
+      ...accepted.simulation,
+    };
+    authority.authorizedRefs.push({ kind: "possession", id: creditorPossessionId });
+    const retryCommand = {
+      ...command,
+      ...commandBase(0, READY_VERSION + 1),
+      commandId: "command-retry-settlement",
+      batchId: "batch-retry-settlement",
+    };
+    expect(preflightCampaignPlayRulebook({
+      frame: retryFrame,
+      authority,
+      batch: {
+        batchId: "batch-retry-settlement",
+        baseWorldVersion: READY_VERSION + 1,
+        commands: [retryCommand],
+      },
+    })).toMatchObject({ accepted: false, denial: { code: "precondition_failed" } });
+
+    const partialFrame = structuredClone(fixture.frame);
+    const partialCommand = {
+      ...command,
+      ...commandBase(0, READY_VERSION),
+      commandId: "command-partial-settlement",
+      batchId: "batch-partial-settlement",
+      amount: fixture.paidDelivery.feeAmount - 1,
+    };
+    const partialAuthority = playerAuthority();
+    partialAuthority.authorizedRefs.push({ kind: "obligation", id: obligationId });
+    const partial = preflightCampaignPlayRulebook({
+      frame: partialFrame,
+      authority: partialAuthority,
+      batch: {
+        batchId: "batch-partial-settlement",
+        baseWorldVersion: READY_VERSION,
+        commands: [partialCommand],
+      },
+    });
+    expect(partial).toMatchObject({ accepted: false, denial: { code: "precondition_failed" } });
+    expect(partialFrame).toEqual(structuredClone(fixture.frame));
+  });
+
+  it("rejects receivable settlement when the player's copper possession would overflow", () => {
+    const fixture = commitmentExecutionFixture("collect");
+    const commitment = fixture.frame.commitments[0]!;
+    commitment.status = "completed";
+    commitment.completionTurnId = TURN_ID;
+    commitment.completionReceiptId = "receipt-completed";
+    const obligationId = fixture.obligationId;
+    fixture.frame.obligations.push({
+      obligationId,
+      debtorActorId: fixture.decision.actorId,
+      creditorActorId: PLAYER_ID,
+      unitKey: "copper",
+      principalAmount: fixture.paidDelivery.feeAmount,
+      outstandingAmount: fixture.paidDelivery.feeAmount,
+    });
+    const creditorPossessionId = deriveCampaignPlayPossessionId(
+      CAMPAIGN_ID,
+      PLAYER_ID,
+      "copper",
+    );
+    fixture.frame.possessions.push({
+      possessionId: creditorPossessionId,
+      actorId: PLAYER_ID,
+      possessionKey: "copper",
+      name: "Copper",
+      quantity: CAMPAIGN_PLAY_LIMITS.possessionQuantity - fixture.paidDelivery.feeAmount + 1,
+    });
+    const authority = playerAuthority();
+    authority.authorizedRefs.push(
+      { kind: "obligation", id: obligationId },
+      { kind: "possession", id: creditorPossessionId },
+    );
+    const command = {
+      ...commandBase(0, READY_VERSION),
+      kind: "settle_player_receivable" as const,
+      debtorActorId: fixture.decision.actorId,
+      creditorActorId: PLAYER_ID,
+      obligationId,
+      creditorPossessionId,
+      creditorPossessionKey: "copper",
+      creditorPossessionName: "Copper",
+      unitKey: "copper" as const,
+      amount: fixture.paidDelivery.feeAmount,
+      summary: "The player collects the exact copper owed for the completed delivery.",
+      readScope: [
+        { kind: "actor" as const, id: fixture.decision.actorId },
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "possession" as const, id: creditorPossessionId },
+        { kind: "obligation" as const, id: obligationId },
+      ],
+      writeScope: [
+        { kind: "possession" as const, id: creditorPossessionId },
+        { kind: "obligation" as const, id: obligationId },
+      ],
+      affectedRefs: [
+        { kind: "actor" as const, id: fixture.decision.actorId },
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "possession" as const, id: creditorPossessionId },
+        { kind: "obligation" as const, id: obligationId },
+      ],
+    };
+    const before = structuredClone(fixture.frame);
+    const result = preflightCampaignPlayRulebook({
+      frame: fixture.frame,
+      authority,
+      batch: { batchId: BATCH_ID, baseWorldVersion: READY_VERSION, commands: [command] },
+    });
+    expect(result).toMatchObject({ accepted: false, denial: { code: "precondition_failed" } });
+    expect(fixture.frame).toEqual(before);
+  });
+
+  it("rejects commitment execution source and shape mismatches atomically", () => {
+    const fixture = commitmentExecutionFixture("collect");
+    const command = {
+      ...commandBase(0, READY_VERSION),
+      source: { kind: "system" as const, system: "commitment_executor" as const },
+      kind: "adjust_actor_possession" as const,
+      actorId: PLAYER_ID,
+      possessionId: fixture.possessionId,
+      possessionKey: fixture.possessionKey,
+      name: fixture.paidDelivery.subjectName,
+      quantityDelta: 1,
+      summary: "The employer hands over the sealed statue.",
+      readScope: [
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "possession" as const, id: fixture.possessionId },
+      ],
+      writeScope: [{ kind: "possession" as const, id: fixture.possessionId }],
+      affectedRefs: [
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "possession" as const, id: fixture.possessionId },
+      ],
+    };
+    const before = structuredClone(fixture.frame);
+    const wrongSource = {
+      ...command,
+      commandId: "collect-wrong-source",
+      source: { kind: "actor" as const, actorId: PLAYER_ID },
+    };
+    expect(preflightCampaignPlayRulebook({
+      frame: fixture.frame,
+      authority: fixture.authority,
+      batch: { batchId: BATCH_ID, baseWorldVersion: READY_VERSION, commands: [wrongSource] },
+    })).toMatchObject({ accepted: false, denial: { code: "precondition_failed" } });
+    expect(fixture.frame).toEqual(before);
+
+    expect(preflightCampaignPlayRulebook({
+      frame: fixture.frame,
+      authority: { ...fixture.authority, purpose: "player_action" },
+      batch: { batchId: BATCH_ID, baseWorldVersion: READY_VERSION, commands: [command] },
+    })).toMatchObject({ accepted: false, denial: { code: "invalid_authority" } });
+    expect(fixture.frame).toEqual(before);
+
+    const extraCommand = {
+      ...command,
+      commandId: "collect-extra-command",
+      order: 1,
+      expectedWorldVersion: READY_VERSION + 1,
+      causalParent: { kind: "command" as const, commandId: command.commandId },
+    };
+    expect(preflightCampaignPlayRulebook({
+      frame: fixture.frame,
+      authority: fixture.authority,
+      batch: { batchId: BATCH_ID, baseWorldVersion: READY_VERSION, commands: [command, extraCommand] },
+    })).toMatchObject({ accepted: false, denial: { code: "precondition_failed" } });
+    expect(fixture.frame).toEqual(before);
+  });
+
+  it("executes an exact commitment delivery atomically with a remote employer", () => {
+    const fixture = commitmentExecutionFixture("deliver");
+    const batchId = "batch-execute-delivery";
+    const spend = {
+      ...commandBase(0, READY_VERSION),
+      batchId,
+      source: { kind: "system" as const, system: "commitment_executor" as const },
+      kind: "adjust_actor_possession" as const,
+      actorId: PLAYER_ID,
+      possessionId: fixture.possessionId,
+      possessionKey: fixture.possessionKey,
+      name: fixture.paidDelivery.subjectName,
+      quantityDelta: -1,
+      summary: "The traveler delivers the sealed statue.",
+      readScope: [
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "possession" as const, id: fixture.possessionId },
+      ],
+      writeScope: [{ kind: "possession" as const, id: fixture.possessionId }],
+      affectedRefs: [
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "possession" as const, id: fixture.possessionId },
+      ],
+    };
+    const incur = {
+      ...commandBase(1, READY_VERSION + 1),
+      batchId,
+      causalParent: { kind: "command" as const, commandId: spend.commandId },
+      source: { kind: "system" as const, system: "commitment_executor" as const },
+      kind: "incur_actor_obligation" as const,
+      debtorActorId: fixture.decision.actorId,
+      creditorActorId: PLAYER_ID,
+      obligationId: fixture.obligationId,
+      unitKey: "copper" as const,
+      amount: fixture.paidDelivery.feeAmount,
+      summary: "The employer owes the agreed delivery fee.",
+      readScope: [
+        { kind: "actor" as const, id: fixture.decision.actorId },
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "obligation" as const, id: fixture.obligationId },
+      ],
+      writeScope: [{ kind: "obligation" as const, id: fixture.obligationId }],
+      affectedRefs: [
+        { kind: "actor" as const, id: fixture.decision.actorId },
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "obligation" as const, id: fixture.obligationId },
+      ],
+    };
+    const complete = {
+      ...commandBase(2, READY_VERSION + 2),
+      batchId,
+      causalParent: { kind: "command" as const, commandId: incur.commandId },
+      source: { kind: "system" as const, system: "commitment_executor" as const },
+      kind: "complete_player_commitment" as const,
+      commitmentId: fixture.commitmentId,
+      performerActorId: PLAYER_ID,
+      counterpartyActorId: fixture.decision.actorId,
+      deliveryPossessionId: fixture.possessionId,
+      readScope: [
+        { kind: "commitment" as const, id: fixture.commitmentId },
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "actor" as const, id: fixture.decision.actorId },
+        { kind: "possession" as const, id: fixture.possessionId },
+        { kind: "location" as const, id: "location-b" },
+        { kind: "obligation" as const, id: fixture.obligationId },
+      ],
+      writeScope: [
+        { kind: "possession" as const, id: fixture.possessionId },
+        { kind: "obligation" as const, id: fixture.obligationId },
+        { kind: "commitment" as const, id: fixture.commitmentId },
+      ],
+      affectedRefs: [
+        { kind: "commitment" as const, id: fixture.commitmentId },
+        { kind: "actor" as const, id: PLAYER_ID },
+        { kind: "actor" as const, id: fixture.decision.actorId },
+        { kind: "possession" as const, id: fixture.possessionId },
+        { kind: "location" as const, id: "location-b" },
+        { kind: "obligation" as const, id: fixture.obligationId },
+      ],
+    };
+    const before = structuredClone(fixture.frame);
+    const result = preflightCampaignPlayRulebook({
+      frame: fixture.frame,
+      authority: fixture.authority,
+      batch: { batchId, baseWorldVersion: READY_VERSION, commands: [spend, incur, complete] },
+    });
+    expect(result).toMatchObject({ accepted: true });
+    if (!result.accepted) return;
+    expect(result.simulation.commitments).toEqual([expect.objectContaining({
+      commitmentId: fixture.commitmentId,
+      status: "completed",
+    })]);
+    expect(result.simulation.possessions).toEqual([expect.objectContaining({
+      possessionId: fixture.possessionId,
+      quantity: 0,
+    })]);
+    expect(result.simulation.obligations).toEqual([expect.objectContaining({
+      obligationId: fixture.obligationId,
+      debtorActorId: fixture.decision.actorId,
+      creditorActorId: PLAYER_ID,
+      outstandingAmount: fixture.paidDelivery.feeAmount,
+    })]);
+    expect(fixture.frame).toEqual(before);
   });
 
   it("rejects non-agent and spatially absent performers before any write", () => {

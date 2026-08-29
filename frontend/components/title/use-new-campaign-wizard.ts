@@ -92,6 +92,7 @@ export function useNewCampaignWizard(
   const [step, setStep] = useState<1 | 2>(initialSession?.step ?? 1);
   const [campaignName, setCampaignName] = useState(initialSession?.campaignName ?? "");
   const [campaignPremise, setCampaignPremise] = useState(initialSession?.campaignPremise ?? "");
+  const [playerIdentityName, setPlayerIdentityName] = useState(initialSession?.playerIdentityName ?? "");
   const [campaignFranchise, setCampaignFranchise] = useState(initialSession?.campaignFranchise ?? "");
   const [researchEnabled, setResearchEnabled] = useState(initialSession?.researchEnabled ?? true);
   const [dnaState, setDnaState] = useState<DnaState | null>(initialSession?.dnaState ?? null);
@@ -124,6 +125,7 @@ export function useNewCampaignWizard(
     setStep(1);
     setCampaignName("");
     setCampaignPremise("");
+    setPlayerIdentityName("");
     setCampaignFranchise("");
     setResearchEnabled(true);
     setDnaState(null);
@@ -167,6 +169,13 @@ export function useNewCampaignWizard(
       invalidatePreparedDna();
     }
     setCampaignFranchise(value);
+  }
+
+  function updatePlayerIdentity(value: string) {
+    if (value !== playerIdentityName) {
+      invalidatePreparedDna();
+    }
+    setPlayerIdentityName(value);
   }
 
   function updateResearchEnabled(value: boolean) {
@@ -271,6 +280,7 @@ export function useNewCampaignWizard(
         ipContext?: IpResearchContext | null;
         premiseDivergence?: PremiseDivergence | null;
         researchArtifact?: WorldgenResearchArtifactV2 | null;
+        playerIdentity?: { displayName: string };
         worldgenSourceHint?: string;
         worldgenResearchEnabled?: boolean;
         worldbookSelection?: WorldbookLibraryItem[];
@@ -289,6 +299,10 @@ export function useNewCampaignWizard(
       }
       if (researchArtifact) {
         payload.researchArtifact = researchArtifact;
+      }
+      const normalizedPlayerIdentity = playerIdentityName.trim();
+      if (normalizedPlayerIdentity) {
+        payload.playerIdentity = { displayName: normalizedPlayerIdentity };
       }
       const sourceHint = campaignFranchise.trim();
       if (sourceHint) {
@@ -494,6 +508,8 @@ export function useNewCampaignWizard(
     setCampaignName: updateCampaignName,
     campaignPremise,
     setCampaignPremise: updateCampaignPremise,
+    playerIdentityName,
+    setPlayerIdentityName: updatePlayerIdentity,
     campaignFranchise,
     setCampaignFranchise: updateCampaignFranchise,
     researchEnabled,

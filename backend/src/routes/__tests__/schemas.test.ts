@@ -280,6 +280,18 @@ describe("createCampaignSchema", () => {
         expect(result.data.seeds).toBeUndefined();
       }
     });
+
+    it("accepts and trims the optional player identity claim", () => {
+      const result = createCampaignSchema.safeParse({
+        name: "Identity Campaign",
+        premise: "A clear premise",
+        playerIdentity: { displayName: "  Brina Hael  " },
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.playerIdentity).toEqual({ displayName: "Brina Hael" });
+      }
+    });
   });
 
   describe("trims whitespace from name and premise", () => {
@@ -393,6 +405,15 @@ describe("createCampaignSchema", () => {
       const result = createCampaignSchema.safeParse({
         name: "",
         premise: "",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects an invalid player identity shape", () => {
+      const result = createCampaignSchema.safeParse({
+        name: "Campaign",
+        premise: "Premise",
+        playerIdentity: { displayName: "Brina Hael", actorId: "actor:brina" },
       });
       expect(result.success).toBe(false);
     });

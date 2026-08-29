@@ -73,10 +73,12 @@ const state = {
   visiblePressures: [],
   possessions: [],
   obligations: [],
+  commitments: [],
   narration: null,
   narrationOperation: null,
   utilityActions: [],
   consequences: [],
+  decisionOutcomes: [],
   activeTurn: null,
   journalCursor: 0,
   projectionHash: "a".repeat(64),
@@ -227,6 +229,24 @@ describe("Campaign Play API", () => {
       .rejects.toMatchObject({ code: "service_unavailable", invalidResponse: true });
   });
 
+  it("rejects closed decision outcome statuses", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+      ...readyState,
+      decisionOutcomes: [{
+        decisionKey: "decision_bridge_guard",
+        actorHandle: "actor_guard",
+        kind: "yes_no",
+        disposition: "accept",
+        status: "closed",
+        sourceTurnId: "turn_one",
+        summary: "The bridge guard asks for a toll.",
+      }],
+    })));
+
+    await expect(loadCampaignPlayState("campaign-one"))
+      .rejects.toMatchObject({ code: "service_unavailable", invalidResponse: true });
+  });
+
   it("rejects unrelated narration operation keys even when sourceKind is valid", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
       ...readyState,
@@ -318,6 +338,345 @@ describe("Campaign Play API", () => {
     })));
 
     await expect(loadCampaignPlayState("campaign-one")).resolves.toMatchObject({ obligations });
+  });
+
+  it("loads active and completed paid-delivery commitments from the public state", async () => {
+    const commitments = [{
+      handle: "commitment-active",
+      kind: "paid_delivery" as const,
+      status: "active" as const,
+      counterpartyHandle: "actor-orsa",
+      counterpartyName: "Orsa Pell",
+      title: "Carry the sealed dispatch",
+      subjectName: "Sealed dispatch",
+      destinationHandle: "location-north-cut",
+      destinationName: "North Cut",
+      feeUnit: "copper" as const,
+      feeAmount: 16,
+      paymentTiming: "on_completion" as const,
+      dueWorldTimeLabel: "Before dawn",
+    }, {
+      handle: "commitment-completed",
+      kind: "paid_delivery" as const,
+      status: "completed" as const,
+      counterpartyHandle: "actor-ilya",
+      counterpartyName: "Ilya Venn",
+      title: "Return the signal key",
+      subjectName: "Brass signal key",
+      destinationHandle: "location-signal-yard",
+      destinationName: "Signal Yard",
+      feeUnit: "copper" as const,
+      feeAmount: 8,
+      paymentTiming: "on_completion" as const,
+      dueWorldTimeLabel: null,
+    }];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+      ...readyState,
+      commitments,
+    })));
+
+    await expect(loadCampaignPlayState("campaign-one")).resolves.toMatchObject({ commitments });
+  });
+
+  it("loads unpaid delivery work without inventing payment terms", async () => {
+    const commitments = [{
+      handle: "commitment-unpaid-active",
+      kind: "unpaid_delivery" as const,
+      status: "active" as const,
+      counterpartyHandle: "actor-joss",
+      counterpartyName: "Joss Pebbler",
+      title: "Carry the evacuation roll",
+      subjectName: "Evacuation signature roll",
+      destinationHandle: "location-quayside",
+      destinationName: "Quayside Landing",
+      dueWorldTimeLabel: null,
+    }];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+      ...readyState,
+      commitments,
+    })));
+
+    await expect(loadCampaignPlayState("campaign-one")).resolves.toMatchObject({ commitments });
+  });
+
+  it("rejects payment terms on unpaid delivery work", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+      ...readyState,
+      commitments: [{
+        handle: "commitment-unpaid-active",
+        kind: "unpaid_delivery",
+        status: "active",
+        counterpartyHandle: "actor-joss",
+        counterpartyName: "Joss Pebbler",
+        title: "Carry the evacuation roll",
+        subjectName: "Evacuation signature roll",
+        destinationHandle: "location-quayside",
+        destinationName: "Quayside Landing",
+        dueWorldTimeLabel: null,
+        feeUnit: "copper",
+        feeAmount: 1,
+        paymentTiming: "on_completion",
+      }],
+    })));
+
+    await expect(loadCampaignPlayState("campaign-one"))
+      .rejects.toMatchObject({ code: "service_unavailable", invalidResponse: true });
+  });
+
+  it("fails closed when commitments are missing from the public state", async () => {
+    const { commitments: omittedCommitments, ...withoutCommitments } = readyState;
+    void omittedCommitments;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse(withoutCommitments)));
+
+    await expect(loadCampaignPlayState("campaign-one"))
+      .rejects.toMatchObject({ code: "service_unavailable", invalidResponse: true });
+  });
+
+  it("fails closed when commitments contain an extra field", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+      ...readyState,
+      commitments: [{
+        handle: "commitment-active",
+        kind: "paid_delivery",
+        status: "active",
+        counterpartyHandle: "actor-orsa",
+        counterpartyName: "Orsa Pell",
+        title: "Carry the sealed dispatch",
+        subjectName: "Sealed dispatch",
+        destinationHandle: "location-north-cut",
+        destinationName: "North Cut",
+        feeUnit: "copper",
+        feeAmount: 16,
+        paymentTiming: "on_completion",
+        dueWorldTimeLabel: "Before dawn",
+        internalId: "commitment-secret",
+      }],
+    })));
+
+    await expect(loadCampaignPlayState("campaign-one"))
+      .rejects.toMatchObject({ code: "service_unavailable", invalidResponse: true });
+  });
+
+  it("fails closed for invalid commitment terms and internal handles", async () => {
+    const invalidTerms = {
+      handle: "commitment-active",
+      kind: "paid_delivery",
+      status: "active",
+      counterpartyHandle: "actor-orsa",
+      counterpartyName: "Orsa Pell",
+      title: "Carry the sealed dispatch",
+      subjectName: "Sealed dispatch",
+      destinationHandle: "location-north-cut",
+      destinationName: "North Cut",
+      feeUnit: "copper",
+      feeAmount: 0,
+      paymentTiming: "on_completion",
+      dueWorldTimeLabel: "Before dawn",
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+      ...readyState,
+      commitments: [invalidTerms],
+    })));
+
+    await expect(loadCampaignPlayState("campaign-one"))
+      .rejects.toMatchObject({ code: "service_unavailable", invalidResponse: true });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+      ...readyState,
+      commitments: [{ ...invalidTerms, feeAmount: 16, handle: "commitment:secret" }],
+    })));
+
+    await expect(loadCampaignPlayState("campaign-one"))
+      .rejects.toMatchObject({ code: "service_unavailable", invalidResponse: true });
+  });
+
+  it("preserves exact commitment bindings on narration choices and admission requests", async () => {
+    const commitmentBinding = {
+      commitmentHandle: "commitment-active",
+      action: "collect" as const,
+      counterpartyHandle: "actor-orsa",
+      subjectName: "Sealed dispatch",
+      destinationHandle: "location-north-cut",
+    };
+    const suggestedAction = {
+      choiceHandle: "choice-collect-dispatch",
+      label: "Ask Orsa Pell for Sealed dispatch",
+      commitmentBinding,
+    };
+    const narration = {
+      ...readyNarration,
+      suggestedActions: [suggestedAction],
+    };
+    const narrationOperation = {
+      ...readyNarrationOperation,
+      conciseResult: {
+        displayText: narration.displayText,
+        suggestedActions: [suggestedAction],
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+      ...readyState,
+      commitments: [{
+        handle: "commitment-active",
+        kind: "paid_delivery",
+        status: "active",
+        counterpartyHandle: "actor-orsa",
+        counterpartyName: "Orsa Pell",
+        title: "Carry the sealed dispatch",
+        subjectName: "Sealed dispatch",
+        destinationHandle: "location-north-cut",
+        destinationName: "North Cut",
+        feeUnit: "copper",
+        feeAmount: 16,
+        paymentTiming: "on_completion",
+        dueWorldTimeLabel: "Before dawn",
+      }],
+      narration,
+      narrationOperation,
+    })));
+
+    await expect(loadCampaignPlayState("campaign-one")).resolves.toMatchObject({
+      narration: { suggestedActions: [suggestedAction] },
+      narrationOperation: { conciseResult: { suggestedActions: [suggestedAction] } },
+    });
+
+    const mixedBinding = {
+      ...suggestedAction,
+      decisionBinding: {
+        decisionKey: "decision-one",
+        actorHandle: "actor-orsa",
+        kind: "offer",
+        disposition: "accept",
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+      ...readyState,
+      narration: { ...readyNarration, suggestedActions: [mixedBinding] },
+      narrationOperation: {
+        ...readyNarrationOperation,
+        conciseResult: {
+          displayText: readyNarration.displayText,
+          suggestedActions: [mixedBinding],
+        },
+      },
+    })));
+    await expect(loadCampaignPlayState("campaign-one"))
+      .rejects.toMatchObject({ code: "service_unavailable", invalidResponse: true });
+  });
+
+  it("preserves an exact copper receivable binding on narration choices", async () => {
+    const obligationBinding = {
+      obligationHandle: "obligation-aldous",
+      debtorHandle: "actor-aldous",
+      creditorHandle: "actor-mara",
+      unitKey: "copper" as const,
+      amount: 12,
+    };
+    const suggestedAction = {
+      choiceHandle: "choice-collect-debt",
+      label: "Collect 12 copper from Aldous Crane",
+      obligationBinding,
+    };
+    const narration = {
+      ...readyNarration,
+      suggestedActions: [suggestedAction],
+    };
+    const narrationOperation = {
+      ...readyNarrationOperation,
+      conciseResult: {
+        displayText: narration.displayText,
+        suggestedActions: [suggestedAction],
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+      ...readyState,
+      narration,
+      narrationOperation,
+    })));
+
+    await expect(loadCampaignPlayState("campaign-one")).resolves.toMatchObject({
+      narration: { suggestedActions: [suggestedAction] },
+      narrationOperation: { conciseResult: { suggestedActions: [suggestedAction] } },
+    });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+      ...readyState,
+      narration: {
+        ...readyNarration,
+        suggestedActions: [{
+          ...suggestedAction,
+          obligationBinding: { ...obligationBinding, unitKey: "silver" },
+        }],
+      },
+      narrationOperation: {
+        ...readyNarrationOperation,
+        conciseResult: {
+          displayText: readyNarration.displayText,
+          suggestedActions: [{
+            ...suggestedAction,
+            obligationBinding: { ...obligationBinding, unitKey: "silver" },
+          }],
+        },
+      },
+    })));
+    await expect(loadCampaignPlayState("campaign-one"))
+      .rejects.toMatchObject({ code: "service_unavailable", invalidResponse: true });
+  });
+
+  it("forwards the exact commitment binding when admitting a suggested action", async () => {
+    const request = {
+      source: "suggested" as const,
+      idempotencyKey: "turn-commitment-collect",
+      choiceHandle: "choice-collect-dispatch",
+      commitmentBinding: {
+        commitmentHandle: "commitment-active",
+        action: "collect" as const,
+        counterpartyHandle: "actor-orsa",
+        subjectName: "Sealed dispatch",
+        destinationHandle: "location-north-cut",
+      },
+      expectedWorldVersion: 2,
+      expectedRuntimeRevision: 2,
+    };
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({ turnId: "turn-commitment-collect", sequence: 1 }, 202),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await admitCampaignPlayTurn("campaign-one", request);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3001/api/campaigns/campaign-one/play/turns",
+      expect.objectContaining({ body: JSON.stringify(request) }),
+    );
+  });
+
+  it("forwards the exact receivable binding when admitting a suggested action", async () => {
+    const request = {
+      source: "suggested" as const,
+      idempotencyKey: "turn-receivable-collect",
+      choiceHandle: "choice-collect-debt",
+      obligationBinding: {
+        obligationHandle: "obligation-aldous",
+        debtorHandle: "actor-aldous",
+        creditorHandle: "actor-mara",
+        unitKey: "copper" as const,
+        amount: 12,
+      },
+      expectedWorldVersion: 2,
+      expectedRuntimeRevision: 2,
+    };
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({ turnId: "turn-receivable-collect", sequence: 1 }, 202),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await admitCampaignPlayTurn("campaign-one", request);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3001/api/campaigns/campaign-one/play/turns",
+      expect.objectContaining({ body: JSON.stringify(request) }),
+    );
   });
 
   it("preserves the opaque utility wait action on a ready public state", async () => {
@@ -485,6 +844,127 @@ describe("Campaign Play API", () => {
       body: JSON.stringify(narrationRecoveryRequest),
     });
     expect(fetchMock).toHaveBeenNthCalledWith(11, `${base}/journal?cursor=0&limit=20`, { method: "GET" });
+  });
+
+  it("keeps ordinary journal entries unchanged", async () => {
+    const entry = {
+      observationHandle: "observation-ordinary",
+      title: "A sealed road",
+      text: "The eastern gate closed before dawn.",
+      whereOrRoute: "Eastern gate",
+      worldTimeLabel: "Before dawn",
+      consequence: null,
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+      ...versions,
+      campaignId: "campaign-one",
+      entries: [entry],
+      nextCursor: null,
+    })));
+
+    await expect(loadCampaignPlayJournal("campaign-one", { cursor: 0, limit: 20 }))
+      .resolves.toEqual({ ...versions, campaignId: "campaign-one", entries: [entry], nextCursor: null });
+  });
+
+  it("accepts a journal entry with a decision outcome", async () => {
+    const decisionOutcome = {
+      decisionKey: "decision-one",
+      actorName: "Mara Venn",
+      actorHandle: "actor-mara",
+      kind: "yes_no",
+      disposition: "accept",
+      summary: "The bridge guard asks for a toll.",
+      selectedLabel: "Pay the toll",
+    } as const;
+    const entry = {
+      observationHandle: "observation-decision-outcome",
+      title: "Decision accepted",
+      text: "You pay the bridge toll.",
+      whereOrRoute: "Eastern gate",
+      worldTimeLabel: "Morning",
+      consequence: null,
+      decisionOutcome,
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+      ...versions,
+      campaignId: "campaign-one",
+      entries: [entry],
+      nextCursor: null,
+    })));
+
+    await expect(loadCampaignPlayJournal("campaign-one", { cursor: 0, limit: 20 }))
+      .resolves.toMatchObject({ entries: [entry] });
+  });
+
+  it("accepts a journal entry with an opening decision", async () => {
+    const decision = {
+      decisionKey: "decision-one",
+      actorName: "Mara Venn",
+      actorHandle: "actor-mara",
+      kind: "yes_no",
+      summary: "The bridge guard asks for a toll.",
+      acceptLabel: "Pay the toll",
+      declineLabel: "Refuse the toll",
+      acceptEffect: null,
+    } as const;
+    const entry = {
+      observationHandle: "observation-opening-decision",
+      title: "A choice at hand",
+      text: "Mara puts a choice before you.",
+      whereOrRoute: "Eastern gate",
+      worldTimeLabel: "Morning",
+      consequence: null,
+      decision,
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+      ...versions,
+      campaignId: "campaign-one",
+      entries: [entry],
+      nextCursor: null,
+    })));
+
+    await expect(loadCampaignPlayJournal("campaign-one", { cursor: 0, limit: 20 }))
+      .resolves.toMatchObject({ entries: [entry] });
+  });
+
+  it.each([
+    ["decision", {
+      decisionKey: "decision-one",
+      actorName: "Mara Venn",
+      actorHandle: "actor-mara",
+      kind: "yes_no",
+      summary: "The bridge guard asks for a toll.",
+      acceptLabel: "",
+      declineLabel: "Refuse the toll",
+    }],
+    ["decisionOutcome", {
+      decisionKey: "decision-one",
+      actorName: "Mara Venn",
+      actorHandle: "actor-mara",
+      kind: "yes_no",
+      disposition: "accept",
+      summary: "The bridge guard asks for a toll.",
+      selectedLabel: "",
+    }],
+  ] as const)("rejects malformed optional journal %s fields", async (field, malformedValue) => {
+    const entry = {
+      observationHandle: `observation-malformed-${field}`,
+      title: "A malformed decision",
+      text: "This entry must not be accepted.",
+      whereOrRoute: "Eastern gate",
+      worldTimeLabel: "Morning",
+      consequence: null,
+      [field]: malformedValue,
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+      ...versions,
+      campaignId: "campaign-one",
+      entries: [entry],
+      nextCursor: null,
+    })));
+
+    await expect(loadCampaignPlayJournal("campaign-one", { cursor: 0, limit: 20 }))
+      .rejects.toMatchObject({ code: "service_unavailable", invalidResponse: true });
   });
 
   it("marks authority reads no-store and forwards their caller signal", async () => {

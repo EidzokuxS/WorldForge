@@ -26,6 +26,23 @@ import type {
 
 const log = createLogger("ingestion-synthesizer");
 
+const personalitySampleLinesSchema = z
+  .array(z.string().max(300))
+  .max(3)
+  .superRefine((lines, ctx) => {
+    lines.forEach((line, index) => {
+      const firstNonWhitespace = line.trimStart().charAt(0);
+      if (firstNonWhitespace === "[" || firstNonWhitespace === "{") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [index],
+          message: "one spoken line is required, not encoded array/object data",
+        });
+      }
+    });
+  })
+  .default([]);
+
 const looseRichCharacterSchema = richCharacterSchema.extend({
   race: z.string().default(""),
   gender: z.string().default(""),
@@ -43,7 +60,7 @@ const looseRichCharacterSchema = richCharacterSchema.extend({
   personalityWorldview: z.string().default(""),
   personalityContradictions: z.union([z.array(z.unknown()), z.string(), z.null()]).default([]),
   personalityMythology: z.string().default(""),
-  personalitySampleLines: z.union([z.array(z.unknown()), z.string(), z.null()]).default([]),
+  personalitySampleLines: personalitySampleLinesSchema,
   tags: z.union([z.array(z.unknown()), z.string(), z.null()]).default([]),
   hp: z.union([z.number(), z.string(), z.null()]).default(5),
   equippedItems: z.union([z.array(z.unknown()), z.string(), z.null()]).default([]),
@@ -221,10 +238,7 @@ function normalizeLooseRichOutput(
       maxItemLength: 300,
     }),
     personalityMythology: truncateText(raw.personalityMythology, 400),
-    personalitySampleLines: normalizeStringList(raw.personalitySampleLines, {
-      maxItems: 3,
-      maxItemLength: 300,
-    }),
+    personalitySampleLines: raw.personalitySampleLines,
     tags: normalizeTags(raw.tags, opts.fallbackTags),
     hp: 5,
     equippedItems: normalizeStringList(raw.equippedItems, {

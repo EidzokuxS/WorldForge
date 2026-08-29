@@ -537,6 +537,7 @@ describe("mechanical and runtime truth", () => {
         { handle: "possession-a", name: "Brass key", quantity: 1 },
       ],
       obligations: [],
+      commitments: [],
       consequences: [],
       journal: [],
       narration: null,
@@ -545,6 +546,100 @@ describe("mechanical and runtime truth", () => {
     expect(new Set([runtime.hash, audit.hash, publicState.hash]).size).toBe(3);
     expect(runtime.canonicalBytes).toContain(eligibility.hash);
     expect(runtime.hash).toBe(hashCampaignPlayProjection(runtime.projection));
+  });
+
+  it("preserves public commitment terms and decision effects in the canonical hash", () => {
+    const paidDeliveryEffect = {
+      kind: "paid_delivery" as const,
+      title: "Night ferry job",
+      subjectName: "sealed tide chart",
+      destinationHandle: "location_public_destination",
+      feeUnit: "copper" as const,
+      feeAmount: 24,
+      paymentTiming: "on_completion" as const,
+      dueInMinutes: 45,
+    };
+    const commitment = {
+      handle: "commitment_public",
+      kind: "paid_delivery" as const,
+      status: "active" as const,
+      counterpartyHandle: "actor_public_counterparty",
+      counterpartyName: "Mara",
+      title: "Night ferry job",
+      subjectName: "sealed tide chart",
+      destinationHandle: "location_public_destination",
+      destinationName: "Harbor Office",
+      feeUnit: "copper" as const,
+      feeAmount: 24,
+      paymentTiming: "on_completion" as const,
+      dueWorldTimeLabel: "Day 1, 00:45",
+    };
+    const outcome = {
+      decisionKey: "decision_public",
+      actorHandle: "actor_public_counterparty",
+      kind: "offer" as const,
+      disposition: "accept" as const,
+      status: "accepted" as const,
+      sourceTurnId: "turn_public",
+      summary: "The ferry assignment is accepted.",
+      acceptEffect: paidDeliveryEffect,
+    };
+    const input = {
+      campaignId: CAMPAIGN_ID,
+      acceptedWorldVersion: 7,
+      worldVersion: 8,
+      runtimeRevision: 3,
+      phase: "ready",
+      worldTimeMinutes: 0,
+      currentLocation: null,
+      visibleActors: [],
+      visibleRoutes: [],
+      visiblePressures: [],
+      possessions: [],
+      obligations: [],
+      commitments: [{
+        ...commitment,
+        commitmentId: "commitment-internal-id",
+        counterpartyActorId: "actor-internal-id",
+      }],
+      consequences: [],
+      journal: [],
+      narration: null,
+      decisionOutcomes: [{
+        ...outcome,
+        decisionId: "decision-internal-id",
+      }],
+    };
+
+    const projected = projectCampaignPlayPublicState(input);
+    const sameInput = projectCampaignPlayPublicState(input);
+    const completed = projectCampaignPlayPublicState({
+      ...input,
+      commitments: [{ ...input.commitments[0]!, status: "completed" as const }],
+    });
+    const differentTerms = projectCampaignPlayPublicState({
+      ...input,
+      commitments: [{ ...input.commitments[0]!, feeAmount: 25 }],
+    });
+    const noEffect = projectCampaignPlayPublicState({
+      ...input,
+      decisionOutcomes: [{ ...input.decisionOutcomes[0]!, acceptEffect: null }],
+    });
+    const publicProjection = projected.projection as {
+      commitments: Array<Record<string, unknown>>;
+      decisionOutcomes: Array<Record<string, unknown>>;
+    };
+
+    expect(sameInput.canonicalBytes).toBe(projected.canonicalBytes);
+    expect(sameInput.hash).toBe(projected.hash);
+    expect(completed.hash).not.toBe(projected.hash);
+    expect(differentTerms.hash).not.toBe(projected.hash);
+    expect(noEffect.hash).not.toBe(projected.hash);
+    expect(publicProjection.commitments).toEqual([commitment]);
+    expect(publicProjection.decisionOutcomes).toEqual([outcome]);
+    expect(projected.canonicalBytes).not.toContain("commitment-internal-id");
+    expect(projected.canonicalBytes).not.toContain("actor-internal-id");
+    expect(projected.canonicalBytes).not.toContain("decision-internal-id");
   });
 
   it("sorts normalized collections for byte stability across reload order", () => {
@@ -713,6 +808,7 @@ describe("mechanical and runtime truth", () => {
         { handle: "obligation-z", direction: "receivable", counterpartyHandle: "actor-z", counterpartyName: "Zora", unitKey: "copper", outstandingAmount: 16 },
         { handle: "obligation-a", direction: "payable", counterpartyHandle: "actor-a", counterpartyName: "Arden", unitKey: "copper", outstandingAmount: 8 },
       ],
+      commitments: [],
       consequences: [],
       journal,
       narration: null,
@@ -736,6 +832,7 @@ describe("mechanical and runtime truth", () => {
         { handle: "obligation-a", direction: "payable", counterpartyHandle: "actor-a", counterpartyName: "Arden", unitKey: "copper", outstandingAmount: 8 },
         { handle: "obligation-z", direction: "receivable", counterpartyHandle: "actor-z", counterpartyName: "Zora", unitKey: "copper", outstandingAmount: 16 },
       ],
+      commitments: [],
       consequences: [],
       journal: [...journal].reverse(),
       narration: null,
@@ -806,6 +903,7 @@ describe("mechanical and runtime truth", () => {
       visiblePressures: [],
       possessions: [],
       obligations: [],
+      commitments: [],
       consequences,
       journal: [],
       narration: null,
@@ -926,6 +1024,7 @@ describe("mechanical and runtime truth", () => {
       visiblePressures: [],
       possessions: [],
       obligations: [],
+      commitments: [],
       consequences: [],
       journal: [{ observationId: "stored-observation", worldTimeMinutes: 1, entry }],
       narration: null,
@@ -952,6 +1051,7 @@ describe("mechanical and runtime truth", () => {
       visiblePressures: [],
       possessions: [],
       obligations: [],
+      commitments: [],
       consequences: [],
       journal: [],
       narration: {

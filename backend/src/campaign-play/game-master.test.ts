@@ -2,7 +2,7 @@ import type { LanguageModel } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import type { CampaignWorldReview } from "@worldforge/shared";
+import { CAMPAIGN_PLAY_LIMITS, type CampaignWorldReview } from "@worldforge/shared";
 import {
   buildStructuredOutputModelMetadata,
   rememberStructuredOutputModelMetadata,
@@ -22,8 +22,13 @@ import {
   deriveCampaignPlayObligationId,
   deriveCampaignPlayPossessionId,
   deriveCampaignPlayPossessionKey,
+  deriveCampaignPlayPublicHandle,
   deriveCampaignPlaySupportActorIds,
 } from "./campaign-play-projection.js";
+import {
+  deriveCampaignPlayCommitmentId,
+  deriveCampaignPlayDecisionKey,
+} from "./rulebook.js";
 
 const gameMasterWarn = vi.hoisted(() => vi.fn());
 const gameMasterEvent = vi.hoisted(() => vi.fn());
@@ -132,6 +137,7 @@ function frame(): CampaignPlayGameMasterFrame {
       actorConditions: [],
       possessions: [],
       obligations: [],
+      commitments: [],
       pressureStates: [{ pressureId: "pressure-passage", progress: 40, status: "active", lastAdvancedWorldTimeMinutes: 0 }],
       placements: [
         { placementId: "placement-player", actorId: PLAYER_ID, locationId: "location-a", placementKind: "present" },
@@ -157,6 +163,243 @@ function frame(): CampaignPlayGameMasterFrame {
       knownWorldEventIds: [],
     },
   };
+}
+
+function paidDeliveryFrame(action: "collect" | "deliver"): CampaignPlayGameMasterFrame {
+  const value = frame();
+  const commitmentId = "commitment-paid";
+  const commitmentHandle = "commitment";
+  const subjectName = "Sealed parcel";
+  const destinationHandle = deriveCampaignPlayPublicHandle(
+    "location",
+    CAMPAIGN_ID,
+    "location-b",
+  );
+  const possessionKey = deriveCampaignPlayPossessionKey(subjectName);
+  const possessionId = deriveCampaignPlayPossessionId(CAMPAIGN_ID, PLAYER_ID, possessionKey);
+  const commitmentRef = { kind: "commitment" as const, id: commitmentId };
+  value.visibleFacts.push({
+    handle: commitmentHandle,
+    kind: "commitment",
+    summary: "A paid delivery for a sealed parcel.",
+  });
+  value.handleBindings.push({ handle: commitmentHandle, reference: commitmentRef });
+  value.authority.authorizedRefs.push(commitmentRef);
+  value.authority.authorizedRefs.push({
+    kind: "obligation",
+    id: deriveCampaignPlayObligationId(
+      CAMPAIGN_ID,
+      "actor-guard",
+      PLAYER_ID,
+      "copper",
+    ),
+  });
+  value.rulebookFrame.commitments.push({
+    commitmentId,
+    campaignId: CAMPAIGN_ID,
+    performerActorId: PLAYER_ID,
+    counterpartyActorId: "actor-guard",
+    kind: "paid_delivery",
+    status: "active",
+    title: "Carry the sealed parcel",
+    subjectName,
+    destinationHandle,
+    feeUnit: "copper",
+    feeAmount: 8,
+    paymentTiming: "on_completion",
+    acceptedWorldTimeMinutes: 10,
+    dueWorldTimeMinutes: 20,
+    sourceDecisionKey: "decision-paid",
+    sourceTurnId: "turn-opening",
+    sourceReceiptId: "receipt-opening",
+    completionTurnId: null,
+    completionReceiptId: null,
+    worldVersion: 7,
+    createdAt: 1,
+    updatedAt: 1,
+  });
+  value.rulebookFrame.pendingDecisions = [{
+    decisionKey: "decision-paid",
+    actorId: "actor-guard",
+    actorHandle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-guard"),
+    kind: "offer",
+    status: "accepted",
+    sourceTurnId: "turn-opening",
+    summary: "Oren offers a sealed parcel delivery.",
+    acceptLabel: "Take the delivery",
+    declineLabel: "Decline the delivery",
+    acceptEffect: {
+      kind: "paid_delivery",
+      title: "Carry the sealed parcel",
+      subjectName,
+      destinationHandle,
+      feeUnit: "copper",
+      feeAmount: 8,
+      paymentTiming: "on_completion",
+      dueInMinutes: 10,
+    },
+    resolutionEventId: "event-decision-paid",
+    resolutionTurnId: "turn-opening",
+    resolutionDisposition: "accept",
+    worldVersion: 7,
+  }];
+  if (action === "deliver") {
+    const possessionRef = { kind: "possession" as const, id: possessionId };
+    value.visibleFacts.push({ handle: "parcel", kind: "possession", summary: subjectName });
+    value.handleBindings.push({ handle: "parcel", reference: possessionRef });
+    value.authority.authorizedRefs.push(possessionRef);
+    value.rulebookFrame.possessions.push({
+      possessionId,
+      actorId: PLAYER_ID,
+      possessionKey,
+      name: subjectName,
+      quantity: 1,
+    });
+    const playerPlacement = value.rulebookFrame.placements.find((placement) =>
+      placement.actorId === PLAYER_ID && placement.placementKind === "present");
+    if (playerPlacement !== undefined) playerPlacement.locationId = "location-b";
+  }
+  value.commitmentAuthority = {
+    binding: {
+      commitmentHandle,
+      action,
+      counterpartyHandle: "guard",
+      subjectName,
+      destinationHandle: "south",
+    },
+    commitmentId,
+    action,
+    commitmentKind: "paid_delivery",
+    performerActorId: PLAYER_ID,
+    counterpartyActorId: "actor-guard",
+    counterpartyHandle: "guard",
+    subjectName,
+    destinationHandle: "south",
+    feeAmount: 8,
+    possessionId: action === "deliver" ? possessionId : null,
+    possessionHandle: action === "deliver" ? "parcel" : null,
+  };
+  return value;
+}
+
+function completedPaidDeliveryContactFrame(): CampaignPlayGameMasterFrame {
+  const value = frame();
+  const commitmentId = "commitment-paid-completed";
+  const commitmentHandle = "completed-commitment";
+  const obligationId = deriveCampaignPlayObligationId(
+    CAMPAIGN_ID,
+    "actor-guard",
+    PLAYER_ID,
+    "copper",
+  );
+  const destinationHandle = deriveCampaignPlayPublicHandle(
+    "location",
+    CAMPAIGN_ID,
+    "location-b",
+  );
+  value.visibleFacts.push(
+    { handle: commitmentHandle, kind: "commitment", summary: "A completed paid delivery for a sealed parcel." },
+    { handle: "guard-receivable", kind: "obligation", summary: "Oren Tide owes you eight copper." },
+  );
+  value.handleBindings.push(
+    { handle: commitmentHandle, reference: { kind: "commitment", id: commitmentId } },
+    { handle: "guard-receivable", reference: { kind: "obligation", id: obligationId } },
+  );
+  value.authority.authorizedRefs.push(
+    { kind: "commitment", id: commitmentId },
+    { kind: "obligation", id: obligationId },
+  );
+  value.rulebookFrame.pendingDecisions = [{
+    decisionKey: "decision-paid",
+    actorId: "actor-guard",
+    actorHandle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-guard"),
+    kind: "offer",
+    status: "accepted",
+    sourceTurnId: "turn-opening",
+    summary: "Oren offers a sealed parcel delivery.",
+    acceptLabel: "Take the delivery",
+    declineLabel: "Decline the delivery",
+    acceptEffect: {
+      kind: "paid_delivery",
+      title: "Carry the sealed parcel",
+      subjectName: "Sealed parcel",
+      destinationHandle,
+      feeUnit: "copper",
+      feeAmount: 8,
+      paymentTiming: "on_completion",
+      dueInMinutes: 10,
+    },
+    resolutionEventId: "event-decision-paid",
+    resolutionTurnId: "turn-opening",
+    resolutionDisposition: "accept",
+    worldVersion: 7,
+  }];
+  value.rulebookFrame.commitments.push({
+    commitmentId,
+    campaignId: CAMPAIGN_ID,
+    performerActorId: PLAYER_ID,
+    counterpartyActorId: "actor-guard",
+    kind: "paid_delivery",
+    status: "completed",
+    title: "Carry the sealed parcel",
+    subjectName: "Sealed parcel",
+    destinationHandle,
+    feeUnit: "copper",
+    feeAmount: 8,
+    paymentTiming: "on_completion",
+    acceptedWorldTimeMinutes: 10,
+    dueWorldTimeMinutes: 20,
+    sourceDecisionKey: "decision-paid",
+    sourceTurnId: "turn-opening",
+    sourceReceiptId: "receipt-opening",
+    completionTurnId: "turn-delivery",
+    completionReceiptId: "receipt-delivery",
+    worldVersion: 7,
+    createdAt: 1,
+    updatedAt: 2,
+  });
+  value.rulebookFrame.obligations.push({
+    obligationId,
+    debtorActorId: "actor-guard",
+    creditorActorId: PLAYER_ID,
+    unitKey: "copper",
+    principalAmount: 8,
+    outstandingAmount: 8,
+  });
+  return value;
+}
+
+function unpaidDeliveryFrame(action: "collect" | "deliver"): CampaignPlayGameMasterFrame {
+  const value = paidDeliveryFrame(action);
+  const paidCommitment = value.rulebookFrame.commitments[0]!;
+  if (paidCommitment.kind !== "paid_delivery") {
+    throw new Error("Expected the paid-delivery fixture.");
+  }
+  const { feeUnit: _feeUnit, feeAmount: _feeAmount,
+    paymentTiming: _paymentTiming, ...commonCommitment } = paidCommitment;
+  value.rulebookFrame.commitments[0] = {
+    ...commonCommitment,
+    kind: "unpaid_delivery",
+  };
+  const decision = value.rulebookFrame.pendingDecisions?.[0];
+  if (decision === undefined || decision.acceptEffect?.kind !== "paid_delivery") {
+    throw new Error("Expected the paid-delivery decision fixture.");
+  }
+  const { feeUnit: _effectFeeUnit, feeAmount: _effectFeeAmount,
+    paymentTiming: _effectPaymentTiming, ...commonEffect } = decision.acceptEffect;
+  decision.acceptEffect = { ...commonEffect, kind: "unpaid_delivery" };
+  value.authority.authorizedRefs = value.authority.authorizedRefs.filter((reference) =>
+    reference.kind !== "obligation");
+  const paidAuthority = value.commitmentAuthority;
+  if (paidAuthority?.commitmentKind !== "paid_delivery") {
+    throw new Error("Expected paid-delivery authority.");
+  }
+  const { feeAmount: _authorityFeeAmount, ...commonAuthority } = paidAuthority;
+  value.commitmentAuthority = {
+    ...commonAuthority,
+    commitmentKind: "unpaid_delivery",
+  };
+  return value;
 }
 
 function scopeOverflowFrame(): CampaignPlayGameMasterFrame {
@@ -237,6 +480,37 @@ function ruling(overrides: Partial<CampaignPlayJudgeRuling> = {}): CampaignPlayJ
   };
 }
 
+function genericActorContactRuling(
+  method = "Ask calmly about the ledger",
+  stakes = "Learn what the guard will rely on next",
+): CampaignPlayJudgeRuling {
+  const base = ruling();
+  return {
+    ...base,
+    normalizedIntent: {
+      ...base.normalizedIntent,
+      method,
+      stakes,
+    },
+  };
+}
+
+function certifiedContactRuling(): CampaignPlayJudgeRuling {
+  return ruling({
+    normalizedIntent: {
+      originalText: "Ask the guard what happened here.",
+      source: "suggested",
+      choiceHandle: "ask-guard",
+      kind: "contact",
+      targets: [{ handle: "guard", kind: "actor" }],
+      method: "Ask the guard what happened here",
+      stakes: null,
+    },
+    citedVisibleFactHandles: [],
+    elapsedBounds: { minimumMinutes: 1, maximumMinutes: 1 },
+  });
+}
+
 const resolution: CampaignPlayUncertaintyResolution = { kind: "deterministic", result: "success" };
 const proposal = {
   elapsedMinutes: 1,
@@ -247,6 +521,66 @@ const proposal = {
     summary: "The player asks the guard about the passage.",
     affectedHandles: ["you", "guard"],
   }],
+};
+
+type ContactDecisionFixture = {
+  kind: "none" | "offer" | "paid_delivery" | "unpaid_delivery";
+  contactDetail: string;
+  summary: string | null;
+  acceptLabel: string | null;
+  declineLabel: string | null;
+  acceptEffect: Record<string, unknown> | null;
+};
+
+function contactDecisionNone(contactDetail: string): ContactDecisionFixture {
+  return {
+    kind: "none",
+    contactDetail,
+    summary: null,
+    acceptLabel: null,
+    declineLabel: null,
+    acceptEffect: null,
+  };
+}
+
+function contactProposal<T extends Record<string, unknown>>(
+  base: T,
+  contactDetail: string,
+): T & { decisionProposal: ContactDecisionFixture } {
+  return { ...base, decisionProposal: contactDecisionNone(contactDetail) };
+}
+
+function contactProposalForRuling<T extends Record<string, unknown>>(
+  base: T,
+  candidate: CampaignPlayJudgeRuling,
+): T | (T & { decisionProposal: ContactDecisionFixture }) {
+  const actorTargets = candidate.normalizedIntent.targets.filter((target) => target.kind === "actor");
+  const method = candidate.normalizedIntent.method;
+  return candidate.normalizedIntent.kind === "contact"
+    && actorTargets.length === 1
+    && method !== null
+    ? contactProposal(base, method)
+    : base;
+}
+
+function contactToolTransportForRuling(
+  base: Record<string, unknown>,
+  candidate: CampaignPlayJudgeRuling,
+): Record<string, unknown> {
+  const withDecision = contactProposalForRuling(base, candidate);
+  return withDecision;
+}
+
+const certifiedContactProposal = {
+  ...proposal,
+  decisionProposal: {
+    kind: "none" as const,
+    contactDetail: "Ask the guard what happened here",
+    summary: null,
+    acceptLabel: null,
+    declineLabel: null,
+    acceptEffect: null,
+  },
 };
 
 const guardResponseEffect = {
@@ -651,7 +985,8 @@ describe("Campaign Play Game Master obligations", () => {
   });
 
   it("presents a receivable collection request to the model with acquisition authority removed", async () => {
-    const contactOnlyProposal = {
+    const contactRuling = receivableCollectionRuling();
+    const contactOnlyProposal = contactProposalForRuling({
       elapsedMinutes: 1,
       effects: [{
         kind: "record_world_event" as const,
@@ -660,7 +995,7 @@ describe("Campaign Play Game Master obligations", () => {
         summary: "Oren acknowledges the request but does not transfer any copper yet.",
         affectedHandles: ["you", "guard", "guard-receivable"],
       }],
-    };
+    }, contactRuling);
     const generateObject = vi.fn()
       .mockResolvedValueOnce({ object: contactOnlyProposal, trace: trace() })
       .mockResolvedValueOnce({
@@ -671,7 +1006,7 @@ describe("Campaign Play Game Master obligations", () => {
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).plan({
       frame: receivableCollectionFrame(),
-      ruling: receivableCollectionRuling(),
+      ruling: contactRuling,
       resolution,
       uncertaintyAuthority: null,
       model: model(),
@@ -707,6 +1042,296 @@ describe("Campaign Play Game Master obligations", () => {
   });
 });
 
+describe("Campaign Play Game Master paid-delivery authority", () => {
+  it("collects the code-owned subject on success and leaves refusal cargo-free", () => {
+    const gameMaster = createCampaignPlayGameMaster();
+    const collectFrame = paidDeliveryFrame("collect");
+    const collectRuling = ruling({
+      possessionEffectAuthority: {
+        kind: "adjust_actor_possession",
+        enforcement: "permitted",
+        operation: "acquire",
+        possessionHandle: null,
+        quantity: 1,
+        minimumResult: "success",
+      },
+    });
+    const success = gameMaster.compile(
+      collectFrame,
+      collectRuling,
+      resolution,
+      null,
+      {
+        elapsedMinutes: 1,
+        effects: [{
+          kind: "adjust_actor_possession",
+          operation: "acquire",
+          actorHandle: "you",
+          possessionHandle: null,
+          name: "Sealed parcel",
+          quantity: 1,
+          summary: "The guard hands over the parcel.",
+          affectedHandles: ["you", "guard"],
+        }, guardResponseEffect],
+      },
+    );
+    expect(success.batch.commands).toContainEqual(expect.objectContaining({
+      kind: "adjust_actor_possession",
+      actorId: PLAYER_ID,
+      name: "Sealed parcel",
+      quantityDelta: 1,
+    }));
+    expect(success.batch.commands.some((command) =>
+      command.kind === "incur_actor_obligation" || command.kind === "complete_player_commitment",
+    )).toBe(false);
+    expect(() => gameMaster.compile(
+      collectFrame,
+      collectRuling,
+      resolution,
+      null,
+      {
+        elapsedMinutes: 1,
+        effects: [{
+          kind: "adjust_actor_possession",
+          operation: "acquire",
+          actorHandle: "you",
+          possessionHandle: null,
+          name: "Model-renamed parcel",
+          quantity: 1,
+          summary: "The guard hands over something.",
+          affectedHandles: ["you", "guard"],
+        }, guardResponseEffect],
+      },
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+
+    const refusal = gameMaster.compile(
+      collectFrame,
+      ruling({
+        possessionEffectAuthority: { kind: "none" },
+        resultBounds: { minimum: "setback", maximum: "limited" },
+      }),
+      { kind: "deterministic", result: "limited" },
+      null,
+      { elapsedMinutes: 1, effects: [guardResponseEffect] },
+    );
+    expect(refusal.batch.commands.some((command) => command.kind === "adjust_actor_possession")).toBe(false);
+    expect(refusal.batch.commands.some((command) => command.kind === "complete_player_commitment")).toBe(false);
+  });
+
+  it("settles delivery at the bound destination and rejects an unbound remote debt", () => {
+    const gameMaster = createCampaignPlayGameMaster();
+    const deliveryFrame = paidDeliveryFrame("deliver");
+    const deliveryRuling = ruling({
+      normalizedIntent: {
+        originalText: "Deliver the sealed parcel at the south market.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "attempt",
+        targets: [{ handle: "south", kind: "location" }],
+        method: "Deliver the parcel",
+        stakes: "Complete the paid delivery",
+      },
+      possessionEffectAuthority: {
+        kind: "adjust_actor_possession",
+        enforcement: "required",
+        operation: "spend",
+        possessionHandle: "parcel",
+        quantity: 1,
+        minimumResult: "success",
+      },
+      requiredObligationEffect: {
+        kind: "incur_actor_obligation",
+        debtorHandle: "guard",
+        creditorHandle: "you",
+        unitKey: "copper",
+        amount: 8,
+        minimumResult: "success",
+      },
+      citedVisibleFactHandles: ["south", "parcel", "guard", "you"],
+    });
+    const success = gameMaster.compile(
+      deliveryFrame,
+      deliveryRuling,
+      resolution,
+      null,
+      {
+        elapsedMinutes: 1,
+        effects: [
+          {
+            kind: "adjust_actor_possession",
+            operation: "spend",
+            actorHandle: "you",
+            possessionHandle: "parcel",
+            name: null,
+            quantity: 1,
+            summary: "The sealed parcel is delivered.",
+            affectedHandles: ["you", "parcel", "south"],
+          },
+          {
+            kind: "incur_actor_obligation",
+            debtorActorHandle: "guard",
+            creditorActorHandle: "you",
+            unitKey: "copper",
+            amount: 8,
+            summary: "The guard owes the agreed delivery fee.",
+            affectedHandles: ["guard", "you"],
+          },
+        ],
+      },
+    );
+    expect(success.batch.commands.map((command) => command.kind)).toEqual([
+      "adjust_actor_possession",
+      "incur_actor_obligation",
+      "complete_player_commitment",
+    ]);
+    expect(success.batch.commands.at(-1)).toMatchObject({
+      kind: "complete_player_commitment",
+      commitmentId: "commitment-paid",
+      performerActorId: PLAYER_ID,
+      counterpartyActorId: "actor-guard",
+      deliveryPossessionId: deriveCampaignPlayPossessionId(
+        CAMPAIGN_ID,
+        PLAYER_ID,
+        deriveCampaignPlayPossessionKey("Sealed parcel"),
+      ),
+    });
+    expect(() => gameMaster.compile(
+      deliveryFrame,
+      deliveryRuling,
+      resolution,
+      null,
+      {
+        elapsedMinutes: 1,
+        effects: [
+          {
+            kind: "adjust_actor_possession",
+            operation: "spend",
+            actorHandle: "you",
+            possessionHandle: "parcel",
+            name: null,
+            quantity: 1,
+            summary: "The sealed parcel is delivered.",
+            affectedHandles: ["you", "parcel", "south"],
+          },
+          {
+            kind: "incur_actor_obligation",
+            debtorActorHandle: "guard",
+            creditorActorHandle: "you",
+            unitKey: "copper",
+            amount: 9,
+            summary: "The guard owes an altered fee.",
+            affectedHandles: ["guard", "you"],
+          },
+        ],
+      },
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+
+    const ordinaryDebt = ruling({
+      normalizedIntent: {
+        originalText: "I wait for a remote fee.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "attempt",
+        targets: [{ handle: "south", kind: "location" }],
+        method: "Wait for the fee",
+        stakes: "Receive a remote fee",
+      },
+      requiredObligationEffect: {
+        kind: "incur_actor_obligation",
+        debtorHandle: "guard",
+        creditorHandle: "you",
+        unitKey: "copper",
+        amount: 8,
+        minimumResult: "success",
+      },
+    });
+    expect(() => gameMaster.compile(
+      frame(),
+      ordinaryDebt,
+      resolution,
+      null,
+      {
+        elapsedMinutes: 1,
+        effects: [{
+          kind: "incur_actor_obligation",
+          debtorActorHandle: "guard",
+          creditorActorHandle: "you",
+          unitKey: "copper",
+          amount: 8,
+          summary: "A remote fee is owed.",
+          affectedHandles: ["guard", "you"],
+        }, guardResponseEffect],
+      },
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+  });
+
+  it("settles unpaid delivery without manufacturing payment authority", () => {
+    const gameMaster = createCampaignPlayGameMaster();
+    const deliveryFrame = unpaidDeliveryFrame("deliver");
+    const deliveryRuling = ruling({
+      normalizedIntent: {
+        originalText: "Deliver the sealed parcel at the south market.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "attempt",
+        targets: [{ handle: "south", kind: "location" }],
+        method: "Deliver the parcel",
+        stakes: "Complete the unpaid delivery",
+      },
+      possessionEffectAuthority: {
+        kind: "adjust_actor_possession",
+        enforcement: "required",
+        operation: "spend",
+        possessionHandle: "parcel",
+        quantity: 1,
+        minimumResult: "success",
+      },
+      requiredObligationEffect: { kind: "none" },
+      citedVisibleFactHandles: ["south", "parcel", "guard", "you"],
+    });
+    const success = gameMaster.compile(
+      deliveryFrame,
+      deliveryRuling,
+      resolution,
+      null,
+      {
+        elapsedMinutes: 1,
+        effects: [{
+          kind: "adjust_actor_possession",
+          operation: "spend",
+          actorHandle: "you",
+          possessionHandle: "parcel",
+          name: null,
+          quantity: 1,
+          summary: "The sealed parcel is delivered.",
+          affectedHandles: ["you", "parcel", "south"],
+        }],
+      },
+    );
+    expect(success.batch.commands.map((command) => command.kind)).toEqual([
+      "adjust_actor_possession",
+      "complete_player_commitment",
+    ]);
+    expect(success.batch.commands.at(-1)).toMatchObject({
+      kind: "complete_player_commitment",
+      affectedRefs: [
+        { kind: "commitment", id: "commitment-paid" },
+        { kind: "actor", id: PLAYER_ID },
+        { kind: "actor", id: "actor-guard" },
+        { kind: "possession", id: expect.any(String) },
+        { kind: "location", id: "location-b" },
+      ],
+      writeScope: [
+        { kind: "possession", id: expect.any(String) },
+        { kind: "commitment", id: "commitment-paid" },
+      ],
+    });
+    expect(success.batch.commands.some((command) =>
+      command.kind === "incur_actor_obligation" || command.kind === "pay_actor_obligation",
+    )).toBe(false);
+  });
+});
+
 describe("Campaign Play Game Master obligation authority prompt", () => {
   const obligationRecoveryFeedback = {
     diagnostic: "game_master_semantic_validation_mismatch" as const,
@@ -737,8 +1362,10 @@ describe("Campaign Play Game Master obligation authority prompt", () => {
         affectedHandles: ["you", "guard"],
       }, guardResponseEffect],
     };
+    const obligationRuling = ruling({ requiredObligationEffect });
+    const contactObligationProposal = contactProposalForRuling(obligationProposal, obligationRuling);
     const initialGenerateObject = vi.fn()
-      .mockResolvedValueOnce({ object: obligationProposal, trace: trace() })
+      .mockResolvedValueOnce({ object: contactObligationProposal, trace: trace() })
       .mockResolvedValueOnce({
         object: { verdict: "accepted", reason: "The debt is the typed Judge transition." },
         trace: trace(),
@@ -746,12 +1373,12 @@ describe("Campaign Play Game Master obligation authority prompt", () => {
     await createCampaignPlayGameMaster({
       generateObject: initialGenerateObject as unknown as typeof safeGenerateObject,
     }).plan({
-      frame: frame(), ruling: ruling({ requiredObligationEffect }), resolution,
+      frame: frame(), ruling: obligationRuling, resolution,
       uncertaintyAuthority: null, model: model(), temperature: 0.2, budget,
     });
 
     const recoveryGenerateObject = vi.fn()
-      .mockResolvedValueOnce({ object: obligationProposal, trace: trace() })
+      .mockResolvedValueOnce({ object: contactObligationProposal, trace: trace() })
       .mockResolvedValueOnce({
         object: { verdict: "accepted", reason: "The repaired debt remains typed." },
         trace: trace(),
@@ -759,7 +1386,7 @@ describe("Campaign Play Game Master obligation authority prompt", () => {
     await createCampaignPlayGameMaster({
       generateObject: recoveryGenerateObject as unknown as typeof safeGenerateObject,
     }).plan({
-      frame: frame(), ruling: ruling({ requiredObligationEffect }), resolution,
+      frame: frame(), ruling: obligationRuling, resolution,
       uncertaintyAuthority: null, model: model(), temperature: 0.2, budget,
       recoveryFeedback: obligationRecoveryFeedback,
     });
@@ -846,8 +1473,10 @@ describe("Campaign Play Game Master obligation authority prompt", () => {
         affectedHandles: ["you", "guard", "coins", "guard-debt"],
       }, guardResponseEffect],
     };
+    const paymentRuling = ruling({ requiredObligationEffect });
+    const contactPaymentProposal = contactProposalForRuling(paymentProposal, paymentRuling);
     const generateObject = vi.fn()
-      .mockResolvedValueOnce({ object: paymentProposal, trace: trace() })
+      .mockResolvedValueOnce({ object: contactPaymentProposal, trace: trace() })
       .mockResolvedValueOnce({
         object: { verdict: "accepted", reason: "The payment matches the Judge transition." },
         trace: trace(),
@@ -856,7 +1485,7 @@ describe("Campaign Play Game Master obligation authority prompt", () => {
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).plan({
       frame: paymentFrame,
-      ruling: ruling({ requiredObligationEffect }),
+      ruling: paymentRuling,
       resolution,
       uncertaintyAuthority: null,
       model: model(),
@@ -872,8 +1501,9 @@ describe("Campaign Play Game Master obligation authority prompt", () => {
   });
 
   it("keeps obligation recovery wording targeted to its safe reviewer coordinate", async () => {
+    const contactRuling = ruling();
     const generateObject = vi.fn()
-      .mockResolvedValueOnce({ object: proposal, trace: trace() })
+      .mockResolvedValueOnce({ object: contactProposalForRuling(proposal, contactRuling), trace: trace() })
       .mockResolvedValueOnce({
         object: { verdict: "accepted", reason: "The event remains non-mechanical." },
         trace: trace(),
@@ -881,7 +1511,7 @@ describe("Campaign Play Game Master obligation authority prompt", () => {
     await createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).plan({
-      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      frame: frame(), ruling: contactRuling, resolution, uncertaintyAuthority: null,
       model: model(), temperature: 0.2, budget,
       recoveryFeedback: obligationRecoveryFeedback,
     });
@@ -917,7 +1547,7 @@ describe("Campaign Play Game Master obligation authority prompt", () => {
       }],
     };
     const generateObject = vi.fn()
-      .mockResolvedValueOnce({ object: proposal, trace: trace() })
+      .mockResolvedValueOnce({ object: contactProposalForRuling(proposal, spokenPromiseRuling), trace: trace() })
       .mockResolvedValueOnce({
         object: {
           verdict: "accepted",
@@ -994,7 +1624,7 @@ describe("Campaign Play Game Master obligation authority prompt", () => {
       }],
     };
     const generateObject = vi.fn()
-      .mockResolvedValueOnce({ object: handoffProposal, trace: trace() })
+      .mockResolvedValueOnce({ object: contactProposalForRuling(handoffProposal, handoffRuling), trace: trace() })
       .mockResolvedValueOnce({
         object: {
           verdict: "accepted",
@@ -1129,14 +1759,18 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
       ...proposal,
       effects: [{ ...proposal.effects[0], summary: repeatedSummary }],
     };
-    const generateObject = vi.fn().mockResolvedValue({ object: repeatedProposal, trace: trace() });
+    const contactRuling = ruling();
+    const generateObject = vi.fn().mockResolvedValue({
+      object: contactProposalForRuling(repeatedProposal, contactRuling),
+      trace: trace(),
+    });
     let thrown: unknown;
     try {
       await createCampaignPlayGameMaster({
         generateObject: generateObject as unknown as typeof safeGenerateObject,
       }).plan({
         frame: frame(),
-        ruling: ruling(),
+        ruling: contactRuling,
         resolution,
         uncertaintyAuthority: null,
         model: model(),
@@ -1159,8 +1793,9 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
       object: { verdict: "accepted", reason: "The dialogue remains within supplied authority." },
       trace: trace(),
     };
+    const normalRuling = ruling();
     const normalGenerate = vi.fn()
-      .mockResolvedValueOnce({ object: proposal, trace: trace() })
+      .mockResolvedValueOnce({ object: contactProposalForRuling(proposal, normalRuling), trace: trace() })
       .mockResolvedValueOnce(acceptedReview);
     await createCampaignPlayGameMaster({
       generateObject: normalGenerate as unknown as typeof safeGenerateObject,
@@ -1173,7 +1808,7 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
     expect(normalPrompt).toContain("ROUTE_AUTHORITY=[]");
 
     const recoveryGenerate = vi.fn()
-      .mockResolvedValueOnce({ object: proposal, trace: trace() })
+      .mockResolvedValueOnce({ object: contactProposalForRuling(proposal, normalRuling), trace: trace() })
       .mockResolvedValueOnce(acceptedReview);
     await createCampaignPlayGameMaster({
       generateObject: recoveryGenerate as unknown as typeof safeGenerateObject,
@@ -1186,7 +1821,7 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
     const recoveryBlock = recoveryPrompt.slice(recoveryPrompt.indexOf("GAME_MASTER_RECOVERY"));
     expect(recoveryBlock).toBe([
       "GAME_MASTER_RECOVERY",
-      "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. For mechanical_authority_rejected, make every mechanically durable claim in each event summary agree with the typed resource effects and ROUTE_AUTHORITY. If no typed authority changes a possession, obligation, or route, keep the event summary non-mechanical. All schema, authority, continuity, and Rulebook rules above still apply.",
+      "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. For mechanical_authority_rejected, make every mechanically durable claim in each event summary agree with the typed resource effects and ROUTE_AUTHORITY. If no typed authority changes a possession, obligation, or route, keep the event summary non-mechanical. For a contact decision mismatch, use kind=none with all decision fields null unless the exact typed paid_delivery or unpaid_delivery contract is present; never recover a work, service, delivery, payment, compensation, debt, duty, custody, access, permission, or relationship transition as a null-effect kind=offer. All schema, authority, continuity, and Rulebook rules above still apply.",
       "RECOVERY_DIAGNOSTIC",
       JSON.stringify(recoveryFeedback),
       "END_RECOVERY_DIAGNOSTIC",
@@ -1205,8 +1840,9 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
         summary: "SENTINEL_RAW_PROPOSAL Dren Vask says the route is paid.",
       }],
     };
+    const contactRuling = ruling();
     const generateObject = vi.fn()
-      .mockResolvedValueOnce({ object: rejectedProposal, trace: trace() })
+      .mockResolvedValueOnce({ object: contactProposalForRuling(rejectedProposal, contactRuling), trace: trace() })
       .mockResolvedValueOnce({
         object: {
           verdict: "rejected",
@@ -1313,7 +1949,7 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
       }],
     };
     const firstGenerateObject = vi.fn()
-      .mockResolvedValueOnce({ object: rejectedProposal, trace: trace() })
+      .mockResolvedValueOnce({ object: contactProposalForRuling(rejectedProposal, routeRuling), trace: trace() })
       .mockResolvedValueOnce({
         object: {
           verdict: "rejected",
@@ -1343,7 +1979,7 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
     });
 
     const secondGenerateObject = vi.fn()
-      .mockResolvedValueOnce({ object: correctedProposal, trace: trace() })
+      .mockResolvedValueOnce({ object: contactProposalForRuling(correctedProposal, routeRuling), trace: trace() })
       .mockResolvedValueOnce({
         object: { verdict: "accepted", reason: "The route claim matches the open route." },
         trace: trace(),
@@ -1372,8 +2008,9 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
       object: { verdict: "accepted", reason: "The corrected proposal remains within typed authority." },
       trace: trace(),
     };
+    const contactRuling = ruling();
     const generateObject = vi.fn()
-      .mockResolvedValueOnce({ object: proposal, trace: trace() })
+      .mockResolvedValueOnce({ object: contactProposalForRuling(proposal, contactRuling), trace: trace() })
       .mockResolvedValueOnce(acceptedReview);
     await createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
@@ -1406,13 +2043,14 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
       object: { verdict: "accepted", reason: "The corrected possession remains within typed authority." },
       trace: trace(),
     };
+    const contactRuling = ruling();
     const generateObject = vi.fn()
-      .mockResolvedValueOnce({ object: proposal, trace: trace() })
+      .mockResolvedValueOnce({ object: contactProposalForRuling(proposal, contactRuling), trace: trace() })
       .mockResolvedValueOnce(acceptedReview);
     await createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).plan({
-      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      frame: frame(), ruling: contactRuling, resolution, uncertaintyAuthority: null,
       model: model(), temperature: 0.2, budget,
       recoveryFeedback: possessionTransformRecoveryFeedback,
     });
@@ -1431,13 +2069,14 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
       object: { verdict: "accepted", reason: "The corrected reply precedes the actorless result." },
       trace: trace(),
     };
+    const contactRuling = ruling();
     const generateObject = vi.fn()
-      .mockResolvedValueOnce({ object: proposal, trace: trace() })
+      .mockResolvedValueOnce({ object: contactProposalForRuling(proposal, contactRuling), trace: trace() })
       .mockResolvedValueOnce(acceptedReview);
     await createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).plan({
-      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      frame: frame(), ruling: contactRuling, resolution, uncertaintyAuthority: null,
       model: model(), temperature: 0.2, budget,
       recoveryFeedback: targetedActorRecoveryFeedback,
     });
@@ -1607,6 +2246,86 @@ function schemaContractFailureModel(): LanguageModel {
   return value;
 }
 
+interface SchemaRecoveryModelCall {
+  readonly prompt: unknown;
+  readonly tools: unknown;
+  readonly options: Record<string, unknown>;
+}
+
+function schemaRecoveryModel(
+  invalidTransport: Record<string, unknown>,
+  calls: SchemaRecoveryModelCall[],
+  recoveryTransport: Record<string, unknown> = toolTransport(proposal.elapsedMinutes, proposal.effects),
+): LanguageModel {
+  let callIndex = 0;
+  const value = new MockLanguageModelV3({
+    provider: "test-provider",
+    modelId: "test-model",
+    doGenerate: async (options) => {
+      const rawOptions = options as unknown as Record<string, unknown>;
+      calls.push({
+        prompt: options.prompt,
+        tools: options.tools,
+        options: {
+          temperature: rawOptions.temperature,
+          maxOutputTokens: rawOptions.maxOutputTokens,
+          mode: rawOptions.mode,
+          strictSchema: rawOptions.strictSchema,
+          allowRepair: rawOptions.allowRepair,
+          allowTextFallback: rawOptions.allowTextFallback,
+          retries: rawOptions.retries,
+          timeout: rawOptions.timeout,
+        },
+      });
+      const output = callIndex === 0
+        ? invalidTransport
+        : callIndex === 1
+          ? recoveryTransport
+          : {
+              verdict: "accepted",
+              reason: "The accepted proposal is grounded in the fixed action contract.",
+              failedChecks: [],
+            };
+      callIndex += 1;
+      return {
+        content: [{
+          type: "tool-call" as const,
+          toolCallId: `structured-output-${callIndex}`,
+          toolName: "structured_output",
+          input: JSON.stringify(output),
+        }],
+        finishReason: { unified: "tool-calls" as const, raw: undefined },
+        response: { modelId: "test-model" },
+        usage: {
+          inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
+          outputTokens: { total: 12, text: 12, reasoning: undefined },
+        },
+        warnings: [],
+      };
+    },
+  });
+  rememberStructuredOutputModelMetadata(value, buildStructuredOutputModelMetadata({
+    providerId: "test-provider", providerName: "Test Provider", model: "test-model",
+    protocol: "openai-compatible", baseUrl: "https://api.z.ai/v1", transport: "chat-completions",
+  }));
+  return value;
+}
+
+function modelPromptText(promptValue: unknown): string {
+  if (!Array.isArray(promptValue)) return String(promptValue);
+  return promptValue.flatMap((message) => {
+    if (!message || typeof message !== "object") return [];
+    const content = (message as { content?: unknown }).content;
+    if (typeof content === "string") return [content];
+    if (!Array.isArray(content)) return [];
+    return content.flatMap((part) => {
+      if (!part || typeof part !== "object") return [];
+      const text = (part as { text?: unknown }).text;
+      return typeof text === "string" ? [text] : [];
+    });
+  }).join("\n");
+}
+
 function trace(
   strategy: SafeGenerateTrace["strategy"] = "native_schema",
   usage: SafeGenerateTrace["usage"] = { inputTokens: 100, outputTokens: 80, totalTokens: 180 },
@@ -1645,6 +2364,44 @@ describe("Campaign Play Game Master", () => {
       expectedWorldVersion: 8, readScope: [{ kind: "actor", id: PLAYER_ID }, { kind: "actor", id: "actor-guard" }],
       exposure: { mode: "projectable", predicates: [{ channel: "direct_perception", locationId: "location-a" }] } });
     expect(first.batch.commands[1]!.causalParent).toEqual({ kind: "command", commandId: first.batch.commands[0]!.commandId });
+  });
+
+  it("keeps a named one-off background purchase as actorless scene presentation", () => {
+    const candidate = createCampaignPlayGameMaster().compile(
+      frame(),
+      scopeOverflowRuling(),
+      resolution,
+      null,
+      {
+        elapsedMinutes: 1,
+        effects: [{
+          kind: "record_world_event",
+          eventClass: "scene",
+          performingActorHandle: null,
+          summary: "Neris buys a loaf for two silver.",
+          affectedHandles: ["you", "here"],
+        }],
+      },
+    );
+
+    expect(candidate.preflight.accepted).toBe(true);
+    expect(candidate.batch.commands.map((command) => command.kind)).toEqual([
+      "advance_world_time",
+      "record_world_event",
+    ]);
+    const scene = candidate.batch.commands[1];
+    expect(scene).toMatchObject({
+      kind: "record_world_event",
+      eventClass: "scene",
+      performingActorId: null,
+      writeScope: [],
+    });
+    if (scene?.kind !== "record_world_event") throw new Error("Expected scene event command.");
+    expect(scene.affectedRefs).toEqual([
+      { kind: "actor", id: PLAYER_ID },
+      { kind: "location", id: "location-a" },
+    ]);
+    expect(scene.affectedRefs).not.toContainEqual({ kind: "actor", id: "actor-guard" });
   });
 
   it("materializes one contacted ambient resident with code-owned identity and an immediate reply", () => {
@@ -1732,8 +2489,9 @@ describe("Campaign Play Game Master", () => {
 
   it("gives the strict proposal and authority review independent model-call timeouts", async () => {
     const workerController = new AbortController();
+    const contactRuling = ruling();
     const generateObject = vi.fn()
-      .mockResolvedValueOnce({ object: proposal, trace: trace() })
+      .mockResolvedValueOnce({ object: contactProposalForRuling(proposal, contactRuling), trace: trace() })
       .mockResolvedValueOnce({
         object: {
           verdict: "accepted",
@@ -1742,7 +2500,7 @@ describe("Campaign Play Game Master", () => {
         trace: trace(),
       });
     const gameMaster = createCampaignPlayGameMaster({ generateObject: generateObject as unknown as typeof safeGenerateObject });
-    const result = await gameMaster.plan({ frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+    const result = await gameMaster.plan({ frame: frame(), ruling: contactRuling, resolution, uncertaintyAuthority: null,
       model: model(), temperature: 0.2, budget, signal: workerController.signal });
     expect(result.preflight.accepted).toBe(true);
     expect(result.semanticReview).toEqual({
@@ -1801,6 +2559,12 @@ describe("Campaign Play Game Master", () => {
     expect(reviewSchemaJson).toContain("minItems");
     expect(reviewSchemaJson).toContain("maxItems");
     expect(String(reviewOptions.prompt)).toContain("A record_world_event is presentation evidence, never mechanical authority");
+    expect(String(reviewOptions.prompt)).toContain(
+      "A named or unnamed one-off person may appear in an actorless discovery or scene as ambient presentation",
+    );
+    expect(String(reviewOptions.prompt)).toContain(
+      "If the activity is actionable or consequential, use a canonical or materialized actor and the matching typed authority.",
+    );
     expect(String(reviewOptions.prompt)).toContain("unless typedResourceEffects contains the matching possession effect");
     expect(String(reviewOptions.prompt)).toContain("unless typedResourceEffects contains the matching obligation effect");
     expect(String(reviewOptions.prompt)).toContain('"typedResourceEffects":[]');
@@ -1898,6 +2662,15 @@ describe("Campaign Play Game Master", () => {
     );
     expect(String(options.prompt)).toContain("CANONICAL_PEOPLE is the complete durable person roster at the start of this call");
     expect(String(options.prompt)).toContain("A person name outside this list does not identify an actor, even when SOURCE_MOMENT or prior prose mentions it");
+    expect(String(options.prompt)).toContain(
+      "It may appear in an actorless discovery or scene only under this ambient presentation boundary",
+    );
+    expect(String(options.prompt)).toContain(
+      "A named or unnamed one-off person may appear in an actorless discovery or scene as ambient presentation",
+    );
+    expect(String(options.prompt)).toContain(
+      "If the activity is actionable or consequential, use a canonical or materialized actor and the matching typed authority.",
+    );
     expect(String(options.prompt)).toContain("Unless the materialize_support_actor contract below applies, an unlisted resident cannot own a job");
     expect(String(options.prompt)).toContain("Use materialize_support_actor only for a contact with unnamed ambient residents in CURRENT_EXACT_SCENE");
     expect(String(options.prompt)).toContain("Code derives every identity, placement, role, priority, plan step, timing bounds, scope, version, and receipt");
@@ -2011,9 +2784,10 @@ describe("Campaign Play Game Master", () => {
   });
 
   it("uses the requested strict tool mode for the proposal and authority review", async () => {
+    const contactRuling = ruling();
     const generateObject = vi.fn()
       .mockResolvedValueOnce({
-        object: toolTransport(proposal.elapsedMinutes, proposal.effects),
+        object: contactToolTransportForRuling(toolTransport(proposal.elapsedMinutes, proposal.effects), contactRuling),
         trace: trace("tool_mode", undefined, "tool"),
       })
       .mockResolvedValueOnce({
@@ -2029,7 +2803,7 @@ describe("Campaign Play Game Master", () => {
     });
     await gameMaster.plan({
       frame: frame(),
-      ruling: ruling(),
+      ruling: contactRuling,
       resolution,
       uncertaintyAuthority: null,
       model: model(),
@@ -2044,8 +2818,11 @@ describe("Campaign Play Game Master", () => {
     const reviewerSchema = generateObject.mock.calls[1]![0].schema as z.ZodType<unknown>;
     const proposalSchemaJson = JSON.stringify(z.toJSONSchema(proposalSchema));
     const reviewerSchemaJson = JSON.stringify(z.toJSONSchema(reviewerSchema));
-    for (const forbiddenKeyword of ["anyOf", "oneOf", "const", "prefixItems"]) {
+    for (const forbiddenKeyword of ["oneOf", "prefixItems"]) {
       expect(proposalSchemaJson).not.toContain(forbiddenKeyword);
+      expect(reviewerSchemaJson).not.toContain(forbiddenKeyword);
+    }
+    for (const forbiddenKeyword of ["anyOf", "const"]) {
       expect(reviewerSchemaJson).not.toContain(forbiddenKeyword);
     }
     const proposalJson = z.toJSONSchema(proposalSchema) as {
@@ -2078,6 +2855,7 @@ describe("Campaign Play Game Master", () => {
         performingActorHandle: "introduced-support-actor",
         affectedHandles: ["you", "introduced-support-actor"],
       }]),
+      decisionProposal: contactDecisionNone("Ask calmly"),
     }).success).toBe(true);
     expect(proposalSchema.safeParse({
       ...toolTransport(proposal.elapsedMinutes, [{ ...proposal.effects[0], performingActorHandle: "" }]),
@@ -2095,6 +2873,7 @@ describe("Campaign Play Game Master", () => {
     expect(proposalSchema.safeParse(oldRawPerformer).success).toBe(false);
     expect(proposalSchema.safeParse({
       ...toolTransport(5, [{ kind: "move_actor", actorHandle: "" }]),
+      decisionProposal: contactDecisionNone("Ask calmly"),
     }).success).toBe(true);
     expect(proposalSchema.safeParse({
       ...toolTransport(5, [{ kind: "move_actor", actorHandle: null }]),
@@ -2131,7 +2910,11 @@ describe("Campaign Play Game Master", () => {
   });
 
   it("normalizes omitted zero-cardinality tool partitions before compilation and review", async () => {
-    const omittedTransport = toolTransport(proposal.elapsedMinutes, proposal.effects);
+    const contactRuling = ruling();
+    const omittedTransport = contactToolTransportForRuling(
+      toolTransport(proposal.elapsedMinutes, proposal.effects),
+      contactRuling,
+    );
     for (const kind of toolEffectKinds) {
       if (kind !== "record_world_event") delete omittedTransport[kind];
     }
@@ -2147,7 +2930,7 @@ describe("Campaign Play Game Master", () => {
     const candidate = await createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).plan({
-      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      frame: frame(), ruling: contactRuling, resolution, uncertaintyAuthority: null,
       model: model(), temperature: 0.2, budget, structuredOutputMode: "tool",
     });
 
@@ -2169,7 +2952,11 @@ describe("Campaign Play Game Master", () => {
   });
 
   it("rejects effectOrder coverage for an omitted default-empty partition at private decode", async () => {
-    const malformedTransport = toolTransport(proposal.elapsedMinutes, proposal.effects);
+    const contactRuling = ruling();
+    const malformedTransport = contactToolTransportForRuling(
+      toolTransport(proposal.elapsedMinutes, proposal.effects),
+      contactRuling,
+    );
     for (const kind of toolEffectKinds) {
       if (kind !== "record_world_event") delete malformedTransport[kind];
     }
@@ -2183,7 +2970,7 @@ describe("Campaign Play Game Master", () => {
       await createCampaignPlayGameMaster({
         generateObject: generateObject as unknown as typeof safeGenerateObject,
       }).plan({
-        frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+        frame: frame(), ruling: contactRuling, resolution, uncertaintyAuthority: null,
         model: model(), temperature: 0.2, budget, structuredOutputMode: "tool",
       });
     } catch (error) {
@@ -2218,7 +3005,10 @@ describe("Campaign Play Game Master", () => {
       },
     ];
     for (const testCase of cases) {
-      const omittedTransport = toolTransport(proposal.elapsedMinutes, proposal.effects);
+      const omittedTransport = contactToolTransportForRuling(
+        toolTransport(proposal.elapsedMinutes, proposal.effects),
+        testCase.ruling,
+      );
       delete omittedTransport[testCase.kind];
       const generateObject = vi.fn().mockResolvedValue({
         object: omittedTransport,
@@ -2251,6 +3041,7 @@ describe("Campaign Play Game Master", () => {
   });
 
   it("rejects contradictory reviewer verdict coupling through the private plan boundary", async () => {
+    const contactRuling = ruling();
     const cases = [
       {
         label: "accepted with failed checks",
@@ -2272,7 +3063,7 @@ describe("Campaign Play Game Master", () => {
     for (const malformedCase of cases) {
       const generateObject = vi.fn()
         .mockResolvedValueOnce({
-          object: toolTransport(proposal.elapsedMinutes, proposal.effects),
+          object: contactToolTransportForRuling(toolTransport(proposal.elapsedMinutes, proposal.effects), contactRuling),
           trace: trace("tool_mode", undefined, "tool"),
         })
         .mockResolvedValueOnce({
@@ -2284,7 +3075,7 @@ describe("Campaign Play Game Master", () => {
         await createCampaignPlayGameMaster({
           generateObject: generateObject as unknown as typeof safeGenerateObject,
         }).plan({
-          frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+          frame: frame(), ruling: contactRuling, resolution, uncertaintyAuthority: null,
           model: model(), temperature: 0.2, budget, structuredOutputMode: "tool",
         });
       } catch (error) {
@@ -2301,9 +3092,10 @@ describe("Campaign Play Game Master", () => {
   });
 
   it("keeps the null-sentinel contract in a recovered tool-mode attempt", async () => {
+    const contactRuling = ruling();
     const generateObject = vi.fn()
       .mockResolvedValueOnce({
-        object: toolTransport(proposal.elapsedMinutes, proposal.effects),
+        object: contactToolTransportForRuling(toolTransport(proposal.elapsedMinutes, proposal.effects), contactRuling),
         trace: trace("tool_mode", undefined, "tool"),
       })
       .mockResolvedValueOnce({
@@ -2320,7 +3112,7 @@ describe("Campaign Play Game Master", () => {
     await createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).plan({
-      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      frame: frame(), ruling: contactRuling, resolution, uncertaintyAuthority: null,
       model: model(), temperature: 0.2, budget, structuredOutputMode: "tool", recoveryFeedback,
     });
     const recoveryPrompt = String(generateObject.mock.calls[0]![0].prompt);
@@ -2330,9 +3122,10 @@ describe("Campaign Play Game Master", () => {
   });
 
   it("partitions the fixed-key exposure transport and rejects mixed or contradictory channels", async () => {
+    const contactRuling = ruling();
     const generateObject = vi.fn()
       .mockResolvedValueOnce({
-        object: toolTransport(proposal.elapsedMinutes, proposal.effects),
+        object: contactToolTransportForRuling(toolTransport(proposal.elapsedMinutes, proposal.effects), contactRuling),
         trace: trace("tool_mode", undefined, "tool"),
       })
       .mockResolvedValueOnce({
@@ -2342,18 +3135,18 @@ describe("Campaign Play Game Master", () => {
     await createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).plan({
-      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      frame: frame(), ruling: contactRuling, resolution, uncertaintyAuthority: null,
       model: model(), temperature: 0.2, budget, structuredOutputMode: "tool",
     });
     const proposalSchema = generateObject.mock.calls[0]![0].schema as z.ZodType<unknown>;
-    const exposureItem = (predicate: Record<string, unknown>) => toolTransport(1, [{
+    const exposureItem = (predicate: Record<string, unknown>) => contactToolTransportForRuling(toolTransport(1, [{
       kind: "set_actor_condition",
       exposure: { mode: "projectable", predicates: [predicate] },
       actorHandle: "guard",
       condition: "strained",
       operation: "set",
       summary: "The guard looks strained.",
-    }]);
+    }]), contactRuling);
     for (const predicate of [
       { channel: "direct_perception", anchorHandle: "here", visibleForMinutes: 0, triggers: [] },
       { channel: "local_aftermath", anchorHandle: "here", visibleForMinutes: 5, triggers: [] },
@@ -2362,14 +3155,14 @@ describe("Campaign Play Game Master", () => {
     ]) {
       expect(proposalSchema.safeParse(exposureItem(predicate)).success).toBe(true);
     }
-    const protectedTransport = toolTransport(1, [{
+    const protectedTransport = contactToolTransportForRuling(toolTransport(1, [{
       kind: "set_actor_condition",
       exposure: { mode: "protected" },
       actorHandle: "guard",
       condition: "strained",
       operation: "set",
       summary: "The guard looks strained.",
-    }]);
+    }]), contactRuling);
     expect(proposalSchema.safeParse(protectedTransport).success).toBe(true);
     const oldProtected = structuredClone(protectedTransport);
     ((oldProtected.set_actor_condition as Record<string, unknown>[])[0]!.exposure as Record<string, unknown>) = {
@@ -2390,11 +3183,11 @@ describe("Campaign Play Game Master", () => {
     mixedPredicate.locationId = "here";
     expect(proposalSchema.safeParse(mixedFields).success).toBe(false);
 
-    const protectedNonEmpty = toolTransport(1, [{
+    const protectedNonEmpty = contactToolTransportForRuling(toolTransport(1, [{
       kind: "set_actor_condition",
       exposure: { mode: "protected", predicates: [] },
       actorHandle: "guard", condition: "strained", operation: "set", summary: "The guard looks strained.",
-    }]);
+    }]), contactRuling);
     (((protectedNonEmpty.set_actor_condition as Record<string, unknown>[])[0]!.exposure as Record<string, unknown>)
       .predicates as Record<string, unknown>[]).push({
         channel: "direct_perception", anchorHandle: "here", visibleForMinutes: 0, triggers: [],
@@ -2412,11 +3205,11 @@ describe("Campaign Play Game Master", () => {
       },
       {
         label: "projectable empty partition",
-        transport: toolTransport(1, [{
+        transport: contactToolTransportForRuling(toolTransport(1, [{
           kind: "set_actor_condition",
           exposure: { mode: "projectable", predicates: [] },
           actorHandle: "guard", condition: "strained", operation: "set", summary: "The guard looks strained.",
-        }]),
+        }]), contactRuling),
         coordinate: "exposure.predicates.cardinality",
       },
       {
@@ -2487,12 +3280,12 @@ describe("Campaign Play Game Master", () => {
     });
     expect(JSON.stringify(recoveryFeedback)).not.toContain("Copper chit");
 
-    const correctedTransport = toolTransport(1, [{
+    const correctedTransport = contactToolTransportForRuling(toolTransport(1, [{
       kind: "adjust_actor_possession",
       name: "Copper chit",
       summary: "The guard hands over one copper chit.",
       affectedHandles: ["you", "guard"],
-    }, guardResponseEffect]);
+    }, guardResponseEffect]), possessionRuling);
     const correctedGenerateObject = vi.fn()
       .mockResolvedValueOnce({ object: correctedTransport, trace: trace("tool_mode", undefined, "tool") })
       .mockResolvedValueOnce({
@@ -2532,8 +3325,12 @@ describe("Campaign Play Game Master", () => {
             affectedHandles: ["you"],
           }
         : proposal.effects[0]!;
+      const transport = contactToolTransportForRuling(
+        toolTransport(1, [possessionEffect, guardResponseEffect]),
+        requestRuling,
+      );
       const generateObject = vi.fn()
-        .mockResolvedValueOnce({ object: toolTransport(1, [possessionEffect, guardResponseEffect]), trace: trace("tool_mode", undefined, "tool") })
+        .mockResolvedValueOnce({ object: transport, trace: trace("tool_mode", undefined, "tool") })
         .mockResolvedValueOnce({ object: { verdict: "accepted", reason: "No mechanical change.", failedChecks: [] }, trace: trace("tool_mode", undefined, "tool") });
       await createCampaignPlayGameMaster({ generateObject: generateObject as unknown as typeof safeGenerateObject }).plan({
         frame: sourceFrame, ruling: requestRuling, resolution, uncertaintyAuthority: null,
@@ -2549,7 +3346,10 @@ describe("Campaign Play Game Master", () => {
       citedVisibleFactHandles: ["guard", "copper-chit"],
     });
     const spendSchema = await readSchema(spendRuling);
-    const spendBase = toolTransport(1, [{ kind: "adjust_actor_possession", summary: "One chit is spent.", affectedHandles: ["you"] }, guardResponseEffect]);
+    const spendBase = contactToolTransportForRuling(
+      toolTransport(1, [{ kind: "adjust_actor_possession", summary: "One chit is spent.", affectedHandles: ["you"] }, guardResponseEffect]),
+      spendRuling,
+    );
     expect(spendSchema.safeParse(spendBase).success).toBe(true);
     const illicitSpend = structuredClone(spendBase);
     (illicitSpend.adjust_actor_possession as Record<string, unknown>[])[0]!.name = "Illicit name";
@@ -2563,17 +3363,21 @@ describe("Campaign Play Game Master", () => {
       citedVisibleFactHandles: ["guard", "copper-chit"],
     });
     const transformSchema = await readSchema(transformRuling);
-    const transformBase = toolTransport(1, [{ kind: "adjust_actor_possession", summary: "The chit is stamped.", affectedHandles: ["you"] }, guardResponseEffect]);
+    const transformBase = contactToolTransportForRuling(
+      toolTransport(1, [{ kind: "adjust_actor_possession", summary: "The chit is stamped.", affectedHandles: ["you"] }, guardResponseEffect]),
+      transformRuling,
+    );
     expect(transformSchema.safeParse(transformBase).success).toBe(false);
     const namedTransform = structuredClone(transformBase);
     (namedTransform.adjust_actor_possession as Record<string, unknown>[])[0]!.name = "Stamped copper chit";
     expect(transformSchema.safeParse(namedTransform).success).toBe(true);
 
+    const unavailableRuling = ruling();
     const unavailableGenerateObject = vi.fn()
-      .mockResolvedValueOnce({ object: toolTransport(1, [proposal.effects[0]]), trace: trace("tool_mode", undefined, "tool") })
+      .mockResolvedValueOnce({ object: contactToolTransportForRuling(toolTransport(1, [proposal.effects[0]]), unavailableRuling), trace: trace("tool_mode", undefined, "tool") })
       .mockResolvedValueOnce({ object: { verdict: "accepted", reason: "No mechanical change.", failedChecks: [] }, trace: trace("tool_mode", undefined, "tool") });
     await createCampaignPlayGameMaster({ generateObject: unavailableGenerateObject as unknown as typeof safeGenerateObject }).plan({
-      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      frame: frame(), ruling: unavailableRuling, resolution, uncertaintyAuthority: null,
       model: model(), temperature: 0.2, budget, structuredOutputMode: "tool",
     });
     const unavailableSchema = unavailableGenerateObject.mock.calls[0]![0].schema as z.ZodType<unknown>;
@@ -2584,12 +3388,13 @@ describe("Campaign Play Game Master", () => {
   });
 
   it("normalizes outer tool-text whitespace before exact domain validation", async () => {
+    const contactRuling = ruling();
     const generateObject = vi.fn()
       .mockResolvedValueOnce({
-        object: toolTransport(1, [{
+        object: contactToolTransportForRuling(toolTransport(1, [{
           ...guardResponseEffect,
           summary: " The guard answers. ",
-        }]),
+        }]), contactRuling),
         trace: trace("tool_mode", undefined, "tool"),
       })
       .mockResolvedValueOnce({
@@ -2604,7 +3409,7 @@ describe("Campaign Play Game Master", () => {
     const candidate = await createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).plan({
-      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      frame: frame(), ruling: contactRuling, resolution, uncertaintyAuthority: null,
       model: model(), temperature: 0.2, budget, structuredOutputMode: "tool",
     });
 
@@ -2613,6 +3418,7 @@ describe("Campaign Play Game Master", () => {
   });
 
   it("distinguishes provider extraction, private decode, and domain mismatch without retaining raw content", async () => {
+    const contactRuling = ruling();
     const domainMismatch = toolTransport(1, [{
       kind: "materialize_support_actor",
       actorHandle: "introduced-support-actor",
@@ -2634,16 +3440,16 @@ describe("Campaign Play Game Master", () => {
     const cases = [
       {
         label: "private decode",
-        transport: toolTransport(1, [{
+        transport: contactToolTransportForRuling(toolTransport(1, [{
           kind: "set_actor_condition",
           exposure: { mode: "projectable", predicates: [{ channel: "route_state", anchorHandle: "passage", visibleForMinutes: 0, triggers: ["inspect", "inspect"] }] },
           actorHandle: "guard", condition: "strained", operation: "set", summary: "The guard looks strained.",
-        }]),
+        }]), contactRuling),
         diagnostic: { phase: "private_decode", coordinate: "exposure.predicates[0].route_state.triggers" },
       },
       {
         label: "domain mismatch",
-        transport: domainMismatch,
+        transport: contactToolTransportForRuling(domainMismatch, contactRuling),
         diagnostic: { phase: "domain_mismatch", coordinate: "proposal.domain" },
       },
     ] as const;
@@ -2655,7 +3461,7 @@ describe("Campaign Play Game Master", () => {
       let thrown: unknown;
       try {
         await createCampaignPlayGameMaster({ generateObject: generateObject as unknown as typeof safeGenerateObject }).plan({
-          frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+          frame: frame(), ruling: contactRuling, resolution, uncertaintyAuthority: null,
           model: model(), temperature: 0.2, budget, structuredOutputMode: "tool",
         });
       } catch (error) {
@@ -2669,23 +3475,25 @@ describe("Campaign Play Game Master", () => {
   });
 
   it("keeps native schema planning on the unchanged effects transport", async () => {
+    const contactRuling = ruling();
     const generateObject = vi.fn()
-      .mockResolvedValueOnce({ object: proposal, trace: trace("native_schema") })
+      .mockResolvedValueOnce({ object: contactProposalForRuling(proposal, contactRuling), trace: trace("native_schema") })
       .mockResolvedValueOnce({ object: { verdict: "accepted", reason: "The event is grounded." }, trace: trace("native_schema") });
     await createCampaignPlayGameMaster({ generateObject: generateObject as unknown as typeof safeGenerateObject }).plan({
-      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      frame: frame(), ruling: contactRuling, resolution, uncertaintyAuthority: null,
       model: model(), temperature: 0.2, budget,
     });
     const nativeSchema = generateObject.mock.calls[0]![0].schema as z.ZodType<unknown>;
-    expect(nativeSchema.safeParse(proposal).success).toBe(true);
+    expect(nativeSchema.safeParse(contactProposalForRuling(proposal, contactRuling)).success).toBe(true);
     expect(JSON.stringify(z.toJSONSchema(nativeSchema))).toContain("effects");
     expect(generateObject.mock.calls[0]![0].mode).toBe("auto");
   });
 
   it("keeps every non-resource tool array strict and decodes the required empty nextAction sentinel", async () => {
+    const contactRuling = ruling();
     const generateObject = vi.fn()
       .mockResolvedValueOnce({
-        object: toolTransport(proposal.elapsedMinutes, [proposal.effects[0]]),
+        object: contactToolTransportForRuling(toolTransport(proposal.elapsedMinutes, [proposal.effects[0]]), contactRuling),
         trace: trace("tool_mode", undefined, "tool"),
       })
       .mockResolvedValueOnce({
@@ -2695,7 +3503,7 @@ describe("Campaign Play Game Master", () => {
     await createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).plan({
-      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      frame: frame(), ruling: contactRuling, resolution, uncertaintyAuthority: null,
       model: model(), temperature: 0.2, budget, structuredOutputMode: "tool",
     });
     const proposalSchema = generateObject.mock.calls[0]![0].schema as z.ZodType<unknown>;
@@ -2715,11 +3523,14 @@ describe("Campaign Play Game Master", () => {
       record_world_event: { eventClass: "dialogue", performingActorHandle: "guard", summary: "The guard answers plainly.", affectedHandles: ["you", "guard"] },
     };
     for (const [kind, item] of Object.entries(fixtures)) {
-      const valid = toolTransport(1, [{ kind, ...item }]);
+      const valid: Record<string, unknown> = {
+        ...toolTransport(1, [{ kind, ...item }]),
+        decisionProposal: contactDecisionNone(contactRuling.normalizedIntent.method!),
+      };
       expect(proposalSchema.safeParse(valid).success, kind).toBe(true);
       const row = (valid[kind] as Record<string, unknown>[])[0]!;
       expect(row).not.toHaveProperty("kind");
-      const withKind = structuredClone(valid);
+      const withKind = structuredClone(valid) as Record<string, unknown>;
       ((withKind[kind] as Record<string, unknown>[])[0]!).kind = kind;
       expect(proposalSchema.safeParse(withKind).success, `${kind} rejects kind`).toBe(false);
     }
@@ -2732,6 +3543,7 @@ describe("Campaign Play Game Master", () => {
   });
 
   it("reconstructs kind-list tool order and rejects missing, over-covered, and wrong-kind entries", async () => {
+    const contactRuling = ruling();
     const firstEvent = {
       kind: "record_world_event" as const,
       eventClass: "dialogue" as const,
@@ -2743,7 +3555,7 @@ describe("Campaign Play Game Master", () => {
       ...firstEvent,
       summary: "The guard adds the second part of the answer.",
     };
-    const orderedTransport = toolTransport(1, [firstEvent, secondEvent]);
+    const orderedTransport = contactToolTransportForRuling(toolTransport(1, [firstEvent, secondEvent]), contactRuling);
     const orderedItems = orderedTransport.record_world_event as Record<string, unknown>[];
     orderedTransport.record_world_event = [orderedItems[1], orderedItems[0]];
     orderedTransport.effectOrder = ["record_world_event", "record_world_event"];
@@ -2756,7 +3568,7 @@ describe("Campaign Play Game Master", () => {
     const orderedCandidate = await createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).plan({
-      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      frame: frame(), ruling: contactRuling, resolution, uncertaintyAuthority: null,
       model: model(), temperature: 0.2, budget, structuredOutputMode: "tool",
     });
     const orderedSummaries = orderedCandidate.batch.commands
@@ -2837,16 +3649,16 @@ describe("Campaign Play Game Master", () => {
     )).toEqual(["dialogue", "discovery"]);
 
     const malformedCases: Array<{ label: string; transport: Record<string, unknown> }> = [];
-    const missing = toolTransport(1, [firstEvent, secondEvent]);
+    const missing = contactToolTransportForRuling(toolTransport(1, [firstEvent, secondEvent]), contactRuling);
     missing.effectOrder = ["record_world_event"];
     malformedCases.push({ label: "missing", transport: missing });
-    const overCovered = toolTransport(1, [firstEvent, secondEvent]);
+    const overCovered = contactToolTransportForRuling(toolTransport(1, [firstEvent, secondEvent]), contactRuling);
     overCovered.effectOrder = ["record_world_event", "record_world_event", "record_world_event"];
     malformedCases.push({ label: "over-covered", transport: overCovered });
-    const wrongKind = toolTransport(1, [firstEvent]);
+    const wrongKind = contactToolTransportForRuling(toolTransport(1, [firstEvent]), contactRuling);
     wrongKind.effectOrder = ["move_actor"];
     malformedCases.push({ label: "wrong-kind", transport: wrongKind });
-    const oldIndexed = toolTransport(1, [firstEvent]);
+    const oldIndexed = contactToolTransportForRuling(toolTransport(1, [firstEvent]), contactRuling);
     oldIndexed.effectOrder = [{ kind: "record_world_event", index: 0 }];
     malformedCases.push({ label: "old-indexed-order", transport: oldIndexed });
     for (const malformedCase of malformedCases) {
@@ -2857,7 +3669,7 @@ describe("Campaign Play Game Master", () => {
       await expect(createCampaignPlayGameMaster({
         generateObject: malformedGenerateObject as unknown as typeof safeGenerateObject,
       }).plan({
-        frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+        frame: frame(), ruling: contactRuling, resolution, uncertaintyAuthority: null,
         model: model(), temperature: 0.2, budget, structuredOutputMode: "tool",
       })).rejects.toMatchObject({ code: "model_contract_failed" });
       expect(malformedGenerateObject, malformedCase.label).toHaveBeenCalledTimes(1);
@@ -2897,8 +3709,15 @@ describe("Campaign Play Game Master", () => {
       },
       guardResponseEffect,
     ]);
+    const acquisitionRuling = ruling({
+      possessionEffectAuthority: {
+        kind: "adjust_actor_possession", enforcement: "required", operation: "acquire",
+        possessionHandle: null, quantity: 2, minimumResult: "success",
+      },
+    });
+    const acquisitionTransport = contactToolTransportForRuling(acquisitionProposal, acquisitionRuling);
     const acquisitionGenerateObject = vi.fn()
-      .mockResolvedValueOnce({ object: acquisitionProposal, trace: trace("tool_mode", undefined, "tool") })
+      .mockResolvedValueOnce({ object: acquisitionTransport, trace: trace("tool_mode", undefined, "tool") })
       .mockResolvedValueOnce({
         object: { verdict: "accepted", reason: "The typed acquisition is the only durable possession change.", failedChecks: [] },
         trace: trace("tool_mode", undefined, "tool"),
@@ -2906,12 +3725,7 @@ describe("Campaign Play Game Master", () => {
     const acquisitionCandidate = await createCampaignPlayGameMaster({
       generateObject: acquisitionGenerateObject as unknown as typeof safeGenerateObject,
     }).plan({
-      frame: frame(), ruling: ruling({
-        possessionEffectAuthority: {
-          kind: "adjust_actor_possession", enforcement: "required", operation: "acquire",
-          possessionHandle: null, quantity: 2, minimumResult: "success",
-        },
-      }),
+      frame: frame(), ruling: acquisitionRuling,
       resolution, uncertaintyAuthority: null, model: model(), temperature: 0.2, budget,
       structuredOutputMode: "tool",
     });
@@ -2923,9 +3737,9 @@ describe("Campaign Play Game Master", () => {
       quantityDelta: 2,
     });
     const acquisitionSchema = acquisitionGenerateObject.mock.calls[0]![0].schema as z.ZodType<unknown>;
-    expect(acquisitionSchema.safeParse(acquisitionProposal).success).toBe(true);
+    expect(acquisitionSchema.safeParse(acquisitionTransport).success).toBe(true);
     expect(acquisitionSchema.safeParse({
-      ...acquisitionProposal,
+      ...acquisitionTransport,
       adjust_actor_possession: [{
         ...(acquisitionProposal.adjust_actor_possession as Record<string, unknown>[])[0],
         operation: "acquire",
@@ -2936,18 +3750,18 @@ describe("Campaign Play Game Master", () => {
     };
     delete missingPossessionName.name;
     expect(acquisitionSchema.safeParse({
-      ...acquisitionProposal,
+      ...acquisitionTransport,
       adjust_actor_possession: [missingPossessionName],
     }).success).toBe(false);
     expect(acquisitionSchema.safeParse({
-      ...acquisitionProposal,
+      ...acquisitionTransport,
       adjust_actor_possession: [{
         ...(acquisitionProposal.adjust_actor_possession as Record<string, unknown>[])[0],
         name: null,
       }],
     }).success).toBe(false);
     expect(acquisitionSchema.safeParse({
-      ...acquisitionProposal,
+      ...acquisitionTransport,
       adjust_actor_possession: [{
         ...(acquisitionProposal.adjust_actor_possession as Record<string, unknown>[])[0],
         name: "",
@@ -2978,8 +3792,12 @@ describe("Campaign Play Game Master", () => {
   });
 
   it("rejects irrelevant partition fields before any reviewer call", async () => {
+    const contactRuling = ruling();
     const generateObject = vi.fn().mockResolvedValue({
-      object: toolTransport(proposal.elapsedMinutes, [{ ...proposal.effects[0], actorHandle: "guard" }]),
+      object: contactToolTransportForRuling(
+        toolTransport(proposal.elapsedMinutes, [{ ...proposal.effects[0], actorHandle: "guard" }]),
+        contactRuling,
+      ),
       trace: trace("tool_mode", undefined, "tool"),
     });
     const gameMaster = createCampaignPlayGameMaster({
@@ -2988,7 +3806,7 @@ describe("Campaign Play Game Master", () => {
 
     await expect(gameMaster.plan({
       frame: frame(),
-      ruling: ruling(),
+      ruling: contactRuling,
       resolution,
       uncertaintyAuthority: null,
       model: model(),
@@ -3159,20 +3977,22 @@ describe("Campaign Play Game Master", () => {
 
   it("constrains every generated handle field to admitted frame bindings", async () => {
     const requestFrame = frame();
+    const contactRuling = ruling();
+    const contactProposalFixture = contactProposalForRuling(proposal, contactRuling);
     requestFrame.visibleFacts.push({ handle: "choice-only", kind: "choice", summary: "A UI choice, not an entity ref." });
     const generateObject = vi.fn()
       .mockImplementationOnce(async (options: Parameters<typeof safeGenerateObject>[0]) => {
         const schema = options.schema as typeof campaignPlayGameMasterProposalSchema;
-        expect(schema.safeParse(proposal).success).toBe(true);
+        expect(schema.safeParse(contactProposalFixture).success).toBe(true);
         expect(schema.safeParse({
-          ...proposal,
+          ...contactProposalFixture,
           effects: [{ ...proposal.effects[0], performingActorHandle: "guar" }],
         }).success).toBe(false);
         expect(schema.safeParse({
-          ...proposal,
+          ...contactProposalFixture,
           effects: [{ ...proposal.effects[0], affectedHandles: ["you", "choice-only"] }],
         }).success).toBe(false);
-        return { object: proposal, trace: trace() };
+        return { object: contactProposalFixture, trace: trace() };
       })
       .mockResolvedValueOnce({
         object: { verdict: "accepted", reason: "The dialogue changes no mechanical resource state." },
@@ -3180,7 +4000,7 @@ describe("Campaign Play Game Master", () => {
       });
     await createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
-    }).plan({ frame: requestFrame, ruling: ruling(), resolution, uncertaintyAuthority: null,
+    }).plan({ frame: requestFrame, ruling: contactRuling, resolution, uncertaintyAuthority: null,
       model: model(), temperature: 0.2, budget });
     const promptText = String(generateObject.mock.calls[0]![0].prompt);
     const allowedLine = promptText.split("\n").find((value) => value.startsWith("ALLOWED_HANDLES="));
@@ -3470,13 +4290,13 @@ describe("Campaign Play Game Master", () => {
     });
     const generateObject = vi.fn()
       .mockResolvedValueOnce({
-        object: {
+        object: contactProposalForRuling({
           ...proposal,
           effects: [{
             ...proposal.effects[0],
             summary: "The guard says the passage runs directly south and needs no permit.",
           }],
-        },
+        }, routeRuling),
         trace: trace(),
       })
       .mockResolvedValueOnce({
@@ -3631,7 +4451,7 @@ describe("Campaign Play Game Master", () => {
       }],
     };
     const generateObject = vi.fn()
-      .mockResolvedValueOnce({ object: contradictory, trace: trace() })
+      .mockResolvedValueOnce({ object: contactProposalForRuling(contradictory, routeRuling), trace: trace() })
       .mockResolvedValueOnce({
         object: {
           verdict: "rejected",
@@ -3662,6 +4482,7 @@ describe("Campaign Play Game Master", () => {
   });
 
   it("keeps ordinary location wayfinding outside route-authority classification", async () => {
+    const contactRuling = ruling();
     const wayfinding = {
       ...proposal,
       effects: [{
@@ -3670,7 +4491,7 @@ describe("Campaign Play Game Master", () => {
       }],
     };
     const generateObject = vi.fn()
-      .mockResolvedValueOnce({ object: wayfinding, trace: trace() })
+      .mockResolvedValueOnce({ object: contactProposalForRuling(wayfinding, contactRuling), trace: trace() })
       .mockResolvedValueOnce({
         object: {
           verdict: "accepted",
@@ -3682,7 +4503,7 @@ describe("Campaign Play Game Master", () => {
     const candidate = await createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).plan({
-      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      frame: frame(), ruling: contactRuling, resolution, uncertaintyAuthority: null,
       model: model(), temperature: 0.2, budget,
     });
     expect(candidate.semanticReview.kind).toBe("mechanical_authority");
@@ -3696,6 +4517,7 @@ describe("Campaign Play Game Master", () => {
   });
 
   it("rejects resource consumption and payment hidden inside an ordinary world event", async () => {
+    const contactRuling = ruling();
     const unbackedRepair = {
       ...proposal,
       effects: [{
@@ -3705,7 +4527,7 @@ describe("Campaign Play Game Master", () => {
       }],
     };
     const generateObject = vi.fn()
-      .mockResolvedValueOnce({ object: unbackedRepair, trace: trace() })
+      .mockResolvedValueOnce({ object: contactProposalForRuling(unbackedRepair, contactRuling), trace: trace() })
       .mockResolvedValueOnce({
         object: {
           verdict: "rejected",
@@ -3732,6 +4554,7 @@ describe("Campaign Play Game Master", () => {
   });
 
   it("keeps document procedure dialogue separate from actor resources and route access", async () => {
+    const contactRuling = ruling();
     const documentProcedure = {
       ...proposal,
       effects: [{
@@ -3741,7 +4564,7 @@ describe("Campaign Play Game Master", () => {
       }],
     };
     const generateObject = vi.fn()
-      .mockResolvedValueOnce({ object: documentProcedure, trace: trace() })
+      .mockResolvedValueOnce({ object: contactProposalForRuling(documentProcedure, contactRuling), trace: trace() })
       .mockResolvedValueOnce({
         object: {
           verdict: "accepted",
@@ -3793,7 +4616,7 @@ describe("Campaign Play Game Master", () => {
       }],
     };
     const generateObject = vi.fn()
-      .mockResolvedValueOnce({ object: grounded, trace: trace() })
+      .mockResolvedValueOnce({ object: contactProposalForRuling(grounded, routeRuling), trace: trace() })
       .mockResolvedValueOnce({
         object: { verdict: "accepted", reason: reviewReason },
         trace: trace(),
@@ -3818,6 +4641,16 @@ describe("Campaign Play Game Master", () => {
   });
 
   it("offers only the Judge-authorized resource effect in the per-turn schema and prompt", async () => {
+    const acquisitionRuling = ruling({
+      possessionEffectAuthority: {
+        kind: "adjust_actor_possession",
+        enforcement: "required",
+        operation: "acquire",
+        possessionHandle: null,
+        quantity: 2,
+        minimumResult: "success",
+      },
+    });
     const acquisitionProposal = {
       elapsedMinutes: 1,
       effects: [{
@@ -3832,7 +4665,7 @@ describe("Campaign Play Game Master", () => {
       }, guardResponseEffect],
     };
     const generateObject = vi.fn()
-      .mockResolvedValueOnce({ object: acquisitionProposal, trace: trace() })
+      .mockResolvedValueOnce({ object: contactProposalForRuling(acquisitionProposal, acquisitionRuling), trace: trace() })
       .mockResolvedValueOnce({
         object: {
           verdict: "accepted",
@@ -3844,16 +4677,7 @@ describe("Campaign Play Game Master", () => {
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).plan({
       frame: frame(),
-      ruling: ruling({
-        possessionEffectAuthority: {
-          kind: "adjust_actor_possession",
-          enforcement: "required",
-          operation: "acquire",
-          possessionHandle: null,
-          quantity: 2,
-          minimumResult: "success",
-        },
-      }),
+      ruling: acquisitionRuling,
       resolution,
       uncertaintyAuthority: null,
       model: model(),
@@ -3862,7 +4686,7 @@ describe("Campaign Play Game Master", () => {
     });
 
     const options = generateObject.mock.calls[0]![0];
-    expect(options.schema.safeParse(acquisitionProposal).success).toBe(true);
+    expect(options.schema.safeParse(contactProposalForRuling(acquisitionProposal, acquisitionRuling)).success).toBe(true);
     expect(String(options.prompt)).toContain('PERMITTED_RESOURCE_EFFECT_KINDS=["adjust_actor_possession"]');
     expect(String(options.prompt)).toContain("Use adjust_actor_possession whenever");
     expect(String(options.prompt)).toContain("The transform name must identify the post-transform possession and must differ from the source possession name");
@@ -3914,7 +4738,7 @@ describe("Campaign Play Game Master", () => {
       }, guardResponseEffect],
     };
     const generateObject = vi.fn()
-      .mockResolvedValueOnce({ object: acquisitionProposal, trace: trace() })
+      .mockResolvedValueOnce({ object: contactProposalForRuling(acquisitionProposal, acquisitionRuling), trace: trace() })
       .mockResolvedValueOnce({
         object: {
           verdict: "accepted",
@@ -3990,7 +4814,7 @@ describe("Campaign Play Game Master", () => {
     };
     const generateObject = vi.fn()
       .mockResolvedValueOnce({
-        object: { elapsedMinutes: 1, effects: [inspectionEvent] },
+        object: contactProposalForRuling({ elapsedMinutes: 1, effects: [inspectionEvent] }, inspectionRuling),
         trace: trace(),
       })
       .mockResolvedValueOnce({
@@ -5297,9 +6121,10 @@ describe("Campaign Play Game Master", () => {
   });
 
   it("does not count thinking tokens against the visible output budget", async () => {
+    const contactRuling = ruling();
     const generateObject = vi.fn()
       .mockResolvedValueOnce({
-        object: proposal,
+        object: contactProposalForRuling(proposal, contactRuling),
         trace: trace("native_schema", {
           inputTokens: 100,
           outputTokens: 32_100,
@@ -5320,7 +6145,7 @@ describe("Campaign Play Game Master", () => {
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).plan({
       frame: frame(),
-      ruling: ruling(),
+      ruling: contactRuling,
       resolution,
       uncertaintyAuthority: null,
       model: model(),
@@ -5579,6 +6404,1449 @@ describe("Campaign Play Game Master", () => {
   });
 });
 
+describe("Campaign Play Game Master generic contact proposer", () => {
+  it("requires a pending decision for a pure non-monetary one-actor contact choice", async () => {
+    const method = "Ask calmly about the ledger";
+    const genericRuling = genericActorContactRuling(method);
+    const summary = "Choose whether to hear the guard's account now or leave the gate.";
+    const offerProposal = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        summary: "The guard offers a choice: hear his account now or leave the gate.",
+      }],
+      decisionProposal: {
+        kind: "offer" as const,
+        contactDetail: method,
+        summary,
+        acceptLabel: "Hear the account",
+        declineLabel: "Leave the gate",
+        acceptEffect: null,
+      },
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: offerProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The guard's pure non-monetary choice remains a pending player decision.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(),
+      ruling: genericRuling,
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+    });
+
+    const proposerSchema = generateObject.mock.calls[0]![0].schema as z.ZodType<unknown>;
+    expect(proposerSchema.safeParse(offerProposal).success).toBe(true);
+    const { decisionProposal: _omittedDecisionProposal, ...offerWithoutDecision } = offerProposal;
+    expect(proposerSchema.safeParse(offerWithoutDecision).success).toBe(false);
+    expect(candidate.batch.commands.map((command) => command.kind)).toEqual([
+      "advance_world_time",
+      "record_world_event",
+      "decision_open",
+    ]);
+    expect(candidate.batch.commands[2]).toMatchObject({
+      kind: "decision_open",
+      actorId: "actor-guard",
+      actorHandle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-guard"),
+      decisionKind: "offer",
+      summary,
+      acceptLabel: "Hear the account",
+      declineLabel: "Leave the gate",
+      acceptEffect: null,
+    });
+    expect(candidate.batch.commands).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "adjust_actor_possession" }),
+      expect.objectContaining({ kind: "incur_actor_obligation" }),
+      expect.objectContaining({ kind: "pay_actor_obligation" }),
+      expect.objectContaining({ kind: "set_route_state" }),
+      expect.objectContaining({ kind: "move_actor" }),
+    ]));
+  });
+
+  it("keeps a full-authority one-actor contact with kind none as ordinary dialogue", async () => {
+    const method = "Ask calmly about the ledger";
+    const genericRuling = genericActorContactRuling(method);
+    const noneProposal = contactProposal(proposal, method);
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: noneProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The guard answers without opening a consequential choice.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(),
+      ruling: genericRuling,
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+    });
+
+    expect(candidate.batch.commands.map((command) => command.kind)).toEqual([
+      "advance_world_time",
+      "record_world_event",
+    ]);
+    expect(candidate.batch.commands.some((command) => command.kind === "decision_open")).toBe(false);
+    expect(candidate.batch.commands[1]).toMatchObject({
+      kind: "record_world_event",
+      eventClass: "dialogue",
+      performingActorId: "actor-guard",
+    });
+  });
+
+  it("rejects a generic contact that reopens a completed paid delivery", async () => {
+    const method = "Ask about the completed parcel delivery";
+    const genericRuling = genericActorContactRuling(method);
+    const staleProposal = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        summary: "Oren reaccepts the completed sealed-parcel delivery and confirms the same eight copper terms.",
+      }],
+      decisionProposal: contactDecisionNone(method),
+      lifecycleAssertion: "reopen_completed_commitment" as const,
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: staleProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "rejected",
+          reason: "Generic contact cannot reopen completed delivery terms.",
+          failedChecks: ["other_mechanical_authority_mismatch"],
+        },
+        trace: trace(),
+    });
+    const contactFrame = completedPaidDeliveryContactFrame();
+    const before = structuredClone(contactFrame);
+    let candidate: unknown;
+    let thrown: unknown;
+    try {
+      candidate = await createCampaignPlayGameMaster({
+        generateObject: generateObject as unknown as typeof safeGenerateObject,
+      }).plan({
+        frame: contactFrame,
+        ruling: genericRuling,
+        resolution,
+        uncertaintyAuthority: null,
+        model: model(),
+        temperature: 0.2,
+        budget,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({
+      code: "model_contract_failed",
+      modelEvidence: expect.objectContaining({ errorCode: "mechanical_authority_rejected" }),
+    });
+    expect(getCampaignPlayGameMasterRecoveryFeedback(thrown)).toEqual({
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [{
+        check: "mechanical_authority_rejected",
+        reviewFailedChecks: ["other_mechanical_authority_mismatch"],
+      }],
+    });
+    expect(candidate).toBeUndefined();
+    expect(contactFrame).toEqual(before);
+    expect(generateObject).toHaveBeenCalledTimes(2);
+    const proposerPrompt = String(generateObject.mock.calls[0]![0].prompt);
+    expect(proposerPrompt).toContain("CONTACT_LIFECYCLE_CONTEXT=");
+    expect(proposerPrompt).toContain("lifecycleAssertion is required");
+    const reviewerPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    expect(reviewerPrompt).toContain('"lifecycleAssertion":"reopen_completed_commitment"');
+    expect(reviewerPrompt).toContain("other_mechanical_authority_mismatch");
+    const proposerSchema = generateObject.mock.calls[0]![0].schema as z.ZodType<unknown>;
+    expect(proposerSchema.safeParse(staleProposal).success).toBe(true);
+    const { lifecycleAssertion: _omittedLifecycleAssertion, ...staleWithoutAssertion } = staleProposal;
+    expect(proposerSchema.safeParse(staleWithoutAssertion).success).toBe(false);
+  });
+
+  it("rejects stale reacceptance mislabeled as an ordinary contact response", async () => {
+    const method = "Ask about the completed parcel delivery";
+    const genericRuling = genericActorContactRuling(method);
+    const staleMislabelledProposal = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        summary: "Oren resets the completed sealed-parcel delivery and reaccepts the same eight copper terms.",
+      }],
+      decisionProposal: contactDecisionNone(method),
+      lifecycleAssertion: "contact_response" as const,
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: staleMislabelledProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "rejected",
+          reason: "The event reopens completed delivery terms despite its contact-response label.",
+          failedChecks: ["other_mechanical_authority_mismatch"],
+        },
+        trace: trace(),
+    });
+    const contactFrame = completedPaidDeliveryContactFrame();
+    const before = structuredClone(contactFrame);
+    let candidate: unknown;
+    let thrown: unknown;
+    try {
+      candidate = await createCampaignPlayGameMaster({
+        generateObject: generateObject as unknown as typeof safeGenerateObject,
+      }).plan({
+        frame: contactFrame,
+        ruling: genericRuling,
+        resolution,
+        uncertaintyAuthority: null,
+        model: model(),
+        temperature: 0.2,
+        budget,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({
+      code: "model_contract_failed",
+      modelEvidence: expect.objectContaining({ errorCode: "mechanical_authority_rejected" }),
+    });
+    expect(getCampaignPlayGameMasterRecoveryFeedback(thrown)).toEqual({
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [{
+        check: "mechanical_authority_rejected",
+        reviewFailedChecks: ["other_mechanical_authority_mismatch"],
+      }],
+    });
+    expect(candidate).toBeUndefined();
+    expect(contactFrame).toEqual(before);
+    expect(generateObject).toHaveBeenCalledTimes(2);
+    const reviewerPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    expect(reviewerPrompt).toContain("Oren resets the completed sealed-parcel delivery");
+    expect(reviewerPrompt).toContain('"lifecycleAssertion":"contact_response"');
+    expect(reviewerPrompt).toContain("other_mechanical_authority_mismatch");
+  });
+
+  it("accepts ordinary contact status on a completed paid delivery without payment effects", async () => {
+    const method = "Ask about the completed parcel delivery";
+    const genericRuling = genericActorContactRuling(method);
+    const statusProposal = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        summary: "Oren acknowledges the completed sealed-parcel delivery and confirms that eight copper remains due.",
+      }],
+      decisionProposal: contactDecisionNone(method),
+      lifecycleAssertion: "contact_response" as const,
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: statusProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The status response leaves the completed commitment and receivable unchanged.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+    const contactFrame = completedPaidDeliveryContactFrame();
+    const before = structuredClone(contactFrame);
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: contactFrame,
+      ruling: genericRuling,
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+    });
+    expect(candidate.batch.commands.map((command) => command.kind)).toEqual([
+      "advance_world_time",
+      "record_world_event",
+    ]);
+    expect(candidate.batch.commands).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "decision_open" }),
+      expect.objectContaining({ kind: "decision_resolve" }),
+      expect.objectContaining({ kind: "create_player_commitment" }),
+      expect.objectContaining({ kind: "adjust_actor_possession" }),
+      expect.objectContaining({ kind: "pay_actor_obligation" }),
+      expect.objectContaining({ kind: "incur_actor_obligation" }),
+    ]));
+    expect(contactFrame).toEqual(before);
+    const proposerSchema = generateObject.mock.calls[0]![0].schema as z.ZodType<unknown>;
+    expect(proposerSchema.safeParse(statusProposal).success).toBe(true);
+    const reviewerPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    expect(reviewerPrompt).toContain('"lifecycleAssertion":"contact_response"');
+    expect(reviewerPrompt).toContain("outstandingReceivable");
+  });
+
+  it("preserves typed paid delivery for a generic one-actor contact", async () => {
+    const method = "Ask about paid delivery";
+    const genericRuling = genericActorContactRuling(method, "Decide whether to carry the parcel");
+    const paidProposal = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        summary: "The guard offers eight copper to carry a sealed parcel to South Harbor.",
+      }],
+      decisionProposal: {
+        kind: "paid_delivery" as const,
+        contactDetail: method,
+        summary: "The guard offers eight copper for a sealed parcel delivered to South Harbor.",
+        acceptLabel: "Take the delivery",
+        declineLabel: "Decline the delivery",
+        acceptEffect: {
+          kind: "paid_delivery" as const,
+          title: "Carry the sealed parcel",
+          subjectName: "Sealed parcel",
+          destinationHandle: "south",
+          feeUnit: "copper" as const,
+          feeAmount: 8,
+          paymentTiming: "on_completion" as const,
+          dueInMinutes: 10,
+        },
+      },
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: paidProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The typed delivery offer remains pending until accepted.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(),
+      ruling: genericRuling,
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+    });
+
+    const decision = candidate.batch.commands.find((command) => command.kind === "decision_open");
+    expect(decision).toMatchObject({
+      kind: "decision_open",
+      actorId: "actor-guard",
+      decisionKind: "offer",
+      acceptEffect: {
+        kind: "paid_delivery",
+        title: "Carry the sealed parcel",
+        subjectName: "Sealed parcel",
+        destinationHandle: deriveCampaignPlayPublicHandle("location", CAMPAIGN_ID, "location-b"),
+        feeUnit: "copper",
+        feeAmount: 8,
+        paymentTiming: "on_completion",
+        dueInMinutes: 10,
+      },
+    });
+  });
+
+  it("compiles an explicitly accepted copper delivery into one atomic proposal, acceptance, and commitment", async () => {
+    const method = "Ask about a paid delivery";
+    const genericRuling = genericActorContactRuling(method, "Decide whether to carry the sealed parcel");
+    const acceptedDeal = {
+      contactDetail: method,
+      counterpartyActorHandle: "guard",
+      summary: "Oren accepts eight copper for the sealed parcel delivered to South Harbor Market.",
+      acceptLabel: "Accept the delivery",
+      declineLabel: "Decline the delivery",
+      acceptEffect: {
+        kind: "paid_delivery" as const,
+        title: "Carry the sealed parcel",
+        subjectName: "Sealed parcel",
+        destinationHandle: "south",
+        feeUnit: "copper" as const,
+        feeAmount: 8,
+        paymentTiming: "on_completion" as const,
+        dueInMinutes: 10,
+      },
+      completionCondition: "deliver_subject_to_destination" as const,
+    };
+    const acceptedProposal = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        summary: "Oren explicitly accepts the player's eight-copper delivery proposal for South Harbor Market.",
+      }],
+      decisionProposal: contactDecisionNone(method),
+      acceptedDeal,
+    };
+    const generateObject = vi.fn(async (options: { prompt?: unknown; schema?: unknown }) => {
+      if (String(options.prompt).includes("You are the Mechanical Authority Reviewer.")) {
+        return {
+          object: {
+            verdict: "accepted",
+            reason: "The NPC acceptance and typed delivery terms are grounded.",
+            failedChecks: [],
+          },
+          trace: trace(),
+        };
+      }
+      return { object: acceptedProposal, trace: trace() };
+    });
+    const gameMaster = createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    const request = {
+      frame: frame(),
+      ruling: genericRuling,
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+    } as const;
+
+    const first = await gameMaster.plan(request);
+    const second = await gameMaster.plan({ ...request, frame: structuredClone(request.frame) });
+    const proposerSchema = generateObject.mock.calls[0]![0].schema as z.ZodType<unknown>;
+    expect(proposerSchema.safeParse(acceptedProposal).success).toBe(true);
+    expect(first.batch).toEqual(second.batch);
+    expect(first.batch.commands.map((command) => command.kind)).toEqual([
+      "advance_world_time",
+      "record_world_event",
+      "decision_open",
+      "decision_resolve",
+      "create_player_commitment",
+    ]);
+    expect(first.batch.commands.filter((command) => command.kind === "decision_open")).toHaveLength(1);
+    expect(first.batch.commands.filter((command) => command.kind === "decision_resolve")).toHaveLength(1);
+    expect(first.batch.commands.filter((command) => command.kind === "create_player_commitment")).toHaveLength(1);
+    const decisionKey = deriveCampaignPlayDecisionKey(CAMPAIGN_ID, TURN_ID, "actor-guard", "offer");
+    const commitmentId = deriveCampaignPlayCommitmentId(CAMPAIGN_ID, decisionKey);
+    const destinationHandle = deriveCampaignPlayPublicHandle("location", CAMPAIGN_ID, "location-b");
+    expect(first.batch.commands[2]).toMatchObject({
+      kind: "decision_open",
+      decisionKey,
+      actorId: "actor-guard",
+      sourceTurnId: TURN_ID,
+      summary: acceptedDeal.summary,
+      acceptLabel: acceptedDeal.acceptLabel,
+      declineLabel: acceptedDeal.declineLabel,
+      acceptEffect: {
+        kind: "paid_delivery",
+        title: acceptedDeal.acceptEffect.title,
+        subjectName: acceptedDeal.acceptEffect.subjectName,
+        destinationHandle,
+        feeUnit: "copper",
+        feeAmount: 8,
+        paymentTiming: "on_completion",
+        dueInMinutes: 10,
+      },
+    });
+    expect(first.batch.commands[3]).toMatchObject({
+      kind: "decision_resolve",
+      decisionKey,
+      actorId: "actor-guard",
+      sourceTurnId: TURN_ID,
+      selectedLabel: acceptedDeal.acceptLabel,
+      disposition: "accept",
+    });
+    expect(first.batch.commands[4]).toMatchObject({
+      kind: "create_player_commitment",
+      commitmentId,
+      sourceDecisionKey: decisionKey,
+      sourceTurnId: TURN_ID,
+      performerActorId: PLAYER_ID,
+      counterpartyActorId: "actor-guard",
+      title: acceptedDeal.acceptEffect.title,
+      subjectName: acceptedDeal.acceptEffect.subjectName,
+      destinationHandle,
+      acceptedWorldTimeMinutes: 11,
+      dueWorldTimeMinutes: 21,
+      commitmentKind: "paid_delivery",
+      feeUnit: "copper",
+      feeAmount: 8,
+      paymentTiming: "on_completion",
+    });
+    expect(new Set(first.batch.commands.map((command) => command.commandId)).size)
+      .toBe(first.batch.commands.length);
+    expect(first.preflight.accepted).toBe(true);
+  });
+
+  it("rejects an accepted deal paired with a non-none decision", async () => {
+    const method = "Ask about a paid delivery";
+    const genericRuling = genericActorContactRuling(method);
+    const acceptedDeal = {
+      contactDetail: method,
+      counterpartyActorHandle: "guard",
+      summary: "Oren accepts eight copper for the sealed parcel delivered to South Harbor Market.",
+      acceptLabel: "Accept the delivery",
+      declineLabel: "Decline the delivery",
+      acceptEffect: {
+        kind: "paid_delivery" as const,
+        title: "Carry the sealed parcel",
+        subjectName: "Sealed parcel",
+        destinationHandle: "south",
+        feeUnit: "copper" as const,
+        feeAmount: 8,
+        paymentTiming: "on_completion" as const,
+        dueInMinutes: 10,
+      },
+      completionCondition: "deliver_subject_to_destination" as const,
+    };
+    const contradictoryProposal = {
+      ...proposal,
+      decisionProposal: {
+        kind: "offer" as const,
+        contactDetail: method,
+        summary: "Choose whether to carry the parcel.",
+        acceptLabel: "Take it",
+        declineLabel: "Leave it",
+        acceptEffect: null,
+      },
+      acceptedDeal,
+    };
+    const generateObject = vi.fn().mockResolvedValue({ object: contradictoryProposal, trace: trace() });
+    await expect(createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(),
+      ruling: genericRuling,
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+    })).rejects.toMatchObject({ code: "model_contract_failed" });
+    expect(generateObject).toHaveBeenCalledOnce();
+    const proposerSchema = generateObject.mock.calls[0]![0].schema as z.ZodType<unknown>;
+    expect(proposerSchema.safeParse(contradictoryProposal).success).toBe(false);
+  });
+
+  it("rejects accepted deals with an unstable counterparty or unauthorized destination", async () => {
+    const method = "Ask about a paid delivery";
+    const genericRuling = genericActorContactRuling(method);
+    const acceptedDeal = {
+      contactDetail: method,
+      counterpartyActorHandle: "guard",
+      summary: "Oren accepts eight copper for the sealed parcel delivered to South Harbor Market.",
+      acceptLabel: "Accept the delivery",
+      declineLabel: "Decline the delivery",
+      acceptEffect: {
+        kind: "paid_delivery" as const,
+        title: "Carry the sealed parcel",
+        subjectName: "Sealed parcel",
+        destinationHandle: "south",
+        feeUnit: "copper" as const,
+        feeAmount: 8,
+        paymentTiming: "on_completion" as const,
+        dueInMinutes: 10,
+      },
+      completionCondition: "deliver_subject_to_destination" as const,
+    };
+    const cases = [
+      {
+        label: "counterparty",
+        frame: frame(),
+        deal: { ...acceptedDeal, counterpartyActorHandle: "you" },
+        schemaAccepted: true,
+      },
+      {
+        label: "destination",
+        frame: frame(),
+        deal: {
+          ...acceptedDeal,
+          acceptEffect: { ...acceptedDeal.acceptEffect, destinationHandle: "guard" },
+        },
+        schemaAccepted: true,
+      },
+    ] as const;
+    for (const testCase of cases) {
+      const rejectedProposal = {
+        ...proposal,
+        decisionProposal: contactDecisionNone(method),
+        acceptedDeal: testCase.deal,
+      };
+      const generateObject = vi.fn().mockResolvedValue({ object: rejectedProposal, trace: trace() });
+      await expect(createCampaignPlayGameMaster({
+        generateObject: generateObject as unknown as typeof safeGenerateObject,
+      }).plan({
+        frame: testCase.frame,
+        ruling: genericRuling,
+        resolution,
+        uncertaintyAuthority: null,
+        model: model(),
+        temperature: 0.2,
+        budget,
+      }), testCase.label).rejects.toMatchObject({ code: "model_contract_failed" });
+      expect(generateObject, testCase.label).toHaveBeenCalledOnce();
+      const proposerSchema = generateObject.mock.calls[0]![0].schema as z.ZodType<unknown>;
+      expect(proposerSchema.safeParse(rejectedProposal).success, testCase.label)
+        .toBe(testCase.schemaAccepted);
+    }
+  });
+
+  it("fails closed on unsupported silver or unstructured accepted-deal terms", async () => {
+    const method = "Ask about a paid delivery";
+    const genericRuling = genericActorContactRuling(method);
+    const acceptedDeal = {
+      contactDetail: method,
+      counterpartyActorHandle: "guard",
+      summary: "Oren accepts a payment for the sealed parcel delivered to South Harbor Market.",
+      acceptLabel: "Accept the delivery",
+      declineLabel: "Decline the delivery",
+      acceptEffect: {
+        kind: "paid_delivery" as const,
+        title: "Carry the sealed parcel",
+        subjectName: "Sealed parcel",
+        destinationHandle: "south",
+        feeUnit: "copper" as const,
+        feeAmount: 8,
+        paymentTiming: "on_completion" as const,
+        dueInMinutes: 10,
+      },
+      completionCondition: "deliver_subject_to_destination" as const,
+    };
+    const malformedDeals = [
+      {
+        label: "silver",
+        deal: {
+          ...acceptedDeal,
+          acceptEffect: { ...acceptedDeal.acceptEffect, feeUnit: "silver" },
+        },
+      },
+      {
+        label: "unstructured",
+        deal: { ...acceptedDeal, acceptEffect: "eight copper" },
+      },
+    ] as const;
+    for (const testCase of malformedDeals) {
+      const malformedProposal = {
+        ...proposal,
+        decisionProposal: contactDecisionNone(method),
+        acceptedDeal: testCase.deal,
+      };
+      const generateObject = vi.fn().mockResolvedValue({ object: malformedProposal, trace: trace() });
+      await expect(createCampaignPlayGameMaster({
+        generateObject: generateObject as unknown as typeof safeGenerateObject,
+      }).plan({
+        frame: frame(),
+        ruling: genericRuling,
+        resolution,
+        uncertaintyAuthority: null,
+        model: model(),
+        temperature: 0.2,
+        budget,
+      }), testCase.label).rejects.toMatchObject({ code: "model_contract_failed" });
+      expect(generateObject, testCase.label).toHaveBeenCalledOnce();
+      const proposerSchema = generateObject.mock.calls[0]![0].schema as z.ZodType<unknown>;
+      expect(proposerSchema.safeParse(malformedProposal).success, testCase.label).toBe(false);
+    }
+  });
+
+  it("keeps vague contact prose non-mechanical and preserves the existing NPC-offer path", async () => {
+    const method = "Ask about a paid delivery";
+    const genericRuling = genericActorContactRuling(method);
+    const vagueProposal = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        summary: "The guard hears a vague request and offers no commitment; a named fishmonger mentions a copper price in passing.",
+      }],
+      decisionProposal: contactDecisionNone(method),
+    };
+    const vagueGenerateObject = vi.fn()
+      .mockResolvedValueOnce({ object: vagueProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The vague contact remains prose-only.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+    const vagueCandidate = await createCampaignPlayGameMaster({
+      generateObject: vagueGenerateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(),
+      ruling: genericRuling,
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+    });
+    expect(vagueCandidate.batch.commands.map((command) => command.kind)).toEqual([
+      "advance_world_time",
+      "record_world_event",
+    ]);
+    expect(vagueCandidate.batch.commands.some((command) => command.kind === "create_player_commitment")).toBe(false);
+    expect(vagueCandidate.batch.commands.some((command) => command.kind === "decision_open")).toBe(false);
+
+    const offerProposal = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        summary: "The guard offers eight copper to carry the sealed parcel to South Harbor Market.",
+      }],
+      decisionProposal: {
+        kind: "paid_delivery" as const,
+        contactDetail: method,
+        summary: "The guard offers eight copper for the sealed parcel delivered to South Harbor Market.",
+        acceptLabel: "Take the delivery",
+        declineLabel: "Decline the delivery",
+        acceptEffect: {
+          kind: "paid_delivery" as const,
+          title: "Carry the sealed parcel",
+          subjectName: "Sealed parcel",
+          destinationHandle: "south",
+          feeUnit: "copper" as const,
+          feeAmount: 8,
+          paymentTiming: "on_completion" as const,
+          dueInMinutes: 10,
+        },
+      },
+    };
+    const offerGenerateObject = vi.fn()
+      .mockResolvedValueOnce({ object: offerProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The existing NPC offer remains a pending decision.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+    const offerCandidate = await createCampaignPlayGameMaster({
+      generateObject: offerGenerateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(),
+      ruling: genericRuling,
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+    });
+    expect(offerCandidate.batch.commands.map((command) => command.kind)).toEqual([
+      "advance_world_time",
+      "record_world_event",
+      "decision_open",
+    ]);
+    expect(offerCandidate.batch.commands.filter((command) => command.kind === "decision_open")).toHaveLength(1);
+    expect(offerCandidate.batch.commands.some((command) => command.kind === "decision_resolve")).toBe(false);
+    expect(offerCandidate.batch.commands.some((command) => command.kind === "create_player_commitment")).toBe(false);
+  });
+
+  it("requires decisionProposal in the generic tool schema for one-actor contact", async () => {
+    const method = "Ask calmly about the ledger";
+    const genericRuling = genericActorContactRuling(method);
+    const toolProposal = contactToolTransportForRuling(
+      toolTransport(proposal.elapsedMinutes, proposal.effects),
+      genericRuling,
+    );
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({
+        object: toolProposal,
+        trace: trace("tool_mode", undefined, "tool"),
+      })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The generic contact response remains within the supplied authority.",
+          failedChecks: [],
+        },
+        trace: trace("tool_mode", undefined, "tool"),
+      });
+
+    await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(),
+      ruling: genericRuling,
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      structuredOutputMode: "tool",
+    });
+
+    const proposerSchema = generateObject.mock.calls[0]![0].schema as z.ZodType<unknown>;
+    expect(proposerSchema.safeParse(toolProposal).success).toBe(true);
+    const { decisionProposal: _omittedDecisionProposal, ...toolWithoutDecision } = toolProposal;
+    expect(proposerSchema.safeParse(toolWithoutDecision).success).toBe(false);
+  });
+
+  it("rejects a contact target outside the player's current location before provider generation", async () => {
+    const separatedFrame = frame();
+    const targetPlacement = separatedFrame.rulebookFrame.placements.find((placement) =>
+      placement.actorId === "actor-guard" && placement.placementKind === "present",
+    );
+    if (targetPlacement === undefined) throw new Error("contact fixture target placement is missing");
+    targetPlacement.locationId = "location-b";
+    const generateObject = vi.fn();
+
+    await expect(createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: separatedFrame,
+      ruling: genericActorContactRuling(),
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+    })).rejects.toMatchObject({ code: "ruling_invalid" });
+    expect(generateObject).not.toHaveBeenCalled();
+  });
+
+  it("keeps the non-contact generic provider shape valid without decisionProposal", async () => {
+    const nonContactRuling = scopeOverflowRuling();
+    const nonContactProposal = {
+      elapsedMinutes: 1,
+      effects: [scopeDiscoveryEffect(["here"])],
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: nonContactProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The visible inspection remains a non-contact discovery.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: scopeOverflowFrame(),
+      ruling: nonContactRuling,
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+    });
+
+    expect(candidate.preflight.accepted).toBe(true);
+    const schema = generateObject.mock.calls[0]![0].schema as z.ZodType<unknown>;
+    expect(schema.safeParse(nonContactProposal).success).toBe(true);
+    expect(schema.safeParse({
+      ...nonContactProposal,
+      decisionProposal: contactDecisionNone("Unexpected contact field"),
+    }).success).toBe(false);
+  });
+
+  it("rejects identity-only support-actor materialization without a continuing stake", () => {
+    const identityOnlyRuling = ruling({
+      normalizedIntent: {
+        originalText: "I call to the nearby workers.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "contact",
+        targets: [{ handle: "here", kind: "location" }],
+        method: "Call to the nearby workers",
+        stakes: null,
+      },
+      citedVisibleFactHandles: ["here"],
+      reason: "Nearby residents can hear the call.",
+    });
+
+    expect(() => createCampaignPlayGameMaster().compile(
+      frame(),
+      identityOnlyRuling,
+      resolution,
+      null,
+      {
+        elapsedMinutes: 2,
+        effects: [
+          {
+            kind: "materialize_support_actor",
+            actorHandle: "introduced-support-actor",
+            name: "Sella Rook",
+            summary: "A rope mender with a torn work boot.",
+            goal: "Find work before rain closes the bridge market.",
+            motivation: "Keep the family workshop supplied.",
+            nextIntentKind: "contact",
+            observableTrace: "Sella tests a frayed rope by hand.",
+            cadenceMinutes: 30,
+          },
+          {
+            kind: "record_world_event",
+            eventClass: "dialogue",
+            performingActorHandle: "introduced-support-actor",
+            summary: "A named resident steps forward and answers the call.",
+            affectedHandles: ["you", "here", "introduced-support-actor"],
+          },
+        ],
+      },
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+  });
+
+  it("fails closed on malformed generic decision fields in native and tool output", async () => {
+    const method = "Ask calmly about the ledger";
+    const genericRuling = genericActorContactRuling(method);
+    const malformedNative = {
+      ...proposal,
+      decisionProposal: {
+        kind: "offer",
+        contactDetail: "A different accepted method",
+        summary: "Bring the missing ledger.",
+        acceptLabel: "Bring it",
+        declineLabel: "Leave it",
+        acceptEffect: null,
+      },
+    };
+    const malformedToolBase = contactToolTransportForRuling(
+      toolTransport(proposal.elapsedMinutes, proposal.effects),
+      genericRuling,
+    );
+    const malformedTool = {
+      ...malformedToolBase,
+      decisionProposal: {
+        ...(malformedToolBase.decisionProposal as Record<string, unknown>),
+        contactDetail: "A different accepted method",
+      },
+    };
+    const runMalformed = async (
+      structuredOutputMode: "auto" | "tool",
+      object: Record<string, unknown>,
+      outputTrace: SafeGenerateTrace,
+    ) => {
+      const generateObject = vi.fn().mockResolvedValueOnce({ object, trace: outputTrace });
+      await expect(createCampaignPlayGameMaster({
+        generateObject: generateObject as unknown as typeof safeGenerateObject,
+      }).plan({
+        frame: frame(),
+        ruling: genericRuling,
+        resolution,
+        uncertaintyAuthority: null,
+        model: model(),
+        temperature: 0.2,
+        budget,
+        structuredOutputMode,
+      })).rejects.toMatchObject({ code: "model_contract_failed" });
+      expect(generateObject).toHaveBeenCalledOnce();
+    };
+
+    await runMalformed("auto", malformedNative, trace());
+    await runMalformed("tool", malformedTool, trace("tool_mode", undefined, "tool"));
+  });
+});
+
+describe("Campaign Play certified contact proposer", () => {
+  it("captures a compact contact prompt and schema without universal branches", async () => {
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: certifiedContactProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The target actor answers the delivered question.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+    await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(),
+      ruling: certifiedContactRuling(),
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      contract: "certified_contact",
+    });
+
+    const proposerCall = generateObject.mock.calls[0]![0];
+    const promptText = String(proposerCall.prompt);
+    for (const required of [
+      "SOURCE_MOMENT=",
+      "PLAYER_PROFILE=",
+      "PLAYER_INTENT=",
+      "RULING=",
+      "RESOLUTION=",
+      "TARGET_ACTOR_DIRECTIVES=",
+      "TARGET_ACTOR_CONTINUITY=",
+      "REQUIRED_TARGET_RESPONSE=",
+      "CANONICAL_PEOPLE=",
+      "HANDLE_BINDINGS=",
+      "EVENT_RULE=",
+    ]) {
+      expect(promptText).toContain(required);
+    }
+    for (const forbidden of [
+      "VISIBLE_FACTS=",
+      "PLAYER_MOVEMENT=",
+      "ROUTE_AUTHORITY=",
+      "OBLIGATION_AUTHORITY=",
+      "PERMITTED_RESOURCE_EFFECT_KINDS=",
+      "move_actor",
+      "enter_local_scene",
+      "set_route_state",
+      "adjust_actor_possession",
+      "materialize_support_actor",
+      "incur_actor_obligation",
+      "pay_actor_obligation",
+    ]) {
+      expect(promptText).not.toContain(forbidden);
+    }
+
+    const schema = proposerCall.schema as z.ZodType<unknown>;
+    const schemaText = JSON.stringify(z.toJSONSchema(schema));
+    expect(schemaText).toContain("record_world_event");
+    expect(schemaText).not.toContain("move_actor");
+    expect(schemaText).not.toContain("enter_local_scene");
+    expect(schemaText).not.toContain("set_route_state");
+    expect(schemaText).not.toContain("adjust_actor_possession");
+    expect(schemaText).not.toContain("materialize_support_actor");
+    expect(schemaText).not.toContain("incur_actor_obligation");
+    expect(schemaText).not.toContain("pay_actor_obligation");
+    expect(schema.safeParse(certifiedContactProposal).success).toBe(true);
+    expect(schema.safeParse({
+      ...certifiedContactProposal,
+      effects: [...certifiedContactProposal.effects, certifiedContactProposal.effects[0]],
+    }).success).toBe(false);
+    expect(schema.safeParse({
+      ...certifiedContactProposal,
+      effects: [{ ...certifiedContactProposal.effects[0], performingActorHandle: "you" }],
+    }).success).toBe(false);
+    const reviewerPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    expect(reviewerPrompt).toContain('"decisionProposal"');
+    expect(reviewerPrompt).toContain('"kind":"none"');
+  });
+
+  it("compiles accepted contact output to one compiler-owned minute and one target response", async () => {
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: certifiedContactProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The target actor response grounds the contact.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(),
+      ruling: certifiedContactRuling(),
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      contract: "certified_contact",
+    });
+    expect(generateObject).toHaveBeenCalledTimes(2);
+    expect(candidate.batch.commands.map((command) => command.kind)).toEqual([
+      "advance_world_time",
+      "record_world_event",
+    ]);
+    expect(candidate.batch.commands[0]).toMatchObject({
+      kind: "advance_world_time",
+      elapsedMinutes: 1,
+    });
+    expect(candidate.batch.commands[1]).toMatchObject({
+      kind: "record_world_event",
+      eventClass: "dialogue",
+      performingActorId: "actor-guard",
+      affectedRefs: [
+        { kind: "actor", id: PLAYER_ID },
+        { kind: "actor", id: "actor-guard" },
+      ],
+    });
+    expect(candidate.semanticReview.kind).toBe("mechanical_authority");
+  });
+
+  it("compiles an unpaid delivery contact as a typed pending decision without payment terms", async () => {
+    const unpaidContactProposal = {
+      ...certifiedContactProposal,
+      decisionProposal: {
+        kind: "unpaid_delivery" as const,
+        contactDetail: "Ask the guard what happened here",
+        summary: "Carry the sealed route map to the south harbor gate.",
+        acceptLabel: "Carry the route map",
+        declineLabel: "Leave the map",
+        acceptEffect: {
+          kind: "unpaid_delivery" as const,
+          title: "Carry the sealed route map",
+          subjectName: "Sealed route map",
+          destinationHandle: "south",
+          dueInMinutes: 15,
+        },
+      },
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: unpaidContactProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The unpaid delivery is a concrete typed pending commitment.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(),
+      ruling: certifiedContactRuling(),
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      contract: "certified_contact",
+    });
+    const decision = candidate.batch.commands.find((command) => command.kind === "decision_open");
+    if (!decision || decision.kind !== "decision_open") {
+      throw new Error("Expected the unpaid delivery contact to open a decision.");
+    }
+    expect(decision).toMatchObject({
+      kind: "decision_open",
+      decisionKind: "offer",
+      summary: unpaidContactProposal.decisionProposal.summary,
+      acceptEffect: {
+        kind: "unpaid_delivery",
+        title: unpaidContactProposal.decisionProposal.acceptEffect.title,
+        subjectName: unpaidContactProposal.decisionProposal.acceptEffect.subjectName,
+        destinationHandle: deriveCampaignPlayPublicHandle(
+          "location",
+          CAMPAIGN_ID,
+          "location-b",
+        ),
+        dueInMinutes: 15,
+      },
+    });
+    expect(decision.acceptEffect).not.toHaveProperty("feeUnit");
+    expect(decision.acceptEffect).not.toHaveProperty("feeAmount");
+    expect(decision.acceptEffect).not.toHaveProperty("paymentTiming");
+  });
+
+  it("rejects a null-effect work offer and recovers to non-actionable contact", async () => {
+    const offerContactProposal = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        summary: "The guard offers paid work: bring the missing ledger, and he will advance the passage papers and pay the promised copper.",
+      }],
+      decisionProposal: {
+        kind: "offer" as const,
+        contactDetail: "Ask the guard what happened here",
+        summary: "Bring the missing ledger; the guard will advance the passage papers and pay the promised copper.",
+        acceptLabel: "Bring the ledger",
+        declineLabel: "Leave the matter",
+        acceptEffect: null,
+      },
+    };
+    const initialGenerateObject = vi.fn()
+      .mockResolvedValueOnce({ object: offerContactProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "rejected",
+          reason: "The work, payment, and future access terms are a mechanical decision mismatch without typed paid delivery.",
+          failedChecks: ["other_mechanical_authority_mismatch"],
+        },
+        trace: trace(),
+      });
+    let firstError: unknown;
+    try {
+      await createCampaignPlayGameMaster({
+        generateObject: initialGenerateObject as unknown as typeof safeGenerateObject,
+      }).plan({
+        frame: frame(),
+        ruling: certifiedContactRuling(),
+        resolution,
+        uncertaintyAuthority: null,
+        model: model(),
+        temperature: 0.2,
+        budget,
+        contract: "certified_contact",
+      });
+    } catch (error) {
+      firstError = error;
+    }
+    expect(firstError).toMatchObject({
+      code: "model_contract_failed",
+      modelEvidence: expect.objectContaining({ errorCode: "mechanical_authority_rejected" }),
+    });
+    const recoveryFeedback = getCampaignPlayGameMasterRecoveryFeedback(firstError);
+    expect(recoveryFeedback).toEqual({
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [{
+        check: "mechanical_authority_rejected",
+        reviewFailedChecks: ["other_mechanical_authority_mismatch"],
+      }],
+    });
+    const recoveryContactProposal = {
+      ...certifiedContactProposal,
+      effects: [{
+        ...certifiedContactProposal.effects[0],
+        summary: "The guard says the question is not a matter for the gate and returns to his watch.",
+      }],
+    };
+    const recoveryGenerateObject = vi.fn()
+      .mockResolvedValueOnce({ object: recoveryContactProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The recovered contact is ordinary dialogue with no actionable control.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: recoveryGenerateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(),
+      ruling: certifiedContactRuling(),
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      contract: "certified_contact",
+      recoveryFeedback,
+    });
+    expect(candidate.batch.commands.map((command) => command.kind)).toEqual([
+      "advance_world_time",
+      "record_world_event",
+    ]);
+    expect(candidate.batch.commands.some((command) => command.kind === "decision_open")).toBe(false);
+    const proposerPrompt = String(initialGenerateObject.mock.calls[0]![0].prompt);
+    expect(proposerPrompt).toContain("Reserve kind=offer for a pure non-monetary choice");
+    expect(proposerPrompt).toContain("kind=paid_delivery or kind=unpaid_delivery");
+    expect(proposerPrompt).toContain("exact matching typed acceptEffect");
+    const reviewerPrompt = String(initialGenerateObject.mock.calls[1]![0].prompt);
+    expect(reviewerPrompt).toContain('"kind":"offer"');
+    expect(reviewerPrompt).toContain('"acceptEffect":null');
+    expect(reviewerPrompt).toContain("other_mechanical_authority_mismatch");
+    const recoveryPrompt = String(recoveryGenerateObject.mock.calls[0]![0].prompt);
+    expect(recoveryPrompt).toContain("use kind=none with all decision fields null");
+    expect(recoveryGenerateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps an atmospheric named contact and incidental trade as kind none without a decision", async () => {
+    const atmosphericContactProposal = {
+      ...certifiedContactProposal,
+      effects: [{
+        ...certifiedContactProposal.effects[0],
+        summary: "The guard answers while a named fishmonger, Lio, mentions a random copper price; no bargain follows.",
+      }],
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: atmosphericContactProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The contact remains atmospheric and non-actionable.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(),
+      ruling: certifiedContactRuling(),
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      contract: "certified_contact",
+    });
+    expect(atmosphericContactProposal.decisionProposal.kind).toBe("none");
+    expect(candidate.batch.commands.map((command) => command.kind)).toEqual([
+      "advance_world_time",
+      "record_world_event",
+    ]);
+    expect(candidate.batch.commands.some((command) => command.kind === "decision_open")).toBe(false);
+  });
+
+  it("compiles a consequential paid-delivery contact into one pending typed offer", async () => {
+    const paidContactProposal = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        summary: "The guard offers eight copper to carry a sealed parcel to South Harbor.",
+      }],
+      decisionProposal: {
+        kind: "paid_delivery" as const,
+        contactDetail: "Ask the guard what happened here",
+        summary: "The guard offers eight copper for a sealed parcel delivered to South Harbor.",
+        acceptLabel: "Take the delivery",
+        declineLabel: "Decline the delivery",
+        acceptEffect: {
+          kind: "paid_delivery" as const,
+          title: "Carry the sealed parcel",
+          subjectName: "Sealed parcel",
+          destinationHandle: "south",
+          feeUnit: "copper" as const,
+          feeAmount: 8,
+          paymentTiming: "on_completion" as const,
+          dueInMinutes: 10,
+        },
+      },
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: paidContactProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The target actor's offer remains a pending choice.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(),
+      ruling: certifiedContactRuling(),
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      contract: "certified_contact",
+    });
+    expect(candidate.batch.commands.map((command) => command.kind)).toEqual([
+      "advance_world_time",
+      "record_world_event",
+      "decision_open",
+    ]);
+    expect(candidate.batch.commands[2]).toMatchObject({
+      kind: "decision_open",
+      actorId: "actor-guard",
+      actorHandle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-guard"),
+      decisionKind: "offer",
+      sourceTurnId: TURN_ID,
+      summary: "The guard offers eight copper for a sealed parcel delivered to South Harbor.",
+      acceptLabel: "Take the delivery",
+      declineLabel: "Decline the delivery",
+      acceptEffect: {
+        kind: "paid_delivery",
+        title: "Carry the sealed parcel",
+        subjectName: "Sealed parcel",
+        destinationHandle: deriveCampaignPlayPublicHandle("location", CAMPAIGN_ID, "location-b"),
+        feeUnit: "copper",
+        feeAmount: 8,
+        paymentTiming: "on_completion",
+        dueInMinutes: 10,
+      },
+    });
+    const reviewerPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    expect(reviewerPrompt).toContain('"decisionProposal"');
+    expect(reviewerPrompt).toContain('"kind":"paid_delivery"');
+  });
+
+  it("rejects a concrete paid Aye/Nay delivery paired with kind none", async () => {
+    const mismatchedContactProposal = {
+      ...certifiedContactProposal,
+      effects: [{
+        ...certifiedContactProposal.effects[0],
+        summary: "The guard offers 12 copper to carry a sealed medicine crate to South Harbor. Aye or Nay?",
+      }],
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: mismatchedContactProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "rejected",
+          reason: "The event is a consequential paid delivery offer but decisionProposal is kind none.",
+          failedChecks: ["other_mechanical_authority_mismatch"],
+        },
+        trace: trace(),
+      });
+
+    await expect(createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(),
+      ruling: certifiedContactRuling(),
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      contract: "certified_contact",
+    })).rejects.toMatchObject({
+      code: "model_contract_failed",
+      modelEvidence: expect.objectContaining({ errorCode: "mechanical_authority_rejected" }),
+    });
+    expect(generateObject).toHaveBeenCalledTimes(2);
+    const reviewerPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    expect(reviewerPrompt).toContain('"kind":"none"');
+    expect(reviewerPrompt).toContain("12 copper");
+    expect(reviewerPrompt).toContain("Aye or Nay");
+  });
+
+  it("rejects an extra contact effect at the contact schema boundary", async () => {
+    const generateObject = vi.fn().mockResolvedValue({
+      object: {
+        ...certifiedContactProposal,
+        effects: [certifiedContactProposal.effects[0], {
+          ...certifiedContactProposal.effects[0],
+          summary: "A second response that must not be admitted.",
+        }],
+      },
+      trace: trace(),
+    });
+    await expect(createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(),
+      ruling: certifiedContactRuling(),
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      contract: "certified_contact",
+    })).rejects.toMatchObject({ code: "model_contract_failed" });
+    expect(generateObject).toHaveBeenCalledOnce();
+  });
+
+  it("rejects contact contract mismatch without falling back to universal planning", async () => {
+    const contactRuling = ruling();
+    const generateObject = vi.fn();
+    await expect(createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(),
+      ruling: contactRuling,
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      contract: "certified_contact",
+    })).rejects.toMatchObject({ code: "ruling_invalid" });
+    expect(generateObject).not.toHaveBeenCalled();
+  });
+});
+
 describe("Campaign Play Game Master contract rejection diagnostics", () => {
   beforeEach(() => {
     gameMasterEvent.mockClear();
@@ -5586,8 +7854,9 @@ describe("Campaign Play Game Master contract rejection diagnostics", () => {
   });
 
   it("stays silent for an accepted plan", async () => {
+    const contactRuling = ruling();
     const generateObject = vi.fn()
-      .mockResolvedValueOnce({ object: proposal, trace: trace() })
+      .mockResolvedValueOnce({ object: contactProposalForRuling(proposal, contactRuling), trace: trace() })
       .mockResolvedValueOnce({
         object: { verdict: "accepted", reason: "No mechanical authority changes are present." },
         trace: trace(),
@@ -5596,7 +7865,7 @@ describe("Campaign Play Game Master contract rejection diagnostics", () => {
     await createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).plan({
-      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      frame: frame(), ruling: contactRuling, resolution, uncertaintyAuthority: null,
       model: model(), temperature: 0.2, budget,
     });
 
@@ -5604,6 +7873,7 @@ describe("Campaign Play Game Master contract rejection diagnostics", () => {
   });
 
   it("emits one generation diagnostic for a primary transport interruption", async () => {
+    const contactRuling = ruling();
     const generateObject = vi.fn(async () => {
       throw new Error("SENTINEL_PROVIDER_BODY_AND_STACK");
     });
@@ -5611,7 +7881,7 @@ describe("Campaign Play Game Master contract rejection diagnostics", () => {
     await expect(createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).plan({
-      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      frame: frame(), ruling: contactRuling, resolution, uncertaintyAuthority: null,
       model: model(), temperature: 0.2, budget,
     })).rejects.toMatchObject({ code: "transport_interrupted" });
 
@@ -5633,8 +7903,9 @@ describe("Campaign Play Game Master contract rejection diagnostics", () => {
   });
 
   it("emits the SafeGenerate contract code for a primary strict tool failure", async () => {
+    const contactRuling = ruling();
     await expect(createCampaignPlayGameMaster().plan({
-      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      frame: frame(), ruling: contactRuling, resolution, uncertaintyAuthority: null,
       model: schemaContractFailureModel(), temperature: 0.2, budget,
     })).rejects.toMatchObject({
       code: "model_contract_failed",
@@ -5669,6 +7940,119 @@ describe("Campaign Play Game Master contract rejection diagnostics", () => {
     expect(serialized).not.toContain("SENTINEL_RAW_PROPOSAL");
     expect(serialized).not.toContain("SENTINEL_PLAYER_AND_ACTOR_PROSE");
     expect(serialized).not.toContain("schema-validation");
+  });
+
+  it.each([
+    {
+      label: "an oversized record event summary",
+      expectedCode: "too_big",
+      expectedPath: "record_world_event[0].summary",
+      rejectedValue: `SENTINEL_REJECTED_SUMMARY_${"x".repeat(CAMPAIGN_PLAY_LIMITS.text + 1)}`,
+      rejectedField: "summary",
+    },
+    {
+      label: "an unknown affected handle",
+      expectedCode: "invalid_value",
+      expectedPath: "record_world_event[0].affectedHandles[1]",
+      rejectedValue: "SENTINEL_REJECTED_HANDLE",
+      rejectedField: "affectedHandles",
+    },
+  ])("recovers a bounded schema issue for $label", async ({
+    expectedCode,
+    expectedPath,
+    rejectedValue,
+    rejectedField,
+  }) => {
+    const invalidEffect: Record<string, unknown> = {
+      ...proposal.effects[0],
+      [rejectedField]: rejectedField === "affectedHandles"
+        ? ["you", rejectedValue]
+        : rejectedValue,
+    };
+    const contactRuling = ruling();
+    const invalidTransport = contactToolTransportForRuling(toolTransport(proposal.elapsedMinutes, [invalidEffect]), contactRuling);
+    const recoveryTransport = contactToolTransportForRuling(toolTransport(proposal.elapsedMinutes, proposal.effects), contactRuling);
+    const calls: SchemaRecoveryModelCall[] = [];
+    const recoveryModel = schemaRecoveryModel(invalidTransport, calls, recoveryTransport);
+    const gameMaster = createCampaignPlayGameMaster();
+
+    let firstError: unknown;
+    try {
+      await gameMaster.plan({
+        frame: frame(), ruling: contactRuling, resolution, uncertaintyAuthority: null,
+        model: recoveryModel, temperature: 0.2, budget, structuredOutputMode: "tool",
+      });
+    } catch (error) {
+      firstError = error;
+    }
+    expect(firstError).toMatchObject({
+      code: "model_contract_failed",
+      modelEvidence: { errorCode: "invalid_structured_tool_call" },
+    });
+    expect(calls).toHaveLength(1);
+    const feedback = getCampaignPlayGameMasterRecoveryFeedback(firstError);
+    expect(feedback).toMatchObject({
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [],
+      contractDiagnostic: {
+        phase: "provider_extraction",
+        coordinate: expectedPath,
+        schemaIssue: { code: expectedCode, path: expectedPath },
+      },
+    });
+    if (feedback === undefined) throw new Error("Expected bounded Game Master recovery feedback");
+
+    const candidate = await gameMaster.plan({
+      frame: frame(), ruling: contactRuling, resolution, uncertaintyAuthority: null,
+      model: recoveryModel, temperature: 0.2, budget, structuredOutputMode: "tool",
+      recoveryFeedback: feedback,
+    });
+    expect(candidate.preflight.accepted).toBe(true);
+    expect(candidate.batch.commands).toHaveLength(2);
+    expect(candidate.batch.commands[1]).toMatchObject({
+      kind: "record_world_event",
+      eventClass: "dialogue",
+      summary: proposal.effects[0]!.summary,
+    });
+    expect(calls).toHaveLength(3);
+    expect(calls[1]!.tools).toEqual(calls[0]!.tools);
+    expect(calls[1]!.options).toEqual(calls[0]!.options);
+    expect(calls[2]!.tools).not.toEqual(calls[0]!.tools);
+
+    const initialPrompt = modelPromptText(calls[0]!.prompt);
+    const recoveryPrompt = modelPromptText(calls[1]!.prompt);
+    for (const packetMarker of [
+      "SOURCE_MOMENT=",
+      "ALLOWED_HANDLES=",
+      "PLAYER_INTENT=",
+      "RULING=",
+      "RESOLUTION=",
+      "TOOL_MODE_OUTPUT_CONTRACT",
+    ]) {
+      expect(initialPrompt).toContain(packetMarker);
+      expect(recoveryPrompt).toContain(packetMarker);
+    }
+    expect(initialPrompt).toContain(
+      `record_world_event items have exactly eventClass (dialogue, interaction, discovery, or scene), performingActorKey (one of ["p1","p2",""]), summary (at most ${CAMPAIGN_PLAY_LIMITS.text} characters), and affectedHandles (one or more exact copies from ALLOWED_HANDLES=["you","guard","here","south","passage","delay","trust","guard-goal","introduced-support-actor"] with no duplicates).`,
+    );
+    expect(recoveryPrompt).toContain(
+      `The bounded schema issue is ${expectedCode} at ${expectedPath}.`,
+    );
+    expect(recoveryPrompt).toContain(JSON.stringify(feedback));
+    expect(recoveryPrompt).not.toContain(rejectedValue);
+    expect(JSON.stringify(feedback)).not.toContain(rejectedValue);
+    const [, eventPayload] = gameMasterEvent.mock.calls[0]!;
+    expect(eventPayload).toMatchObject({
+      phase: "generation",
+      safeGenerationCode: "invalid_structured_tool_call",
+      contractDiagnosticPhase: "provider_extraction",
+      contractDiagnosticCoordinate: expectedPath,
+      recoveryDiagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [],
+      reviewFailedChecks: [],
+    });
+    expect(JSON.stringify(eventPayload)).not.toContain(rejectedValue);
+    expect(JSON.stringify(eventPayload)).not.toContain("SENTINEL_REVIEW");
   });
 
   it("classifies a returned evidence-invariant failure before compilation", async () => {
@@ -5710,17 +8094,18 @@ describe("Campaign Play Game Master contract rejection diagnostics", () => {
   });
 
   it("classifies compiler recovery coordinates without proposal content", async () => {
+    const contactRuling = ruling();
     const repeatedSummary = frame().actorContinuity[0]!.recentOwnActions[0]!.summary;
     const repeatedProposal = {
       ...proposal,
       effects: [{ ...proposal.effects[0], summary: repeatedSummary }],
     };
-    const generateObject = vi.fn(async () => ({ object: repeatedProposal, trace: trace() }));
+    const generateObject = vi.fn(async () => ({ object: contactProposalForRuling(repeatedProposal, contactRuling), trace: trace() }));
 
     await expect(createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).plan({
-      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      frame: frame(), ruling: contactRuling, resolution, uncertaintyAuthority: null,
       model: model(), temperature: 0.2, budget,
     })).rejects.toMatchObject({ code: "model_contract_failed" });
 
@@ -5789,7 +8174,7 @@ describe("Campaign Play Game Master contract rejection diagnostics", () => {
         },
       ],
     };
-    const generateObject = vi.fn(async () => ({ object: candidate, trace: trace() }));
+    const generateObject = vi.fn(async () => ({ object: contactProposalForRuling(candidate, compoundRuling), trace: trace() }));
 
     await expect(createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
@@ -5844,14 +8229,15 @@ describe("Campaign Play Game Master contract rejection diagnostics", () => {
   });
 
   it("classifies Mechanical Authority Reviewer generation failure as review", async () => {
+    const contactRuling = ruling();
     const generateObject = vi.fn()
-      .mockResolvedValueOnce({ object: proposal, trace: trace() })
+      .mockResolvedValueOnce({ object: contactProposalForRuling(proposal, contactRuling), trace: trace() })
       .mockRejectedValueOnce(new Error("SENTINEL_REVIEW_PROVIDER_BODY"));
 
     await expect(createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).plan({
-      frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
+      frame: frame(), ruling: contactRuling, resolution, uncertaintyAuthority: null,
       model: model(), temperature: 0.2, budget,
     })).rejects.toMatchObject({ code: "transport_interrupted" });
 

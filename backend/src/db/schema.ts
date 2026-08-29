@@ -263,11 +263,16 @@ export const campaignPlayCommandKindValues = [
   "adjust_actor_possession",
   "incur_actor_obligation",
   "pay_actor_obligation",
+  "settle_player_receivable",
   "record_world_event",
   "create_player_actor",
   "initialize_player_placement",
   "initialize_world_time",
   "initialize_pressure_state",
+  "decision_open",
+  "decision_resolve",
+  "create_player_commitment",
+  "complete_player_commitment",
 ] as const;
 
 export const campaignPlayWorldEventKindValues = [
@@ -285,7 +290,25 @@ export const campaignPlayWorldEventKindValues = [
   "actor_possession_adjusted",
   "actor_obligation_incurred",
   "actor_obligation_payment_applied",
+  "player_receivable_settled",
   "scene_recorded",
+  "decision_opened",
+  "decision_accepted",
+  "decision_declined",
+  "player_commitment_created",
+  "player_commitment_completed",
+] as const;
+
+export const campaignPlayDecisionKindValues = [
+  "offer",
+  "yes_no",
+  "demand",
+] as const;
+
+export const campaignPlayDecisionStatusValues = [
+  "open",
+  "accepted",
+  "declined",
 ] as const;
 
 export const campaignPlayExposureChannelValues = [
@@ -3007,7 +3030,12 @@ export const campaignPlayCommands = sqliteTable(
         'create_player_actor',
         'initialize_player_placement',
         'initialize_world_time',
-        'initialize_pressure_state'
+        'initialize_pressure_state',
+        'settle_player_receivable',
+        'decision_open',
+        'decision_resolve',
+        'create_player_commitment',
+        'complete_player_commitment'
       )`,
     ),
     check(
@@ -3098,7 +3126,12 @@ export const campaignPlayReceipts = sqliteTable(
         'create_player_actor',
         'initialize_player_placement',
         'initialize_world_time',
-        'initialize_pressure_state'
+        'initialize_pressure_state',
+        'settle_player_receivable',
+        'decision_open',
+        'decision_resolve',
+        'create_player_commitment',
+        'complete_player_commitment'
       ) AND ${table.outcome} = 'applied'`,
     ),
     check(
@@ -3194,7 +3227,13 @@ export const campaignPlayEvents = sqliteTable(
         'actor_relation_changed',
         'actor_goal_changed',
         'pressure_advanced',
-        'scene_recorded'
+        'scene_recorded',
+        'decision_opened',
+        'decision_accepted',
+        'decision_declined',
+        'player_commitment_created',
+        'player_commitment_completed',
+        'player_receivable_settled'
       )`,
     ),
     check(
@@ -3222,6 +3261,276 @@ export const campaignPlayEvents = sqliteTable(
         )
         AND (${table.beforePayloadJson} IS NOT NULL OR ${table.afterPayloadJson} IS NOT NULL)
         AND length(${table.payloadHash}) = 64`,
+    ),
+  ],
+);
+
+export const campaignPlayDecisions = sqliteTable(
+  "campaign_play_decisions",
+  {
+    decisionKey: text("decision_key").primaryKey(),
+    campaignId: text("campaign_id")
+      .notNull()
+      .references(() => campaignPlayStates.campaignId, { onDelete: "cascade" }),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => actors.id, { onDelete: "restrict" }),
+    actorHandle: text("actor_handle").notNull(),
+    decisionKind: text("decision_kind", {
+      enum: campaignPlayDecisionKindValues,
+    }).notNull(),
+    sourceTurnId: text("source_turn_id")
+      .notNull()
+      .references(() => campaignPlayTurns.id, { onDelete: "restrict" }),
+    status: text("status", {
+      enum: campaignPlayDecisionStatusValues,
+    }).notNull(),
+    summary: text("summary").notNull(),
+    acceptLabel: text("accept_label").notNull(),
+    declineLabel: text("decline_label").notNull(),
+    acceptEffectJson: text("accept_effect_json"),
+    openedAt: integer("opened_at", { mode: "number" }).notNull(),
+    resolvedAt: integer("resolved_at", { mode: "number" }),
+    resolutionTurnId: text("resolution_turn_id").references(() => campaignPlayTurns.id, {
+      onDelete: "restrict",
+    }),
+    resolutionEventId: text("resolution_event_id").references(() => campaignPlayEvents.eventId, {
+      onDelete: "restrict",
+    }),
+    worldVersion: integer("world_version").notNull(),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("campaign_play_decisions_identity_unique").on(
+      table.campaignId,
+      table.sourceTurnId,
+      table.actorId,
+      table.decisionKind,
+    ),
+    index("idx_campaign_play_decisions_campaign_status").on(
+      table.campaignId,
+      table.status,
+    ),
+    index("idx_campaign_play_decisions_campaign_source").on(
+      table.campaignId,
+      table.sourceTurnId,
+    ),
+    index("idx_campaign_play_decisions_campaign_actor").on(
+      table.campaignId,
+      table.actorId,
+    ),
+    index("idx_campaign_play_decisions_resolution_event").on(table.resolutionEventId),
+    check(
+      "campaign_play_decisions_payload_valid",
+      sql`length(${table.decisionKey}) BETWEEN 1 AND 256
+        AND length(${table.campaignId}) BETWEEN 1 AND 128
+        AND length(${table.actorId}) BETWEEN 1 AND 128
+        AND length(${table.actorHandle}) BETWEEN 1 AND 128
+        AND ${table.decisionKind} IN ('offer', 'yes_no', 'demand')
+        AND length(${table.sourceTurnId}) BETWEEN 1 AND 256
+        AND ${table.status} IN ('open', 'accepted', 'declined')
+        AND length(${table.summary}) BETWEEN 1 AND 4000
+        AND length(${table.acceptLabel}) BETWEEN 1 AND 256
+        AND length(${table.declineLabel}) BETWEEN 1 AND 256
+        AND (${table.acceptEffectJson} IS NULL OR (
+          json_valid(${table.acceptEffectJson})
+          AND json_type(${table.acceptEffectJson}) = 'object'
+          AND json_type(${table.acceptEffectJson}, '$.kind') = 'text'
+          AND (
+            (
+              json_extract(${table.acceptEffectJson}, '$.kind') = 'grant_player_possession'
+              AND json_type(${table.acceptEffectJson}, '$.name') = 'text'
+              AND length(json_extract(${table.acceptEffectJson}, '$.name')) BETWEEN 1 AND 120
+              AND json_remove(${table.acceptEffectJson}, '$.kind', '$.name') = '{}'
+            ) OR (
+              json_extract(${table.acceptEffectJson}, '$.kind') = 'paid_delivery'
+              AND json_type(${table.acceptEffectJson}, '$.title') = 'text'
+              AND length(json_extract(${table.acceptEffectJson}, '$.title')) BETWEEN 1 AND 240
+              AND json_type(${table.acceptEffectJson}, '$.subjectName') = 'text'
+              AND length(json_extract(${table.acceptEffectJson}, '$.subjectName')) BETWEEN 1 AND 120
+              AND json_type(${table.acceptEffectJson}, '$.destinationHandle') = 'text'
+              AND length(json_extract(${table.acceptEffectJson}, '$.destinationHandle')) BETWEEN 1 AND 128
+              AND json_extract(${table.acceptEffectJson}, '$.feeUnit') = 'copper'
+              AND json_type(${table.acceptEffectJson}, '$.feeAmount') = 'integer'
+              AND json_extract(${table.acceptEffectJson}, '$.feeAmount') BETWEEN 1 AND 1000000
+              AND json_extract(${table.acceptEffectJson}, '$.paymentTiming') = 'on_completion'
+              AND (
+                json_type(${table.acceptEffectJson}, '$.dueInMinutes') IS NULL
+                OR (
+                  json_type(${table.acceptEffectJson}, '$.dueInMinutes') = 'integer'
+                  AND json_extract(${table.acceptEffectJson}, '$.dueInMinutes') BETWEEN 1 AND 10080
+                )
+              )
+              AND json_remove(
+                ${table.acceptEffectJson},
+                '$.kind', '$.title', '$.subjectName', '$.destinationHandle',
+                '$.feeUnit', '$.feeAmount', '$.paymentTiming', '$.dueInMinutes'
+              ) = '{}'
+            ) OR (
+              json_extract(${table.acceptEffectJson}, '$.kind') = 'unpaid_delivery'
+              AND json_type(${table.acceptEffectJson}, '$.title') = 'text'
+              AND length(json_extract(${table.acceptEffectJson}, '$.title')) BETWEEN 1 AND 240
+              AND json_type(${table.acceptEffectJson}, '$.subjectName') = 'text'
+              AND length(json_extract(${table.acceptEffectJson}, '$.subjectName')) BETWEEN 1 AND 120
+              AND json_type(${table.acceptEffectJson}, '$.destinationHandle') = 'text'
+              AND length(json_extract(${table.acceptEffectJson}, '$.destinationHandle')) BETWEEN 1 AND 128
+              AND (
+                json_type(${table.acceptEffectJson}, '$.dueInMinutes') IS NULL
+                OR (
+                  json_type(${table.acceptEffectJson}, '$.dueInMinutes') = 'integer'
+                  AND json_extract(${table.acceptEffectJson}, '$.dueInMinutes') BETWEEN 1 AND 10080
+                )
+              )
+              AND json_remove(
+                ${table.acceptEffectJson},
+                '$.kind', '$.title', '$.subjectName', '$.destinationHandle',
+                '$.dueInMinutes'
+              ) = '{}'
+            )
+          )
+        ))
+        AND ${table.openedAt} >= 0
+        AND (${table.resolvedAt} IS NULL OR ${table.resolvedAt} >= ${table.openedAt})
+        AND (${table.resolutionTurnId} IS NULL OR length(${table.resolutionTurnId}) BETWEEN 1 AND 256)
+        AND (${table.resolutionEventId} IS NULL OR length(${table.resolutionEventId}) BETWEEN 1 AND 256)
+        AND ${table.worldVersion} >= 1
+        AND ${table.createdAt} >= 0
+        AND ${table.updatedAt} >= ${table.createdAt}`,
+    ),
+    check(
+      "campaign_play_decisions_state_consistent",
+      sql`(
+          ${table.status} = 'open'
+          AND ${table.resolvedAt} IS NULL
+          AND ${table.resolutionTurnId} IS NULL
+          AND ${table.resolutionEventId} IS NULL
+        ) OR (
+          ${table.status} IN ('accepted', 'declined')
+          AND ${table.resolvedAt} IS NOT NULL
+          AND ${table.resolutionTurnId} IS NOT NULL
+          AND ${table.resolutionEventId} IS NOT NULL
+        )`,
+    ),
+  ],
+);
+
+export const campaignPlayCommitments = sqliteTable(
+  "campaign_play_commitments",
+  {
+    commitmentId: text("commitment_id").primaryKey(),
+    campaignId: text("campaign_id")
+      .notNull()
+      .references(() => campaignPlayStates.campaignId, { onDelete: "cascade" }),
+    performerActorId: text("performer_actor_id")
+      .notNull()
+      .references(() => actors.id, { onDelete: "restrict" }),
+    counterpartyActorId: text("counterparty_actor_id")
+      .notNull()
+      .references(() => actors.id, { onDelete: "restrict" }),
+    kind: text("kind", { enum: ["paid_delivery", "unpaid_delivery"] }).notNull(),
+    status: text("status", { enum: ["active", "completed"] }).notNull(),
+    title: text("title").notNull(),
+    subjectName: text("subject_name").notNull(),
+    destinationHandle: text("destination_handle").notNull(),
+    feeUnit: text("fee_unit", { enum: ["copper"] }),
+    feeAmount: integer("fee_amount"),
+    paymentTiming: text("payment_timing", { enum: ["on_completion"] }),
+    acceptedWorldTimeMinutes: integer("accepted_world_time_minutes").notNull(),
+    dueWorldTimeMinutes: integer("due_world_time_minutes"),
+    sourceDecisionKey: text("source_decision_key")
+      .notNull()
+      .references(() => campaignPlayDecisions.decisionKey, { onDelete: "restrict" }),
+    sourceTurnId: text("source_turn_id")
+      .notNull()
+      .references(() => campaignPlayTurns.id, { onDelete: "restrict" }),
+    sourceReceiptId: text("source_receipt_id")
+      .notNull()
+      .references(() => campaignPlayReceipts.receiptId, { onDelete: "restrict" }),
+    completionTurnId: text("completion_turn_id").references(
+      () => campaignPlayTurns.id,
+      { onDelete: "restrict" },
+    ),
+    completionReceiptId: text("completion_receipt_id").references(
+      () => campaignPlayReceipts.receiptId,
+      { onDelete: "restrict" },
+    ),
+    worldVersion: integer("world_version").notNull(),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("campaign_play_commitments_campaign_source_decision_unique").on(
+      table.campaignId,
+      table.sourceDecisionKey,
+    ),
+    uniqueIndex("campaign_play_commitments_source_receipt_unique").on(
+      table.sourceReceiptId,
+    ),
+    uniqueIndex("campaign_play_commitments_completion_receipt_unique")
+      .on(table.completionReceiptId)
+      .where(sql`${table.completionReceiptId} IS NOT NULL`),
+    index("idx_campaign_play_commitments_campaign_status").on(
+      table.campaignId,
+      table.status,
+    ),
+    index("idx_campaign_play_commitments_campaign_performer").on(
+      table.campaignId,
+      table.performerActorId,
+    ),
+    index("idx_campaign_play_commitments_campaign_counterparty").on(
+      table.campaignId,
+      table.counterpartyActorId,
+    ),
+    index("idx_campaign_play_commitments_campaign_due").on(
+      table.campaignId,
+      table.status,
+      table.dueWorldTimeMinutes,
+    ),
+    check(
+      "campaign_play_commitments_payload_valid",
+      sql`length(${table.commitmentId}) BETWEEN 1 AND 128
+        AND length(${table.campaignId}) BETWEEN 1 AND 128
+        AND length(${table.performerActorId}) BETWEEN 1 AND 128
+        AND length(${table.counterpartyActorId}) BETWEEN 1 AND 128
+        AND ${table.performerActorId} <> ${table.counterpartyActorId}
+        AND ${table.kind} IN ('paid_delivery', 'unpaid_delivery')
+        AND ${table.status} IN ('active', 'completed')
+        AND length(${table.title}) BETWEEN 1 AND 240
+        AND length(${table.subjectName}) BETWEEN 1 AND 120
+        AND length(${table.destinationHandle}) BETWEEN 1 AND 128
+        AND (
+          (${table.kind} = 'paid_delivery'
+            AND ${table.feeUnit} = 'copper'
+            AND ${table.feeAmount} BETWEEN 1 AND 1000000
+            AND ${table.paymentTiming} = 'on_completion')
+          OR (${table.kind} = 'unpaid_delivery'
+            AND ${table.feeUnit} IS NULL
+            AND ${table.feeAmount} IS NULL
+            AND ${table.paymentTiming} IS NULL)
+        )
+        AND ${table.acceptedWorldTimeMinutes} BETWEEN 0 AND 2147483647
+        AND (${table.dueWorldTimeMinutes} IS NULL OR ${table.dueWorldTimeMinutes} BETWEEN 1 AND 2147483647)
+        AND length(${table.sourceDecisionKey}) BETWEEN 1 AND 256
+        AND length(${table.sourceTurnId}) BETWEEN 1 AND 256
+        AND length(${table.sourceReceiptId}) BETWEEN 1 AND 256
+        AND (${table.completionTurnId} IS NULL OR length(${table.completionTurnId}) BETWEEN 1 AND 256)
+        AND (${table.completionReceiptId} IS NULL OR length(${table.completionReceiptId}) BETWEEN 1 AND 256)
+        AND ${table.worldVersion} >= 1
+        AND ${table.createdAt} >= 0
+        AND ${table.updatedAt} >= ${table.createdAt}`,
+    ),
+    check(
+      "campaign_play_commitments_state_consistent",
+      sql`(
+          ${table.status} = 'active'
+          AND ${table.completionTurnId} IS NULL
+          AND ${table.completionReceiptId} IS NULL
+        ) OR (
+          ${table.status} = 'completed'
+          AND ${table.completionTurnId} IS NOT NULL
+          AND ${table.completionReceiptId} IS NOT NULL
+        )`,
     ),
   ],
 );

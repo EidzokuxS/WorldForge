@@ -6,6 +6,10 @@ import {
   CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES,
   CAMPAIGN_PLAY_LIMITS,
   type CampaignPlayActionContext,
+  type CampaignPlayCommitmentBinding,
+  type CampaignPlayDecisionBinding,
+  type CampaignPlayDecisionOutcome,
+  type CampaignPlayObligationBinding,
   type CampaignPlayJournalEntry,
   type CampaignPlayNarration,
   type CampaignPlayNarrationOperation,
@@ -19,7 +23,13 @@ import {
   CAMPAIGN_PLAY_COMMAND_METADATA,
   campaignPlayActionExecutionRouteSchema,
   campaignPlayActionContextSchema,
+  campaignPlayDecisionBindingSchema,
+  campaignPlayCommitmentBindingSchema,
+  campaignPlayObligationBindingSchema,
+  campaignPlayCertifiedCommitmentSchema,
+  campaignPlayCertifiedObligationSchema,
   campaignPlayCertifiedContactSchema,
+  campaignPlayCertifiedDecisionSchema,
   campaignPlayCertifiedMoveSchema,
   campaignPlayCertifiedObserveSchema,
   campaignPlayCertifiedWaitSchema,
@@ -37,7 +47,10 @@ import {
   rulebookCommandBatchSchema,
   validateNarrationAgainstPacket,
   type CampaignPlayEntityRef,
+  type CampaignPlayCertifiedCommitment,
+  type CampaignPlayCertifiedObligation,
   type CampaignPlayCertifiedContact,
+  type CampaignPlayCertifiedDecision,
   type CampaignPlayCertifiedMove,
   type CampaignPlayCertifiedObserve,
   type CampaignPlayCertifiedWait,
@@ -48,7 +61,10 @@ import {
 import type { CampaignPlayDatabaseHandle } from "./campaign-play-database.js";
 import {
   canonicalizeCampaignPlayProjection,
+  deriveCampaignPlayPossessionId,
+  deriveCampaignPlayPossessionKey,
   deriveCampaignPlayPublicHandle,
+  deriveCampaignPlayObligationId,
   deriveCampaignPlayUtilityActions,
   hashCampaignPlayProjection,
   type CampaignPlayProjectionRecord,
@@ -73,12 +89,15 @@ import {
   createCampaignPlayGameMaster,
   getCampaignPlayGameMasterContractFailureDiagnostic,
   getCampaignPlayGameMasterRecoveryFeedback,
+  type CampaignPlayCommitmentAuthority,
   type CampaignPlayGameMasterFrame,
   type CampaignPlayGameMasterRecoveryFeedback,
 } from "./game-master.js";
 import { loadCampaignPlayActorContinuity } from "./actor-continuity.js";
 import {
   executeCampaignPlayRulebookBatch,
+  deriveCampaignPlayCommandId,
+  deriveCampaignPlayCommitmentId,
   preflightCampaignPlayRulebook,
   type CampaignPlayRulebookAuthority,
   type CampaignPlayRulebookFaultPoint,
@@ -155,6 +174,9 @@ const judgeInputSchema = z.object({
     .refine((value) => value === value.trim()),
   source: z.enum(["freeform", "suggested"]),
   choiceHandle: line(CAMPAIGN_PLAY_LIMITS.handle).nullable(),
+  decisionBinding: campaignPlayDecisionBindingSchema.optional(),
+  commitmentBinding: campaignPlayCommitmentBindingSchema.optional(),
+  obligationBinding: campaignPlayObligationBindingSchema.optional(),
 }).strict().superRefine((value, context) => {
   if ((value.source === "suggested") !== (value.choiceHandle !== null)) {
     context.addIssue({
@@ -163,7 +185,25 @@ const judgeInputSchema = z.object({
       message: "Choice handle must match the admitted input source.",
     });
   }
+  const bindingCount = [
+    value.decisionBinding,
+    value.commitmentBinding,
+    value.obligationBinding,
+  ].filter((binding) => binding !== undefined).length;
+  if (bindingCount > 1) {
+    context.addIssue({
+      code: "custom",
+      path: ["obligationBinding"],
+      message: "A suggested action cannot carry more than one typed binding.",
+    });
+  }
 });
+
+type CampaignPlayAdmissionJudgeInput = CampaignPlayJudgeInput & {
+  decisionBinding?: CampaignPlayDecisionBinding;
+  commitmentBinding?: CampaignPlayCommitmentBinding;
+  obligationBinding?: CampaignPlayObligationBinding;
+};
 
 const choiceBindingSchema = z.object({
   handle: line(CAMPAIGN_PLAY_LIMITS.handle),
@@ -173,6 +213,9 @@ const choiceBindingSchema = z.object({
     handle: line(CAMPAIGN_PLAY_LIMITS.handle),
     kind: z.enum(["actor", "location", "route", "pressure", "possession"]),
   }).strict()).max(CAMPAIGN_PLAY_LIMITS.targets),
+  decisionBinding: campaignPlayDecisionBindingSchema.optional(),
+  commitmentBinding: campaignPlayCommitmentBindingSchema.optional(),
+  obligationBinding: campaignPlayObligationBindingSchema.optional(),
 }).strict();
 
 const handleBindingSchema = z.object({
@@ -612,10 +655,14 @@ function selection(input: CreateCampaignPlayTurnRuntimeInput): CampaignPlayTurnM
 function selectionForRoute(
   base: CampaignPlayTurnModelSelection,
   routeKind: "full_authority" | "certified_move" | "certified_wait" | "certified_contact" |
-    "certified_observe",
+    "certified_decision" | "certified_observe" | "certified_commitment" |
+    "certified_obligation",
+  certifiedGameMaster: CampaignPlayRequestedModel,
 ): CampaignPlayTurnModelSelection {
   if (base.turnKind !== "player_action") return base;
-  return { ...base, routeKind };
+  return routeKind === "certified_contact"
+    ? { ...base, routeKind, gameMaster: certifiedGameMaster }
+    : { ...base, routeKind };
 }
 
 function loadCompletedPublicMoment(
@@ -902,7 +949,7 @@ function buildPublicAuthority(input: {
   moment: z.infer<typeof publicMomentSchema>;
   mechanicalFrame: CampaignPlayRulebookFrame;
   human: HumanRow;
-  judgeInput: CampaignPlayJudgeInput;
+  judgeInput: CampaignPlayAdmissionJudgeInput;
 }): Pick<CampaignPlayPlayerActionAdmissionFrame,
   "player" | "visibleFacts" | "handleBindings" | "choiceBindings" | "authority"> {
   const { handle, packet, moment, mechanicalFrame, human, judgeInput } = input;
@@ -976,6 +1023,58 @@ function buildPublicAuthority(input: {
     ...relevantPlayerHistory({ handle, mechanicalFrame, human, judgeInput }),
     ...packet.newObservations,
   ];
+  const openingDecision = packet.turnKind === "opening"
+    ? packet.openingContext?.decision ?? null
+    : null;
+  const decisionObservationBindings = new Map<string, CampaignPlayEntityRef>();
+  observations.forEach((observation) => {
+    const marker = observation.decision;
+    if (marker === undefined) return;
+    if (packet.turnKind === "opening" && (openingDecision === null || (
+      marker.decisionKey !== openingDecision.decisionKey ||
+      marker.actorName !== openingDecision.actorName ||
+      marker.actorHandle !== openingDecision.actorHandle ||
+      marker.kind !== openingDecision.kind ||
+      marker.summary !== openingDecision.summary ||
+      marker.acceptLabel !== openingDecision.acceptLabel ||
+      marker.declineLabel !== openingDecision.declineLabel
+    ))) {
+      throw new CampaignPlayTurnRuntimeError(
+        "turn_public_context_invalid",
+        "Campaign Play opening decision observation does not match its exact decision authority.",
+      );
+    }
+    const persistedDecision = mechanicalFrame.pendingDecisions?.find((candidate) =>
+      candidate.decisionKey === marker.decisionKey);
+    const persistedActor = [
+      ...mechanicalFrame.runtimeActors,
+      ...mechanicalFrame.acceptedWorld.actors,
+    ].find((actor) => actor.id === persistedDecision?.actorId);
+    const actorBinding = candidates.get(marker.actorHandle);
+    if (
+      !persistedDecision ||
+      persistedDecision.actorHandle !== marker.actorHandle ||
+      persistedDecision.kind !== marker.kind ||
+      persistedDecision.summary !== marker.summary ||
+      persistedDecision.acceptLabel !== marker.acceptLabel ||
+      persistedDecision.declineLabel !== marker.declineLabel ||
+      !persistedActor ||
+      persistedActor.name !== marker.actorName ||
+      actorBinding?.kind !== "actor" ||
+      actorBinding.id !== persistedDecision.actorId
+    ) {
+      throw new CampaignPlayTurnRuntimeError(
+        "turn_public_context_invalid",
+        "Campaign Play decision observation does not match its exact persisted decision authority.",
+      );
+    }
+    if (persistedDecision.status === "open") {
+      decisionObservationBindings.set(observation.observationHandle, {
+        kind: "decision",
+        id: marker.decisionKey,
+      });
+    }
+  });
   let admittedObservationCount = 0;
   for (const observation of observations) {
     if (
@@ -1003,7 +1102,8 @@ function buildPublicAuthority(input: {
   const handleBindings = visibleFacts
     .filter((fact) => fact.kind !== "choice")
     .map((fact) => {
-      const reference = candidates.get(fact.handle);
+      const reference = decisionObservationBindings.get(fact.handle)
+        ?? candidates.get(fact.handle);
       if (!reference) {
         throw new CampaignPlayTurnRuntimeError(
           "turn_public_context_invalid",
@@ -1019,6 +1119,17 @@ function buildPublicAuthority(input: {
     if (!seenRefs.has(key)) {
       seenRefs.add(key);
       authorizedRefs.push(binding.reference);
+    }
+  }
+  if (judgeInput.decisionBinding !== undefined) {
+    const decisionRef: CampaignPlayEntityRef = {
+      kind: "decision",
+      id: judgeInput.decisionBinding.decisionKey,
+    };
+    const key = referenceKey(decisionRef);
+    if (!seenRefs.has(key)) {
+      seenRefs.add(key);
+      authorizedRefs.push(decisionRef);
     }
   }
   const witnessActorIds = handleBindings
@@ -1046,7 +1157,7 @@ function resolveJudgeInput(
   request: CampaignPlayTurnAdmissionRequest,
   packet: CampaignPlayNarratorPacket,
   moment: z.infer<typeof publicMomentSchema>,
-): CampaignPlayJudgeInput {
+): CampaignPlayAdmissionJudgeInput {
   if (request.source === "freeform") {
     return judgeInputSchema.parse({
       originalText: request.text,
@@ -1067,10 +1178,74 @@ function resolveJudgeInput(
       "Campaign Play suggested action is stale or was not rendered.",
     );
   }
+  const suggestionBinding = suggestion.decisionBinding;
+  const availableBinding = available.decisionBinding;
+  const requestedBinding = request.decisionBinding;
+  const bindingsMatch = suggestionBinding !== undefined &&
+    availableBinding !== undefined && requestedBinding !== undefined &&
+    suggestionBinding.decisionKey === availableBinding.decisionKey &&
+    suggestionBinding.actorHandle === availableBinding.actorHandle &&
+    suggestionBinding.kind === availableBinding.kind &&
+    suggestionBinding.disposition === availableBinding.disposition &&
+    requestedBinding.decisionKey === suggestionBinding.decisionKey &&
+    requestedBinding.actorHandle === suggestionBinding.actorHandle &&
+    requestedBinding.kind === suggestionBinding.kind &&
+    requestedBinding.disposition === suggestionBinding.disposition;
+  if ((suggestionBinding === undefined || availableBinding === undefined)
+    ? requestedBinding !== undefined || suggestionBinding !== availableBinding
+    : !bindingsMatch) {
+    throw new CampaignPlayTurnRuntimeError(
+      "turn_request_invalid",
+      "Campaign Play decision binding is missing or does not match the rendered decision.",
+    );
+  }
+  const suggestionCommitmentBinding = suggestion.commitmentBinding;
+  const availableCommitmentBinding = available.commitmentBinding;
+  const requestedCommitmentBinding = request.commitmentBinding;
+  const commitmentBindingsMatch = suggestionCommitmentBinding !== undefined &&
+    availableCommitmentBinding !== undefined && requestedCommitmentBinding !== undefined &&
+    canonicalizeCampaignPlayProjection(suggestionCommitmentBinding) ===
+      canonicalizeCampaignPlayProjection(availableCommitmentBinding) &&
+    canonicalizeCampaignPlayProjection(requestedCommitmentBinding) ===
+      canonicalizeCampaignPlayProjection(suggestionCommitmentBinding);
+  if ((suggestionCommitmentBinding === undefined || availableCommitmentBinding === undefined)
+    ? requestedCommitmentBinding !== undefined ||
+      suggestionCommitmentBinding !== availableCommitmentBinding
+    : !commitmentBindingsMatch) {
+    throw new CampaignPlayTurnRuntimeError(
+      "turn_request_invalid",
+      "Campaign Play commitment binding is missing or does not match the rendered intent.",
+    );
+  }
+  const suggestionObligationBinding = suggestion.obligationBinding;
+  const availableObligationBinding = available.obligationBinding;
+  const requestedObligationBinding = request.obligationBinding;
+  const obligationBindingsMatch = suggestionObligationBinding !== undefined &&
+    availableObligationBinding !== undefined && requestedObligationBinding !== undefined &&
+    canonicalizeCampaignPlayProjection(suggestionObligationBinding) ===
+      canonicalizeCampaignPlayProjection(availableObligationBinding) &&
+    canonicalizeCampaignPlayProjection(requestedObligationBinding) ===
+      canonicalizeCampaignPlayProjection(suggestionObligationBinding);
+  if ((suggestionObligationBinding === undefined || availableObligationBinding === undefined)
+    ? requestedObligationBinding !== undefined ||
+      suggestionObligationBinding !== availableObligationBinding
+    : !obligationBindingsMatch) {
+    throw new CampaignPlayTurnRuntimeError(
+      "turn_request_invalid",
+      "Campaign Play receivable binding is missing or does not match the rendered obligation.",
+    );
+  }
   return judgeInputSchema.parse({
     originalText: suggestion.label,
     source: "suggested",
     choiceHandle: suggestion.choiceHandle,
+    ...(suggestionBinding === undefined ? {} : { decisionBinding: suggestionBinding }),
+    ...(suggestionCommitmentBinding === undefined
+      ? {}
+      : { commitmentBinding: suggestionCommitmentBinding }),
+    ...(suggestionObligationBinding === undefined
+      ? {}
+      : { obligationBinding: suggestionObligationBinding }),
   });
 }
 
@@ -1095,9 +1270,30 @@ function certifiedContactHash(certificate: CampaignPlayCertifiedContact): string
   });
 }
 
+function certifiedDecisionHash(certificate: CampaignPlayCertifiedDecision): string {
+  return hashCampaignPlayProjection({
+    domain: "campaign_play_certified_decision",
+    certificate,
+  });
+}
+
 function certifiedObserveHash(certificate: CampaignPlayCertifiedObserve): string {
   return hashCampaignPlayProjection({
     domain: "campaign_play_certified_observe",
+    certificate,
+  });
+}
+
+function certifiedCommitmentHash(certificate: CampaignPlayCertifiedCommitment): string {
+  return hashCampaignPlayProjection({
+    domain: "campaign_play_certified_commitment",
+    certificate,
+  });
+}
+
+function certifiedObligationHash(certificate: CampaignPlayCertifiedObligation): string {
+  return hashCampaignPlayProjection({
+    domain: "campaign_play_certified_obligation",
     certificate,
   });
 }
@@ -1108,7 +1304,22 @@ function isCertifiedRoute(
   return route.kind === "certified_move" ||
     route.kind === "certified_wait" ||
     route.kind === "certified_contact" ||
-    route.kind === "certified_observe";
+    route.kind === "certified_decision" ||
+    route.kind === "certified_observe" ||
+    route.kind === "certified_commitment" ||
+    route.kind === "certified_obligation";
+}
+
+function usesCodeOwnedCertifiedPlan(
+  route: CampaignPlayPlayerActionAdmissionFrame["executionRoute"],
+): route is Extract<
+  CampaignPlayPlayerActionAdmissionFrame["executionRoute"],
+  { kind: "certified_move" | "certified_wait" | "certified_decision" |
+    "certified_commitment" | "certified_obligation" }
+> {
+  return isCertifiedRoute(route) &&
+    route.kind !== "certified_contact" &&
+    route.kind !== "certified_observe";
 }
 
 function certifyPureRenderedMove(input: {
@@ -1136,10 +1347,19 @@ function certifyPureRenderedMove(input: {
     candidate.handle === judgeInput.choiceHandle);
   const choice = publicAuthority.choiceBindings.find((candidate) =>
     candidate.handle === judgeInput.choiceHandle);
+  const moveLabelPrefix = intent?.kind === "move"
+    ? campaignPlaySuggestedActionLabelPrefix(packet, intent)
+    : null;
+  const moveDetail = moveLabelPrefix !== null && suggestion?.label.startsWith(`${moveLabelPrefix}: `)
+    ? suggestion.label.slice(moveLabelPrefix.length + 2)
+    : null;
   if (
     !suggestion || !intent || !choice || intent.kind !== "move" ||
     suggestion.label !== judgeInput.originalText ||
-    suggestion.label !== campaignPlaySuggestedActionLabelPrefix(packet, intent) ||
+    (suggestion.label !== moveLabelPrefix && (
+      moveDetail === null || moveDetail.length === 0 || moveDetail !== moveDetail.trim() ||
+      moveDetail.includes("\n") || moveDetail.includes("\r")
+    )) ||
     canonicalizeCampaignPlayProjection(choice) !== canonicalizeCampaignPlayProjection({
       ...intent,
       label: suggestion.label,
@@ -1214,7 +1434,7 @@ function certifyPureRenderedMove(input: {
         choiceHandle: intent.handle,
         kind: "move",
         targets: intent.targets,
-        method: null,
+        method: moveDetail,
         stakes: null,
       },
       movementRouteHandle: routeHandle,
@@ -1227,7 +1447,9 @@ function certifyPureRenderedMove(input: {
         maximumMinutes: canonicalRoute.travelCost,
       },
       uncertainty: { kind: "none" },
-      reason: "Current rendered move is fully determined by the open canonical route.",
+      reason: moveDetail === null
+        ? "Current rendered move is fully determined by the open canonical route."
+        : "Current rendered move keeps a player-visible purpose while the open canonical route determines travel.",
       clarificationQuestion: null,
     },
     resolution: { kind: "deterministic", result: "success" },
@@ -1330,6 +1552,141 @@ function certifyPureRenderedWait(input: {
   });
 }
 
+function certifyPureRenderedDecision(input: {
+  campaignId: string;
+  turnId: string;
+  acceptedWorldVersion: number;
+  baseWorldVersion: number;
+  baseRuntimeRevision: number;
+  sourceTurnId: string;
+  sourceMomentId: string;
+  sourceMomentHash: string;
+  sourcePacketHash: string;
+  packet: CampaignPlayNarratorPacket;
+  moment: z.infer<typeof publicMomentSchema>;
+  mechanicalFrame: CampaignPlayRulebookFrame;
+  publicAuthority: Pick<CampaignPlayPlayerActionAdmissionFrame,
+    "player" | "visibleFacts" | "handleBindings" | "choiceBindings" | "authority">;
+  judgeInput: CampaignPlayAdmissionJudgeInput;
+}): CampaignPlayCertifiedDecision | null {
+  const { judgeInput, packet, moment, mechanicalFrame, publicAuthority } = input;
+  if (
+    judgeInput.source !== "suggested" || judgeInput.choiceHandle === null ||
+    judgeInput.decisionBinding === undefined
+  ) return null;
+  const suggestion = moment.suggestedActions.find((candidate) =>
+    candidate.choiceHandle === judgeInput.choiceHandle);
+  const intent = packet.availableIntents.find((candidate) =>
+    candidate.handle === judgeInput.choiceHandle);
+  const choice = publicAuthority.choiceBindings.find((candidate) =>
+    candidate.handle === judgeInput.choiceHandle);
+  const binding = judgeInput.decisionBinding;
+  const sameBinding = (candidate: CampaignPlayDecisionBinding | undefined) =>
+    candidate !== undefined &&
+    candidate.decisionKey === binding.decisionKey &&
+    candidate.actorHandle === binding.actorHandle &&
+    candidate.kind === binding.kind &&
+    candidate.disposition === binding.disposition;
+  if (
+    !suggestion || !intent || !choice || intent.kind !== "contact" ||
+    intent.targets.length !== 1 || intent.targets[0]?.kind !== "actor" ||
+    intent.targets[0]?.handle !== binding.actorHandle ||
+    !sameBinding(suggestion.decisionBinding) ||
+    !sameBinding(intent.decisionBinding) ||
+    !sameBinding(choice.decisionBinding) ||
+    suggestion.label !== judgeInput.originalText ||
+    canonicalizeCampaignPlayProjection(choice) !== canonicalizeCampaignPlayProjection({
+      ...intent,
+      label: suggestion.label,
+    })
+  ) return null;
+  const decision = mechanicalFrame.pendingDecisions?.find((candidate) =>
+    candidate.decisionKey === binding.decisionKey);
+  if (
+    !decision || decision.status !== "open" ||
+    decision.actorHandle !== binding.actorHandle || decision.kind !== binding.kind ||
+    decision.sourceTurnId.length === 0 ||
+    !publicAuthority.visibleFacts.some((fact) =>
+      fact.handle === binding.actorHandle && fact.kind === "actor")
+  ) return null;
+  const actorBinding = publicAuthority.handleBindings.find((candidate) =>
+    candidate.handle === binding.actorHandle && candidate.reference.kind === "actor");
+  const currentLocationBinding = publicAuthority.handleBindings.find((candidate) =>
+    candidate.handle === packet.currentLocation.handle && candidate.reference.kind === "location");
+  if (!actorBinding || !currentLocationBinding || actorBinding.reference.id !== decision.actorId) return null;
+  const playerPlacement = mechanicalFrame.placements.find((placement) =>
+    placement.actorId === publicAuthority.player.actorId &&
+    placement.placementKind === "present" &&
+    placement.locationId === currentLocationBinding.reference.id);
+  const decisionActorPlacement = mechanicalFrame.placements.find((placement) =>
+    placement.actorId === decision.actorId &&
+    placement.placementKind === "present" &&
+    placement.locationId === currentLocationBinding.reference.id);
+  const authorized = (kind: CampaignPlayEntityRef["kind"], id: string) =>
+    publicAuthority.authority.authorizedRefs.some((reference) =>
+      reference.kind === kind && reference.id === id);
+  if (
+    !playerPlacement || !decisionActorPlacement ||
+    !authorized("actor", publicAuthority.player.actorId) ||
+    !authorized("actor", decision.actorId) ||
+    !authorized("location", currentLocationBinding.reference.id) ||
+    !authorized("decision", decision.decisionKey)
+  ) return null;
+  return campaignPlayCertifiedDecisionSchema.parse({
+    actionSchemaVersion: 1,
+    resolver: "code_owned",
+    campaignId: input.campaignId,
+    turnId: input.turnId,
+    sourceTurnId: input.sourceTurnId,
+    sourceMomentId: input.sourceMomentId,
+    sourceMomentHash: input.sourceMomentHash,
+    sourcePacketHash: input.sourcePacketHash,
+    acceptedWorldVersion: input.acceptedWorldVersion,
+    baseWorldVersion: input.baseWorldVersion,
+    baseRuntimeRevision: input.baseRuntimeRevision,
+    actorId: publicAuthority.player.actorId,
+    actorHandle: publicAuthority.player.actorHandle,
+    choiceHandle: intent.handle,
+    label: suggestion.label,
+    decisionBinding: binding,
+    decisionActorId: decision.actorId,
+    decisionSourceTurnId: decision.sourceTurnId,
+    decisionStatus: "open",
+    decisionSummary: decision.summary,
+    acceptLabel: decision.acceptLabel,
+    declineLabel: decision.declineLabel,
+    acceptEffect: decision.acceptEffect ?? null,
+    ruling: {
+      disposition: "deterministic",
+      normalizedIntent: {
+        originalText: suggestion.label,
+        source: "suggested",
+        choiceHandle: intent.handle,
+        kind: "contact",
+        targets: intent.targets,
+        method: null,
+        stakes: null,
+      },
+      movementRouteHandle: null,
+      possessionEffectAuthority: { kind: "none" },
+      requiredObligationEffect: { kind: "none" },
+      citedVisibleFactHandles: [binding.actorHandle],
+      resultBounds: { minimum: "success", maximum: "success" },
+      elapsedBounds: { minimumMinutes: 1, maximumMinutes: 1 },
+      uncertainty: { kind: "none" },
+      reason: "Current rendered decision binding selects one open code-owned decision disposition.",
+      clarificationQuestion: null,
+    },
+    resolution: { kind: "deterministic", result: "success" },
+    publicResult: {
+      intentKind: "contact",
+      disposition: "deterministic",
+      result: "success",
+      clarificationQuestion: null,
+    },
+  });
+}
+
 function certifyPureRenderedContact(input: {
   campaignId: string;
   turnId: string;
@@ -1364,16 +1721,24 @@ function certifyPureRenderedContact(input: {
   const visibleActor = packet.visibleActors.find((candidate) =>
     candidate.handle === targetActorHandle);
   if (!visibleActor) return null;
-  const prefix = campaignPlaySuggestedActionLabelPrefix(packet, intent);
-  if (!suggestion.label.startsWith(prefix)) return null;
-  const renderedDetail = suggestion.label.slice(prefix.length);
-  const quotedDetail = /^“([^”]+)”$/u.exec(renderedDetail);
-  if (quotedDetail === null) return null;
-  const detail = quotedDetail[1]!;
-  if (!/^ask (?:about|what|who|where|when|why|how|whether|if) [^\r\n]+$/.test(detail)) {
-    return null;
-  }
+  const renderedSpeechPrefixes = [
+    campaignPlaySuggestedActionLabelPrefix(packet, intent),
+    `Ask ${visibleActor.name}: `,
+    `Tell ${visibleActor.name}: `,
+  ];
+  const renderedSpeechPrefix = renderedSpeechPrefixes.find((candidate) =>
+    suggestion.label.startsWith(`${candidate}“`) && suggestion.label.endsWith("”")
+  );
+  const renderedDetail = renderedSpeechPrefix === undefined
+    ? null
+    : suggestion.label.slice(renderedSpeechPrefix.length + 1, -1);
+  const terminalPunctuation = renderedDetail?.at(-1);
   if (
+    renderedDetail === null ||
+    renderedDetail.length === 0 ||
+    renderedDetail !== renderedDetail.trim() ||
+    renderedDetail.includes("\n") || renderedDetail.includes("\r") ||
+    ![".", "?", "!"].includes(terminalPunctuation ?? "") ||
     canonicalizeCampaignPlayProjection(choice) !== canonicalizeCampaignPlayProjection({
       ...intent,
       label: suggestion.label,
@@ -1424,7 +1789,7 @@ function certifyPureRenderedContact(input: {
     label: suggestion.label,
     targetActorId,
     targetActorHandle,
-    detail,
+    detail: renderedDetail,
     ruling: {
       disposition: "deterministic",
       normalizedIntent: {
@@ -1433,7 +1798,7 @@ function certifyPureRenderedContact(input: {
         choiceHandle: intent.handle,
         kind: "contact",
         targets: intent.targets,
-        method: detail,
+        method: renderedDetail,
         stakes: null,
       },
       movementRouteHandle: null,
@@ -1443,7 +1808,7 @@ function certifyPureRenderedContact(input: {
       resultBounds: { minimum: "success", maximum: "success" },
       elapsedBounds: { minimumMinutes: 1, maximumMinutes: 1 },
       uncertainty: { kind: "none" },
-      reason: "Current rendered question is authorized for delivery without a response claim.",
+      reason: "Current rendered contact action carries one exact player-facing utterance to one visible actor.",
       clarificationQuestion: null,
     },
     resolution: { kind: "deterministic", result: "success" },
@@ -1489,8 +1854,9 @@ function certifyPureRenderedObserve(input: {
   const locationHandle = intent.targets[0]!.handle;
   if (locationHandle !== packet.currentLocation.handle) return null;
   const prefix = campaignPlaySuggestedActionLabelPrefix(packet, intent);
-  if (!suggestion.label.startsWith(prefix)) return null;
-  const detail = suggestion.label.slice(prefix.length);
+  const detail = suggestion.label.startsWith(prefix)
+    ? suggestion.label.slice(prefix.length)
+    : suggestion.label;
   const detailWords = detail.split(/\s+/u);
   if (
     detail.length === 0 || detail !== detail.trim() || detail.includes("\n") || detail.includes("\r") ||
@@ -1568,6 +1934,338 @@ function certifyPureRenderedObserve(input: {
   });
 }
 
+function certifyPureRenderedCommitment(input: {
+  campaignId: string;
+  turnId: string;
+  acceptedWorldVersion: number;
+  baseWorldVersion: number;
+  baseRuntimeRevision: number;
+  sourceTurnId: string;
+  sourceMomentId: string;
+  sourceMomentHash: string;
+  sourcePacketHash: string;
+  packet: CampaignPlayNarratorPacket;
+  moment: z.infer<typeof publicMomentSchema>;
+  mechanicalFrame: CampaignPlayRulebookFrame;
+  publicAuthority: Pick<CampaignPlayPlayerActionAdmissionFrame,
+    "player" | "visibleFacts" | "handleBindings" | "choiceBindings" | "authority">;
+  judgeInput: CampaignPlayJudgeInput;
+}): CampaignPlayCertifiedCommitment | null {
+  const { judgeInput, packet, moment, mechanicalFrame, publicAuthority } = input;
+  const binding = judgeInput.commitmentBinding;
+  if (judgeInput.source !== "suggested" || judgeInput.choiceHandle === null || binding === undefined) {
+    return null;
+  }
+  const suggestion = moment.suggestedActions.find((candidate) =>
+    candidate.choiceHandle === judgeInput.choiceHandle);
+  const intent = packet.availableIntents.find((candidate) =>
+    candidate.handle === judgeInput.choiceHandle);
+  const choice = publicAuthority.choiceBindings.find((candidate) =>
+    candidate.handle === judgeInput.choiceHandle);
+  if (!suggestion || !intent || !choice || suggestion.label !== judgeInput.originalText) return null;
+  const suggestionBinding = suggestion.commitmentBinding;
+  const intentBinding = intent.commitmentBinding;
+  if (
+    suggestionBinding === undefined || intentBinding === undefined ||
+    canonicalizeCampaignPlayProjection(suggestionBinding) !==
+      canonicalizeCampaignPlayProjection(binding) ||
+    canonicalizeCampaignPlayProjection(intentBinding) !==
+      canonicalizeCampaignPlayProjection(binding) ||
+    choice.commitmentBinding === undefined ||
+    canonicalizeCampaignPlayProjection(choice.commitmentBinding) !==
+      canonicalizeCampaignPlayProjection(binding)
+  ) return null;
+  const commitment = mechanicalFrame.commitments.find((candidate) =>
+    deriveCampaignPlayPublicHandle("commitment", input.campaignId, candidate.commitmentId) ===
+      binding.commitmentHandle);
+  if (
+    !commitment || commitment.status !== "active" ||
+    (commitment.kind !== "paid_delivery" && commitment.kind !== "unpaid_delivery") ||
+    commitment.performerActorId !== publicAuthority.player.actorId ||
+    commitment.subjectName !== binding.subjectName ||
+    commitment.destinationHandle !== binding.destinationHandle
+  ) return null;
+  const counterparty = [...mechanicalFrame.acceptedWorld.actors, ...mechanicalFrame.runtimeActors]
+    .find((candidate) => candidate.id === commitment.counterpartyActorId);
+  const destination = [...mechanicalFrame.acceptedWorld.locations, ...mechanicalFrame.runtimeLocations]
+    .find((candidate) =>
+      deriveCampaignPlayPublicHandle("location", input.campaignId, candidate.id) ===
+        binding.destinationHandle);
+  if (
+    !counterparty || counterparty.kind !== "person" || counterparty.controller !== "agent" ||
+    !destination ||
+    deriveCampaignPlayPublicHandle("actor", input.campaignId, counterparty.id) !==
+      binding.counterpartyHandle ||
+    deriveCampaignPlayPublicHandle("location", input.campaignId, destination.id) !==
+      binding.destinationHandle
+  ) return null;
+  const counterpartyBinding = publicAuthority.handleBindings.find((candidate) =>
+    candidate.handle === binding.counterpartyHandle && candidate.reference.kind === "actor");
+  const destinationBinding = publicAuthority.handleBindings.find((candidate) =>
+    candidate.handle === binding.destinationHandle && candidate.reference.kind === "location");
+  const currentLocationBinding = publicAuthority.handleBindings.find((candidate) =>
+    candidate.handle === packet.currentLocation.handle && candidate.reference.kind === "location");
+  if (
+    !currentLocationBinding || currentLocationBinding.reference.id !==
+      (mechanicalFrame.placements.find((placement) =>
+        placement.actorId === publicAuthority.player.actorId && placement.placementKind === "present")
+        ?.locationId ?? "")
+  ) return null;
+  const playerPlacement = mechanicalFrame.placements.find((placement) =>
+    placement.actorId === publicAuthority.player.actorId && placement.placementKind === "present");
+  const counterpartyPlacement = mechanicalFrame.placements.find((placement) =>
+    placement.actorId === commitment.counterpartyActorId && placement.placementKind === "present");
+  const expectedPossessionKey = deriveCampaignPlayPossessionKey(commitment.subjectName);
+  const expectedPossessionId = deriveCampaignPlayPossessionId(
+    input.campaignId,
+    publicAuthority.player.actorId,
+    expectedPossessionKey,
+  );
+  const possession = mechanicalFrame.possessions.find((candidate) =>
+    candidate.actorId === publicAuthority.player.actorId &&
+    candidate.possessionId === expectedPossessionId &&
+    candidate.possessionKey === expectedPossessionKey &&
+    candidate.name === commitment.subjectName);
+  const action = binding.action;
+  const expectedLabel = action === "collect"
+    ? `Ask ${counterparty.name} for ${commitment.subjectName}`
+    : `Deliver ${commitment.subjectName} at ${destination.name}`;
+  const authorized = (kind: CampaignPlayEntityRef["kind"], id: string) =>
+    publicAuthority.authority.authorizedRefs.some((reference) =>
+      reference.kind === kind && reference.id === id);
+  const visibleCounterparty = publicAuthority.visibleFacts.some((fact) =>
+    fact.handle === binding.counterpartyHandle && fact.kind === "actor");
+  const playerHasActiveCondition = mechanicalFrame.actorConditions.some((condition) =>
+    condition.actorId === publicAuthority.player.actorId && condition.present);
+  const counterpartyHasActiveCondition = mechanicalFrame.actorConditions.some((condition) =>
+    condition.actorId === commitment.counterpartyActorId && condition.present);
+  if (
+    intent.targets.length !== 1 ||
+    (action === "collect"
+      ? intent.kind !== "contact" || intent.targets[0]?.kind !== "actor" ||
+        intent.targets[0]?.handle !== binding.counterpartyHandle ||
+        !visibleCounterparty || !counterpartyBinding ||
+        counterpartyBinding.reference.id !== commitment.counterpartyActorId ||
+        !playerPlacement || !counterpartyPlacement ||
+        playerPlacement.locationId !== counterpartyPlacement.locationId ||
+        playerPlacement.locationId !== currentLocationBinding.reference.id ||
+        playerHasActiveCondition || counterpartyHasActiveCondition ||
+        (possession !== undefined && possession.quantity > 0) ||
+        suggestion.label !== expectedLabel ||
+        !authorized("actor", commitment.counterpartyActorId) ||
+        !authorized("location", currentLocationBinding.reference.id)
+      : intent.kind !== "attempt" || intent.targets[0]?.kind !== "location" ||
+        intent.targets[0]?.handle !== binding.destinationHandle ||
+        !destinationBinding || destinationBinding.reference.id !== destination.id ||
+        !playerPlacement || playerPlacement.locationId !== destination.id ||
+        currentLocationBinding.reference.id !== destination.id ||
+        playerHasActiveCondition || possession === undefined || possession.quantity < 1 ||
+        suggestion.label !== expectedLabel ||
+        !authorized("location", destination.id))
+  ) return null;
+  if (!authorized("actor", publicAuthority.player.actorId)) return null;
+  const certificateBase = {
+    actionSchemaVersion: 1,
+    resolver: "code_owned",
+    campaignId: input.campaignId,
+    turnId: input.turnId,
+    sourceTurnId: input.sourceTurnId,
+    sourceMomentId: input.sourceMomentId,
+    sourceMomentHash: input.sourceMomentHash,
+    sourcePacketHash: input.sourcePacketHash,
+    acceptedWorldVersion: input.acceptedWorldVersion,
+    baseWorldVersion: input.baseWorldVersion,
+    baseRuntimeRevision: input.baseRuntimeRevision,
+    actorId: publicAuthority.player.actorId,
+    actorHandle: publicAuthority.player.actorHandle,
+    choiceHandle: intent.handle,
+    label: suggestion.label,
+    commitmentId: commitment.commitmentId,
+    commitmentHandle: binding.commitmentHandle,
+    action,
+    commitmentBinding: binding,
+    counterpartyActorId: commitment.counterpartyActorId,
+    counterpartyActorHandle: binding.counterpartyHandle,
+    subjectName: commitment.subjectName,
+    destinationLocationId: destination.id,
+    destinationHandle: binding.destinationHandle,
+    commitmentWorldVersion: commitment.worldVersion,
+    commitmentSourceDecisionKey: commitment.sourceDecisionKey,
+    commitmentSourceTurnId: commitment.sourceTurnId,
+    commitmentSourceReceiptId: commitment.sourceReceiptId,
+    possessionId: action === "collect" ? null : possession?.possessionId ?? null,
+    possessionHandle: action === "collect" || possession === undefined
+      ? null
+      : deriveCampaignPlayPublicHandle("possession", input.campaignId, possession.possessionId),
+  };
+  return campaignPlayCertifiedCommitmentSchema.parse(
+    commitment.kind === "paid_delivery"
+      ? { ...certificateBase, feeUnit: "copper", feeAmount: commitment.feeAmount }
+      : certificateBase,
+  );
+}
+
+function certifyPureRenderedObligation(input: {
+  campaignId: string;
+  turnId: string;
+  acceptedWorldVersion: number;
+  baseWorldVersion: number;
+  baseRuntimeRevision: number;
+  sourceTurnId: string;
+  sourceMomentId: string;
+  sourceMomentHash: string;
+  sourcePacketHash: string;
+  packet: CampaignPlayNarratorPacket;
+  moment: z.infer<typeof publicMomentSchema>;
+  mechanicalFrame: CampaignPlayRulebookFrame;
+  publicAuthority: Pick<CampaignPlayPlayerActionAdmissionFrame,
+    "player" | "visibleFacts" | "handleBindings" | "choiceBindings" | "authority">;
+  judgeInput: CampaignPlayAdmissionJudgeInput;
+}): CampaignPlayCertifiedObligation | null {
+  const { judgeInput, packet, moment, mechanicalFrame, publicAuthority } = input;
+  const binding = judgeInput.obligationBinding;
+  if (judgeInput.source !== "suggested" || judgeInput.choiceHandle === null || binding === undefined) {
+    return null;
+  }
+  const suggestion = [
+    ...moment.suggestedActions,
+    ...moment.utilityActions,
+  ].find((candidate) => candidate.choiceHandle === judgeInput.choiceHandle);
+  const intent = packet.availableIntents.find((candidate) =>
+    candidate.handle === judgeInput.choiceHandle);
+  const choice = publicAuthority.choiceBindings.find((candidate) =>
+    candidate.handle === judgeInput.choiceHandle);
+  if (!suggestion || !intent || !choice || suggestion.label !== judgeInput.originalText) return null;
+  const suggestionBinding = suggestion.obligationBinding;
+  const intentBinding = intent.obligationBinding;
+  if (
+    suggestionBinding === undefined || intentBinding === undefined ||
+    canonicalizeCampaignPlayProjection(suggestionBinding) !==
+      canonicalizeCampaignPlayProjection(binding) ||
+    canonicalizeCampaignPlayProjection(intentBinding) !==
+      canonicalizeCampaignPlayProjection(binding) ||
+    choice.obligationBinding === undefined ||
+    canonicalizeCampaignPlayProjection(choice.obligationBinding) !==
+      canonicalizeCampaignPlayProjection(binding)
+  ) return null;
+  const visibleObligation = packet.obligations.find((candidate) =>
+    candidate.handle === binding.obligationHandle);
+  const visibleDebtorActor = packet.visibleActors.find((candidate) =>
+    candidate.handle === binding.debtorHandle);
+  if (
+    intent.kind !== "contact" || intent.targets.length !== 1 ||
+    intent.targets[0]?.kind !== "actor" ||
+    intent.targets[0]?.handle !== binding.debtorHandle ||
+    binding.creditorHandle !== publicAuthority.player.actorHandle ||
+    visibleObligation === undefined ||
+    visibleObligation.direction !== "receivable" ||
+    visibleObligation.counterpartyHandle !== binding.debtorHandle ||
+    visibleObligation.unitKey !== "copper" ||
+    visibleObligation.outstandingAmount !== binding.amount ||
+    visibleDebtorActor === undefined ||
+    suggestion.label !== `Collect ${binding.amount} copper from ${visibleDebtorActor.name}`
+  ) return null;
+  const obligation = mechanicalFrame.obligations.find((candidate) =>
+      deriveCampaignPlayPublicHandle("obligation", input.campaignId, candidate.obligationId) ===
+        binding.obligationHandle);
+  if (!obligation) return null;
+  const debtor = [
+    ...mechanicalFrame.acceptedWorld.actors,
+    ...mechanicalFrame.runtimeActors,
+  ].find((candidate) => candidate.id === obligation.debtorActorId);
+  const creditor = mechanicalFrame.human?.actorId === publicAuthority.player.actorId
+    ? mechanicalFrame.human
+    : null;
+  const expectedObligationId = deriveCampaignPlayObligationId(
+    input.campaignId,
+    obligation.debtorActorId,
+    obligation.creditorActorId,
+    obligation.unitKey,
+  );
+  const debtorHandle = deriveCampaignPlayPublicHandle(
+    "actor",
+    input.campaignId,
+    obligation.debtorActorId,
+  );
+  const creditorHandle = deriveCampaignPlayPublicHandle(
+    "actor",
+    input.campaignId,
+    obligation.creditorActorId,
+  );
+  const obligationBinding = publicAuthority.handleBindings.find((candidate) =>
+    candidate.handle === binding.obligationHandle && candidate.reference.kind === "obligation");
+  const debtorBinding = publicAuthority.handleBindings.find((candidate) =>
+    candidate.handle === binding.debtorHandle && candidate.reference.kind === "actor");
+  const currentLocationBinding = publicAuthority.handleBindings.find((candidate) =>
+    candidate.handle === packet.currentLocation.handle && candidate.reference.kind === "location");
+  const visibleDebtor = publicAuthority.visibleFacts.some((fact) =>
+    fact.handle === binding.debtorHandle && fact.kind === "actor");
+  const playerPlacement = mechanicalFrame.placements.find((placement) =>
+    placement.actorId === publicAuthority.player.actorId && placement.placementKind === "present");
+  const debtorPlacement = mechanicalFrame.placements.find((placement) =>
+    placement.actorId === obligation.debtorActorId && placement.placementKind === "present");
+  const authorized = (kind: CampaignPlayEntityRef["kind"], id: string) =>
+    publicAuthority.authority.authorizedRefs.some((reference) =>
+      reference.kind === kind && reference.id === id);
+  const possessionId = deriveCampaignPlayPossessionId(
+    input.campaignId,
+    publicAuthority.player.actorId,
+    "copper",
+  );
+  if (
+    debtor === undefined || debtor.kind !== "person" || debtor.controller !== "agent" ||
+    creditor === null || obligation.debtorActorId === obligation.creditorActorId ||
+    obligation.obligationId !== expectedObligationId ||
+    obligation.creditorActorId !== publicAuthority.player.actorId ||
+    obligation.unitKey !== "copper" || obligation.outstandingAmount !== binding.amount ||
+    binding.obligationHandle !== deriveCampaignPlayPublicHandle(
+      "obligation", input.campaignId, obligation.obligationId) ||
+    binding.debtorHandle !== debtorHandle || binding.creditorHandle !== creditorHandle ||
+    debtor.name !== visibleDebtorActor.name ||
+    !obligationBinding || obligationBinding.reference.id !== obligation.obligationId ||
+    !debtorBinding || debtorBinding.reference.id !== obligation.debtorActorId ||
+    !currentLocationBinding || !visibleDebtor || !playerPlacement || !debtorPlacement ||
+    playerPlacement.locationId !== debtorPlacement.locationId ||
+    playerPlacement.locationId !== currentLocationBinding.reference.id ||
+    !authorized("actor", publicAuthority.player.actorId) ||
+    !authorized("actor", obligation.debtorActorId) ||
+    !authorized("obligation", obligation.obligationId) ||
+    !authorized("location", playerPlacement.locationId)
+  ) return null;
+  return campaignPlayCertifiedObligationSchema.parse({
+    actionSchemaVersion: 1,
+    resolver: "code_owned",
+    campaignId: input.campaignId,
+    turnId: input.turnId,
+    sourceTurnId: input.sourceTurnId,
+    sourceMomentId: input.sourceMomentId,
+    sourceMomentHash: input.sourceMomentHash,
+    sourcePacketHash: input.sourcePacketHash,
+    acceptedWorldVersion: input.acceptedWorldVersion,
+    baseWorldVersion: input.baseWorldVersion,
+    baseRuntimeRevision: input.baseRuntimeRevision,
+    actorId: publicAuthority.player.actorId,
+    actorHandle: publicAuthority.player.actorHandle,
+    choiceHandle: intent.handle,
+    label: suggestion.label,
+    obligationId: obligation.obligationId,
+    obligationHandle: binding.obligationHandle,
+    obligationBinding: binding,
+    debtorActorId: obligation.debtorActorId,
+    debtorActorHandle: binding.debtorHandle,
+    debtorName: debtor.name,
+    creditorActorId: obligation.creditorActorId,
+    creditorActorHandle: binding.creditorHandle,
+    unitKey: "copper",
+    amount: obligation.outstandingAmount,
+    locationId: playerPlacement.locationId,
+    locationHandle: currentLocationBinding.handle,
+    creditorPossessionId: possessionId,
+    creditorPossessionKey: "copper",
+    creditorPossessionName: "Copper",
+  });
+}
+
 function buildAdmissionFrame(input: {
   handle: CampaignPlayDatabaseHandle;
   turnId: string;
@@ -1598,6 +2296,8 @@ function buildAdmissionFrame(input: {
   const mechanicalFrame = loadCampaignPlayRulebookFrame(input.handle);
   const human = humanPlayer(input.handle);
   const judgeInput = resolveJudgeInput(input.request, moment.packet, moment.moment);
+  const hasCommitmentBinding = judgeInput.commitmentBinding !== undefined;
+  const hasObligationBinding = judgeInput.obligationBinding !== undefined;
   const publicAuthority = buildPublicAuthority({
     handle: input.handle,
     packet: moment.packet,
@@ -1626,7 +2326,55 @@ function buildAdmissionFrame(input: {
     judgeInput,
     ...publicAuthority,
   };
-  const moveCertificate = certifyPureRenderedMove({
+  const obligationCertificate = hasObligationBinding
+    ? certifyPureRenderedObligation({
+      campaignId: baseFrame.campaignId,
+      turnId: baseFrame.turnId,
+      acceptedWorldVersion: baseFrame.acceptedWorldVersion,
+      baseWorldVersion: baseFrame.baseWorldVersion,
+      baseRuntimeRevision: baseFrame.baseRuntimeRevision,
+      sourceTurnId: baseFrame.sourceTurnId,
+      sourceMomentId: baseFrame.sourceMomentId,
+      sourceMomentHash: baseFrame.sourceMomentHash,
+      sourcePacketHash: baseFrame.sourcePacketHash,
+      packet: baseFrame.sourcePacket,
+      moment: baseFrame.sourceMoment,
+      mechanicalFrame,
+      publicAuthority,
+      judgeInput,
+    })
+    : null;
+  if (hasObligationBinding && obligationCertificate === null) {
+    throw new CampaignPlayTurnRuntimeError(
+      "turn_request_invalid",
+      "Campaign Play receivable action no longer matches the signed obligation authority.",
+    );
+  }
+  const commitmentCertificate = hasCommitmentBinding && !hasObligationBinding
+    ? certifyPureRenderedCommitment({
+      campaignId: baseFrame.campaignId,
+      turnId: baseFrame.turnId,
+      acceptedWorldVersion: baseFrame.acceptedWorldVersion,
+      baseWorldVersion: baseFrame.baseWorldVersion,
+      baseRuntimeRevision: baseFrame.baseRuntimeRevision,
+      sourceTurnId: baseFrame.sourceTurnId,
+      sourceMomentId: baseFrame.sourceMomentId,
+      sourceMomentHash: baseFrame.sourceMomentHash,
+      sourcePacketHash: baseFrame.sourcePacketHash,
+      packet: baseFrame.sourcePacket,
+      moment: baseFrame.sourceMoment,
+      mechanicalFrame,
+      publicAuthority,
+      judgeInput,
+    })
+    : null;
+  if (hasCommitmentBinding && commitmentCertificate === null) {
+    throw new CampaignPlayTurnRuntimeError(
+      "turn_request_invalid",
+      "Campaign Play commitment action no longer matches the signed delivery authority.",
+    );
+  }
+  const moveCertificate = hasCommitmentBinding || hasObligationBinding ? null : certifyPureRenderedMove({
     campaignId: baseFrame.campaignId,
     turnId: baseFrame.turnId,
     acceptedWorldVersion: baseFrame.acceptedWorldVersion,
@@ -1642,7 +2390,7 @@ function buildAdmissionFrame(input: {
     publicAuthority,
     judgeInput,
   });
-  const waitCertificate = moveCertificate === null ? certifyPureRenderedWait({
+  const waitCertificate = moveCertificate === null && !hasCommitmentBinding && !hasObligationBinding ? certifyPureRenderedWait({
     campaignId: baseFrame.campaignId,
     turnId: baseFrame.turnId,
     acceptedWorldVersion: baseFrame.acceptedWorldVersion,
@@ -1669,7 +2417,34 @@ function buildAdmissionFrame(input: {
       "Campaign Play utility action no longer matches the current wait certificate.",
     );
   }
-  const contactCertificate = moveCertificate === null && waitCertificate === null
+  const decisionCertificate = !hasCommitmentBinding && !hasObligationBinding && moveCertificate === null && waitCertificate === null
+    ? certifyPureRenderedDecision({
+      campaignId: baseFrame.campaignId,
+      turnId: baseFrame.turnId,
+      acceptedWorldVersion: baseFrame.acceptedWorldVersion,
+      baseWorldVersion: baseFrame.baseWorldVersion,
+      baseRuntimeRevision: baseFrame.baseRuntimeRevision,
+      sourceTurnId: baseFrame.sourceTurnId,
+      sourceMomentId: baseFrame.sourceMomentId,
+      sourceMomentHash: baseFrame.sourceMomentHash,
+      sourcePacketHash: baseFrame.sourcePacketHash,
+      packet: baseFrame.sourcePacket,
+      moment: baseFrame.sourceMoment,
+      mechanicalFrame,
+      publicAuthority,
+      judgeInput,
+    }) : null;
+  const requestedDecisionBinding = input.request.source === "suggested"
+    ? input.request.decisionBinding
+    : undefined;
+  if (requestedDecisionBinding !== undefined && decisionCertificate === null) {
+    throw new CampaignPlayTurnRuntimeError(
+      "turn_request_invalid",
+      "Campaign Play decision binding no longer matches an open rendered decision.",
+    );
+  }
+  const contactCertificate = !hasCommitmentBinding && !hasObligationBinding && moveCertificate === null && waitCertificate === null &&
+    decisionCertificate === null
     ? certifyPureRenderedContact({
       campaignId: baseFrame.campaignId,
       turnId: baseFrame.turnId,
@@ -1686,8 +2461,8 @@ function buildAdmissionFrame(input: {
       publicAuthority,
       judgeInput,
     }) : null;
-  const observeCertificate = moveCertificate === null && waitCertificate === null &&
-    contactCertificate === null
+  const observeCertificate = !hasCommitmentBinding && !hasObligationBinding && moveCertificate === null && waitCertificate === null &&
+    decisionCertificate === null && contactCertificate === null
     ? certifyPureRenderedObserve({
       campaignId: baseFrame.campaignId,
       turnId: baseFrame.turnId,
@@ -1707,7 +2482,19 @@ function buildAdmissionFrame(input: {
     : null;
   return playerActionAdmissionFrameSchema.parse({
     ...baseFrame,
-    executionRoute: moveCertificate !== null
+    executionRoute: obligationCertificate !== null
+      ? {
+          kind: "certified_obligation",
+          certificate: obligationCertificate,
+          certificateHash: certifiedObligationHash(obligationCertificate),
+        }
+      : commitmentCertificate !== null
+      ? {
+          kind: "certified_commitment",
+          certificate: commitmentCertificate,
+          certificateHash: certifiedCommitmentHash(commitmentCertificate),
+        }
+      : moveCertificate !== null
       ? {
           kind: "certified_move",
           certificate: moveCertificate,
@@ -1715,9 +2502,15 @@ function buildAdmissionFrame(input: {
         }
       : waitCertificate !== null
         ? {
-            kind: "certified_wait",
+          kind: "certified_wait",
             certificate: waitCertificate,
-            certificateHash: certifiedWaitHash(waitCertificate),
+          certificateHash: certifiedWaitHash(waitCertificate),
+        }
+      : decisionCertificate !== null
+        ? {
+            kind: "certified_decision",
+            certificate: decisionCertificate,
+            certificateHash: certifiedDecisionHash(decisionCertificate),
           }
         : contactCertificate !== null
           ? {
@@ -1758,6 +2551,90 @@ function rulebookAuthority(
   turnId: string,
   frame: CampaignPlayPlayerActionAdmissionFrame,
 ): CampaignPlayRulebookAuthority {
+  if (frame.executionRoute.kind === "certified_commitment") {
+    const certificate = frame.executionRoute.certificate;
+    const isPaidDelivery = "feeAmount" in certificate;
+    const authorizedRefs: CampaignPlayEntityRef[] = [
+      { kind: "actor", id: certificate.actorId },
+      { kind: "actor", id: certificate.counterpartyActorId },
+      { kind: "commitment", id: certificate.commitmentId },
+      { kind: "location", id: certificate.destinationLocationId },
+    ];
+    if (isPaidDelivery) {
+      authorizedRefs.push({
+        kind: "obligation",
+        id: deriveCampaignPlayObligationId(
+          frame.campaignId,
+          certificate.counterpartyActorId,
+          certificate.actorId,
+          certificate.feeUnit,
+        ),
+      });
+    }
+    if (certificate.possessionId !== null) {
+      authorizedRefs.push({ kind: "possession", id: certificate.possessionId });
+    }
+    return {
+      purpose: "commitment_execution",
+      turnId,
+      actorId: certificate.actorId,
+      rootParent: { kind: "turn", turnId },
+      authorizedRefs,
+      witnessActorIds: [],
+      knownWorldEventIds: [],
+        commitmentExecution: isPaidDelivery
+          ? {
+              action: certificate.action,
+              commitmentKind: "paid_delivery",
+              commitmentId: certificate.commitmentId,
+              performerActorId: certificate.actorId,
+              counterpartyActorId: certificate.counterpartyActorId,
+              subjectName: certificate.subjectName,
+              destinationLocationId: certificate.destinationLocationId,
+              destinationHandle: certificate.destinationHandle,
+              feeUnit: certificate.feeUnit,
+              feeAmount: certificate.feeAmount,
+              possessionId: certificate.possessionId,
+              sourceDecisionKey: certificate.commitmentSourceDecisionKey,
+              sourceTurnId: certificate.commitmentSourceTurnId,
+              sourceReceiptId: certificate.commitmentSourceReceiptId,
+              commitmentWorldVersion: certificate.commitmentWorldVersion,
+            }
+          : {
+              action: certificate.action,
+              commitmentKind: "unpaid_delivery",
+              commitmentId: certificate.commitmentId,
+              performerActorId: certificate.actorId,
+              counterpartyActorId: certificate.counterpartyActorId,
+              subjectName: certificate.subjectName,
+              destinationLocationId: certificate.destinationLocationId,
+              destinationHandle: certificate.destinationHandle,
+              possessionId: certificate.possessionId,
+              sourceDecisionKey: certificate.commitmentSourceDecisionKey,
+              sourceTurnId: certificate.commitmentSourceTurnId,
+              sourceReceiptId: certificate.commitmentSourceReceiptId,
+              commitmentWorldVersion: certificate.commitmentWorldVersion,
+            },
+    };
+  }
+  if (frame.executionRoute.kind === "certified_obligation") {
+    const certificate = frame.executionRoute.certificate;
+    return {
+      purpose: "player_action",
+      turnId,
+      actorId: certificate.actorId,
+      rootParent: { kind: "turn", turnId },
+      authorizedRefs: [
+        { kind: "actor", id: certificate.actorId },
+        { kind: "actor", id: certificate.debtorActorId },
+        { kind: "obligation", id: certificate.obligationId },
+        { kind: "location", id: certificate.locationId },
+        { kind: "possession", id: certificate.creditorPossessionId },
+      ],
+      witnessActorIds: [certificate.debtorActorId],
+      knownWorldEventIds: [],
+    };
+  }
   return {
     purpose: "player_action",
     turnId,
@@ -1767,6 +2644,102 @@ function rulebookAuthority(
     witnessActorIds: frame.authority.witnessActorIds,
     knownWorldEventIds: frame.authority.knownWorldEventIds,
   };
+}
+
+function commitmentAuthorityForAdmission(input: {
+  handle: CampaignPlayDatabaseHandle;
+  admission: CampaignPlayPlayerActionAdmissionFrame;
+  mechanical: CampaignPlayRulebookFrame;
+}): CampaignPlayCommitmentAuthority | undefined {
+  const binding = input.admission.judgeInput.commitmentBinding;
+  if (binding === undefined) return undefined;
+  const commitment = input.mechanical.commitments.find((candidate) =>
+    deriveCampaignPlayPublicHandle("commitment", input.handle.campaignId, candidate.commitmentId)
+      === binding.commitmentHandle);
+  const destination = [
+    ...input.mechanical.acceptedWorld.locations,
+    ...input.mechanical.runtimeLocations,
+  ].find((candidate) =>
+    deriveCampaignPlayPublicHandle("location", input.handle.campaignId, candidate.id)
+      === binding.destinationHandle);
+  const counterparty = commitment === undefined
+    ? undefined
+    : [...input.mechanical.acceptedWorld.actors, ...input.mechanical.runtimeActors]
+      .find((candidate) => candidate.id === commitment.counterpartyActorId);
+  const counterpartyHandle = commitment === undefined
+    ? null
+    : deriveCampaignPlayPublicHandle(
+      "actor",
+      input.handle.campaignId,
+      commitment.counterpartyActorId,
+    );
+  const counterpartyBinding = counterpartyHandle === null
+    ? undefined
+    : input.admission.handleBindings.find((candidate) =>
+      candidate.handle === counterpartyHandle && candidate.reference.kind === "actor");
+  const destinationBinding = input.admission.handleBindings.find((candidate) =>
+    candidate.handle === binding.destinationHandle && candidate.reference.kind === "location");
+  const expectedPossessionKey = commitment === undefined
+    ? null
+    : deriveCampaignPlayPossessionKey(commitment.subjectName);
+  const expectedPossessionId = expectedPossessionKey === null
+    ? null
+    : deriveCampaignPlayPossessionId(
+      input.handle.campaignId,
+      input.admission.player.actorId,
+      expectedPossessionKey,
+    );
+  const possession = expectedPossessionId === null
+    ? undefined
+    : input.mechanical.possessions.find((candidate) =>
+      candidate.possessionId === expectedPossessionId &&
+      candidate.actorId === input.admission.player.actorId);
+  const playerPlacement = input.mechanical.placements.find((candidate) =>
+    candidate.actorId === input.admission.player.actorId && candidate.placementKind === "present");
+  if (
+    commitment === undefined ||
+    commitment.status !== "active" ||
+    (commitment.kind !== "paid_delivery" && commitment.kind !== "unpaid_delivery") ||
+    commitment.performerActorId !== input.admission.player.actorId ||
+    counterparty?.kind !== "person" ||
+    counterparty.controller !== "agent" ||
+    counterpartyHandle !== binding.counterpartyHandle ||
+    (binding.action === "collect" && (
+      counterpartyBinding === undefined ||
+      counterpartyBinding.reference.id !== commitment.counterpartyActorId
+    )) ||
+    destination === undefined ||
+    (binding.action === "deliver" && (
+      destinationBinding === undefined || destinationBinding.reference.id !== destination.id
+    )) ||
+    commitment.subjectName !== binding.subjectName ||
+    commitment.destinationHandle !== binding.destinationHandle ||
+    (binding.action === "collect"
+      ? possession !== undefined && possession.quantity > 0
+      : playerPlacement?.locationId !== destination.id || (possession?.quantity ?? 0) < 1)
+  ) {
+    throw new CampaignPlayTurnRuntimeError(
+      "turn_artifact_invalid",
+      "Campaign Play commitment binding is stale or no longer matches mechanical authority.",
+    );
+  }
+  const authorityBase = {
+    binding,
+    commitmentId: commitment.commitmentId,
+    action: binding.action,
+    performerActorId: commitment.performerActorId,
+    counterpartyActorId: commitment.counterpartyActorId,
+    counterpartyHandle: binding.counterpartyHandle,
+    subjectName: commitment.subjectName,
+    destinationHandle: commitment.destinationHandle,
+    possessionId: possession?.possessionId ?? null,
+    possessionHandle: possession === undefined
+      ? null
+      : deriveCampaignPlayPublicHandle("possession", input.handle.campaignId, possession.possessionId),
+  };
+  return commitment.kind === "paid_delivery"
+    ? { ...authorityBase, commitmentKind: "paid_delivery" as const, feeAmount: commitment.feeAmount }
+    : { ...authorityBase, commitmentKind: "unpaid_delivery" as const };
 }
 
 function currentGameMasterFrame(
@@ -1819,6 +2792,11 @@ function currentGameMasterFrame(
       "Campaign Play admitted public bindings changed before settlement.",
     );
   }
+  const commitmentAuthority = commitmentAuthorityForAdmission({
+    handle,
+    admission,
+    mechanical,
+  });
   return {
     admission,
     frame: {
@@ -1837,6 +2815,7 @@ function currentGameMasterFrame(
       ),
       rulebookFrame: mechanical,
       authority: rulebookAuthority(turn.turnId, admission),
+      ...(commitmentAuthority === undefined ? {} : { commitmentAuthority }),
     },
   };
 }
@@ -1845,7 +2824,8 @@ function revalidateCertifiedRoute(
   handle: CampaignPlayDatabaseHandle,
   turn: LoadedCampaignPlayTurn,
 ): CampaignPlayCertifiedMove | CampaignPlayCertifiedWait | CampaignPlayCertifiedContact |
-  CampaignPlayCertifiedObserve {
+  CampaignPlayCertifiedDecision | CampaignPlayCertifiedObserve | CampaignPlayCertifiedCommitment |
+  CampaignPlayCertifiedObligation {
   const current = currentGameMasterFrame(handle, turn);
   const admission = current.admission;
   if (!isCertifiedRoute(admission.executionRoute)) {
@@ -1911,7 +2891,58 @@ function revalidateCertifiedRoute(
         publicAuthority,
         judgeInput: admission.judgeInput,
         })
-        : certifyPureRenderedObserve({
+        : admission.executionRoute.kind === "certified_decision"
+          ? certifyPureRenderedDecision({
+          campaignId: admission.campaignId,
+          turnId: admission.turnId,
+          acceptedWorldVersion: admission.acceptedWorldVersion,
+          baseWorldVersion: admission.baseWorldVersion,
+          baseRuntimeRevision: admission.baseRuntimeRevision,
+          sourceTurnId: admission.sourceTurnId,
+          sourceMomentId: admission.sourceMomentId,
+          sourceMomentHash: admission.sourceMomentHash,
+          sourcePacketHash: admission.sourcePacketHash,
+          packet: admission.sourcePacket,
+          moment: admission.sourceMoment,
+          mechanicalFrame: current.frame.rulebookFrame,
+          publicAuthority,
+          judgeInput: admission.judgeInput,
+          })
+          : admission.executionRoute.kind === "certified_commitment"
+            ? certifyPureRenderedCommitment({
+            campaignId: admission.campaignId,
+            turnId: admission.turnId,
+            acceptedWorldVersion: admission.acceptedWorldVersion,
+            baseWorldVersion: admission.baseWorldVersion,
+            baseRuntimeRevision: admission.baseRuntimeRevision,
+            sourceTurnId: admission.sourceTurnId,
+            sourceMomentId: admission.sourceMomentId,
+            sourceMomentHash: admission.sourceMomentHash,
+            sourcePacketHash: admission.sourcePacketHash,
+            packet: admission.sourcePacket,
+            moment: admission.sourceMoment,
+            mechanicalFrame: current.frame.rulebookFrame,
+            publicAuthority,
+            judgeInput: admission.judgeInput,
+            })
+            : admission.executionRoute.kind === "certified_obligation"
+              ? certifyPureRenderedObligation({
+              campaignId: admission.campaignId,
+              turnId: admission.turnId,
+              acceptedWorldVersion: admission.acceptedWorldVersion,
+              baseWorldVersion: admission.baseWorldVersion,
+              baseRuntimeRevision: admission.baseRuntimeRevision,
+              sourceTurnId: admission.sourceTurnId,
+              sourceMomentId: admission.sourceMomentId,
+              sourceMomentHash: admission.sourceMomentHash,
+              sourcePacketHash: admission.sourcePacketHash,
+              packet: admission.sourcePacket,
+              moment: admission.sourceMoment,
+              mechanicalFrame: current.frame.rulebookFrame,
+              publicAuthority,
+              judgeInput: admission.judgeInput,
+              })
+              : certifyPureRenderedObserve({
           campaignId: admission.campaignId,
           turnId: admission.turnId,
           acceptedWorldVersion: admission.acceptedWorldVersion,
@@ -1935,7 +2966,13 @@ function revalidateCertifiedRoute(
         ? certifiedWaitHash(fresh as CampaignPlayCertifiedWait)
         : admission.executionRoute.kind === "certified_contact"
           ? certifiedContactHash(fresh as CampaignPlayCertifiedContact)
-          : certifiedObserveHash(fresh as CampaignPlayCertifiedObserve);
+          : admission.executionRoute.kind === "certified_decision"
+            ? certifiedDecisionHash(fresh as CampaignPlayCertifiedDecision)
+            : admission.executionRoute.kind === "certified_commitment"
+              ? certifiedCommitmentHash(fresh as CampaignPlayCertifiedCommitment)
+              : admission.executionRoute.kind === "certified_obligation"
+                ? certifiedObligationHash(fresh as CampaignPlayCertifiedObligation)
+                : certifiedObserveHash(fresh as CampaignPlayCertifiedObserve);
   if (
     fresh === null ||
     hash !== admission.executionRoute.certificateHash ||
@@ -1948,6 +2985,359 @@ function revalidateCertifiedRoute(
     );
   }
   return fresh;
+}
+
+function compileCertifiedRouteBatch(
+  handle: CampaignPlayDatabaseHandle,
+  turn: LoadedCampaignPlayTurn,
+): { batch: ReturnType<typeof rulebookCommandBatchSchema.parse>; batchHash: string } {
+  const current = currentGameMasterFrame(handle, turn);
+  const certificate = revalidateCertifiedRoute(handle, turn);
+  const frame = current.frame.rulebookFrame;
+  const playerRef = { kind: "actor" as const, id: certificate.actorId };
+  const isCommitment = current.admission.executionRoute.kind === "certified_commitment";
+  const isObligation = current.admission.executionRoute.kind === "certified_obligation";
+  const source = isCommitment
+    ? { kind: "system" as const, system: "commitment_executor" as const }
+    : { kind: "actor" as const, actorId: certificate.actorId };
+  const ruling = isCommitment || isObligation
+    ? null
+    : (certificate as CampaignPlayCertifiedMove | CampaignPlayCertifiedWait |
+      CampaignPlayCertifiedContact | CampaignPlayCertifiedDecision | CampaignPlayCertifiedObserve).ruling;
+  const commandArguments: Array<Record<string, unknown>> = isCommitment || isObligation ? [] : [{
+    kind: "advance_world_time",
+    elapsedMinutes: ruling!.elapsedBounds.maximumMinutes,
+    readScope: [],
+    writeScope: [],
+    exposure: { mode: "protected" },
+  }];
+  if (isObligation) {
+    const obligation = certificate as CampaignPlayCertifiedObligation;
+    const debtorRef = { kind: "actor" as const, id: obligation.debtorActorId };
+    const obligationRef = { kind: "obligation" as const, id: obligation.obligationId };
+    const locationRef = { kind: "location" as const, id: obligation.locationId };
+    const possessionRef = { kind: "possession" as const, id: obligation.creditorPossessionId };
+    commandArguments.push({
+      kind: "settle_player_receivable",
+      debtorActorId: obligation.debtorActorId,
+      creditorActorId: obligation.creditorActorId,
+      obligationId: obligation.obligationId,
+      creditorPossessionId: obligation.creditorPossessionId,
+      creditorPossessionKey: obligation.creditorPossessionKey,
+      creditorPossessionName: obligation.creditorPossessionName,
+      unitKey: obligation.unitKey,
+      amount: obligation.amount,
+      summary: obligation.label,
+      affectedRefs: [debtorRef, playerRef, possessionRef, obligationRef, locationRef],
+      readScope: [debtorRef, playerRef, possessionRef, obligationRef],
+      writeScope: [possessionRef, obligationRef],
+      exposure: { mode: "protected" },
+    });
+  } else if (isCommitment) {
+    const commitment = certificate as CampaignPlayCertifiedCommitment;
+    const commitmentRef = { kind: "commitment" as const, id: commitment.commitmentId };
+    const counterpartyRef = { kind: "actor" as const, id: commitment.counterpartyActorId };
+    const destinationRef = { kind: "location" as const, id: commitment.destinationLocationId };
+    const possessionId = commitment.possessionId ?? deriveCampaignPlayPossessionId(
+      turn.campaignId,
+      commitment.actorId,
+      deriveCampaignPlayPossessionKey(commitment.subjectName),
+    );
+    const possessionKey = deriveCampaignPlayPossessionKey(commitment.subjectName);
+    const possessionRef = { kind: "possession" as const, id: possessionId };
+    const isPaidDelivery = "feeAmount" in commitment;
+    const obligationId = isPaidDelivery
+      ? deriveCampaignPlayObligationId(
+          turn.campaignId,
+          commitment.counterpartyActorId,
+          commitment.actorId,
+          commitment.feeUnit,
+        )
+      : null;
+    const obligationRef = obligationId === null
+      ? null
+      : { kind: "obligation" as const, id: obligationId };
+    if (commitment.action === "collect") {
+      commandArguments.push({
+        kind: "adjust_actor_possession",
+        actorId: commitment.actorId,
+        possessionId,
+        possessionKey,
+        name: commitment.subjectName,
+        quantityDelta: 1,
+        summary: commitment.label,
+        affectedRefs: [playerRef, possessionRef, counterpartyRef, commitmentRef, destinationRef],
+        readScope: [playerRef, possessionRef, counterpartyRef, commitmentRef, destinationRef],
+        writeScope: [possessionRef],
+        exposure: { mode: "protected" },
+      });
+    } else {
+      if (commitment.possessionId === null) {
+        throw new CampaignPlayTurnRuntimeError(
+          "turn_artifact_invalid",
+          "Certified delivery commitment lost its exact possession.",
+        );
+      }
+      commandArguments.push({
+        kind: "adjust_actor_possession",
+        actorId: commitment.actorId,
+        possessionId: commitment.possessionId,
+        possessionKey,
+        name: commitment.subjectName,
+        quantityDelta: -1,
+        summary: commitment.label,
+        affectedRefs: [playerRef, possessionRef, commitmentRef, destinationRef],
+        readScope: [playerRef, possessionRef, commitmentRef, destinationRef],
+        writeScope: [possessionRef],
+        exposure: { mode: "protected" },
+      });
+      if (isPaidDelivery && obligationId !== null && obligationRef !== null) {
+        commandArguments.push({
+          kind: "incur_actor_obligation",
+          debtorActorId: commitment.counterpartyActorId,
+          creditorActorId: commitment.actorId,
+          obligationId,
+          unitKey: commitment.feeUnit,
+          amount: commitment.feeAmount,
+          summary: commitment.label,
+          affectedRefs: [counterpartyRef, playerRef, obligationRef],
+          readScope: [counterpartyRef, playerRef, obligationRef],
+          writeScope: [obligationRef],
+          exposure: { mode: "protected" },
+        });
+      }
+      commandArguments.push({
+        kind: "complete_player_commitment",
+        commitmentId: commitment.commitmentId,
+        performerActorId: commitment.actorId,
+        counterpartyActorId: commitment.counterpartyActorId,
+        deliveryPossessionId: commitment.possessionId,
+        affectedRefs: [
+          commitmentRef,
+          playerRef,
+          counterpartyRef,
+          possessionRef,
+          destinationRef,
+          ...(obligationRef === null ? [] : [obligationRef]),
+        ],
+        readScope: [
+          commitmentRef,
+          playerRef,
+          counterpartyRef,
+          possessionRef,
+          destinationRef,
+          ...(obligationRef === null ? [] : [obligationRef]),
+        ],
+        writeScope: [possessionRef, ...(obligationRef === null ? [] : [obligationRef]), commitmentRef],
+        exposure: { mode: "protected" },
+      });
+    }
+  }
+  if (!isCommitment && !isObligation && ruling!.normalizedIntent.kind === "move") {
+    const move = certificate as CampaignPlayCertifiedMove;
+    const routeRef = { kind: "route" as const, id: move.routeId };
+    const fromRef = { kind: "location" as const, id: move.fromLocationId };
+    const destinationRef = { kind: "location" as const, id: move.destinationLocationId };
+    commandArguments.push({
+      kind: "move_actor",
+      actorId: move.actorId,
+      routeId: move.routeId,
+      fromLocationId: move.fromLocationId,
+      toLocationId: move.destinationLocationId,
+      observableTrace: move.label,
+      readScope: [playerRef, routeRef, fromRef, destinationRef],
+      writeScope: [playerRef, fromRef, destinationRef],
+      exposure: {
+        mode: "projectable",
+        predicates: [{ channel: "direct_perception", locationId: move.destinationLocationId }],
+      },
+    });
+  } else if (!isCommitment && !isObligation && "decisionBinding" in certificate) {
+    const decision = certificate as CampaignPlayCertifiedDecision;
+    const currentLocation = current.frame.handleBindings.find((binding) =>
+      binding.handle === current.admission.sourcePacket.currentLocation.handle &&
+      binding.reference.kind === "location");
+    if (!currentLocation) {
+      throw new CampaignPlayTurnRuntimeError(
+        "turn_artifact_invalid",
+        "Certified decision action lost its current-location authority.",
+      );
+    }
+    const decisionRef = { kind: "decision" as const, id: decision.decisionBinding.decisionKey };
+    commandArguments.push({
+      kind: "decision_resolve",
+      decisionKey: decision.decisionBinding.decisionKey,
+      actorId: decision.decisionActorId,
+      actorHandle: decision.decisionBinding.actorHandle,
+      decisionKind: decision.decisionBinding.kind,
+      sourceTurnId: decision.decisionSourceTurnId,
+      summary: decision.decisionSummary,
+      selectedLabel: decision.decisionBinding.disposition === "accept"
+        ? decision.acceptLabel
+        : decision.declineLabel,
+      disposition: decision.decisionBinding.disposition,
+      readScope: [{ kind: "actor" as const, id: decision.decisionActorId }, decisionRef],
+      writeScope: [decisionRef],
+      exposure: {
+        mode: "projectable",
+        predicates: [{
+          channel: "direct_perception",
+          locationId: currentLocation.reference.id,
+        }],
+      },
+    });
+    if (decision.decisionBinding.disposition === "accept" && decision.acceptEffect) {
+      const acceptEffect = decision.acceptEffect;
+      if (acceptEffect.kind === "grant_player_possession") {
+        const possessionKey = deriveCampaignPlayPossessionKey(acceptEffect.name);
+        const possessionId = deriveCampaignPlayPossessionId(
+          turn.campaignId,
+          decision.actorId,
+          possessionKey,
+        );
+        const possessionRef = { kind: "possession" as const, id: possessionId };
+        commandArguments.push({
+          kind: "adjust_actor_possession",
+          actorId: decision.actorId,
+          possessionId,
+          possessionKey,
+          name: acceptEffect.name,
+          quantityDelta: 1,
+          summary: decision.decisionSummary,
+          affectedRefs: [playerRef, possessionRef],
+          readScope: [playerRef, possessionRef],
+          writeScope: [possessionRef],
+          exposure: { mode: "protected" },
+        });
+      } else {
+        switch (acceptEffect.kind) {
+        case "paid_delivery":
+        case "unpaid_delivery": {
+        const commitmentId = deriveCampaignPlayCommitmentId(
+          turn.campaignId,
+          decision.decisionBinding.decisionKey,
+        );
+        const commitmentRef = { kind: "commitment" as const, id: commitmentId };
+        const counterpartyRef = { kind: "actor" as const, id: decision.decisionActorId };
+        const destinationBinding = current.frame.handleBindings.find((candidate) =>
+          candidate.handle === acceptEffect.destinationHandle &&
+          candidate.reference.kind === "location");
+        if (!destinationBinding) {
+          throw new CampaignPlayTurnRuntimeError(
+            "turn_artifact_invalid",
+            "Delivery decision lost its exact destination authority.",
+          );
+        }
+        if (frame.worldTimeMinutes === null) {
+          throw new CampaignPlayTurnRuntimeError(
+            "turn_state_invalid",
+            "Delivery acceptance requires a canonical world time.",
+          );
+        }
+        const acceptedWorldTimeMinutes = frame.worldTimeMinutes +
+          ruling!.elapsedBounds.maximumMinutes;
+        const dueWorldTimeMinutes = acceptEffect.dueInMinutes === undefined
+          ? null
+          : acceptedWorldTimeMinutes + acceptEffect.dueInMinutes;
+        const commitmentArguments = {
+          kind: "create_player_commitment",
+          commitmentId,
+          sourceDecisionKey: decision.decisionBinding.decisionKey,
+          sourceTurnId: decision.decisionSourceTurnId,
+          performerActorId: decision.actorId,
+          counterpartyActorId: decision.decisionActorId,
+          commitmentKind: acceptEffect.kind,
+          title: acceptEffect.title,
+          subjectName: acceptEffect.subjectName,
+          destinationHandle: acceptEffect.destinationHandle,
+          acceptedWorldTimeMinutes,
+          dueWorldTimeMinutes,
+          affectedRefs: [
+            commitmentRef,
+            playerRef,
+            counterpartyRef,
+            decisionRef,
+            destinationBinding.reference,
+          ],
+          readScope: [playerRef, counterpartyRef, decisionRef, destinationBinding.reference],
+          writeScope: [commitmentRef],
+          exposure: { mode: "protected" },
+        };
+        commandArguments.push(acceptEffect.kind === "paid_delivery"
+          ? {
+              ...commitmentArguments,
+              feeUnit: "copper" as const,
+              feeAmount: acceptEffect.feeAmount,
+              paymentTiming: "on_completion" as const,
+            }
+          : commitmentArguments);
+        break;
+        }
+        default:
+          throw new CampaignPlayTurnRuntimeError(
+            "turn_artifact_invalid",
+            "Decision acceptance has an unsupported mechanical effect.",
+          );
+        }
+      }
+    }
+  }
+  const batchId = `batch:${hashCampaignPlayProjection({
+    domain: "campaign_play_certified_action_batch",
+    campaignId: turn.campaignId,
+    turnId: turn.turnId,
+    certificate,
+    commandArguments,
+  }).slice(0, 32)}`;
+  let expectedWorldVersion = frame.worldVersion;
+  const commands = commandArguments.map((argumentsValue, order) => {
+    const commandId = deriveCampaignPlayCommandId(
+      turn.campaignId,
+      turn.turnId,
+      batchId,
+      order,
+    );
+    const command = {
+      ...argumentsValue,
+      commandId,
+      batchId,
+      order,
+      causalParent: order === 0
+        ? current.frame.authority.rootParent
+        : {
+            kind: "command" as const,
+            commandId: deriveCampaignPlayCommandId(
+              turn.campaignId,
+              turn.turnId,
+              batchId,
+              order - 1,
+            ),
+          },
+      source: isCommitment
+        ? source
+        : argumentsValue.kind === "create_player_commitment"
+          || argumentsValue.kind === "complete_player_commitment"
+          ? { kind: "system" as const, system: "game_master" as const }
+          : source,
+      expectedWorldVersion,
+    };
+    if (
+      typeof argumentsValue.kind === "string" &&
+      argumentsValue.kind in CAMPAIGN_PLAY_COMMAND_METADATA &&
+      CAMPAIGN_PLAY_COMMAND_METADATA[
+        argumentsValue.kind as keyof typeof CAMPAIGN_PLAY_COMMAND_METADATA
+      ].mechanicalMutation
+    ) {
+      expectedWorldVersion += 1;
+    }
+    return command;
+  });
+  const batch = rulebookCommandBatchSchema.parse({
+    batchId,
+    baseWorldVersion: frame.worldVersion,
+    commands,
+  });
+  return { batch, batchHash: hashCampaignPlayProjection(batch) };
 }
 
 function assertSuggestedRuling(
@@ -2203,14 +3593,25 @@ function playerActionContext(
   repository: ReturnType<typeof createCampaignPlayTurnRepository>,
 ): CampaignPlayActionContext {
   const admission = loadCampaignPlayPlayerActionAdmissionFrame(turn);
-  if (isCertifiedRoute(admission.executionRoute)) {
+  if (isCertifiedRoute(admission.executionRoute) && admission.executionRoute.kind !== "certified_observe") {
     const certificateHash = admission.executionRoute.kind === "certified_move"
       ? certifiedMoveHash(admission.executionRoute.certificate)
       : admission.executionRoute.kind === "certified_wait"
         ? certifiedWaitHash(admission.executionRoute.certificate)
         : admission.executionRoute.kind === "certified_contact"
           ? certifiedContactHash(admission.executionRoute.certificate)
-          : certifiedObserveHash(admission.executionRoute.certificate);
+          : admission.executionRoute.kind === "certified_decision"
+          ? certifiedDecisionHash(admission.executionRoute.certificate)
+            : admission.executionRoute.kind === "certified_commitment"
+              ? certifiedCommitmentHash(admission.executionRoute.certificate)
+              : admission.executionRoute.kind === "certified_obligation"
+                ? certifiedObligationHash(admission.executionRoute.certificate)
+              : (() => {
+                  throw new CampaignPlayTurnRuntimeError(
+                    "turn_artifact_invalid",
+                    "Campaign Play certified route has no certificate hash.",
+                  );
+                })();
     if (
       certificateHash !== admission.executionRoute.certificateHash ||
       repository.loadAcceptedModelArtifact(turn.turnId, "judge") !== null
@@ -2220,9 +3621,59 @@ function playerActionContext(
         "Campaign Play visibility rejected invalid certified route authority.",
       );
     }
+    if (admission.executionRoute.kind === "certified_decision") {
+      const certificate = admission.executionRoute.certificate;
+      const decisionOutcome: CampaignPlayDecisionOutcome = {
+        decisionKey: certificate.decisionBinding.decisionKey,
+        actorHandle: certificate.decisionBinding.actorHandle,
+        kind: certificate.decisionBinding.kind,
+        disposition: certificate.decisionBinding.disposition,
+        status: certificate.decisionBinding.disposition === "accept" ? "accepted" : "declined",
+        sourceTurnId: certificate.decisionSourceTurnId,
+        summary: certificate.decisionSummary,
+        acceptEffect: certificate.acceptEffect ?? null,
+      };
+      return campaignPlayActionContextSchema.parse({
+        submittedText: admission.judgeInput.originalText,
+        ...certificate.publicResult,
+        decisionBinding: certificate.decisionBinding,
+        decisionOutcome,
+      });
+    }
+    if (admission.executionRoute.kind === "certified_commitment") {
+      const certificate = admission.executionRoute.certificate;
+      return campaignPlayActionContextSchema.parse({
+        submittedText: admission.judgeInput.originalText,
+        intentKind: certificate.action === "collect" ? "contact" : "attempt",
+        disposition: "deterministic",
+        result: "success",
+        clarificationQuestion: null,
+      });
+    }
+    if (admission.executionRoute.kind === "certified_obligation") {
+      const certificate = admission.executionRoute.certificate;
+      return campaignPlayActionContextSchema.parse({
+        submittedText: admission.judgeInput.originalText,
+        intentKind: "contact",
+        disposition: "deterministic",
+        result: "success",
+        clarificationQuestion: null,
+        obligationSettlement: {
+          obligationHandle: certificate.obligationHandle,
+          debtorHandle: certificate.debtorActorHandle,
+          creditorHandle: certificate.creditorActorHandle,
+          unitKey: certificate.unitKey,
+          amount: certificate.amount,
+          status: "settled",
+          sourceTurnId: certificate.turnId,
+          summary: certificate.label,
+        },
+      });
+    }
+    const certificate = admission.executionRoute.certificate;
     return campaignPlayActionContextSchema.parse({
       submittedText: admission.judgeInput.originalText,
-      ...admission.executionRoute.certificate.publicResult,
+      ...certificate.publicResult,
     });
   }
   const storedJudge = repository.loadAcceptedModelArtifact(turn.turnId, "judge");
@@ -2410,12 +3861,12 @@ export function createCampaignPlayTurnRuntime(
   const visibility = input.visibility ?? createCampaignPlayVisibilityService(input.handle);
   const narrationOperations = createCampaignPlayNarrationOperationRepository(input.handle);
   const frozenSelection = selection(input);
-  const certifiedGameMasterModel = input.certifiedGameMasterModel ?? input.gameMasterModel;
   const externalOperationDeadlineMs = input.externalOperationDeadlineMs ?? 90_000;
   const gameMasterOperationDeadlineMs = input.gameMasterOperationDeadlineMs
     ?? externalOperationDeadlineMs;
   const actorReplannerOperationDeadlineMs = input.actorReplannerOperationDeadlineMs ?? 90_000;
   const actorCriticalPathReplanLimit = input.actorCriticalPathReplanLimit ?? 1;
+  const certifiedGameMasterModel = input.certifiedGameMasterModel ?? input.gameMasterModel;
   if (!Number.isSafeInteger(externalOperationDeadlineMs) || externalOperationDeadlineMs <= 0) {
     throw new CampaignPlayTurnRuntimeError(
       "turn_state_invalid",
@@ -2767,21 +4218,81 @@ export function createCampaignPlayTurnRuntime(
       if (turn.turnKind !== "player_action") return null;
       if (stage === "admitted") {
         const admitted = loadCampaignPlayPlayerActionAdmissionFrame(turn);
+        const executionRoute = admitted.executionRoute;
+        if (usesCodeOwnedCertifiedPlan(executionRoute)) {
+          return {
+            kind: "deterministic",
+            ready: () => artifacts.load("judge") === null && artifacts.load("game_master") === null,
+            execute(context) {
+              let deterministicCommitStarted = false;
+              try {
+                revalidateCertifiedRoute(input.handle, context.turn);
+                if (
+                  context.artifacts.load("judge") !== null ||
+                  context.artifacts.load("game_master") !== null
+                ) {
+                  throw new CampaignPlayTurnRuntimeError(
+                    "turn_artifact_invalid",
+                    "Campaign Play certified planning cannot retain model authority.",
+                  );
+                }
+                deterministicCommitStarted = true;
+                repository.commitDeterministic({
+                  token: context.token,
+                  transition: "certified_planned",
+                  worldVersionAdvance: 0,
+                  committedAt: now(),
+                  mutationId: runtimeId("certified-action-planned", {
+                    turnId: context.turn.turnId,
+                    epoch: context.token.epoch,
+                    routeKind: executionRoute.kind,
+                    certificateHash: executionRoute.certificateHash,
+                  }),
+                });
+              } catch (cause) {
+                if (deterministicCommitStarted || cause instanceof CampaignPlayTurnRepositoryError) {
+                  throw cause;
+                }
+                repository.failTurn({
+                  token: context.token,
+                  errorCode: "stale_artifact",
+                  publicErrorCode: "turn_failed",
+                  mutationAudit: {
+                    stage: "admitted",
+                    routeKind: executionRoute.kind,
+                    cause: cause instanceof CampaignPlayTurnRuntimeError
+                      ? cause.code
+                      : "invalid_certificate",
+                  },
+                  modelEvidence: null,
+                  failedAt: now(),
+                  mutationId: runtimeId("certified-action-planning-failed", {
+                    turnId: context.turn.turnId,
+                    epoch: context.token.epoch,
+                  }),
+                });
+              }
+            },
+          };
+        }
         return {
           kind: "external",
-          externalOperationDeadlineMs: isCertifiedRoute(admitted.executionRoute)
+          externalOperationDeadlineMs: executionRoute.kind === "certified_contact"
             ? gameMasterOperationDeadlineMs
             : externalOperationDeadlineMs,
           async execute(context) {
             const startedAt = now();
-            let routeKind: "full_authority" | "certified_move" | "certified_wait" |
-              "certified_contact" | "certified_observe" = "full_authority";
+            let routeKind: CampaignPlayPlayerActionAdmissionFrame["executionRoute"]["kind"] =
+              "full_authority";
             try {
               const admission = loadCampaignPlayPlayerActionAdmissionFrame(context.turn);
+              if (admission.executionRoute.kind === "certified_observe") {
+                revalidateCertifiedRoute(input.handle, context.turn);
+              }
               routeKind = admission.executionRoute.kind;
               const current = currentGameMasterFrame(input.handle, context.turn);
-              if (isCertifiedRoute(admission.executionRoute)) {
-                const certificate = revalidateCertifiedRoute(input.handle, context.turn);
+              if (admission.executionRoute.kind === "certified_contact") {
+                const certificate = revalidateCertifiedRoute(input.handle, context.turn) as CampaignPlayCertifiedContact;
                 const candidate = await gameMaster.plan({
                   frame: current.frame,
                   ruling: certificate.ruling,
@@ -2800,19 +4311,14 @@ export function createCampaignPlayTurnRuntime(
                   ),
                   temperature: certifiedGameMasterModel.temperature,
                   budget: modelBudget(certifiedGameMasterModel),
+                  contract: "certified_contact",
                   signal: context.signal,
                   ...(input.gameMasterRecoveryFeedback === undefined || context.attempt <= 1
                     ? {}
                     : { recoveryFeedback: input.gameMasterRecoveryFeedback }),
                 });
                 const artifact = campaignPlayGameMasterArtifactSchema.parse({
-                  ...(admission.executionRoute.kind === "certified_move"
-                    ? { certifiedMoveHash: admission.executionRoute.certificateHash }
-                    : admission.executionRoute.kind === "certified_wait"
-                      ? { certifiedWaitHash: admission.executionRoute.certificateHash }
-                      : admission.executionRoute.kind === "certified_contact"
-                        ? { certifiedContactHash: admission.executionRoute.certificateHash }
-                        : { certifiedObserveHash: admission.executionRoute.certificateHash }),
+                  certifiedContactHash: admission.executionRoute.certificateHash,
                   batch: candidate.batch,
                   batchHash: candidate.batchHash,
                   semanticReview: candidate.semanticReview,
@@ -2824,7 +4330,7 @@ export function createCampaignPlayTurnRuntime(
                   );
                 }
                 const evidence = acceptedEvidence(
-                  input.gameMasterModel.requested,
+                  certifiedGameMasterModel.requested,
                   candidate.modelEvidence,
                 );
                 return {
@@ -2845,7 +4351,7 @@ export function createCampaignPlayTurnRuntime(
                       if (cause instanceof CampaignPlayTurnRepositoryError) throw cause;
                       throw new CampaignPlayExternalStageInterruption(
                         interruptionEvidence({
-                          requested: input.gameMasterModel.requested,
+                          requested: certifiedGameMasterModel.requested,
                           evidence: candidate.modelEvidence,
                           durationMs: candidate.modelEvidence.durationMs,
                           errorCode: "persistence_failed",
@@ -2914,6 +4420,18 @@ export function createCampaignPlayTurnRuntime(
                   frozenChoice: frozenChoice
                     ? { kind: frozenChoice.kind, targets: frozenChoice.targets }
                     : null,
+                  ...(current.frame.commitmentAuthority === undefined
+                    ? {}
+                    : current.frame.commitmentAuthority.commitmentKind === "paid_delivery"
+                      ? {
+                          commitmentFeeAmount: current.frame.commitmentAuthority.feeAmount,
+                          commitmentPossessionHandle:
+                            current.frame.commitmentAuthority.possessionHandle,
+                        }
+                      : {
+                          commitmentPossessionHandle:
+                            current.frame.commitmentAuthority.possessionHandle,
+                        }),
                 },
                 model: modelForExternalAttempt(
                   context.turn.turnId,
@@ -2940,6 +4458,15 @@ export function createCampaignPlayTurnRuntime(
                 ruling: result.ruling,
                 uncertaintySeedKey: input.uncertaintySeedKey,
               });
+              if (
+                routeKind === "certified_observe" &&
+                artifact.primaryPlan.kind !== "game_master_required"
+              ) {
+                throw new CampaignPlayTurnRuntimeError(
+                  "turn_artifact_invalid",
+                  "Campaign Play certified observe Judge result must require Game Master planning.",
+                );
+              }
               const evidence = acceptedEvidence(input.judgeModel.requested, result.modelEvidence);
               return {
                 commit({ token, completedAt }) {
@@ -2974,13 +4501,13 @@ export function createCampaignPlayTurnRuntime(
               };
             } catch (cause) {
               if (cause instanceof CampaignPlayExternalStageInterruption) throw cause;
-              const gameMasterRecoveryFeedback = getCampaignPlayGameMasterRecoveryFeedback(cause);
-              if (gameMasterRecoveryFeedback !== undefined) {
-                input.onGameMasterRecoveryFeedback?.(gameMasterRecoveryFeedback);
-              }
-              if (routeKind !== "full_authority") {
+              if (routeKind === "certified_contact") {
+                const gameMasterRecoveryFeedback = getCampaignPlayGameMasterRecoveryFeedback(cause);
+                if (gameMasterRecoveryFeedback !== undefined) {
+                  input.onGameMasterRecoveryFeedback?.(gameMasterRecoveryFeedback);
+                }
                 throw gameMasterInterruption(
-                  input.gameMasterModel.requested,
+                  certifiedGameMasterModel.requested,
                   cause,
                   now() - startedAt,
                 );
@@ -3116,7 +4643,10 @@ export function createCampaignPlayTurnRuntime(
           kind: "deterministic",
           ready: ({ turn: currentTurn }) => {
             const admission = loadCampaignPlayPlayerActionAdmissionFrame(currentTurn);
-            if (isCertifiedRoute(admission.executionRoute)) {
+            if (usesCodeOwnedCertifiedPlan(admission.executionRoute)) {
+              return artifacts.load("judge") === null && artifacts.load("game_master") === null;
+            }
+            if (admission.executionRoute.kind === "certified_contact") {
               return artifacts.load("judge") === null && artifacts.load("game_master") !== null;
             }
             const storedJudge = artifacts.load("judge");
@@ -3130,34 +4660,25 @@ export function createCampaignPlayTurnRuntime(
               const admission = loadCampaignPlayPlayerActionAdmissionFrame(context.turn);
               const committedAt = now();
               const storedGameMaster = context.artifacts.load("game_master");
-              let acceptedGameMaster: CampaignPlayGameMasterArtifact;
-              if (isCertifiedRoute(admission.executionRoute)) {
+              let acceptedPlan: Pick<CampaignPlayGameMasterArtifact, "batch" | "batchHash">;
+              if (usesCodeOwnedCertifiedPlan(admission.executionRoute)) {
+                if (context.artifacts.load("judge") !== null || storedGameMaster !== null) {
+                  throw new Error("certified route retained model authority evidence");
+                }
+                acceptedPlan = compileCertifiedRouteBatch(input.handle, context.turn);
+              } else if (admission.executionRoute.kind === "certified_contact") {
                 if (context.artifacts.load("judge") !== null || !storedGameMaster) {
-                  throw new Error("certified route has invalid model authority evidence");
+                  throw new Error("certified contact has invalid model authority evidence");
                 }
-                const certificate = revalidateCertifiedRoute(input.handle, context.turn);
-                acceptedGameMaster = parseGameMasterArtifact(storedGameMaster.artifact);
-                const certificateHash = admission.executionRoute.kind === "certified_move"
-                  ? certifiedMoveHash(certificate as CampaignPlayCertifiedMove)
-                  : admission.executionRoute.kind === "certified_wait"
-                    ? certifiedWaitHash(certificate as CampaignPlayCertifiedWait)
-                    : admission.executionRoute.kind === "certified_contact"
-                      ? certifiedContactHash(certificate as CampaignPlayCertifiedContact)
-                      : certifiedObserveHash(certificate as CampaignPlayCertifiedObserve);
-                const artifactReferencesCertificate = admission.executionRoute.kind === "certified_move"
-                  ? "certifiedMoveHash" in acceptedGameMaster &&
-                    acceptedGameMaster.certifiedMoveHash === certificateHash
-                  : admission.executionRoute.kind === "certified_wait"
-                    ? "certifiedWaitHash" in acceptedGameMaster &&
-                      acceptedGameMaster.certifiedWaitHash === certificateHash
-                    : admission.executionRoute.kind === "certified_contact"
-                      ? "certifiedContactHash" in acceptedGameMaster &&
-                        acceptedGameMaster.certifiedContactHash === certificateHash
-                      : "certifiedObserveHash" in acceptedGameMaster &&
-                        acceptedGameMaster.certifiedObserveHash === certificateHash;
-                if (!artifactReferencesCertificate) {
-                  throw new Error("game master references another certified route");
+                revalidateCertifiedRoute(input.handle, context.turn);
+                const acceptedGameMaster = parseGameMasterArtifact(storedGameMaster.artifact);
+                if (
+                  !("certifiedContactHash" in acceptedGameMaster) ||
+                  acceptedGameMaster.certifiedContactHash !== admission.executionRoute.certificateHash
+                ) {
+                  throw new Error("certified contact references another certificate");
                 }
+                acceptedPlan = acceptedGameMaster;
               } else {
                 const storedJudge = context.artifacts.load("judge");
                 if (!storedJudge) throw new Error("missing judge artifact");
@@ -3181,10 +4702,10 @@ export function createCampaignPlayTurnRuntime(
                   return;
                 }
                 if (!storedGameMaster) throw new Error("missing game master artifact");
-                acceptedGameMaster = parseGameMasterArtifact(storedGameMaster.artifact);
+                acceptedPlan = parseGameMasterArtifact(storedGameMaster.artifact);
                 if (
-                  !("judgeArtifactHash" in acceptedGameMaster) ||
-                  acceptedGameMaster.judgeArtifactHash !== storedJudge.artifactHash
+                  !("judgeArtifactHash" in acceptedPlan) ||
+                  acceptedPlan.judgeArtifactHash !== storedJudge.artifactHash
                 ) {
                   throw new Error("game master references another judge artifact");
                 }
@@ -3193,7 +4714,7 @@ export function createCampaignPlayTurnRuntime(
               const preflight = preflightCampaignPlayRulebook({
                 frame: current.frame.rulebookFrame,
                 authority: current.frame.authority,
-                batch: acceptedGameMaster.batch,
+                batch: acceptedPlan.batch,
               });
               if (!preflight.accepted) {
                 repository.failTurn({
@@ -3203,7 +4724,7 @@ export function createCampaignPlayTurnRuntime(
                   mutationAudit: {
                     stage: "planned",
                     denial: preflight.denial as unknown as CampaignPlayProjectionRecord,
-                    batchHash: acceptedGameMaster.batchHash,
+                    batchHash: acceptedPlan.batchHash,
                   },
                   modelEvidence: null,
                   failedAt: committedAt,
@@ -3226,7 +4747,7 @@ export function createCampaignPlayTurnRuntime(
                 mutationId: runtimeId("primary-settled", {
                   turnId: context.turn.turnId,
                   epoch: context.token.epoch,
-                  batchHash: acceptedGameMaster.batchHash,
+                  batchHash: acceptedPlan.batchHash,
                 }),
                 mutate(mutationContext) {
                   executeCampaignPlayRulebookBatch({
@@ -3289,7 +4810,8 @@ export function createCampaignPlayTurnRuntime(
             const dueSet = actorScheduler.loadDueSet(context.turn.turnId);
             if (!dueSet) {
               const admission = loadCampaignPlayPlayerActionAdmissionFrame(context.turn);
-              if (!isCertifiedRoute(admission.executionRoute)) {
+              if (!isCertifiedRoute(admission.executionRoute) ||
+                admission.executionRoute.kind === "certified_observe") {
                 const storedJudge = context.artifacts.load("judge");
                 if (!storedJudge) {
                   throw new CampaignPlayTurnRuntimeError(
@@ -3416,7 +4938,14 @@ export function createCampaignPlayTurnRuntime(
                   "Campaign Play actor deadline exceeds the timestamp range.",
                 );
               }
-              if (acceptedActorReplanCount(context.turn.turnId) >= actorCriticalPathReplanLimit) {
+              const executionRoute = loadCampaignPlayPlayerActionAdmissionFrame(
+                context.turn,
+              ).executionRoute;
+              const criticalPathReplanLimit = executionRoute.kind === "full_authority" ||
+                  executionRoute.kind === "certified_wait"
+                ? actorCriticalPathReplanLimit
+                : 0;
+              if (acceptedActorReplanCount(context.turn.turnId) >= criticalPathReplanLimit) {
                 const deferred = actorProposalService.deferReplan({
                   jobId: outcome.jobId,
                   token: context.token,
@@ -3455,8 +4984,12 @@ export function createCampaignPlayTurnRuntime(
           kind: "deterministic",
           ready: ({ turn: currentTurn }) => {
             const admission = loadCampaignPlayPlayerActionAdmissionFrame(currentTurn);
-            return isCertifiedRoute(admission.executionRoute)
-              ? artifacts.load("judge") === null && artifacts.load("game_master") !== null
+            if (admission.executionRoute.kind === "certified_contact") {
+              return artifacts.load("judge") === null && artifacts.load("game_master") !== null;
+            }
+            return isCertifiedRoute(admission.executionRoute) &&
+              admission.executionRoute.kind !== "certified_observe"
+              ? artifacts.load("judge") === null && artifacts.load("game_master") === null
               : artifacts.load("judge") !== null;
           },
           execute(context) {
@@ -3586,7 +5119,11 @@ export function createCampaignPlayTurnRuntime(
         const expectedSelection = replay.modelSelection.turnKind === "player_action" &&
             replay.modelSelection.routeKind === undefined
           ? frozenSelection
-          : selectionForRoute(frozenSelection, replayFrame.executionRoute.kind);
+          : selectionForRoute(
+            frozenSelection,
+            replayFrame.executionRoute.kind,
+            certifiedGameMasterModel.requested,
+          );
         if (
           replay.turnKind !== "player_action" || replay.document.turnKind !== "player_action" ||
           canonicalizeCampaignPlayProjection(replay.document.request) !==
@@ -3609,7 +5146,11 @@ export function createCampaignPlayTurnRuntime(
         });
       }
       const frame = buildAdmissionFrame({ handle: input.handle, turnId, request });
-      const modelSelection = selectionForRoute(frozenSelection, frame.executionRoute.kind);
+      const modelSelection = selectionForRoute(
+        frozenSelection,
+        frame.executionRoute.kind,
+        certifiedGameMasterModel.requested,
+      );
       return repository.admitTurn({
         turnId,
         supersedesTurnId: null,
@@ -3684,6 +5225,12 @@ export function createCampaignPlayTurnRuntime(
         : undefined;
       if (!turn || !interruptedJob || resume.interruptedStage !== "primary_settled") {
         return service.resumeInterruptedStage(resume);
+      }
+      if (loadCampaignPlayPlayerActionAdmissionFrame(turn).executionRoute.kind === "certified_contact") {
+        throw new CampaignPlayTurnRuntimeError(
+          "turn_state_invalid",
+          "Campaign Play certified contact turns cannot resume interrupted actor replanning.",
+        );
       }
       if (turn.workerEpoch !== resume.observedEpoch) {
         throw new CampaignPlayTurnRepositoryError(

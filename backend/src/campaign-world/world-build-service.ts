@@ -3,6 +3,7 @@ import type { LanguageModel } from "ai";
 import type { CampaignWorldBuildStage } from "@worldforge/shared";
 import { createLogger } from "../lib/index.js";
 import {
+  CAMPAIGN_WORLD_BUILD_BUDGET_MS,
   CampaignWorldBuilderError,
   campaignWorldBuilder,
   type CampaignWorldBuilder,
@@ -33,6 +34,11 @@ const modelStages = new Set<CampaignWorldModelStage>([
   "world_cast",
   "world_connections",
 ]);
+
+/** Keep the outer builder wrapper behind the builder's own 210-second deadline. */
+export const CAMPAIGN_WORLD_BUILDER_SETTLEMENT_GRACE_MS = 5_000;
+export const CAMPAIGN_WORLD_SERVICE_BUILDER_BUDGET_MS =
+  CAMPAIGN_WORLD_BUILD_BUDGET_MS + CAMPAIGN_WORLD_BUILDER_SETTLEMENT_GRACE_MS;
 
 export interface StartCampaignWorldBuildRequest {
   campaignId: string;
@@ -123,6 +129,64 @@ interface BuildFailure {
   evidence?: CampaignWorldStageEvidence;
 }
 
+class CampaignWorldBuildTimeoutError extends Error {
+  constructor() {
+    super("Campaign World build exceeded its operation budget.");
+    this.name = "CampaignWorldBuildTimeoutError";
+  }
+}
+
+/**
+ * Bound the staged builder even when a provider ignores AbortSignal. The late
+ * builder settlement remains observed, while the caller rejects at the outer
+ * service budget boundary and can durably fail the build immediately.
+ */
+function withCampaignWorldBuildBudget<T>(
+  operation: (abortSignal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const clearBudgetTimer = () => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    };
+
+    const settle = (settlement: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearBudgetTimer();
+      settlement();
+    };
+
+    timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      clearBudgetTimer();
+      controller.abort();
+      reject(new CampaignWorldBuildTimeoutError());
+    }, CAMPAIGN_WORLD_SERVICE_BUILDER_BUDGET_MS);
+
+    let operationPromise: Promise<T>;
+    try {
+      operationPromise = Promise.resolve(operation(controller.signal));
+    } catch (error) {
+      settle(() => reject(error));
+      return;
+    }
+
+    operationPromise.then(
+      (value) => settle(() => resolve(value)),
+      (error) => settle(() => reject(error)),
+    );
+  });
+}
+
 function failedModelEvidence(
   error: CampaignWorldBuilderError,
 ): CampaignWorldStageEvidence | undefined {
@@ -135,6 +199,12 @@ function failedModelEvidence(
 }
 
 function buildFailure(error: unknown): BuildFailure {
+  if (error instanceof CampaignWorldBuildTimeoutError) {
+    return {
+      errorCode: "world_build_timed_out",
+      message: campaignWorldPlayerMessages.worldBuildFailed,
+    };
+  }
   if (error instanceof CampaignWorldBuilderError) {
     if (error.code === "structured_output_unavailable") {
       return {
@@ -174,31 +244,55 @@ async function executeBuild(
   repository: CampaignWorldRepository,
   dependencies: CampaignWorldBuildServiceDependencies,
 ): Promise<void> {
+  let terminal = false;
+  let observerWriteTail: Promise<void> = Promise.resolve();
   try {
     const source = repository.loadBuildContext(buildId).source;
-    const candidate = await dependencies.builder.build({
-      source,
-      model: request.model,
-      temperature: request.temperature,
-      maxOutputTokens: request.maxOutputTokens,
-      observer: {
-        onStageStarted(stage) {
-          repository.recordStageStarted({
-            buildId,
-            stage,
-            createdAt: dependencies.now(),
+    const candidate = await withCampaignWorldBuildBudget((abortSignal) =>
+      (() => {
+        const enqueueObserverWrite = (operation: () => void): Promise<void> => {
+          const next = observerWriteTail.then(() => {
+            if (terminal || abortSignal.aborted) return;
+            operation();
           });
-        },
-        onStageCompleted(evidence) {
-          repository.recordStageCompleted({
-            buildId,
-            stage: evidence.stage,
-            evidence,
-            createdAt: dependencies.now(),
+          observerWriteTail = next.catch(() => {
+            terminal = true;
           });
+          return next;
+        };
+        return dependencies.builder.build({
+        source,
+        model: request.model,
+        temperature: request.temperature,
+        maxOutputTokens: request.maxOutputTokens,
+        abortSignal,
+        observer: {
+          onStageStarted(stage) {
+            return enqueueObserverWrite(() => {
+              repository.recordStageStarted({
+                buildId,
+                stage,
+                createdAt: dependencies.now(),
+              });
+            });
+          },
+          onStageCompleted(evidence) {
+            return enqueueObserverWrite(() => {
+              repository.recordStageCompleted({
+                buildId,
+                stage: evidence.stage,
+                evidence,
+                createdAt: dependencies.now(),
+              });
+            });
+          },
         },
-      },
-    });
+        });
+      })(),
+    );
+
+    await observerWriteTail;
+    terminal = true;
 
     recordCodeStage(
       repository,
@@ -222,6 +316,8 @@ async function executeBuild(
       completedAt: dependencies.now(),
     });
   } catch (error) {
+    terminal = true;
+    await observerWriteTail.catch(() => undefined);
     const failure = buildFailure(error);
     repository.failBuild({
       buildId,

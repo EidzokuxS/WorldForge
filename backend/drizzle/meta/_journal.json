@@ -407,6 +407,55 @@
       "when": 1787254078110,
       "tag": "0057_flawless_dakota_north",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "6",
+      "when": 1787564035793,
+      "tag": "0058_campaign_play_decisions",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "6",
+      "when": 1787614700000,
+      "tag": "0059_campaign_play_decision_accept_effect",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "6",
+      "when": 1787701200000,
+      "tag": "0060_campaign_play_player_commitments",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "6",
+      "when": 1787701300000,
+      "tag": "0061_campaign_play_commitment_settlement_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "6",
+      "when": 1787701400000,
+      "tag": "0062_campaign_play_certified_commitment_results",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "6",
+      "when": 1787701500000,
+      "tag": "0063_campaign_play_unpaid_delivery_commitments",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "6",
+      "when": 1787701600000,
+      "tag": "0064_campaign_play_receivable_settlement",
+      "breakpoints": true
     }
   ]
 }

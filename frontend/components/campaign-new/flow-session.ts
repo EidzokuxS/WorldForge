@@ -14,6 +14,7 @@ export type CampaignNewFlowSession = {
   version: 1;
   campaignName: string;
   campaignPremise: string;
+  playerIdentityName: string;
   campaignFranchise: string;
   researchEnabled: boolean;
   selectedWorldbooks: WorldbookLibraryItem[];
@@ -50,6 +51,7 @@ export function readCampaignNewFlowSession(): CampaignNewFlowSession | null {
       version: 1,
       campaignName: typeof parsed.campaignName === "string" ? parsed.campaignName : "",
       campaignPremise: typeof parsed.campaignPremise === "string" ? parsed.campaignPremise : "",
+      playerIdentityName: typeof parsed.playerIdentityName === "string" ? parsed.playerIdentityName : "",
       campaignFranchise: typeof parsed.campaignFranchise === "string" ? parsed.campaignFranchise : "",
       researchEnabled: parsed.researchEnabled !== false,
       selectedWorldbooks: Array.isArray(parsed.selectedWorldbooks) ? parsed.selectedWorldbooks : [],
@@ -90,6 +92,7 @@ export function isCampaignNewFlowSessionEmpty(session: CampaignNewFlowSession): 
   return (
     session.campaignName.trim().length === 0
     && session.campaignPremise.trim().length === 0
+    && session.playerIdentityName.trim().length === 0
     && session.campaignFranchise.trim().length === 0
     && session.selectedWorldbooks.length === 0
     && session.dnaState === null

@@ -102,6 +102,9 @@ const sourceSchema = z.object({
     label: z.string().min(1),
     sourceType: z.string().min(1),
   }).strict()),
+  playerIdentity: z.object({
+    displayName: z.string().min(1).max(200),
+  }).strict().optional(),
   sourceDigest: z.string().min(1),
 }).strict();
 
@@ -266,6 +269,9 @@ function parseSource(
         dna: result.data.dna,
         researchSummary: result.data.researchSummary,
         sourceReferences: result.data.sourceReferences,
+        ...(result.data.playerIdentity
+          ? { playerIdentity: result.data.playerIdentity }
+          : {}),
       })
     : null;
   if (
@@ -510,6 +516,30 @@ export function createCampaignWorldRepository(
         "invalid_build_transition",
         `Campaign World stage ${stage} already started.`,
       );
+    }
+    if (stage === "world_connections") {
+      if (
+        !hasEvent(buildId, "stage_completed", "world_frame") ||
+        !hasEvent(buildId, "stage_started", "world_cast")
+      ) {
+        throw repositoryError(
+          "invalid_build_transition",
+          "Campaign World stage world_connections requires a completed frame and started cast.",
+        );
+      }
+      return;
+    }
+    if (stage === "validation") {
+      if (
+        !hasEvent(buildId, "stage_completed", "world_cast") ||
+        !hasEvent(buildId, "stage_completed", "world_connections")
+      ) {
+        throw repositoryError(
+          "invalid_build_transition",
+          "Campaign World validation requires completed cast and connections stages.",
+        );
+      }
+      return;
     }
     const stageIndex = buildStages.indexOf(stage);
     const previousStage = stageIndex > 0 ? buildStages[stageIndex - 1] : null;
@@ -828,6 +858,7 @@ export function createCampaignWorldRepository(
         dna: source.dna,
         researchSummary: source.researchSummary,
         sourceReferences: source.sourceReferences,
+        ...(source.playerIdentity ? { playerIdentity: source.playerIdentity } : {}),
       },
     };
   };
@@ -1119,12 +1150,16 @@ export function createCampaignWorldRepository(
 
     recordStageStarted(input) {
       return sqlite.transaction(() => {
-        requireRunningBuild(input.buildId);
+        const build = requireRunningBuild(input.buildId);
         assertStageCanStart(input.buildId, input.stage);
-        sqlite.prepare(`
-          UPDATE campaign_world_builds SET stage = ?
-          WHERE id = ? AND campaign_id = ? AND status = 'running'
-        `).run(input.stage, input.buildId, campaignId);
+        const currentStage = buildStages.indexOf(build.stage as CampaignWorldBuildStage);
+        const nextStage = buildStages.indexOf(input.stage);
+        if (nextStage > currentStage) {
+          sqlite.prepare(`
+            UPDATE campaign_world_builds SET stage = ?
+            WHERE id = ? AND campaign_id = ? AND status = 'running'
+          `).run(input.stage, input.buildId, campaignId);
+        }
         return appendEvent(
           input.buildId,
           "stage_started",
@@ -1142,12 +1177,6 @@ export function createCampaignWorldRepository(
           throw repositoryError(
             "invalid_build_transition",
             "Persistence completion belongs to the terminal success transaction.",
-          );
-        }
-        if (build.stage !== input.stage) {
-          throw repositoryError(
-            "invalid_build_transition",
-            `Campaign World build is currently at ${build.stage}.`,
           );
         }
         assertStageCanComplete(input.buildId, input.stage);

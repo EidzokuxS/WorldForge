@@ -67,7 +67,15 @@ describe("CampaignConceptPage", () => {
     const sourceStep = screen.getByText("Sources").closest(".wf-form-step");
     expect(sourceStep).not.toBeNull();
     expect(sourceStep?.querySelector(".wf-forge-source")).not.toBeNull();
-    expect(document.querySelectorAll(".wf-form-step")).toHaveLength(4);
+    const formStepTitles = Array.from(document.querySelectorAll(".wf-form-step-title"))
+      .map((title) => title.firstChild?.textContent?.trim());
+    expect(formStepTitles).toEqual([
+      "Name",
+      "Premise",
+      "Player character",
+      "Franchise / IP",
+      "Sources",
+    ]);
     expect(document.querySelector(".wf-set-toggle")).not.toBeNull();
 
     const side = document.querySelector(".wf-forge-side");

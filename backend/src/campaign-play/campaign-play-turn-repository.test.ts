@@ -23,11 +23,13 @@ import {
   type CampaignPlayProjectionRecord,
 } from "./campaign-play-projection.js";
 import type { CampaignPlayGameMasterContractFailureDiagnostic } from "./game-master.js";
+import type { CampaignPlayNarratorContractFailureDiagnostic } from "./narrator.js";
 import {
   CampaignPlayTurnRepositoryError,
   createCampaignPlayTurnRepository,
   hashCampaignPlayNarratorPacket,
   type AdmitCampaignPlayTurnInput,
+  type CampaignPlayTurnModelSelection,
   type CampaignPlayWorkerLeaseToken,
   type ClaimCampaignPlayStageInput,
   type RenewCampaignPlayLeaseInput,
@@ -543,6 +545,7 @@ function advanceOpeningToVisibility(
     continuity: [],
     possessions: [],
     obligations: [],
+    commitments: [],
     elapsedMinutes: 0,
     availableIntents: [],
   };
@@ -644,6 +647,72 @@ function completeOpening(
     },
   });
   return { completed, narratorToken, packetHash, narration };
+}
+
+function certifiedCommitmentRoute(
+  turnId: string,
+  worldVersion: number,
+  runtimeRevision: number,
+) {
+  const certificate = {
+    actionSchemaVersion: 1 as const,
+    resolver: "code_owned" as const,
+    campaignId,
+    turnId,
+    sourceTurnId: "source-turn-commitment",
+    sourceMomentId: "source-moment-commitment",
+    sourceMomentHash: hashA,
+    sourcePacketHash: hashB,
+    acceptedWorldVersion: worldVersion,
+    baseWorldVersion: worldVersion,
+    baseRuntimeRevision: runtimeRevision,
+    actorId: "actor-player",
+    actorHandle: "player",
+    choiceHandle: "collect-parcel",
+    label: "Collect the parcel",
+    commitmentId: "commitment-parcel",
+    commitmentHandle: "parcel-delivery",
+    action: "collect" as const,
+    commitmentBinding: {
+      commitmentHandle: "parcel-delivery",
+      action: "collect" as const,
+      counterpartyHandle: "warden",
+      subjectName: "Sealed parcel",
+      destinationHandle: "harbor-office",
+    },
+    counterpartyActorId: "actor-warden",
+    counterpartyActorHandle: "warden",
+    subjectName: "Sealed parcel",
+    destinationLocationId: "location-harbor-office",
+    destinationHandle: "harbor-office",
+    feeUnit: "copper" as const,
+    feeAmount: 1,
+    commitmentWorldVersion: worldVersion,
+    commitmentSourceDecisionKey: "decision-parcel",
+    commitmentSourceTurnId: "source-turn-commitment",
+    commitmentSourceReceiptId: "receipt-parcel",
+    possessionId: null,
+    possessionHandle: null,
+  };
+  return {
+    kind: "certified_commitment" as const,
+    certificate,
+    certificateHash: hashCampaignPlayProjection({
+      domain: "campaign_play_certified_commitment",
+      certificate,
+    }),
+  };
+}
+
+function certifiedCommitmentSelection() {
+  return {
+    turnKind: "player_action" as const,
+    routeKind: "certified_commitment" as const,
+    judge: { providerId: "test-provider", model: "judge", strategy: "strict_object" as const, pricing: TEST_MODEL_PRICING },
+    gameMaster: { providerId: "test-provider", model: "game-master", strategy: "strict_object" as const, pricing: TEST_MODEL_PRICING },
+    actorReplanner: { providerId: "test-provider", model: "actor-replanner", strategy: "strict_object" as const, pricing: TEST_MODEL_PRICING },
+    narrator: { providerId: "test-provider", model: "narrator", strategy: "strict_object" as const, pricing: TEST_MODEL_PRICING },
+  };
 }
 
 describe("Campaign Play turn repository admission", () => {
@@ -809,6 +878,130 @@ describe("Campaign Play turn repository admission", () => {
     handle.sqlite.prepare("UPDATE campaign_play_runtime_events SET turn_id = NULL WHERE event_id = 'runtime-turn-opening'").run();
     handle.sqlite.pragma("ignore_check_constraints = OFF");
     expectTurnError(() => repository.loadTurn("turn-opening"), "turn_corrupt");
+  });
+
+  it("persists and replays a certified commitment with deterministic planning and no model stages", () => {
+    const { handle, state } = createOpeningReadyCampaign();
+    const openingRepository = createCampaignPlayTurnRepository(handle);
+    completeOpening(handle, openingRepository, state);
+    const ready = createCampaignPlayStateRepository(handle).loadState();
+    if (!ready) throw new Error("Campaign Play ready state disappeared.");
+    const repository = createCampaignPlayTurnRepository(handle);
+    const turnId = "turn-certified-commitment";
+    const route = certifiedCommitmentRoute(turnId, ready.authority.worldVersion, ready.authority.runtimeRevision);
+    const modelSelection = certifiedCommitmentSelection();
+    const input: AdmitCampaignPlayTurnInput = {
+      turnId,
+      supersedesTurnId: null,
+      mutationId: "certified-commitment-admitted",
+      submittedAt: 3_000,
+      document: {
+        turnKind: "player_action",
+        request: {
+          source: "freeform",
+          idempotencyKey: "certified-commitment-one",
+          text: "Collect the parcel.",
+          expectedWorldVersion: ready.authority.worldVersion,
+          expectedRuntimeRevision: ready.authority.runtimeRevision,
+        },
+        frame: { ...ready.publicState.projection, executionRoute: route },
+      },
+      modelSelection,
+    };
+
+    expect(repository.admitTurn(input)).toMatchObject({ turnId, sequence: expect.any(Number) });
+    expect(repository.loadTurn(turnId)).toMatchObject({
+      turnId,
+      stage: "admitted",
+      modelSelection: { routeKind: "certified_commitment" },
+    });
+    const token = repository.claimStage({
+      turnId,
+      expectedStage: "admitted",
+      observedEpoch: 0,
+      owner: "commitment-worker",
+      claimedAt: 3_050,
+      leaseExpiresAt: 3_400,
+      mutationId: "certified-commitment-claim",
+    });
+    expect(repository.commitDeterministic({
+      token,
+      transition: "certified_planned",
+      worldVersionAdvance: 0,
+      committedAt: 3_100,
+      mutationId: "certified-commitment-planned",
+    })).toMatchObject({ turnId, stage: "planned" });
+
+    expect(repository.loadTurn(turnId)).toMatchObject({
+      turnId,
+      stage: "planned",
+      document: { frame: { executionRoute: route } },
+      modelSelection: { routeKind: "certified_commitment" },
+    });
+    expect(handle.sqlite.prepare(`
+      SELECT COUNT(*) AS count FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ?
+    `).get(campaignId, turnId)).toEqual({ count: 0 });
+    expect(repository.loadTurnTelemetry(turnId)).toMatchObject({
+      turnId,
+      routeKind: "certified_commitment",
+      modelCallCounts: { judge: 0, gameMaster: 0 },
+    });
+
+    handle.close();
+    handles = handles.filter((candidate) => candidate !== handle);
+    const reopened = openPlay();
+    const reopenedTurn = createCampaignPlayTurnRepository(reopened).loadTurn(turnId);
+    expect(reopenedTurn).toMatchObject({
+      turnId,
+      stage: "planned",
+      document: { frame: { executionRoute: route } },
+      modelSelection: { routeKind: "certified_commitment" },
+    });
+  });
+
+  it("rejects certified commitment route selection and certificate hash corruption", () => {
+    const { handle, state } = createOpeningReadyCampaign();
+    const openingRepository = createCampaignPlayTurnRepository(handle);
+    completeOpening(handle, openingRepository, state);
+    const ready = createCampaignPlayStateRepository(handle).loadState();
+    if (!ready) throw new Error("Campaign Play ready state disappeared.");
+    const repository = createCampaignPlayTurnRepository(handle);
+    const route = certifiedCommitmentRoute("turn-certified-commitment-corrupt", ready.authority.worldVersion, ready.authority.runtimeRevision);
+    const baseDocument = {
+      turnKind: "player_action" as const,
+      request: {
+        source: "freeform" as const,
+        idempotencyKey: "certified-commitment-corrupt-one",
+        text: "Collect the parcel.",
+        expectedWorldVersion: ready.authority.worldVersion,
+        expectedRuntimeRevision: ready.authority.runtimeRevision,
+      },
+      frame: { ...ready.publicState.projection, executionRoute: route },
+    };
+    const baseInput = (turnId: string, document: typeof baseDocument, modelSelection: CampaignPlayTurnModelSelection, mutationId: string): AdmitCampaignPlayTurnInput => ({
+      turnId,
+      supersedesTurnId: null,
+      mutationId,
+      submittedAt: 3_000,
+      document,
+      modelSelection,
+    });
+    expectTurnError(() => repository.admitTurn(baseInput(
+      "turn-certified-commitment-wrong-selection",
+      baseDocument,
+      { ...certifiedCommitmentSelection(), routeKind: "certified_move" },
+      "certified-commitment-wrong-selection",
+    )), "turn_stage_invalid");
+    expectTurnError(() => repository.admitTurn(baseInput(
+      "turn-certified-commitment-wrong-hash",
+      {
+        ...baseDocument,
+        frame: { ...baseDocument.frame, executionRoute: { ...route, certificateHash: hashB } },
+      },
+      certifiedCommitmentSelection(),
+      "certified-commitment-wrong-hash",
+    )), "turn_stage_invalid");
   });
 });
 
@@ -2237,6 +2430,251 @@ describe("Campaign Play deterministic and terminal turn boundaries", () => {
       acceptedAt: 3_450,
       mutationId: "gm-accepted",
     }).stage).toBe("planned");
+  });
+
+  it("persists, loads, and reopens a canonical narrator contract diagnostic", () => {
+    const { handle, state } = createOpeningReadyCampaign();
+    const repository = createCampaignPlayTurnRepository(handle);
+    advanceOpeningToVisibility(handle, repository, state);
+    const narratorToken = repository.claimStage(claimInput({
+      expectedStage: "visibility_projected",
+      observedEpoch: 5,
+      claimedAt: 2_100,
+      leaseExpiresAt: 2_500,
+      mutationId: "narrator-diagnostic-claim",
+    }));
+    const diagnostic = {
+      failedChecks: [{ check: "generation_schema_invalid" }],
+      recoveryDiagnostic: "narrator_generation_schema_mismatch",
+      contractDiagnosticCoordinate: "proposal.packet",
+      contractDiagnosticPhase: "provider_extraction",
+      safeGenerationCode: "schema_validation_failed",
+      rejectionPhase: "generation",
+      owner: "narrator",
+    } satisfies CampaignPlayNarratorContractFailureDiagnostic;
+    const canonicalDiagnosticJson = JSON.stringify({
+      owner: "narrator",
+      rejectionPhase: "generation",
+      safeGenerationCode: "schema_validation_failed",
+      contractDiagnosticPhase: "provider_extraction",
+      contractDiagnosticCoordinate: "proposal.packet",
+      recoveryDiagnostic: "narrator_generation_schema_mismatch",
+      failedChecks: [{ check: "generation_schema_invalid" }],
+    });
+
+    const interrupted = repository.interruptExternal({
+      token: narratorToken,
+      evidence: {
+        ...executionEvidence("narrator"),
+        schemaOutcome: "invalid" as const,
+        errorCode: "model_contract_invalid" as const,
+        contractFailureDiagnostic: diagnostic,
+      },
+      interruptedAt: 2_150,
+      mutationId: "narrator-diagnostic-interrupted",
+    });
+    expect(interrupted).toMatchObject({
+      stage: "interrupted",
+      interruptedStage: "visibility_projected",
+      errorCode: "model_contract_invalid",
+    });
+    expect(repository.loadTurn("turn-opening")).toMatchObject({
+      stage: "interrupted",
+      interruptedStage: "visibility_projected",
+      errorCode: "model_contract_invalid",
+    });
+    const beforeClose = handle.sqlite.prepare(`
+      SELECT status, kind, error_code AS errorCode,
+        contract_failure_diagnostic_json AS contractFailureDiagnosticJson
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'narrator' AND attempt = 1
+    `).get(campaignId, "turn-opening");
+    expect(beforeClose).toEqual({
+      status: "interrupted",
+      kind: "narrator",
+      errorCode: "model_contract_invalid",
+      contractFailureDiagnosticJson: canonicalDiagnosticJson,
+    });
+
+    handle.close();
+    handles = handles.filter((candidate) => candidate !== handle);
+    const reopened = openPlay();
+    const reopenedRepository = createCampaignPlayTurnRepository(reopened);
+    expect(reopenedRepository.loadTurn("turn-opening")).toMatchObject({
+      stage: "interrupted",
+      interruptedStage: "visibility_projected",
+      errorCode: "model_contract_invalid",
+    });
+    expect(reopened.sqlite.prepare(`
+      SELECT contract_failure_diagnostic_json AS contractFailureDiagnosticJson
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'narrator' AND attempt = 1
+    `).get(campaignId, "turn-opening")).toEqual({
+      contractFailureDiagnosticJson: canonicalDiagnosticJson,
+    });
+  });
+
+  it("rejects a narrator contract diagnostic on a game-master stage", () => {
+    const { handle, state } = createOpeningReadyCampaign();
+    const openingRepository = createCampaignPlayTurnRepository(handle);
+    completeOpening(handle, openingRepository, state);
+    const ready = createCampaignPlayStateRepository(handle).loadState();
+    if (!ready) throw new Error("Campaign Play ready state disappeared.");
+    const repository = createCampaignPlayTurnRepository(handle);
+    repository.admitTurn({
+      turnId: "turn-narrator-diagnostic-game-master",
+      supersedesTurnId: null,
+      mutationId: "narrator-diagnostic-gm-admitted",
+      submittedAt: 3_000,
+      document: {
+        turnKind: "player_action",
+        request: {
+          source: "freeform",
+          idempotencyKey: "narrator-diagnostic-gm-one",
+          text: "I watch the gate from the rain.",
+          expectedWorldVersion: ready.authority.worldVersion,
+          expectedRuntimeRevision: ready.authority.runtimeRevision,
+        },
+        frame: ready.publicState.projection as CampaignPlayProjectionRecord,
+      },
+      modelSelection: {
+        turnKind: "player_action",
+        judge: { providerId: "test-provider", model: "judge", strategy: "strict_object", pricing: TEST_MODEL_PRICING },
+        gameMaster: { providerId: "test-provider", model: "game-master", strategy: "strict_object", pricing: TEST_MODEL_PRICING },
+        actorReplanner: { providerId: "test-provider", model: "actor-replanner", strategy: "strict_object", pricing: TEST_MODEL_PRICING },
+        narrator: { providerId: "test-provider", model: "narrator", strategy: "strict_object", pricing: TEST_MODEL_PRICING },
+      },
+    });
+    const judgeToken = repository.claimStage({
+      turnId: "turn-narrator-diagnostic-game-master", expectedStage: "admitted", observedEpoch: 0,
+      owner: "judge-worker", claimedAt: 3_050, leaseExpiresAt: 3_400,
+      mutationId: "narrator-diagnostic-gm-judge-claim",
+    });
+    repository.acceptModelArtifact({
+      token: judgeToken,
+      artifact: {
+        ruling: {
+          disposition: "deterministic",
+          normalizedIntent: {
+            originalText: "I watch the gate from the rain.",
+            source: "freeform",
+            choiceHandle: null,
+            kind: "observe",
+            targets: [],
+            method: null,
+            stakes: null,
+          },
+          movementRouteHandle: null,
+          possessionEffectAuthority: { kind: "none" },
+          requiredObligationEffect: { kind: "none" },
+          citedVisibleFactHandles: [],
+          resultBounds: { minimum: "limited", maximum: "success" },
+          elapsedBounds: { minimumMinutes: 0, maximumMinutes: 10 },
+          uncertainty: { kind: "none" },
+          reason: "The visible gate can be watched from shelter.",
+          clarificationQuestion: null,
+        },
+        resolution: { kind: "deterministic", result: "success" },
+        uncertaintyAuthority: null,
+        publicResult: {
+          intentKind: "observe",
+          disposition: "deterministic",
+          result: "success",
+          clarificationQuestion: null,
+        },
+        primaryPlan: { kind: "game_master_required" },
+      },
+      evidence: executionEvidence("judge"),
+      mutationDomain: "runtime",
+      acceptedAt: 3_100,
+      mutationId: "narrator-diagnostic-gm-judge-accepted",
+    });
+    const gameMasterToken = repository.claimStage({
+      turnId: "turn-narrator-diagnostic-game-master", expectedStage: "judged", observedEpoch: 1,
+      owner: "gm-worker", claimedAt: 3_150, leaseExpiresAt: 3_500,
+      mutationId: "narrator-diagnostic-gm-claim",
+    });
+    const diagnostic = {
+      failedChecks: [{ check: "generation_schema_invalid" }],
+      recoveryDiagnostic: "narrator_generation_schema_mismatch",
+      contractDiagnosticCoordinate: "proposal.packet",
+      contractDiagnosticPhase: "provider_extraction",
+      safeGenerationCode: "schema_validation_failed",
+      rejectionPhase: "generation",
+      owner: "narrator",
+    } satisfies CampaignPlayNarratorContractFailureDiagnostic;
+    expectTurnError(() => repository.interruptExternal({
+      token: gameMasterToken,
+      evidence: {
+        ...executionEvidence("game-master"),
+        schemaOutcome: "invalid" as const,
+        errorCode: "model_contract_invalid" as const,
+        contractFailureDiagnostic: diagnostic,
+      },
+      interruptedAt: 3_200,
+      mutationId: "narrator-diagnostic-gm-interrupted",
+    }), "turn_stage_invalid");
+    expect(repository.loadTurn("turn-narrator-diagnostic-game-master")).toMatchObject({
+      stage: "judged",
+      workerLeaseOwner: "gm-worker",
+      workerEpoch: 2,
+      workerLeaseExpiresAt: 3_500,
+    });
+    expect(handle.sqlite.prepare(`
+      SELECT status, contract_failure_diagnostic_json AS contractFailureDiagnosticJson
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'game_master' AND attempt = 1
+    `).get(campaignId, "turn-narrator-diagnostic-game-master")).toEqual({
+      status: "started",
+      contractFailureDiagnosticJson: null,
+    });
+  });
+
+  it("rejects a legacy game-master diagnostic on a narrator stage", () => {
+    const { handle, state } = createOpeningReadyCampaign();
+    const repository = createCampaignPlayTurnRepository(handle);
+    advanceOpeningToVisibility(handle, repository, state);
+    const narratorToken = repository.claimStage(claimInput({
+      expectedStage: "visibility_projected",
+      observedEpoch: 5,
+      claimedAt: 2_100,
+      leaseExpiresAt: 2_500,
+      mutationId: "legacy-gm-diagnostic-narrator-claim",
+    }));
+    const diagnostic = {
+      rejectionPhase: "generation",
+      safeGenerationCode: "invalid_json",
+      contractDiagnosticPhase: "provider_extraction",
+      contractDiagnosticCoordinate: "proposal.provider_response",
+      recoveryDiagnostic: null,
+      failedChecks: [],
+      reviewFailedChecks: [],
+    } satisfies CampaignPlayGameMasterContractFailureDiagnostic;
+    expectTurnError(() => repository.interruptExternal({
+      token: narratorToken,
+      evidence: {
+        ...executionEvidence("narrator"),
+        schemaOutcome: "invalid" as const,
+        errorCode: "model_contract_invalid" as const,
+        contractFailureDiagnostic: diagnostic,
+      },
+      interruptedAt: 2_150,
+      mutationId: "legacy-gm-diagnostic-narrator-interrupted",
+    }), "turn_stage_invalid");
+    expect(repository.loadTurn("turn-opening")).toMatchObject({
+      stage: "visibility_projected",
+      workerLeaseOwner: "worker-alpha",
+      workerEpoch: 6,
+      workerLeaseExpiresAt: 2_500,
+    });
+    expect(handle.sqlite.prepare(`
+      SELECT status, contract_failure_diagnostic_json AS contractFailureDiagnosticJson
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'narrator' AND attempt = 1
+    `).get(campaignId, "turn-opening")).toEqual({
+      status: "started",
+      contractFailureDiagnosticJson: null,
+    });
   });
 
   it("advances a clarification result directly to the durable no-effect plan without a game-master attempt", () => {

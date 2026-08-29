@@ -650,6 +650,8 @@ interface SafeGenerateOpts<T> {
   allowTextFallback?: boolean;
   /** Default true. Set false for call sites where repair would mask a broken primary contract. */
   allowRepair?: boolean;
+  /** Number of bounded same-model repair passes (default 1). */
+  maxRepairAttempts?: 1 | 2;
   /** Optional model-facing repair redactor for caller-private names or refs in invalid output/issues. */
   repairRedactor?: (text: string) => string;
   /** Default false. Set true for fail-closed call sites where schema coercion would mask a broken contract. */
@@ -916,15 +918,532 @@ function redactBackendRefsForRepair(text: string): string {
   return redacted;
 }
 
+type RepairPathSegment = string | number;
+
+type RepairLedgerPrimitive = string | number | boolean | null;
+
+type RepairLedgerValue =
+  | RepairLedgerPrimitive
+  | RepairLedgerValue[]
+  | { [key: string]: RepairLedgerValue };
+
+interface RepairIssueLedgerEntry {
+  issueIndex: number;
+  code: string;
+  path: RepairPathSegment[];
+  message?: string;
+  metadata?: Record<string, RepairLedgerValue>;
+}
+
+interface RepairIssueLedger {
+  issueCount: number;
+  truncated: boolean;
+  entries: RepairIssueLedgerEntry[];
+}
+
+interface RepairConstraintLedgerEntry {
+  path: RepairPathSegment[];
+  type: string;
+  required: boolean;
+  optional?: boolean;
+  nullable?: boolean;
+  strict?: boolean;
+  allowedKeys?: string[];
+  minLength?: number;
+  maxLength?: number;
+  minItems?: number;
+  maxItems?: number;
+  minValue?: number;
+  maxValue?: number;
+  literals?: RepairLedgerPrimitive[];
+}
+
+interface RepairConstraintLedger {
+  nodeCount: number;
+  truncated: boolean;
+  entries: RepairConstraintLedgerEntry[];
+}
+
+const MAX_REPAIR_ISSUES = 8;
+const MAX_REPAIR_CONSTRAINT_NODES = 128;
+const MAX_REPAIR_CONSTRAINT_DEPTH = 16;
+const MAX_REPAIR_LEDGER_VALUES = 32;
+const MAX_REPAIR_LEDGER_TEXT = 4_000;
+const MAX_REPAIR_ISSUE_LEDGER_TEXT = 10_000;
+const MAX_REPAIR_CONSTRAINT_LEDGER_TEXT = 24_000;
+
+function redactRepairLedgerText(
+  value: string,
+  repairRedactor: (text: string) => string,
+): string | null {
+  try {
+    const redacted = repairRedactor(redactBackendRefsForRepair(value));
+    if (typeof redacted !== "string" || redacted.length > MAX_REPAIR_LEDGER_TEXT) {
+      return null;
+    }
+    return redacted;
+  } catch {
+    return null;
+  }
+}
+
+function redactRepairLedgerPrimitive(
+  value: unknown,
+  repairRedactor: (text: string) => string,
+): RepairLedgerPrimitive | null {
+  if (value === null || typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "string") {
+    return redactRepairLedgerText(value, repairRedactor);
+  }
+  return null;
+}
+
+function buildRepairIssueLedger(
+  error: unknown,
+  repairRedactor: (text: string) => string,
+): RepairIssueLedger | null {
+  if (!error || typeof error !== "object") return null;
+  const rawIssues = (error as { issues?: unknown }).issues;
+  if (!Array.isArray(rawIssues)) return null;
+  if (rawIssues.length > MAX_REPAIR_ISSUES) {
+    return {
+      issueCount: rawIssues.length,
+      truncated: true,
+      entries: [],
+    };
+  }
+
+  const entries: RepairIssueLedgerEntry[] = [];
+  for (let issueIndex = 0; issueIndex < rawIssues.length; issueIndex += 1) {
+    const rawIssue = rawIssues[issueIndex];
+    if (!rawIssue || typeof rawIssue !== "object") return null;
+    const issue = rawIssue as Record<string, unknown>;
+    const code = issue.code;
+    const rawPath = issue.path;
+    if (typeof code !== "string" || !Array.isArray(rawPath)) return null;
+
+    const path: RepairPathSegment[] = [];
+    for (const segment of rawPath) {
+      if (typeof segment === "string") {
+        const redacted = redactRepairLedgerText(segment, repairRedactor);
+        if (redacted === null) return null;
+        path.push(redacted);
+      } else if (typeof segment === "number" && Number.isSafeInteger(segment) && segment >= 0) {
+        path.push(segment);
+      } else {
+        return null;
+      }
+    }
+
+    const redactedCode = redactRepairLedgerText(code, repairRedactor);
+    if (redactedCode === null) return null;
+    const entry: RepairIssueLedgerEntry = { issueIndex, code: redactedCode, path };
+    if (typeof issue.message === "string") {
+      const message = redactRepairLedgerText(issue.message, repairRedactor);
+      if (message === null) return null;
+      entry.message = message;
+    }
+
+    const metadata: Record<string, RepairLedgerValue> = {};
+    for (const key of [
+      "origin",
+      "expected",
+      "received",
+      "minimum",
+      "maximum",
+      "inclusive",
+      "exact",
+      "format",
+      "keys",
+      "values",
+    ]) {
+      const value = issue[key];
+      if (value === undefined) continue;
+      if (Array.isArray(value)) {
+        if (value.length > MAX_REPAIR_LEDGER_VALUES) return null;
+        const redactedValues: RepairLedgerPrimitive[] = [];
+        for (const item of value) {
+          const redacted = redactRepairLedgerPrimitive(item, repairRedactor);
+          if (redacted === null && item !== null) return null;
+          redactedValues.push(redacted);
+        }
+        metadata[key] = redactedValues;
+        continue;
+      }
+      const redacted = redactRepairLedgerPrimitive(value, repairRedactor);
+      if (redacted === null && value !== null) return null;
+      metadata[key] = redacted;
+    }
+    if (Object.keys(metadata).length > 0) entry.metadata = metadata;
+    entries.push(entry);
+  }
+
+  return {
+    issueCount: rawIssues.length,
+    truncated: false,
+    entries,
+  };
+}
+
+function buildRepairParseIssueLedger(
+  message: string,
+  repairRedactor: (text: string) => string,
+): RepairIssueLedger | null {
+  const redacted = redactRepairLedgerText(message, repairRedactor);
+  if (redacted === null) return null;
+  return {
+    issueCount: 1,
+    truncated: false,
+    entries: [{
+      issueIndex: 0,
+      code: "invalid_json",
+      path: [],
+      message: redacted,
+    }],
+  };
+}
+
+function repairSchemaDef(schema: ZodType<unknown>): Record<string, unknown> | null {
+  const def = (schema as { _def?: unknown })._def;
+  return def && typeof def === "object" ? def as Record<string, unknown> : null;
+}
+
+function repairSchemaInner(def: Record<string, unknown>): ZodType<unknown> | null {
+  const inner = getInnerSchema(def);
+  return inner ?? null;
+}
+
+function repairSchemaIsOptional(schema: ZodType<unknown>): boolean {
+  const schemaType = getSchemaType(schema);
+  if (
+    schemaType === "ZodOptional" || schemaType === "optional" ||
+    schemaType === "ZodDefault" || schemaType === "default" ||
+    schemaType === "ZodCatch" || schemaType === "catch"
+  ) {
+    return true;
+  }
+  if (
+    schemaType === "ZodNullable" || schemaType === "nullable" ||
+    schemaType === "ZodReadonly" || schemaType === "readonly" ||
+    schemaType === "ZodPipeline" || schemaType === "pipe" ||
+    schemaType === "ZodEffects" || schemaType === "effects" ||
+    schemaType === "ZodBranded" || schemaType === "branded"
+  ) {
+    const inner = repairSchemaInner(repairSchemaDef(schema) ?? {});
+    return inner ? repairSchemaIsOptional(inner) : false;
+  }
+  return false;
+}
+
+function repairSchemaIsNullable(schema: ZodType<unknown>): boolean {
+  const schemaType = getSchemaType(schema);
+  if (schemaType === "ZodNullable" || schemaType === "nullable") return true;
+  if (
+    schemaType === "ZodOptional" || schemaType === "optional" ||
+    schemaType === "ZodDefault" || schemaType === "default" ||
+    schemaType === "ZodCatch" || schemaType === "catch" ||
+    schemaType === "ZodReadonly" || schemaType === "readonly" ||
+    schemaType === "ZodPipeline" || schemaType === "pipe" ||
+    schemaType === "ZodEffects" || schemaType === "effects" ||
+    schemaType === "ZodBranded" || schemaType === "branded"
+  ) {
+    const inner = repairSchemaInner(repairSchemaDef(schema) ?? {});
+    return inner ? repairSchemaIsNullable(inner) : false;
+  }
+  return false;
+}
+
+function repairSchemaNumericValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function repairSchemaCheckDef(check: unknown): Record<string, unknown> | null {
+  if (!check || typeof check !== "object") return null;
+  const record = check as Record<string, unknown>;
+  const zodDef = record._zod;
+  if (zodDef && typeof zodDef === "object") {
+    const nested = (zodDef as Record<string, unknown>).def;
+    if (nested && typeof nested === "object") return nested as Record<string, unknown>;
+  }
+  const ownDef = record._def;
+  if (ownDef && typeof ownDef === "object") return ownDef as Record<string, unknown>;
+  return record;
+}
+
+function repairSchemaBounds(
+  schema: ZodType<unknown>,
+  def: Record<string, unknown>,
+): Pick<RepairConstraintLedgerEntry, "minLength" | "maxLength" | "minItems" | "maxItems" | "minValue" | "maxValue"> {
+  let minLength: number | undefined;
+  let maxLength: number | undefined;
+  let minItems: number | undefined;
+  let maxItems: number | undefined;
+  let minValue: number | undefined;
+  let maxValue: number | undefined;
+  const schemaRecord = schema as unknown as Record<string, unknown>;
+  const directMinLength = repairSchemaNumericValue(schemaRecord.minLength);
+  const directMaxLength = repairSchemaNumericValue(schemaRecord.maxLength);
+  if (directMinLength !== undefined) minLength = directMinLength;
+  if (directMaxLength !== undefined) maxLength = directMaxLength;
+
+  const checks = def.checks;
+  if (Array.isArray(checks)) {
+    for (const check of checks) {
+      const checkDef = repairSchemaCheckDef(check);
+      if (!checkDef) return { minLength, maxLength, minItems, maxItems, minValue, maxValue };
+      const kind = checkDef.check ?? checkDef.kind;
+      const minimum = repairSchemaNumericValue(checkDef.minimum ?? checkDef.value);
+      const maximum = repairSchemaNumericValue(checkDef.maximum ?? checkDef.value);
+      if (kind === "min_length" || kind === "min") {
+        if (minimum !== undefined) {
+          if (getSchemaType(schema) === "array" || getSchemaType(schema) === "ZodArray") minItems = minimum;
+          else minLength = minimum;
+        }
+      } else if (kind === "max_length" || kind === "max") {
+        if (maximum !== undefined) {
+          if (getSchemaType(schema) === "array" || getSchemaType(schema) === "ZodArray") maxItems = maximum;
+          else maxLength = maximum;
+        }
+      } else if (kind === "greater_than") {
+        if (minimum !== undefined) minValue = minimum;
+      } else if (kind === "less_than") {
+        if (maximum !== undefined) maxValue = maximum;
+      }
+    }
+  }
+
+  const directMin = def.minLength;
+  const directMax = def.maxLength;
+  if (directMin && typeof directMin === "object") {
+    minLength ??= repairSchemaNumericValue((directMin as Record<string, unknown>).value);
+  }
+  if (directMax && typeof directMax === "object") {
+    maxLength ??= repairSchemaNumericValue((directMax as Record<string, unknown>).value);
+  }
+  return { minLength, maxLength, minItems, maxItems, minValue, maxValue };
+}
+
+function repairSchemaLiterals(
+  def: Record<string, unknown>,
+  repairRedactor: (text: string) => string,
+): RepairLedgerPrimitive[] | null {
+  const rawValues = Array.isArray(def.values)
+    ? def.values
+    : def.entries && typeof def.entries === "object"
+      ? Object.values(def.entries as Record<string, unknown>)
+      : null;
+  if (!rawValues) return null;
+  if (rawValues.length > MAX_REPAIR_LEDGER_VALUES) return null;
+  const values: RepairLedgerPrimitive[] = [];
+  for (const value of rawValues) {
+    const redacted = redactRepairLedgerPrimitive(value, repairRedactor);
+    if (redacted === null && value !== null) return null;
+    values.push(redacted);
+  }
+  return values;
+}
+
+function buildRepairConstraintLedger(
+  schema: ZodType<unknown>,
+  repairRedactor: (text: string) => string,
+): RepairConstraintLedger | null {
+  const entries: RepairConstraintLedgerEntry[] = [];
+  const ancestors = new Set<object>();
+  let nodeCount = 0;
+
+  const visit = (
+    current: ZodType<unknown>,
+    path: RepairPathSegment[],
+    required: boolean,
+    depth: number,
+    optional = false,
+    nullable = false,
+  ): boolean => {
+    if (depth > MAX_REPAIR_CONSTRAINT_DEPTH || nodeCount >= MAX_REPAIR_CONSTRAINT_NODES) return false;
+    const def = repairSchemaDef(current);
+    if (!def) return false;
+    const currentObject = current as unknown as object;
+    if (ancestors.has(currentObject)) return false;
+    ancestors.add(currentObject);
+    try {
+      const schemaType = getSchemaType(current);
+      if (!schemaType) return false;
+      if (
+        schemaType === "ZodOptional" || schemaType === "optional" ||
+        schemaType === "ZodDefault" || schemaType === "default" ||
+        schemaType === "ZodCatch" || schemaType === "catch" ||
+        schemaType === "ZodNullable" || schemaType === "nullable" ||
+        schemaType === "ZodReadonly" || schemaType === "readonly" ||
+        schemaType === "ZodPipeline" || schemaType === "pipe" ||
+        schemaType === "ZodEffects" || schemaType === "effects" ||
+        schemaType === "ZodBranded" || schemaType === "branded"
+      ) {
+        const inner = repairSchemaInner(def);
+        if (!inner) return false;
+        return visit(
+          inner,
+          path,
+          required && !optional,
+          depth + 1,
+          optional || repairSchemaIsOptional(current),
+          nullable || repairSchemaIsNullable(current),
+        );
+      }
+
+      const normalizedType = schemaType.replace(/^Zod/, "").toLowerCase();
+      const supported = new Set([
+        "object", "array", "tuple", "record", "union", "intersection", "string", "number",
+        "boolean", "bigint", "date", "literal", "enum", "null", "undefined", "any", "unknown",
+        "never", "symbol",
+      ]);
+      if (!supported.has(normalizedType)) return false;
+
+      const entry: RepairConstraintLedgerEntry = {
+        path: [...path],
+        type: normalizedType,
+        required: required && !optional,
+      };
+      if (optional) entry.optional = true;
+      if (nullable) entry.nullable = true;
+      const bounds = repairSchemaBounds(current, def);
+      Object.assign(entry, Object.fromEntries(
+        Object.entries(bounds).filter(([, value]) => value !== undefined),
+      ));
+      if (normalizedType === "literal" || normalizedType === "enum") {
+        const literals = repairSchemaLiterals(def, repairRedactor);
+        if (!literals) return false;
+        entry.literals = literals;
+      }
+      if (normalizedType === "object") {
+        let shape: unknown;
+        try {
+          shape = typeof def.shape === "function" ? (def.shape as () => unknown)() : def.shape;
+        } catch {
+          return false;
+        }
+        if (!shape || typeof shape !== "object" || Array.isArray(shape)) return false;
+        const shapeEntries = Object.entries(shape as Record<string, unknown>);
+        if (shapeEntries.length > MAX_REPAIR_LEDGER_VALUES) return false;
+        const allowedKeys: string[] = [];
+        for (const [key, field] of shapeEntries) {
+          if (!field || typeof field !== "object") return false;
+          const redactedKey = redactRepairLedgerText(key, repairRedactor);
+          if (redactedKey === null) return false;
+          allowedKeys.push(redactedKey);
+        }
+        const catchall = def.catchall;
+        const strict = def.unknownKeys === "strict"
+          || (catchall && typeof catchall === "object" && getSchemaType(catchall as ZodType<unknown>) === "never");
+        if (strict) {
+          entry.strict = true;
+          entry.allowedKeys = allowedKeys;
+        }
+        nodeCount += 1;
+        entries.push(entry);
+        for (const [key, field] of shapeEntries) {
+          const redactedKey = redactRepairLedgerText(key, repairRedactor);
+          if (redactedKey === null) return false;
+          if (!visit(
+            field as ZodType<unknown>,
+            [...path, redactedKey],
+            !repairSchemaIsOptional(field as ZodType<unknown>),
+            depth + 1,
+          )) return false;
+        }
+        return true;
+      }
+
+      nodeCount += 1;
+      entries.push(entry);
+      if (normalizedType === "array") {
+        const element = getArrayElementSchema(def);
+        return element
+          ? visit(element, [...path, "<item>"], true, depth + 1)
+          : false;
+      }
+      if (normalizedType === "tuple") {
+        const items = def.items;
+        if (!Array.isArray(items) || items.length > MAX_REPAIR_LEDGER_VALUES) return false;
+        entry.minItems = items.length;
+        entry.maxItems = items.length;
+        for (let index = 0; index < items.length; index += 1) {
+          if (!visit(items[index] as ZodType<unknown>, [...path, index], true, depth + 1)) return false;
+        }
+        return true;
+      }
+      if (normalizedType === "record") {
+        const valueSchema = getRecordValueSchema(def);
+        return valueSchema ? visit(valueSchema, [...path, "<key>"], true, depth + 1) : false;
+      }
+      if (normalizedType === "union") {
+        const options = def.options;
+        if (!Array.isArray(options) || options.length === 0 || options.length > MAX_REPAIR_LEDGER_VALUES) return false;
+        for (let index = 0; index < options.length; index += 1) {
+          if (!visit(options[index] as ZodType<unknown>, [...path, `<option:${index}>`], required, depth + 1)) return false;
+        }
+        return true;
+      }
+      if (normalizedType === "intersection") {
+        const left = def.left;
+        const right = def.right;
+        return Boolean(
+          left && right
+          && visit(left as ZodType<unknown>, [...path, "<left>"], required, depth + 1)
+          && visit(right as ZodType<unknown>, [...path, "<right>"], required, depth + 1),
+        );
+      }
+      return true;
+    } finally {
+      ancestors.delete(currentObject);
+    }
+  };
+
+  if (!visit(schema, [], true, 0)) return null;
+  return { nodeCount, truncated: false, entries };
+}
+
+function serializeRepairLedger(
+  ledger: RepairIssueLedger | RepairConstraintLedger,
+  maxChars: number,
+): string | null {
+  if (ledger.truncated) return null;
+  try {
+    const serialized = JSON.stringify(ledger, null, 2);
+    return typeof serialized === "string" && serialized.length <= maxChars ? serialized : null;
+  } catch {
+    return null;
+  }
+}
+
+function formatRepairIssueChecklist(ledger: RepairIssueLedger): string | null {
+  if (ledger.truncated || ledger.entries.length !== ledger.issueCount) return null;
+  if (ledger.entries.length === 0) return "(no issues recorded)";
+  return ledger.entries
+    .map((entry, index) => `${index + 1}. ${JSON.stringify(entry)}`)
+    .join("\n");
+}
+
 function buildRepairPrompt(
   invalidJson: string,
   issues: string,
   schemaHint: string,
   repairRedactor: (text: string) => string = redactBackendRefsForRepair,
+  issueLedger?: RepairIssueLedger,
+  constraintLedger?: RepairConstraintLedger,
 ): string {
   const redactedInvalidJson = repairRedactor(redactBackendRefsForRepair(invalidJson)).slice(0, 24000);
   const redactedIssues = repairRedactor(redactBackendRefsForRepair(issues));
   const redactedSchemaHint = repairRedactor(redactBackendRefsForRepair(schemaHint));
+  const serializedIssueLedger = issueLedger
+    ? serializeRepairLedger(issueLedger, MAX_REPAIR_ISSUE_LEDGER_TEXT)
+    : null;
+  const serializedConstraintLedger = constraintLedger
+    ? serializeRepairLedger(constraintLedger, MAX_REPAIR_CONSTRAINT_LEDGER_TEXT)
+    : null;
+  const checklist = issueLedger ? formatRepairIssueChecklist(issueLedger) : null;
   return `Repair this model JSON output so it satisfies the expected schema.
 
 ${STRUCTURED_OUTPUT_REPAIR_POLICY}
@@ -934,10 +1453,19 @@ Rules:
 - Change only structure, field types, field names, and invalid caps needed to satisfy validation.
 - Do not invent new lore, actions, targets, actor intent, quick action labels, source roles, canonical names, power facts, IDs, UUIDs, or new array elements with missing semantics.
 - If an optional field cannot be repaired from the output, omit it.
-- If a field named "citations" is present and the schema expects citation objects, return an array of objects, not strings.
-- If a field named "canonicalNames" is present, return an object with locations/factions/characters arrays when those names can be classified.
 - If required semantic content is absent, fail closed by leaving the output invalid rather than creating missing content.
 - Output valid JSON only. No markdown. No explanation.
+
+Repair checklist (complete):
+${checklist ?? "(structured issue ledger unavailable)"}
+
+Every numbered issue must be resolved; a partial repair is invalid. Recheck the entire object against the Expected schema and every listed constraint before returning it. Preserve valid meaning and required content.
+
+Structured issue ledger (redacted):
+${serializedIssueLedger ?? "(structured issue ledger unavailable)"}
+
+Expected schema constraints (redacted):
+${serializedConstraintLedger ?? "(schema constraint ledger unavailable)"}
 
 Validation errors:
 ${redactedIssues}
@@ -955,11 +1483,13 @@ async function attemptRepair<T>(
   issues: string,
   originalTrace: SafeGenerateTrace,
   schemaHint: string,
+  issueLedger: RepairIssueLedger | null,
 ): Promise<SafeGenerateResult<T> | null> {
   if (opts.allowRepair === false) {
     return null;
   }
 
+  const repairRedactor = opts.repairRedactor ?? redactBackendRefsForRepair;
   const repairContext: StrategyContext = {
     metadata: getStructuredOutputModelMetadata(opts.model),
     capability: {
@@ -971,63 +1501,111 @@ async function attemptRepair<T>(
       capabilityKey: originalTrace.capability?.capabilityKey,
     },
   };
-  const result = await generateText({
-    model: opts.model,
-    temperature: 0,
-    maxOutputTokens: opts.maxOutputTokens ?? opts.maxTokens,
-    maxRetries: 0,
-    timeout: opts.timeout,
-    system: "You repair invalid JSON into schema-valid JSON. Return JSON only.",
-    prompt: buildRepairPrompt(invalidJson, issues, schemaHint, opts.repairRedactor),
-  });
-
-  const cleaned = extractJson(result.text);
-  const repairTrace = applyStrategyTrace(
-    toTraceFromGenerateTextResult(result, cleaned),
-    repairContext,
-    "repair",
-    originalTrace.fallbackReason,
-  );
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch {
-    log.warn(`safeGenerateObject repair returned invalid JSON: ${result.text.slice(0, 200)}`);
-    return null;
+  const maxAttempts = opts.maxRepairAttempts === 2 ? 2 : 1;
+  const constraintLedger = maxAttempts === 2
+    ? buildRepairConstraintLedger(opts.schema, repairRedactor)
+    : null;
+  if (maxAttempts === 2) {
+    if (!issueLedger || issueLedger.truncated) {
+      return null;
+    }
+    if (!constraintLedger || constraintLedger.truncated) {
+      return null;
+    }
+    if (
+      serializeRepairLedger(issueLedger, MAX_REPAIR_ISSUE_LEDGER_TEXT) === null
+      || serializeRepairLedger(constraintLedger, MAX_REPAIR_CONSTRAINT_LEDGER_TEXT) === null
+    ) {
+      return null;
+    }
   }
+  let currentInvalidJson = invalidJson;
+  let currentIssues = issues;
+  let currentIssueLedger = issueLedger;
 
-  parsed = maybeCoerceToSchema(parsed, opts.schema, opts);
-  const repaired = opts.schema.safeParse(parsed);
-  if (!repaired.success) {
-    log.warn(`safeGenerateObject repair still failed Zod validation: ${formatZodIssues(repaired.error)}`);
-    return null;
-  }
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const result = await generateText({
+      model: opts.model,
+      temperature: 0,
+      maxOutputTokens: opts.maxOutputTokens ?? opts.maxTokens,
+      maxRetries: 0,
+      timeout: opts.timeout,
+      ...(opts.abortSignal !== undefined ? { abortSignal: opts.abortSignal } : {}),
+      system: "You repair invalid JSON into schema-valid JSON. Return JSON only.",
+      prompt: buildRepairPrompt(
+        currentInvalidJson,
+        currentIssues,
+        schemaHint,
+        repairRedactor,
+        currentIssueLedger ?? undefined,
+        constraintLedger ?? undefined,
+      ),
+    });
 
-  log.event("llm.repair", {
-    strategy: "repair",
-    primaryStrategy: repairTrace.primaryStrategy ?? null,
-    fallbackStrategy: repairTrace.fallbackStrategy ?? null,
-    fallbackReason: repairTrace.fallbackReason ?? null,
-    success: true,
-    issues,
-    reasoningLen: repairTrace.reasoningText?.length ?? 0,
-    responseModel: repairTrace.response?.modelId ?? null,
-    usage: repairTrace.usage ?? null,
-  });
+    const cleaned = extractJson(result.text);
+    const repairTrace = applyStrategyTrace(
+      toTraceFromGenerateTextResult(result, cleaned),
+      repairContext,
+      "repair",
+      originalTrace.fallbackReason,
+    );
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (error) {
+      log.warn(`safeGenerateObject repair returned invalid JSON: ${result.text.slice(0, 200)}`);
+      if (attempt + 1 >= maxAttempts) return null;
+      const parseIssue = error instanceof Error ? error.message : String(error);
+      const parseLedger = buildRepairParseIssueLedger(parseIssue, repairRedactor);
+      if (!parseLedger) return null;
+      currentInvalidJson = result.text;
+      currentIssues = parseIssue;
+      currentIssueLedger = parseLedger;
+      continue;
+    }
 
-  return {
-    object: repaired.data as T,
-    trace: {
-      ...originalTrace,
+    parsed = maybeCoerceToSchema(parsed, opts.schema, opts);
+    const repaired = opts.schema.safeParse(parsed);
+    if (!repaired.success) {
+      const residualIssues = formatZodIssues(repaired.error);
+      log.warn(`safeGenerateObject repair still failed Zod validation: ${residualIssues}`);
+      if (attempt + 1 >= maxAttempts) return null;
+      const residualLedger = buildRepairIssueLedger(repaired.error, repairRedactor);
+      if (!residualLedger || residualLedger.truncated) return null;
+      currentInvalidJson = cleaned;
+      currentIssues = residualIssues;
+      currentIssueLedger = residualLedger;
+      continue;
+    }
+
+    log.event("llm.repair", {
       strategy: "repair",
-      ...(originalTrace.strategy ? { repairedFromStrategy: originalTrace.strategy } : {}),
-      cleanedText: JSON.stringify(repaired.data),
-      repair: {
-        ...repairTrace,
-        issues,
+      primaryStrategy: repairTrace.primaryStrategy ?? null,
+      fallbackStrategy: repairTrace.fallbackStrategy ?? null,
+      fallbackReason: repairTrace.fallbackReason ?? null,
+      success: true,
+      issues: currentIssues,
+      reasoningLen: repairTrace.reasoningText?.length ?? 0,
+      responseModel: repairTrace.response?.modelId ?? null,
+      usage: repairTrace.usage ?? null,
+    });
+
+    return {
+      object: repaired.data as T,
+      trace: {
+        ...originalTrace,
+        strategy: "repair",
+        ...(originalTrace.strategy ? { repairedFromStrategy: originalTrace.strategy } : {}),
+        cleanedText: JSON.stringify(repaired.data),
+        repair: {
+          ...repairTrace,
+          issues: currentIssues,
+        },
       },
-    },
-  };
+    };
+  }
+
+  return null;
 }
 
 function textFallbackDisabledError(
@@ -1230,6 +1808,15 @@ function structuredOutputToolArgument(
 
 function structuredOutputToolInput(call: StructuredOutputToolCallLike): unknown {
   return structuredOutputToolArgument(call).value;
+}
+
+function serializeStructuredOutputToolInput(input: unknown): string | null {
+  try {
+    const serialized = JSON.stringify(input);
+    return typeof serialized === "string" ? serialized : null;
+  } catch {
+    return null;
+  }
 }
 
 function structuredOutputArgumentType(value: unknown): StructuredOutputArgumentType {
@@ -1802,7 +2389,11 @@ async function attemptTextFallbackGenerate<T>(
     parsed = JSON.parse(cleaned);
   } catch (err) {
     const issues = `Invalid JSON: ${err instanceof Error ? err.message : String(err)}`;
-    const repaired = await attemptRepair(opts, result.text, issues, trace, schemaHint);
+    const issueLedger = buildRepairParseIssueLedger(
+      err instanceof Error ? err.message : String(err),
+      opts.repairRedactor ?? redactBackendRefsForRepair,
+    );
+    const repaired = await attemptRepair(opts, result.text, issues, trace, schemaHint, issueLedger);
     if (repaired) return repaired;
     throw new SafeGenerateError(
       `safeGenerateObject: invalid JSON. Raw: ${result.text.slice(0, 500)}`,
@@ -1818,7 +2409,10 @@ async function attemptTextFallbackGenerate<T>(
 
   const direct = schema.safeParse(parsed);
   const zodErrors = direct.success ? "" : formatZodIssues(direct.error);
-  const repaired = await attemptRepair(opts, cleaned, zodErrors, trace, schemaHint);
+  const issueLedger = direct.success
+    ? null
+    : buildRepairIssueLedger(direct.error, opts.repairRedactor ?? redactBackendRefsForRepair);
+  const repaired = await attemptRepair(opts, cleaned, zodErrors, trace, schemaHint, issueLedger);
   if (repaired) return repaired;
 
   throw new SafeGenerateError(
@@ -1948,6 +2542,9 @@ async function attemptNativeJsonGenerate<T>(
     zodErrors,
     trace,
     schemaHint,
+    direct.success
+      ? null
+      : buildRepairIssueLedger(direct.error, opts.repairRedactor ?? redactBackendRefsForRepair),
   );
   if (repaired) return repaired;
 
@@ -2010,6 +2607,30 @@ async function attemptToolModeGenerate<T>(
       ...toolInputResult.diagnostic,
       ...schemaDiagnostics,
     });
+
+    if (opts.allowRepair === true) {
+      const invalidJson = serializeStructuredOutputToolInput(toolInputResult.input);
+      if (invalidJson !== null) {
+        const direct = opts.schema.safeParse(toolInputResult.input);
+        if (!direct.success) {
+          const zodErrors = formatZodIssues(direct.error);
+          try {
+            const repaired = await attemptRepair(
+              opts,
+              invalidJson,
+              zodErrors,
+              trace,
+              schemaHint,
+              buildRepairIssueLedger(direct.error, opts.repairRedactor ?? redactBackendRefsForRepair),
+            );
+            if (repaired) return repaired;
+          } catch (error) {
+            log.warn(`safeGenerateObject tool mode repair failed: ${formatToolFailureReason(error)}`);
+          }
+        }
+      }
+    }
+
     throw new SafeGenerateError(
       `safeGenerateObject tool mode: ${STRUCTURED_OUTPUT_TOOL_NAME} tool call was generated with invalid arguments`,
       trace,
@@ -2024,7 +2645,16 @@ async function attemptToolModeGenerate<T>(
 
   const direct = opts.schema.safeParse(parsed);
   const zodErrors = direct.success ? "" : formatZodIssues(direct.error);
-  const repaired = await attemptRepair(opts, JSON.stringify(toolInputResult.input), zodErrors, trace, schemaHint);
+  const repaired = await attemptRepair(
+    opts,
+    JSON.stringify(toolInputResult.input),
+    zodErrors,
+    trace,
+    schemaHint,
+    direct.success
+      ? null
+      : buildRepairIssueLedger(direct.error, opts.repairRedactor ?? redactBackendRefsForRepair),
+  );
   if (repaired) return repaired;
 
   throw new SafeGenerateError(

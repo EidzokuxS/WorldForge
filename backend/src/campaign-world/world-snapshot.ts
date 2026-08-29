@@ -49,6 +49,9 @@ const acceptedSourceSchema = z.object({
     label: z.string().min(1),
     sourceType: z.string().min(1),
   }).strict()),
+  playerIdentity: z.object({
+    displayName: z.string().min(1).max(200),
+  }).strict().optional(),
 }).strict();
 
 const acceptedReviewSchema: z.ZodType<CampaignWorldReview> = z.object({

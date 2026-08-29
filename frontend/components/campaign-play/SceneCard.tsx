@@ -1,6 +1,7 @@
 import type {
   CampaignPlayConsequence,
   CampaignPlayVisibleActor,
+  CampaignPlayVisibleCommitment,
   CampaignPlayVisibleLocation,
   CampaignPlayVisibleObligation,
   CampaignPlayVisiblePossession,
@@ -18,6 +19,7 @@ export interface SceneCardProps {
   pressures: CampaignPlayVisiblePressure[];
   possessions: CampaignPlayVisiblePossession[];
   obligations: CampaignPlayVisibleObligation[];
+  commitments: CampaignPlayVisibleCommitment[];
   consequences?: CampaignPlayConsequence[];
 }
 
@@ -42,7 +44,16 @@ function actorAccentStyle(accent: string): CSSProperties {
   return { "--campaign-play-actor-accent": color } as CSSProperties;
 }
 
-export function SceneCard({ location, actors, routes, pressures, possessions, obligations, consequences = [] }: SceneCardProps) {
+export function SceneCard({
+  location,
+  actors,
+  routes,
+  pressures,
+  possessions,
+  obligations,
+  commitments,
+  consequences = [],
+}: SceneCardProps) {
   return (
     <section className="campaign-play-scene" aria-labelledby="campaign-play-location">
       <div className="campaign-play-scene-copy">
@@ -91,6 +102,42 @@ export function SceneCard({ location, actors, routes, pressures, possessions, ob
                 <small>{obligation.outstandingAmount} {obligation.unitKey}</small>
               </li>
             ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {commitments.length > 0 ? (
+        <section className="campaign-play-work" aria-labelledby="campaign-play-work-heading">
+          <h2 id="campaign-play-work-heading">Work</h2>
+          <ul>
+            {commitments.map((commitment) => {
+              const statusLabel = commitment.status === "active" ? "Active" : "Completed";
+              return (
+                <li key={commitment.handle} data-work-status={commitment.status}>
+                  <span className="campaign-play-work-copy">
+                    <strong>{commitment.title}</strong>
+                    <small>{commitment.subjectName} · to {commitment.destinationName}</small>
+                    <small>For {commitment.counterpartyName}</small>
+                  </span>
+                  <span className="campaign-play-work-terms">
+                    <span
+                      aria-label={`Work status: ${statusLabel}`}
+                      className="campaign-play-work-status"
+                    >
+                      {statusLabel}
+                    </span>
+                    {commitment.kind === "paid_delivery" ? (
+                      <small>{commitment.feeAmount} {commitment.feeUnit} · on completion</small>
+                    ) : (
+                      <small>No payment offered</small>
+                    )}
+                    {commitment.dueWorldTimeLabel ? (
+                      <small>Due {commitment.dueWorldTimeLabel}</small>
+                    ) : null}
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         </section>
       ) : null}

@@ -291,6 +291,137 @@ function finalInvalidProposal() {
 }
 
 describe("Campaign Play Judge", () => {
+  it("keeps paid-delivery collection and delivery effects code-bound", () => {
+    const judge = createCampaignPlayJudge();
+    const collectInput: CampaignPlayJudgeInput = {
+      originalText: "Ask the guard for the sealed parcel.",
+      source: "freeform",
+      choiceHandle: null,
+      commitmentBinding: {
+        commitmentHandle: "commitment-paid",
+        action: "collect",
+        counterpartyHandle: "actor-guard",
+        subjectName: "Sealed parcel",
+        destinationHandle: "location-reef",
+      },
+    };
+    const collect = judge.compile(frame(), collectInput, proposal({
+      possessionEffectAuthority: {
+        kind: "adjust_actor_possession",
+        enforcement: "permitted",
+        operation: "acquire",
+        possessionHandle: null,
+        quantity: 1,
+        minimumResult: "success",
+      },
+    }));
+    expect(collect.possessionEffectAuthority).toEqual({
+      kind: "adjust_actor_possession",
+      enforcement: "permitted",
+      operation: "acquire",
+      possessionHandle: null,
+      quantity: 1,
+      minimumResult: "success",
+    });
+    const collectRefusal = judge.compile(frame(), collectInput, proposal({
+      possessionEffectAuthority: { kind: "none" },
+      resultBounds: { minimum: "limited", maximum: "limited" },
+    }));
+    expect(collectRefusal.possessionEffectAuthority).toEqual({ kind: "none" });
+    expect(() => judge.compile(frame(), collectInput, proposal({
+      possessionEffectAuthority: {
+        kind: "adjust_actor_possession",
+        enforcement: "required",
+        operation: "acquire",
+        possessionHandle: null,
+        quantity: 1,
+        minimumResult: "success",
+      },
+    }))).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+
+    const deliverInput: CampaignPlayJudgeInput = {
+      originalText: "Deliver the sealed parcel at the reef.",
+      source: "freeform",
+      choiceHandle: null,
+      commitmentBinding: {
+        commitmentHandle: "commitment-paid",
+        action: "deliver",
+        counterpartyHandle: "actor-guard",
+        subjectName: "Sealed parcel",
+        destinationHandle: "location-reef",
+      },
+      commitmentFeeAmount: 8,
+      commitmentPossessionHandle: "notebook",
+    };
+    const deliver = judge.compile(frame(), deliverInput, proposal({
+      kind: "attempt",
+      targets: [{ handle: "location-reef", kind: "location" }],
+      possessionEffectAuthority: {
+        kind: "adjust_actor_possession",
+        enforcement: "required",
+        operation: "spend",
+        possessionHandle: "notebook",
+        quantity: 1,
+        minimumResult: "success",
+      },
+      requiredObligationEffect: {
+        kind: "incur_actor_obligation",
+        debtorHandle: "actor-guard",
+        creditorHandle: "actor-you",
+        unitKey: "copper",
+        amount: 8,
+        minimumResult: "success",
+      },
+      citedVisibleFactHandles: ["location-reef", "notebook", "actor-guard", "actor-you"],
+    }));
+    expect(deliver.possessionEffectAuthority).toMatchObject({
+      kind: "adjust_actor_possession",
+      operation: "spend",
+      possessionHandle: "notebook",
+      quantity: 1,
+      minimumResult: "success",
+    });
+    expect(deliver.requiredObligationEffect).toEqual({
+      kind: "incur_actor_obligation",
+      debtorHandle: "actor-guard",
+      creditorHandle: "actor-you",
+      unitKey: "copper",
+      amount: 8,
+      minimumResult: "success",
+    });
+    const deliverBelowSuccess = judge.compile(frame(), deliverInput, proposal({
+      kind: "attempt",
+      targets: [{ handle: "location-reef", kind: "location" }],
+      possessionEffectAuthority: { kind: "none" },
+      requiredObligationEffect: { kind: "none" },
+      resultBounds: { minimum: "limited", maximum: "limited" },
+      citedVisibleFactHandles: ["location-reef"],
+    }));
+    expect(deliverBelowSuccess.possessionEffectAuthority).toEqual({ kind: "none" });
+    expect(deliverBelowSuccess.requiredObligationEffect).toEqual({ kind: "none" });
+    expect(() => judge.compile(frame(), deliverInput, proposal({
+      kind: "attempt",
+      targets: [{ handle: "location-reef", kind: "location" }],
+      possessionEffectAuthority: {
+        kind: "adjust_actor_possession",
+        enforcement: "required",
+        operation: "spend",
+        possessionHandle: "notebook",
+        quantity: 1,
+        minimumResult: "success",
+      },
+      requiredObligationEffect: {
+        kind: "incur_actor_obligation",
+        debtorHandle: "actor-guard",
+        creditorHandle: "actor-you",
+        unitKey: "copper",
+        amount: 9,
+        minimumResult: "success",
+      },
+      citedVisibleFactHandles: ["location-reef", "notebook", "actor-guard", "actor-you"],
+    }))).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+  });
+
   it("binds a definite debt to one cited visible creditor", () => {
     const judge = createCampaignPlayJudge();
     const input = {
@@ -820,6 +951,13 @@ describe("Campaign Play Judge", () => {
     expect(properties.travelRouteHandle).toMatchObject({ type: "string" });
     expect(properties.kind).toBeUndefined();
     expect(properties.movementRouteHandle).toBeUndefined();
+    expect(properties.citedVisibleFactHandles).toMatchObject({
+      type: "array",
+      items: {
+        type: "string",
+        enum: frame().visibleFacts.map((fact) => fact.handle),
+      },
+    });
     expect(properties.clarificationQuestion).toMatchObject({ type: "string" });
     expect(properties.visibleActorReactions?.items?.properties?.supportingVisibleFactHandle)
       .toMatchObject({ type: "string" });
@@ -855,6 +993,10 @@ describe("Campaign Play Judge", () => {
     expect(properties.uncertainty?.additionalProperties).toBe(false);
     expect(options.schema.safeParse({ ...toolProposal(), kind: "contact" }).success).toBe(false);
     expect(options.schema.safeParse({ ...toolProposal(), movementRouteHandle: "" }).success).toBe(false);
+    expect(options.schema.safeParse({
+      ...toolProposal(),
+      citedVisibleFactHandles: ["citation-rogue"],
+    }).success).toBe(false);
     const { disposition: _disposition, ...missingDisposition } = toolProposal();
     expect(options.schema.safeParse(missingDisposition).success).toBe(false);
     const { clarificationQuestion: _clarificationQuestion, ...missingClarificationQuestion } = toolProposal();
@@ -880,6 +1022,80 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("visibleActorReactions[].supportingVisibleFactHandle");
     expect(sentPrompt).toContain("possessionEffectAuthority.possessionHandle when kind is adjust_actor_possession");
     expect(sentPrompt).toContain('clarificationQuestion must be a non-empty question only when disposition is clarification_required; otherwise it must be "".');
+  });
+
+  it("recovers one strict tool rejection with indexed handle instructions and the same packet", async () => {
+    const invalidTransport = toolProposal();
+    invalidTransport.visibleActorReactions = [{
+      ...invalidTransport.visibleActorReactions[0],
+      actorHandle: "actor-rogue",
+      reason: "",
+    }];
+    invalidTransport.citedVisibleFactHandles = ["actor-guard", "citation-rogue"];
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: invalidTransport, trace: trace("tool_mode", "tool") })
+      .mockResolvedValueOnce({ object: toolProposal(), trace: trace("tool_mode", "tool") });
+    const judge = createCampaignPlayJudge({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    const input = { originalText: "I ask the guard.", source: "freeform" as const, choiceHandle: null };
+    const request = {
+      frame: frame(), input, model: model(), temperature: 0.2, budget,
+      structuredOutputMode: "tool" as const,
+    };
+
+    let firstError: unknown;
+    try {
+      await judge.judge({ ...request, attempt: 1, workerEpoch: 20 });
+    } catch (cause) {
+      firstError = cause;
+    }
+    expect(firstError).toMatchObject({ code: "model_contract_failed" });
+    const feedback = getCampaignPlayJudgeRecoveryFeedback(firstError);
+    expect(feedback?.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: ["visibleActorReactions", 0, "actorHandle"] }),
+      expect.objectContaining({ path: ["visibleActorReactions", 0, "reason"] }),
+      expect.objectContaining({ path: ["citedVisibleFactHandles", 1] }),
+    ]));
+    if (feedback === undefined) throw new Error("Expected bounded Judge recovery feedback.");
+
+    const result = await judge.judge({
+      ...request,
+      attempt: 2,
+      workerEpoch: 21,
+      recoveryFeedback: feedback,
+    });
+    expect(result.ruling.normalizedIntent.originalText).toBe(input.originalText);
+    expect(generateObject).toHaveBeenCalledTimes(2);
+
+    const firstOptions = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    const secondOptions = generateObject.mock.calls[1]![0] as Parameters<typeof safeGenerateObject>[0];
+    for (const key of [
+      "model", "temperature", "maxOutputTokens", "mode", "strictSchema",
+      "allowRepair", "allowTextFallback", "retries",
+    ] as const) {
+      expect(secondOptions[key]).toBe(firstOptions[key]);
+    }
+    const firstPrompt = String(firstOptions.prompt);
+    const secondPrompt = String(secondOptions.prompt);
+    expect(firstPrompt).toContain(
+      'VISIBLE_ACTOR_REACTION_HANDLE_CATALOG=[{"index":0,"actorHandle":"actor-guard"}]',
+    );
+    expect(firstPrompt).toContain(
+      'CITATION_HANDLE_CATALOG=[{"index":0,"handle":"actor-you"}',
+    );
+    expect(firstPrompt).toContain("COPY_EXACT=");
+    expect(firstPrompt).toContain("REACTION_REASON_NON_EMPTY=");
+    expect(secondPrompt).toContain('RECOVERY_SCHEMA_INSTRUCTION_CLASSES=["copy_exact_reaction_catalog","non_empty_reaction_line","copy_exact_citation_catalog"]');
+    expect(secondPrompt).toContain("RECOVERY_COPY_EXACT_REACTION_CATALOG=COPY_EXACT");
+    expect(secondPrompt).toContain("RECOVERY_COPY_EXACT_CITATION_CATALOG=COPY_EXACT");
+    expect(secondPrompt).toContain("RECOVERY_NON_EMPTY_REACTION_LINE=Provide a non-empty");
+    expect(secondPrompt).toContain(`RECOVERY_FINAL_VALIDATION_ISSUES=${JSON.stringify(feedback.issues)}`);
+    const recoveryMarker = secondPrompt.indexOf("RECOVERY_SCHEMA_INSTRUCTION_CLASSES");
+    expect(recoveryMarker).toBeGreaterThan(0);
+    expect(secondPrompt.slice(0, recoveryMarker).trimEnd()).toBe(firstPrompt);
+    expect(secondPrompt).not.toContain("actor-rogue");
+    expect(secondPrompt).not.toContain("citation-rogue");
   });
 
   it("decodes every tool null sentinel back to the exact null ruling fields", async () => {
@@ -2294,6 +2510,75 @@ describe("Campaign Play Judge", () => {
     });
   });
 
+  it("emits bounded recovery for a semantic contract rejection and accepts the corrected retry", async () => {
+    await withJudgeLogs(async (capture) => {
+      const unsafe = "candidate-prose-secret-123";
+      const invalid = proposal({
+        method: unsafe,
+        stakes: unsafe,
+        reason: unsafe,
+        targets: [
+          { handle: "actor-guard", kind: "actor" },
+          { handle: "actor-guard", kind: "actor" },
+        ],
+      });
+      const input = { originalText: "I ask the guard.", source: "freeform" as const, choiceHandle: null };
+      const generateObject = vi.fn()
+        .mockResolvedValueOnce({ object: invalid, trace: trace() })
+        .mockResolvedValueOnce({ object: proposal(), trace: trace() });
+      const judge = createCampaignPlayJudge({
+        generateObject: generateObject as unknown as typeof safeGenerateObject,
+      });
+
+      let firstError: unknown;
+      try {
+        await judge.judge({
+          frame: frame(), input, model: model(), temperature: 0.2, budget,
+          attempt: 1, workerEpoch: 30,
+        });
+      } catch (cause) {
+        firstError = cause;
+      }
+      expect(firstError).toMatchObject({ code: "model_contract_failed" });
+      const feedback = getCampaignPlayJudgeRecoveryFeedback(firstError);
+      expect(feedback).toEqual({
+        issues: [{
+          issueIndex: 0,
+          code: "custom",
+          path: ["targets"],
+          check: "duplicate_targets",
+        }],
+      });
+      if (feedback === undefined) throw new Error("Expected bounded semantic recovery feedback.");
+      expect(JSON.stringify(feedback)).not.toContain(unsafe);
+
+      const result = await judge.judge({
+        frame: frame(), input, model: model(), temperature: 0.2, budget,
+        attempt: 2, workerEpoch: 31, recoveryFeedback: feedback,
+      });
+      expect(result.ruling.normalizedIntent.kind).toBe("contact");
+
+      const secondPrompt = String((generateObject.mock.calls[1]![0] as Parameters<typeof safeGenerateObject>[0]).prompt);
+      expect(secondPrompt).toContain(`RECOVERY_FINAL_VALIDATION_ISSUES=${JSON.stringify(feedback.issues)}`);
+      expect(secondPrompt).not.toContain(unsafe);
+      expect(() => judge.compile(frame(), input, invalid)).toThrow(expect.objectContaining({
+        code: "model_contract_failed",
+      }));
+
+      await flushJudgeLogs();
+      const diagnostics = contractDiagnostics(capture);
+      expect(diagnostics).toHaveLength(1);
+      expect((diagnostics[0]!.payload as Record<string, unknown>).issues).toEqual([{
+        issueIndex: 0,
+        code: "custom",
+        path: ["targets"],
+        check: "duplicate_targets",
+      }]);
+      expect(JSON.stringify(capture.records())).not.toContain(unsafe);
+      expect(generateObject).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it("carries only safe final-validation issues into one recovery prompt", async () => {
     const unsafe = "player-prose-secret-123";
     const generateObject = vi.fn()
@@ -2477,13 +2762,13 @@ describe("Campaign Play Judge", () => {
     expect(getCampaignPlayJudgeRecoveryFeedback(error)).toBeUndefined();
   });
 
-  it("ignores recovery feedback outside the automatic second attempt", async () => {
+  it("carries bounded recovery feedback through automatic attempts two and three", async () => {
     const feedback = {
       issues: [{
         issueIndex: 0,
-        code: "custom",
-        path: ["resultBounds", "minimum"],
-        message: "Actionable judgments require a mechanical result range.",
+        code: "invalid_value",
+        path: ["citedVisibleFactHandles", 2],
+        message: "Cited visible fact handle must match the visible catalog.",
       }],
     } as const;
     const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
@@ -2493,26 +2778,36 @@ describe("Campaign Play Judge", () => {
     const judge = createCampaignPlayJudge({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     });
-    await judge.judge({
+    const request = {
       frame: frame(),
-      input: { originalText: "I ask.", source: "freeform", choiceHandle: null },
+      input: { originalText: "I ask.", source: "freeform" as const, choiceHandle: null },
       model: model(), temperature: 0.2, budget,
-      attempt: 1,
-      workerEpoch: 8,
-      recoveryFeedback: feedback,
-    });
-    await judge.judge({
-      frame: frame(),
-      input: { originalText: "I ask.", source: "freeform", choiceHandle: null },
-      model: model(), temperature: 0.2, budget,
-      attempt: 3,
-      workerEpoch: 9,
-      recoveryFeedback: feedback,
-    });
+    };
+    await judge.judge({ ...request, attempt: 1, workerEpoch: 8, recoveryFeedback: feedback });
+    await judge.judge({ ...request, attempt: 2, workerEpoch: 9, recoveryFeedback: feedback });
+    await judge.judge({ ...request, attempt: 3, workerEpoch: 10, recoveryFeedback: feedback });
     const prompts = generateObject.mock.calls.map((call) =>
       String((call[0] as Parameters<typeof safeGenerateObject>[0]).prompt));
-    expect(prompts).toHaveLength(2);
-    expect(prompts.every((value) => !value.includes("RECOVERY_FINAL_VALIDATION_ISSUES"))).toBe(true);
+    expect(prompts).toHaveLength(3);
+    expect(prompts[0]).not.toContain("RECOVERY_SCHEMA_INSTRUCTION_CLASSES");
+    expect(prompts[0]).not.toContain("RECOVERY_FINAL_VALIDATION_ISSUES");
+    for (const prompt of prompts.slice(1)) {
+      expect(prompt).toContain('RECOVERY_SCHEMA_INSTRUCTION_CLASSES=["copy_exact_citation_catalog"]');
+      expect(prompt).toContain("RECOVERY_COPY_EXACT_CITATION_CATALOG=COPY_EXACT");
+      expect(prompt).toContain(`RECOVERY_FINAL_VALIDATION_ISSUES=${JSON.stringify(feedback.issues)}`);
+      expect(prompt).not.toContain("citation-rogue");
+    }
+    expect(prompts[2]).toBe(prompts[1]);
+    const firstOptions = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    for (const call of generateObject.mock.calls.slice(1)) {
+      const options = call[0] as Parameters<typeof safeGenerateObject>[0];
+      for (const key of [
+        "model", "temperature", "maxOutputTokens", "mode", "strictSchema",
+        "allowRepair", "allowTextFallback", "retries",
+      ] as const) {
+        expect(options[key]).toBe(firstOptions[key]);
+      }
+    }
   });
 
   it("emits one safe, ordered diagnostic for a final ruling contract failure", async () => {

@@ -21,21 +21,10 @@ import {
   deriveCampaignPlayPossessionId,
   deriveCampaignPlayPossessionKey,
   hashCampaignPlayProjection,
-  type CampaignPlayHumanMechanicalIdentity,
-  type CampaignPlayLiveActorCondition,
-  type CampaignPlayLiveActorObligation,
-  type CampaignPlayLiveActorPossession,
-  type CampaignPlayLiveGoal,
-  type CampaignPlayLivePlacement,
-  type CampaignPlayLivePressureState,
-  type CampaignPlayLiveRelation,
-  type CampaignPlayLiveRouteState,
-  type CampaignPlayRuntimeLocation,
-  type CampaignPlayRuntimeRoute,
-  type CampaignPlayRuntimeActor,
 } from "./campaign-play-projection.js";
 import {
   createCampaignPlayStateRepository,
+  loadCampaignPlayRulebookFrame,
   type CampaignPlayMutationContext,
 } from "./campaign-play-state-repository.js";
 import {
@@ -488,81 +477,7 @@ function loadRulebookFrame(handle: CampaignPlayDatabaseHandle): CampaignPlayRule
   if (!state || state.authority.worldTimeMinutes === null) {
     throw new CampaignPlayActorProposalServiceError("proposal_state_invalid");
   }
-  const sqlite = handle.sqlite;
-  const campaignId = handle.campaignId;
-  const human = sqlite.prepare(`SELECT a.id AS actorId, c.record_hash AS recordHash
-    FROM actors a JOIN campaign_play_characters c ON c.actor_id = a.id AND c.campaign_id = a.campaign_id
-    WHERE a.campaign_id = ? AND a.controller = 'human'`).get(campaignId) as CampaignPlayHumanMechanicalIdentity | undefined;
-  const routeStates = sqlite.prepare(`SELECT route_id AS routeId, state FROM campaign_play_route_states
-    WHERE campaign_id = ? ORDER BY route_id`).all(campaignId) as CampaignPlayLiveRouteState[];
-  const runtimeActors = (sqlite.prepare(`SELECT id, kind, controller, role, name, summary,
-      traits, tags, causal_receipt_id AS causalReceiptId, world_version AS worldVersion
-    FROM actors WHERE campaign_id = ? AND definition_authority = 'campaign_play'
-    ORDER BY id`).all(campaignId) as Array<Omit<CampaignPlayRuntimeActor, "traits" | "tags"> & {
-      traits: string;
-      tags: string;
-    }>).map((row) => ({
-      ...row,
-      traits: JSON.parse(row.traits) as string[],
-      tags: JSON.parse(row.tags) as string[],
-    }));
-  const runtimeLocations = (sqlite.prepare(`SELECT id, name, description, kind,
-    parent_location_id AS parentLocationId, anchor_location_id AS anchorLocationId,
-    tags, causal_receipt_id AS causalReceiptId, world_version AS worldVersion
-    FROM locations WHERE campaign_id = ? AND definition_authority = 'campaign_play'
-    ORDER BY id`).all(campaignId) as Array<Omit<CampaignPlayRuntimeLocation, "tags"> & { tags: string }>)
-    .map((row) => ({ ...row, tags: JSON.parse(row.tags) as string[] }));
-  const runtimeRoutes = sqlite.prepare(`SELECT id,
-    from_location_id AS fromLocationId, to_location_id AS toLocationId,
-    travel_cost AS travelCost, causal_receipt_id AS causalReceiptId,
-    world_version AS worldVersion
-    FROM location_edges WHERE campaign_id = ? AND definition_authority = 'campaign_play'
-    ORDER BY id`).all(campaignId) as CampaignPlayRuntimeRoute[];
-  const actorConditions = (sqlite.prepare(`SELECT actor_id AS actorId, condition, present, summary
-    FROM campaign_play_actor_conditions WHERE campaign_id = ? ORDER BY actor_id, condition`).all(campaignId) as Array<Omit<CampaignPlayLiveActorCondition, "present"> & { present: number }>)
-    .map((row) => ({ ...row, present: row.present === 1 }));
-  const possessions = sqlite.prepare(`SELECT possession_id AS possessionId,
-    actor_id AS actorId, possession_key AS possessionKey, name, quantity
-    FROM campaign_play_actor_possessions WHERE campaign_id = ?
-    ORDER BY possession_id`).all(campaignId) as CampaignPlayLiveActorPossession[];
-  const obligations = sqlite.prepare(`SELECT obligation_id AS obligationId,
-    debtor_actor_id AS debtorActorId, creditor_actor_id AS creditorActorId,
-    unit_key AS unitKey, principal_amount AS principalAmount,
-    outstanding_amount AS outstandingAmount
-    FROM campaign_play_actor_obligations WHERE campaign_id = ?
-    ORDER BY obligation_id`).all(campaignId) as CampaignPlayLiveActorObligation[];
-  const pressureStates = sqlite.prepare(`SELECT pressure_id AS pressureId, progress, status,
-    last_advanced_world_time_minutes AS lastAdvancedWorldTimeMinutes
-    FROM campaign_play_pressure_states WHERE campaign_id = ? ORDER BY pressure_id`).all(campaignId) as CampaignPlayLivePressureState[];
-  const placements = sqlite.prepare(`SELECT id AS placementId, actor_id AS actorId,
-    location_id AS locationId, placement_kind AS placementKind
-    FROM actor_placements WHERE campaign_id = ? ORDER BY id`).all(campaignId) as CampaignPlayLivePlacement[];
-  const relations = sqlite.prepare(`SELECT id AS relationId, source_actor_id AS sourceActorId,
-    target_actor_id AS targetActorId, relation_type AS relationType, intensity, summary
-    FROM actor_relations WHERE campaign_id = ? ORDER BY id`).all(campaignId) as CampaignPlayLiveRelation[];
-  const goals = sqlite.prepare(`SELECT id AS goalId, actor_id AS actorId, status, priority,
-    objective, motivation FROM actor_goals WHERE campaign_id = ? ORDER BY id`).all(campaignId) as CampaignPlayLiveGoal[];
-  return {
-    campaignId,
-    acceptedWorldVersion: state.authority.acceptedWorldVersion,
-    acceptedContentHash: state.authority.acceptedContentHash,
-    setupPhase: state.authority.setupPhase,
-    worldVersion: state.authority.worldVersion,
-    worldTimeMinutes: state.authority.worldTimeMinutes,
-    human: human ?? null,
-    acceptedWorld: state.acceptedReview,
-    runtimeActors,
-    runtimeLocations,
-    runtimeRoutes,
-    routeStates,
-    actorConditions,
-    possessions,
-    obligations,
-    pressureStates,
-    placements,
-    relations,
-    goals,
-  };
+  return loadCampaignPlayRulebookFrame(handle);
 }
 
 function persistPendingProposal(context: CampaignPlayMutationContext, proposal: CampaignPlayActorProposal, createdAt: number): void {

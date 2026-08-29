@@ -25,7 +25,10 @@ import {
   openCampaignPlayDatabase,
   type CampaignPlayDatabaseHandle,
 } from "./campaign-play-database.js";
-import { createCampaignPlayStateRepository } from "./campaign-play-state-repository.js";
+import {
+  createCampaignPlayStateRepository,
+  loadCampaignPlayRulebookFrame,
+} from "./campaign-play-state-repository.js";
 import { createCampaignPlayCharacterService } from "./character-service.js";
 import { bootstrapCampaignPlayPlayer } from "./player-bootstrap.js";
 import {
@@ -47,6 +50,12 @@ import { createCampaignPlayOpeningRuntime } from "./opening-runtime.js";
 import { createCampaignPlayActorScheduler } from "./actor-scheduler.js";
 import { createCampaignPlayVisibilityService } from "./visibility-service.js";
 import type { CampaignPlayTurnServiceClock } from "./turn-service.js";
+import {
+  deriveCampaignPlayCommandId,
+  executeCampaignPlayRulebookBatch,
+  preflightCampaignPlayRulebook,
+  type CampaignPlayRulebookFrame,
+} from "./rulebook.js";
 
 const CAMPAIGN_ID = "77777777-7777-4777-8777-777777777777";
 const PLAYER_ID = "actor-player-opening";
@@ -170,7 +179,9 @@ function createPlayableCampaign() {
   return { handle, state: bootstrapped.state };
 }
 
-function openingProposal(): CampaignPlayOpeningProposal {
+function openingProposal(
+  decision: NonNullable<CampaignPlayOpeningProposal["decision"]> | null = null,
+): CampaignPlayOpeningProposal {
   return {
     start: {
       role: "A visitor on Bell Island",
@@ -193,6 +204,7 @@ function openingProposal(): CampaignPlayOpeningProposal {
       summary: "The signal keeper asks Mara what she has learned about the impossible signal.",
       routeRestriction: null,
     },
+    decision,
   };
 }
 
@@ -274,12 +286,15 @@ async function runOpeningUntil(
   throw new Error("Opening runtime did not reach the expected durable state.");
 }
 
-function plannerFixture(modelEvidence: CampaignPlayOpeningModelEvidence = plannerEvidence) {
+function plannerFixture(
+  modelEvidence: CampaignPlayOpeningModelEvidence = plannerEvidence,
+  decision: NonNullable<CampaignPlayOpeningProposal["decision"]> | null = null,
+) {
   const compiler = createCampaignPlayOpeningPlanner();
   return {
     compile: compiler.compile,
     plan: vi.fn(async (request: Parameters<typeof compiler.plan>[0]) => {
-      const proposal = openingProposal();
+      const proposal = openingProposal(decision);
       if (request.startingConditions.mode === "chosen") {
         proposal.start = {
           role: request.startingConditions.role,
@@ -308,6 +323,103 @@ function plannerFixture(modelEvidence: CampaignPlayOpeningModelEvidence = planne
   };
 }
 
+function prepareDecisionResolution(
+  frame: CampaignPlayRulebookFrame,
+  turnId: string,
+  batchId: string,
+  disposition: "accept" | "decline",
+  overrides: {
+    actorId?: string;
+    source?: { kind: "system"; system: "game_master" | "opening_bootstrap" };
+  } = {},
+) {
+  const decision = frame.pendingDecisions?.[0];
+  if (!decision || !frame.human) throw new Error("Decision fixture is missing a pending decision.");
+  const actorId = overrides.actorId ?? decision.actorId;
+  const source = overrides.source ?? { kind: "system" as const, system: "game_master" as const };
+  const rootParent = { kind: "turn" as const, turnId };
+  const command = {
+    commandId: deriveCampaignPlayCommandId(frame.campaignId, turnId, batchId, 0),
+    batchId,
+    order: 0,
+    kind: "decision_resolve" as const,
+    causalParent: rootParent,
+    source,
+    expectedWorldVersion: frame.worldVersion,
+    readScope: [
+      { kind: "actor" as const, id: actorId },
+      { kind: "decision" as const, id: decision.decisionKey },
+    ],
+    writeScope: [{ kind: "decision" as const, id: decision.decisionKey }],
+    exposure: { mode: "protected" as const },
+    decisionKey: decision.decisionKey,
+    actorId,
+    actorHandle: decision.actorHandle,
+    decisionKind: decision.kind,
+    sourceTurnId: decision.sourceTurnId,
+    summary: decision.summary,
+    selectedLabel: disposition === "accept" ? decision.acceptLabel : decision.declineLabel,
+    disposition,
+  };
+  const preflight = preflightCampaignPlayRulebook({
+    frame,
+    authority: {
+      purpose: "player_action",
+      turnId,
+      actorId: frame.human.actorId,
+      rootParent,
+      authorizedRefs: [
+        { kind: "actor", id: frame.human.actorId },
+        ...frame.acceptedWorld.actors.map((actor) => ({ kind: "actor" as const, id: actor.id })),
+        { kind: "decision", id: decision.decisionKey },
+      ],
+      witnessActorIds: [],
+      knownWorldEventIds: [],
+    },
+    batch: {
+      batchId,
+      baseWorldVersion: frame.worldVersion,
+      commands: [command],
+    },
+  });
+  return { command, preflight };
+}
+
+async function completeDecisionOpening(
+  decision: NonNullable<CampaignPlayOpeningProposal["decision"]>,
+) {
+  const { handle, state } = createPlayableCampaign();
+  const planner = plannerFixture(plannerEvidence, decision);
+  const time = fixedClock(1_500);
+  const runtime = createCampaignPlayOpeningRuntime({
+    handle,
+    owner: "opening-decision-worker",
+    leaseDurationMs: 1_000,
+    heartbeatIntervalMs: 100,
+    clock: time.clock,
+    ...runtimeModels(),
+    openingPlanner: planner,
+    narrator: narratorFixture(),
+  });
+  const admission = runtime.admitOpening({
+    submittedAt: 1_500,
+    request: {
+      idempotencyKey: "opening-decision",
+      expectedWorldVersion: state.authority.worldVersion,
+      expectedRuntimeRevision: state.authority.runtimeRevision,
+      startingConditions: { mode: "delegate" },
+    },
+  });
+  await runOpeningUntil(runtime, time, admission.turnId, (turn) => turn.stage === "completed");
+  return {
+    handle,
+    state,
+    runtime,
+    admission,
+    frame: loadCampaignPlayRulebookFrame(handle),
+  };
+}
+
 function narratorActionSelections(packet: CampaignPlayNarratorPacket) {
   const latestVisiblePerformer = [...packet.consequences].reverse().find((consequence) =>
     consequence.performingActorHandle !== null && packet.visibleActors.some((actor) =>
@@ -315,16 +427,36 @@ function narratorActionSelections(packet: CampaignPlayNarratorPacket) {
   const requiredReplyIndex = latestVisiblePerformer === null
     ? -1
     : packet.availableIntents.findIndex((intent) => intent.kind === "contact"
+      && intent.decisionBinding === undefined
       && intent.targets.some((target) => target.kind === "actor"
         && target.handle === latestVisiblePerformer));
   const expectedActionCount = Math.min(
     CAMPAIGN_PLAY_LIMITS.suggestedActions,
     packet.availableIntents.length,
   );
+  const mandatoryDecisionIndexes = packet.availableIntents
+    .map((intent, intentIndex) => ({ intent, intentIndex }))
+    .filter((entry) => entry.intent.decisionBinding !== undefined)
+    .sort((left, right) => {
+      const leftBinding = left.intent.decisionBinding!;
+      const rightBinding = right.intent.decisionBinding!;
+      return leftBinding.decisionKey.localeCompare(rightBinding.decisionKey)
+        || (leftBinding.disposition === "accept" ? -1 : 1)
+          - (rightBinding.disposition === "accept" ? -1 : 1);
+    })
+    .map((entry) => entry.intentIndex);
   const indexes = packet.availableIntents.map((_intent, intentIndex) => intentIndex);
-  const orderedIndexes = requiredReplyIndex < 0
-    ? indexes
-    : [requiredReplyIndex, ...indexes.filter((intentIndex) => intentIndex !== requiredReplyIndex)];
+  const requiredReplyIndexes = requiredReplyIndex < 0 ||
+    mandatoryDecisionIndexes.includes(requiredReplyIndex)
+    ? []
+    : [requiredReplyIndex];
+  const orderedIndexes = [
+    ...mandatoryDecisionIndexes,
+    ...requiredReplyIndexes,
+    ...indexes.filter((intentIndex) =>
+      !mandatoryDecisionIndexes.includes(intentIndex) &&
+      !requiredReplyIndexes.includes(intentIndex)),
+  ];
   return orderedIndexes.slice(0, expectedActionCount).map((intentIndex) => ({
     intentIndex,
     detail: intentIndex === requiredReplyIndex ? "the immediate situation" : null,
@@ -337,14 +469,38 @@ function narratorFixture(modelEvidence: CampaignPlayNarratorModelEvidence = narr
     compile: compiler.compile,
     narrate: vi.fn(async (request: Parameters<typeof compiler.narrate>[0]) => {
       const packet = JSON.parse(request.packetBytes) as CampaignPlayNarratorPacket;
+      const openingDecision = packet.openingContext?.decision ?? null;
+      const decisionObservationIndex = openingDecision === null
+        ? null
+        : packet.newObservations.findIndex((entry) => {
+          const marker = entry.decision;
+          return marker !== undefined
+            && marker.decisionKey === openingDecision.decisionKey
+            && marker.actorName === openingDecision.actorName
+            && marker.actorHandle === openingDecision.actorHandle
+            && marker.kind === openingDecision.kind
+            && marker.summary === openingDecision.summary
+            && marker.acceptLabel === openingDecision.acceptLabel
+            && marker.declineLabel === openingDecision.declineLabel;
+        });
+      const orientationObservationIndexes = decisionObservationIndex !== null
+        && decisionObservationIndex >= 0
+        ? [decisionObservationIndex]
+        : [];
+      const consequenceObservationIndexes = packet.newObservations
+        .map((_entry, index) => index)
+        .filter((index) => !orientationObservationIndexes.includes(index));
+      const orientationText = openingDecision === null
+        ? "Rain rings against the signal tower as Mara reaches Bell Island."
+        : `${openingDecision.actorName} presents a choice: ${openingDecision.summary}`;
       return compiler.compile({
         narrationId: request.narrationId,
         packet,
         proposal: {
           actionSelections: narratorActionSelections(packet),
           beats: [
-            { purpose: "orientation", observationIndexes: [], text: "Rain rings against the signal tower as Mara reaches Bell Island." },
-            { purpose: "consequence", observationIndexes: packet.newObservations.map((_entry, index) => index), text: "Ahead, signal keepers brace the route gate while warning bells gather pace." },
+            { purpose: "orientation", observationIndexes: orientationObservationIndexes, text: orientationText },
+            { purpose: "consequence", observationIndexes: consequenceObservationIndexes, text: "Ahead, signal keepers brace the route gate while warning bells gather pace." },
             { purpose: "action_handoff", observationIndexes: [], text: "The open path and the waiting keeper leave a clear choice." },
           ],
         },
@@ -376,6 +532,252 @@ function runtimeModels() {
 }
 
 describe("Campaign Play opening runtime", () => {
+  const decisionFixture = {
+    actor: "openingActor" as const,
+    kind: "offer" as const,
+    summary: "The signal keeper offers a sealed route map for the next crossing.",
+    acceptLabel: "Take the map",
+    declineLabel: "Leave it sealed",
+  };
+
+  it("compiles a structured opening decision and persists one open decision at settlement", async () => {
+    const { handle, admission, frame } = await completeDecisionOpening(decisionFixture);
+
+    expect(frame.pendingDecisions).toHaveLength(1);
+    const decision = frame.pendingDecisions![0]!;
+    expect(decision).toMatchObject({
+      actorId: "actor-c",
+      kind: "offer",
+      status: "open",
+      sourceTurnId: admission.turnId,
+      summary: decisionFixture.summary,
+      acceptLabel: decisionFixture.acceptLabel,
+      declineLabel: decisionFixture.declineLabel,
+      resolutionEventId: null,
+      resolutionTurnId: null,
+      resolutionDisposition: null,
+    });
+    expect(handle.sqlite.prepare(`SELECT decision_key AS decisionKey, status,
+        source_turn_id AS sourceTurnId, resolution_event_id AS resolutionEventId,
+        resolution_turn_id AS resolutionTurnId
+      FROM campaign_play_decisions WHERE campaign_id = ?`).all(CAMPAIGN_ID)).toEqual([{
+      decisionKey: decision.decisionKey,
+      status: "open",
+      sourceTurnId: admission.turnId,
+      resolutionEventId: null,
+      resolutionTurnId: null,
+    }]);
+    expect(handle.sqlite.prepare(`SELECT event_kind AS eventKind, command_kind AS commandKind
+      FROM campaign_play_events e
+      JOIN campaign_play_commands c ON c.command_id = e.command_id
+      WHERE e.campaign_id = ? AND c.turn_id = ? AND c.command_kind = 'decision_open'`
+    ).all(CAMPAIGN_ID, admission.turnId)).toEqual([
+      { eventKind: "decision_opened", commandKind: "decision_open" },
+    ]);
+  });
+
+  it("persists an explicit custody effect with the opening decision and public packet", async () => {
+    const decision = {
+      ...decisionFixture,
+      acceptEffect: {
+        kind: "grant_player_possession" as const,
+        name: "Sealed route map",
+      },
+    };
+    const { handle, frame } = await completeDecisionOpening(decision);
+    const pending = frame.pendingDecisions?.[0];
+    expect(pending?.acceptEffect).toEqual(decision.acceptEffect);
+    expect(handle.sqlite.prepare(`
+      SELECT accept_effect_json AS acceptEffectJson
+      FROM campaign_play_decisions WHERE campaign_id = ?
+    `).get(CAMPAIGN_ID)).toEqual({
+      acceptEffectJson: JSON.stringify(decision.acceptEffect),
+    });
+
+    const narration = handle.sqlite.prepare(`
+      SELECT packet_json AS packetJson
+      FROM campaign_play_narrations
+      WHERE campaign_id = ? AND status = 'complete'
+      ORDER BY completed_at DESC LIMIT 1
+    `).get(CAMPAIGN_ID) as { packetJson: string };
+    const packet = JSON.parse(narration.packetJson) as CampaignPlayNarratorPacket;
+    expect(packet.openingContext?.decision?.acceptEffect).toEqual(decision.acceptEffect);
+    expect(packet.newObservations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        decision: expect.objectContaining({ acceptEffect: decision.acceptEffect }),
+      }),
+    ]));
+  });
+
+  it("accepts a pending decision once and retains its accepted receipt and event after reload", async () => {
+    const { handle, admission, frame } = await completeDecisionOpening(decisionFixture);
+    const repository = createCampaignPlayStateRepository(handle);
+    const prepared = prepareDecisionResolution(
+      frame,
+      admission.turnId,
+      "batch-decision-accept",
+      "accept",
+    );
+    const acceptedPreflight = prepared.preflight;
+    if (!acceptedPreflight.accepted) {
+      throw new Error(`Decision accept preflight failed: ${acceptedPreflight.denial.code}`);
+    }
+    let execution: ReturnType<typeof executeCampaignPlayRulebookBatch> | null = null;
+    repository.commitMechanicalAndRuntime({
+      worldVersionAdvance: 1,
+      event: {
+        eventId: "runtime-decision-accept",
+        turnId: admission.turnId,
+        kind: "turn_completed",
+        workerEpoch: 1,
+        protectedPayloadHash: "d".repeat(64),
+        createdAt: 2_000,
+      },
+      mutate(context) {
+        execution = executeCampaignPlayRulebookBatch({
+          frame,
+          accepted: acceptedPreflight,
+          context,
+          turnId: admission.turnId,
+          createdAt: 2_000,
+        });
+      },
+    });
+    expect(execution).not.toBeNull();
+    const result = execution!;
+    const row = handle.sqlite.prepare(`SELECT status,
+        resolution_turn_id AS resolutionTurnId, resolution_event_id AS resolutionEventId
+      FROM campaign_play_decisions WHERE campaign_id = ?`).get(CAMPAIGN_ID);
+    expect(row).toEqual({
+      status: "accepted",
+      resolutionTurnId: admission.turnId,
+      resolutionEventId: result.eventIds[0],
+    });
+    expect(handle.sqlite.prepare(`SELECT
+      (SELECT count(*) FROM campaign_play_receipts WHERE command_id = ?) AS receipts,
+      (SELECT count(*) FROM campaign_play_events
+        WHERE command_id = ? AND event_kind = 'decision_accepted') AS acceptedEvents,
+      (SELECT count(*) FROM campaign_play_events
+        WHERE command_id = ? AND event_kind = 'decision_declined') AS declinedEvents`
+    ).get(prepared.command.commandId, prepared.command.commandId, prepared.command.commandId))
+      .toEqual({ receipts: 1, acceptedEvents: 1, declinedEvents: 0 });
+
+    const reloadedFrame = loadCampaignPlayRulebookFrame(handle);
+    expect(reloadedFrame.pendingDecisions).toMatchObject([{
+      decisionKey: frame.pendingDecisions![0]!.decisionKey,
+      status: "accepted",
+      resolutionTurnId: admission.turnId,
+      resolutionEventId: result.eventIds[0],
+      resolutionDisposition: "accept",
+    }]);
+
+    const duplicate = prepareDecisionResolution(
+      reloadedFrame,
+      admission.turnId,
+      "batch-decision-accept-duplicate",
+      "accept",
+    );
+    expect(duplicate.preflight).toMatchObject({
+      accepted: false,
+      denial: { code: "precondition_failed" },
+    });
+    expect(handle.sqlite.prepare(`SELECT
+      (SELECT count(*) FROM campaign_play_receipts WHERE command_kind = 'decision_resolve') AS receipts,
+      (SELECT count(*) FROM campaign_play_events
+        WHERE event_kind IN ('decision_accepted', 'decision_declined')) AS events`
+    ).get()).toEqual({ receipts: 1, events: 1 });
+  });
+
+  it("declines an isolated pending decision once without producing an accepted event", async () => {
+    const { handle, admission, frame } = await completeDecisionOpening(decisionFixture);
+    const repository = createCampaignPlayStateRepository(handle);
+    const prepared = prepareDecisionResolution(
+      frame,
+      admission.turnId,
+      "batch-decision-decline",
+      "decline",
+    );
+    const declinedPreflight = prepared.preflight;
+    if (!declinedPreflight.accepted) {
+      throw new Error(`Decision decline preflight failed: ${declinedPreflight.denial.code}`);
+    }
+    let execution: ReturnType<typeof executeCampaignPlayRulebookBatch> | null = null;
+    repository.commitMechanicalAndRuntime({
+      worldVersionAdvance: 1,
+      event: {
+        eventId: "runtime-decision-decline",
+        turnId: admission.turnId,
+        kind: "turn_completed",
+        workerEpoch: 1,
+        protectedPayloadHash: "e".repeat(64),
+        createdAt: 2_100,
+      },
+      mutate(context) {
+        execution = executeCampaignPlayRulebookBatch({
+          frame,
+          accepted: declinedPreflight,
+          context,
+          turnId: admission.turnId,
+          createdAt: 2_100,
+        });
+      },
+    });
+    const result = execution!;
+    expect(handle.sqlite.prepare(`SELECT status,
+        resolution_turn_id AS resolutionTurnId, resolution_event_id AS resolutionEventId
+      FROM campaign_play_decisions WHERE campaign_id = ?`).get(CAMPAIGN_ID)).toEqual({
+      status: "declined",
+      resolutionTurnId: admission.turnId,
+      resolutionEventId: result.eventIds[0],
+    });
+    expect(handle.sqlite.prepare(`SELECT
+      (SELECT count(*) FROM campaign_play_receipts WHERE command_id = ?) AS receipts,
+      (SELECT count(*) FROM campaign_play_events
+        WHERE command_id = ? AND event_kind = 'decision_declined') AS declinedEvents,
+      (SELECT count(*) FROM campaign_play_events
+        WHERE command_id = ? AND event_kind = 'decision_accepted') AS acceptedEvents`
+    ).get(prepared.command.commandId, prepared.command.commandId, prepared.command.commandId))
+      .toEqual({ receipts: 1, declinedEvents: 1, acceptedEvents: 0 });
+    expect(loadCampaignPlayRulebookFrame(handle).pendingDecisions).toMatchObject([{
+      status: "declined",
+      resolutionDisposition: "decline",
+      resolutionEventId: result.eventIds[0],
+      resolutionTurnId: admission.turnId,
+    }]);
+  });
+
+  it("rejects forged decision actor and source before any resolution mutation", async () => {
+    const { handle, admission, frame } = await completeDecisionOpening(decisionFixture);
+    const invalidActor = prepareDecisionResolution(
+      frame,
+      admission.turnId,
+      "batch-decision-invalid-actor",
+      "accept",
+      { actorId: "actor-b" },
+    );
+    expect(invalidActor.preflight).toMatchObject({
+      accepted: false,
+      denial: { code: "precondition_failed" },
+    });
+    const invalidSource = prepareDecisionResolution(
+      frame,
+      admission.turnId,
+      "batch-decision-invalid-source",
+      "accept",
+      { source: { kind: "system", system: "opening_bootstrap" } },
+    );
+    expect(invalidSource.preflight).toMatchObject({
+      accepted: false,
+      denial: { code: "invalid_source" },
+    });
+    expect(handle.sqlite.prepare(`SELECT
+      (SELECT count(*) FROM campaign_play_decisions WHERE status = 'open') AS openDecisions,
+      (SELECT count(*) FROM campaign_play_receipts WHERE command_kind = 'decision_resolve') AS receipts,
+      (SELECT count(*) FROM campaign_play_events
+        WHERE event_kind IN ('decision_accepted', 'decision_declined')) AS events`
+    ).get()).toEqual({ openDecisions: 1, receipts: 0, events: 0 });
+  });
+
   it("bounds the opening provider, fences its late result, and resumes only in a fresh epoch", async () => {
     const { handle, state } = createPlayableCampaign();
     const before = createCampaignPlayStateRepository(handle).loadState()!;
@@ -553,6 +955,7 @@ describe("Campaign Play opening runtime", () => {
 
       const completed = runtime.loadTurn(admission.turnId)!;
       const finalState = createCampaignPlayStateRepository(handle).loadState()!;
+      expect(loadCampaignPlayRulebookFrame(handle).pendingDecisions).toEqual([]);
       expect(completed.stage).toBe("completed");
       expect(completed.workerLeaseOwner).toBeNull();
       expect(finalState.authority).toMatchObject({ setupPhase: "ready" });

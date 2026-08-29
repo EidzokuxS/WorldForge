@@ -42,6 +42,7 @@ import {
   type CampaignPlayOpeningExposureSeed,
   type CampaignPlayOpeningProposal,
 } from "./opening-planner.js";
+import { campaignPlayDecisionAcceptEffectSchema } from "./contracts.js";
 import {
   deriveCampaignPlayCommandId,
   executeCampaignPlayRulebookBatch,
@@ -51,6 +52,7 @@ import {
 import {
   availableIntents,
   createCampaignPlayVisibilityService,
+  currentTurnDecisionPublicObservations,
   renderCampaignPlayVisibleActorEvent,
   resolveCampaignPlayOpeningObservableTrace,
 } from "./visibility-service.js";
@@ -138,7 +140,10 @@ function modelEvidence() {
   };
 }
 
-function openingProposal(_actorBAcquiresPossession = false): CampaignPlayOpeningProposal {
+function openingProposal(
+  _actorBAcquiresPossession = false,
+  decision: NonNullable<CampaignPlayOpeningProposal["decision"]> | null = null,
+): CampaignPlayOpeningProposal {
   return {
     start: {
       role: "A visitor on Bell Island",
@@ -161,6 +166,7 @@ function openingProposal(_actorBAcquiresPossession = false): CampaignPlayOpening
       summary: "The signal keeper asks Mara what she has learned about the impossible signal.",
       routeRestriction: null,
     },
+    decision,
   };
 }
 
@@ -195,6 +201,28 @@ function rulebookFrame(handle: CampaignPlayDatabaseHandle): CampaignPlayRulebook
       status, priority, objective, motivation
     FROM actor_goals WHERE campaign_id = ? ORDER BY id`).all(CAMPAIGN_ID)) as
     CampaignPlayRulebookFrame["goals"];
+  const pendingDecisionRows = (handle.sqlite.prepare(`SELECT decision_key AS decisionKey,
+      actor_id AS actorId, actor_handle AS actorHandle, decision_kind AS kind,
+      status, source_turn_id AS sourceTurnId, summary,
+      accept_label AS acceptLabel, decline_label AS declineLabel,
+      accept_effect_json AS acceptEffectJson,
+      resolution_event_id AS resolutionEventId,
+      resolution_turn_id AS resolutionTurnId,
+      CASE WHEN status = 'accepted' THEN 'accept'
+        WHEN status = 'declined' THEN 'decline' ELSE NULL END AS resolutionDisposition,
+      world_version AS worldVersion
+    FROM campaign_play_decisions
+    WHERE campaign_id = ? ORDER BY decision_key`).all(CAMPAIGN_ID)) as
+    Array<NonNullable<CampaignPlayRulebookFrame["pendingDecisions"]>[number] & {
+      acceptEffectJson: string | null;
+    }>;
+  const pendingDecisions: CampaignPlayRulebookFrame["pendingDecisions"] =
+    pendingDecisionRows.map(({ acceptEffectJson, ...row }) => ({
+      ...row,
+      acceptEffect: acceptEffectJson === null
+        ? null
+        : campaignPlayDecisionAcceptEffectSchema.parse(JSON.parse(acceptEffectJson)),
+    }));
   return {
     campaignId: CAMPAIGN_ID,
     acceptedWorldVersion: authority.acceptedWorldVersion,
@@ -211,10 +239,12 @@ function rulebookFrame(handle: CampaignPlayDatabaseHandle): CampaignPlayRulebook
     actorConditions,
     possessions: [],
     obligations: [],
+    commitments: [],
     pressureStates,
     placements,
     relations,
     goals,
+    pendingDecisions,
   };
 }
 
@@ -222,6 +252,7 @@ function createVisibilityFixture(
   routeTriggers: Array<"inspect" | "attempt" | "traverse"> = ["inspect"],
   actorBAcquiresPossession = false,
   obligationDirection: "none" | "payable" | "receivable" = "none",
+  decision: NonNullable<CampaignPlayOpeningProposal["decision"]> | null = null,
 ) {
   acceptPlayableWorld();
   const handle = track(openCampaignPlayDatabase(CAMPAIGN_ID));
@@ -301,7 +332,7 @@ function createVisibilityFixture(
       motivations: ["Understand why the routes are failing"],
     },
     acceptedWorld: beforeOpening.acceptedReview,
-  }, { mode: "delegate" }, openingProposal(actorBAcquiresPossession));
+  }, { mode: "delegate" }, openingProposal(actorBAcquiresPossession, decision));
   turns.acceptModelArtifact({
     token: plannerToken,
     artifact: openingCandidate.artifact,
@@ -893,6 +924,130 @@ function createVisibilityFixture(
   };
 }
 
+function setPresentActorCondition(
+  handle: CampaignPlayDatabaseHandle,
+  actorId: string,
+  condition: "occupied" | "strained" | "incapacitated",
+): void {
+  const states = createCampaignPlayStateRepository(handle);
+  const frame = rulebookFrame(handle);
+  const turnId = "turn-opening";
+  const batchId = `batch-condition-${actorId}-${condition}`;
+  const summary = `Actor is ${condition}.`;
+  const command = {
+    commandId: deriveCampaignPlayCommandId(CAMPAIGN_ID, turnId, batchId, 0),
+    batchId,
+    order: 0,
+    causalParent: { kind: "turn" as const, turnId },
+    source: { kind: "system" as const, system: "game_master" as const },
+    expectedWorldVersion: frame.worldVersion,
+    readScope: [{ kind: "actor" as const, id: actorId }],
+    writeScope: [{ kind: "actor" as const, id: actorId }],
+    exposure: { mode: "protected" as const },
+    kind: "set_actor_condition" as const,
+    actorId,
+    condition,
+    operation: "set" as const,
+    summary,
+  };
+  const accepted = preflightCampaignPlayRulebook({
+    frame,
+    authority: {
+      purpose: "player_action",
+      turnId,
+      actorId: "actor-player",
+      rootParent: { kind: "turn", turnId },
+      authorizedRefs: [
+        { kind: "actor" as const, id: "actor-player" },
+        ...frame.acceptedWorld.actors.map((actor) => ({
+          kind: "actor" as const,
+          id: actor.id,
+        })),
+      ],
+      witnessActorIds: [],
+      knownWorldEventIds: [],
+    },
+    batch: { batchId, baseWorldVersion: frame.worldVersion, commands: [command] },
+  });
+  if (!accepted.accepted) throw new Error(`Condition denied: ${JSON.stringify(accepted.denial)}`);
+  states.commitMechanical({
+    updatedAt: 2_000,
+    worldVersionAdvance: 1,
+    mutate(context) {
+      executeCampaignPlayRulebookBatch({
+        frame,
+        accepted,
+        context,
+        turnId,
+        createdAt: 2_000,
+      });
+    },
+  });
+}
+
+function commitmentIntentScene(includeCounterparty: boolean) {
+  const actorHandle = deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-c");
+  const currentLocationHandle = deriveCampaignPlayPublicHandle(
+    "location",
+    CAMPAIGN_ID,
+    "location-a",
+  );
+  return {
+    currentLocation: {
+      handle: currentLocationHandle,
+      name: "North Harbor Docks",
+      description: "A rain-dark quay beside the signal office.",
+    },
+    visibleActors: includeCounterparty ? [{
+      handle: actorHandle,
+      name: "Sel Bell",
+      monogram: "SB",
+      descriptor: "Person nearby",
+      accent: "slate" as const,
+    }] : [],
+    visibleRoutes: [],
+    visiblePressures: [],
+    possessions: [{
+      handle: deriveCampaignPlayPublicHandle("possession", CAMPAIGN_ID, "cargo-crate"),
+      name: "Cargo crate",
+      quantity: 1,
+    }],
+    obligations: [],
+    commitments: [
+      {
+        handle: deriveCampaignPlayPublicHandle("commitment", CAMPAIGN_ID, "commitment-collect"),
+        kind: "paid_delivery" as const,
+        status: "active" as const,
+        counterpartyHandle: actorHandle,
+        counterpartyName: "Sel Bell",
+        title: "Carry the sealed ledger",
+        subjectName: "Sealed ledger",
+        destinationHandle: deriveCampaignPlayPublicHandle("location", CAMPAIGN_ID, "location-b"),
+        destinationName: "Flood Market",
+        feeUnit: "copper" as const,
+        feeAmount: 10,
+        paymentTiming: "on_completion" as const,
+        dueWorldTimeLabel: "Day 1, 00:40",
+      },
+      {
+        handle: deriveCampaignPlayPublicHandle("commitment", CAMPAIGN_ID, "commitment-deliver"),
+        kind: "paid_delivery" as const,
+        status: "active" as const,
+        counterpartyHandle: actorHandle,
+        counterpartyName: "Sel Bell",
+        title: "Carry the cargo crate",
+        subjectName: "Cargo crate",
+        destinationHandle: currentLocationHandle,
+        destinationName: "North Harbor Docks",
+        feeUnit: "copper" as const,
+        feeAmount: 12,
+        paymentTiming: "on_completion" as const,
+        dueWorldTimeLabel: "Day 1, 00:50",
+      },
+    ],
+  };
+}
+
 describe("Campaign Play visibility service", () => {
   it("renders directly perceived actor activity from its public-safe observable trace", () => {
     expect(renderCampaignPlayVisibleActorEvent({
@@ -1195,6 +1350,603 @@ describe("Campaign Play visibility service", () => {
       ...matching,
       observableTrace: "Fresh muster sheets lie open beside a capped ink pot.",
     })).toBeNull();
+  });
+
+  it("keeps an unresolved visible offer actionable across later moments", () => {
+    const fixture = createVisibilityFixture(
+      ["inspect"],
+      false,
+      "none",
+      {
+        actor: "openingActor",
+        kind: "offer",
+        summary: "A sealed ledger is offered at the harbor steps.",
+        acceptLabel: "Carry the sealed ledger",
+        declineLabel: "Leave the sealed ledger",
+      },
+    );
+    const openedDecision = fixture.handle.sqlite.prepare(`SELECT decision_key AS decisionKey,
+        actor_id AS actorId, actor_handle AS actorHandle, decision_kind AS kind
+      FROM campaign_play_decisions
+      WHERE campaign_id = ? AND status = 'open'`).get(CAMPAIGN_ID) as {
+        decisionKey: string;
+        actorId: string;
+        actorHandle: string;
+        kind: "offer" | "yes_no" | "demand";
+      };
+    expect(openedDecision).toMatchObject({
+      actorId: "actor-c",
+      actorHandle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-c"),
+      kind: "offer",
+    });
+    const scene = {
+      currentLocation: {
+        handle: deriveCampaignPlayPublicHandle("location", CAMPAIGN_ID, "location-a"),
+        name: "North Harbor Docks",
+        description: "A rain-dark quay beside the signal office.",
+      },
+      visibleActors: [
+        {
+          handle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-d"),
+          name: "Warden Vohn",
+          monogram: "WV",
+          descriptor: "Person nearby",
+          accent: "slate",
+        },
+        {
+          handle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-c"),
+          name: "Sel Bell",
+          monogram: "SB",
+          descriptor: "Person nearby",
+          accent: "slate",
+        },
+      ],
+      visibleRoutes: [],
+      visiblePressures: [],
+      possessions: [],
+      obligations: [],
+      commitments: [{
+        handle: deriveCampaignPlayPublicHandle("commitment", CAMPAIGN_ID, "commitment-harbor"),
+        kind: "paid_delivery" as const,
+        status: "active" as const,
+        counterpartyHandle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-c"),
+        counterpartyName: "Sel Bell",
+        title: "Carry the sealed ledger",
+        subjectName: "Sealed ledger",
+        destinationHandle: deriveCampaignPlayPublicHandle("location", CAMPAIGN_ID, "location-b"),
+        destinationName: "Flood Market",
+        feeUnit: "copper" as const,
+        feeAmount: 16,
+        paymentTiming: "on_completion" as const,
+        dueWorldTimeLabel: "Day 1, 00:30",
+      }],
+    };
+    const intents = availableIntents(
+      fixture.handle,
+      "turn-decision-visible",
+      null,
+      scene,
+      "actor-player",
+      null,
+      1,
+    );
+    const decisionIntents = intents.filter((intent) => intent.decisionBinding !== undefined);
+    expect(decisionIntents).toHaveLength(2);
+    expect(decisionIntents.map((intent) => intent.label)).toEqual([
+      "Accept — Carry the sealed ledger",
+      "Decline — Leave the sealed ledger",
+    ]);
+    expect(decisionIntents.map((intent) => intent.decisionBinding)).toEqual([
+      {
+        decisionKey: openedDecision.decisionKey,
+        actorHandle: openedDecision.actorHandle,
+        kind: "offer",
+        disposition: "accept",
+      },
+      {
+        decisionKey: openedDecision.decisionKey,
+        actorHandle: openedDecision.actorHandle,
+        kind: "offer",
+        disposition: "decline",
+      },
+    ]);
+    expect(intents.slice(0, 3).map((intent) => intent.commitmentBinding ?? intent.decisionBinding))
+      .toEqual([
+        {
+          decisionKey: openedDecision.decisionKey,
+          actorHandle: openedDecision.actorHandle,
+          kind: "offer",
+          disposition: "accept",
+        },
+        {
+          decisionKey: openedDecision.decisionKey,
+          actorHandle: openedDecision.actorHandle,
+          kind: "offer",
+          disposition: "decline",
+        },
+        {
+          commitmentHandle: deriveCampaignPlayPublicHandle(
+            "commitment",
+            CAMPAIGN_ID,
+            "commitment-harbor",
+          ),
+          action: "collect",
+          counterpartyHandle: openedDecision.actorHandle,
+          subjectName: "Sealed ledger",
+          destinationHandle: deriveCampaignPlayPublicHandle(
+            "location",
+            CAMPAIGN_ID,
+            "location-b",
+          ),
+        },
+      ]);
+    expect(intents.some((intent) => intent.kind === "contact" &&
+      intent.decisionBinding === undefined &&
+      intent.commitmentBinding === undefined &&
+      intent.targets.some((target) => target.handle ===
+        deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-c")))).toBe(false);
+    expect(intents.some((intent) => intent.kind === "contact" &&
+      intent.decisionBinding === undefined &&
+      intent.targets.some((target) => target.handle ===
+        deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-d")))).toBe(true);
+
+    const actorAwayIntents = availableIntents(
+      fixture.handle,
+      "turn-decision-actor-away",
+      null,
+      { ...scene, visibleActors: [scene.visibleActors[0]!] },
+      "actor-player",
+      null,
+      1,
+    );
+    expect(actorAwayIntents.filter((intent) => intent.decisionBinding !== undefined)).toEqual([]);
+    expect(actorAwayIntents.some((intent) => intent.kind === "contact" &&
+      intent.targets.some((target) => target.handle ===
+        deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-d")))).toBe(true);
+  });
+
+  it("projects a current-turn open delivery offer as typed narration authority", () => {
+    const destinationHandle = deriveCampaignPlayPublicHandle(
+      "location",
+      CAMPAIGN_ID,
+      "location-a",
+    );
+    const fixture = createVisibilityFixture(
+      ["inspect"],
+      false,
+      "none",
+      {
+        actor: "openingActor",
+        kind: "offer",
+        summary: "Carry bolt crates from the goods slip to the Midrow stalls for three copper.",
+        acceptLabel: "Take the bolt-crate run",
+        declineLabel: "Not this one",
+        acceptEffect: {
+          kind: "paid_delivery",
+          title: "Carry the bolt crates",
+          subjectName: "Bolt crates",
+          destinationHandle,
+          feeUnit: "copper",
+          feeAmount: 3,
+          paymentTiming: "on_completion",
+          dueInMinutes: 30,
+        },
+      },
+    );
+
+    const observations = currentTurnDecisionPublicObservations(
+      fixture.handle,
+      "turn-opening",
+      16,
+      "North Harbor Docks",
+      [{
+        handle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-c"),
+        name: "Sel Bell",
+        monogram: "SB",
+        descriptor: "Person nearby",
+        accent: "slate",
+      }],
+    );
+
+    expect(observations).toHaveLength(1);
+    expect(observations[0]).toMatchObject({
+      title: "A choice at hand",
+      whereOrRoute: "North Harbor Docks",
+      consequence: {
+        performingActorName: "Sel Bell",
+        whereOrRoute: "North Harbor Docks",
+        causalCue: "direct_perception",
+      },
+      decision: {
+        actorName: "Sel Bell",
+        kind: "offer",
+        summary: "Carry bolt crates from the goods slip to the Midrow stalls for three copper.",
+        acceptLabel: "Take the bolt-crate run",
+        declineLabel: "Not this one",
+        acceptEffect: {
+          kind: "paid_delivery",
+          title: "Carry the bolt crates",
+          subjectName: "Bolt crates",
+          destinationHandle,
+          feeUnit: "copper",
+          feeAmount: 3,
+          paymentTiming: "on_completion",
+          dueInMinutes: 30,
+        },
+      },
+    });
+    expect(fixture.handle.sqlite.prepare(`SELECT status FROM campaign_play_decisions
+      WHERE campaign_id = ?`).get(CAMPAIGN_ID)).toEqual({ status: "open" });
+    expect(fixture.handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_commitments WHERE campaign_id = ?`).get(CAMPAIGN_ID))
+      .toEqual({ count: 0 });
+    expect(fixture.handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_actor_obligations WHERE campaign_id = ?`).get(CAMPAIGN_ID))
+      .toEqual({ count: 0 });
+    expect(currentTurnDecisionPublicObservations(
+      fixture.handle,
+      "turn-opening",
+      16,
+      "North Harbor Docks",
+      [],
+    )).toEqual([]);
+  });
+
+  it("puts eligible delivery before collection and keeps commitment controls typed", () => {
+    const fixture = createVisibilityFixture();
+    const actorHandle = deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-c");
+    const locationHandle = deriveCampaignPlayPublicHandle("location", CAMPAIGN_ID, "location-a");
+    const scene = {
+      currentLocation: {
+        handle: locationHandle,
+        name: "North Harbor Docks",
+        description: "A rain-dark quay beside the signal office.",
+      },
+      visibleActors: [{
+        handle: actorHandle,
+        name: "Sel Bell",
+        monogram: "SB",
+        descriptor: "Person nearby",
+        accent: "slate",
+      }],
+      visibleRoutes: [],
+      visiblePressures: [],
+      possessions: [{
+        handle: deriveCampaignPlayPublicHandle("possession", CAMPAIGN_ID, "cargo-crate"),
+        name: "Cargo crate",
+        quantity: 1,
+      }],
+      obligations: [],
+      commitments: [
+        {
+          handle: deriveCampaignPlayPublicHandle("commitment", CAMPAIGN_ID, "commitment-collect"),
+          kind: "paid_delivery" as const,
+          status: "active" as const,
+          counterpartyHandle: actorHandle,
+          counterpartyName: "Sel Bell",
+          title: "Carry the sealed ledger",
+          subjectName: "Sealed ledger",
+          destinationHandle: deriveCampaignPlayPublicHandle("location", CAMPAIGN_ID, "location-b"),
+          destinationName: "Flood Market",
+          feeUnit: "copper" as const,
+          feeAmount: 10,
+          paymentTiming: "on_completion" as const,
+          dueWorldTimeLabel: "Day 1, 00:40",
+        },
+        {
+          handle: deriveCampaignPlayPublicHandle("commitment", CAMPAIGN_ID, "commitment-deliver"),
+          kind: "paid_delivery" as const,
+          status: "active" as const,
+          counterpartyHandle: actorHandle,
+          counterpartyName: "Sel Bell",
+          title: "Carry the cargo crate",
+          subjectName: "Cargo crate",
+          destinationHandle: locationHandle,
+          destinationName: "North Harbor Docks",
+          feeUnit: "copper" as const,
+          feeAmount: 12,
+          paymentTiming: "on_completion" as const,
+          dueWorldTimeLabel: "Day 1, 00:50",
+        },
+      ],
+    };
+    const intents = availableIntents(
+      fixture.handle,
+      "turn-commitment-priority",
+      null,
+      scene,
+      "actor-player",
+      null,
+      1,
+    );
+    const commitmentIntents = intents.filter((intent) => intent.commitmentBinding !== undefined);
+    expect(commitmentIntents.map((intent) => intent.label)).toEqual([
+      "Deliver Cargo crate at North Harbor Docks",
+      "Ask Sel Bell for Sealed ledger",
+    ]);
+    expect(commitmentIntents.map((intent) => intent.commitmentBinding?.action)).toEqual([
+      "deliver",
+      "collect",
+    ]);
+    expect(commitmentIntents.every((intent) => intent.decisionBinding === undefined)).toBe(true);
+  });
+
+  it("exposes collection only for a due copper receivable owed by a visible agent", () => {
+    const fixture = createVisibilityFixture();
+    const debtorHandle = deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-d");
+    const hiddenDebtorHandle = deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-a");
+    const playerHandle = deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-player");
+    const currentLocationHandle = deriveCampaignPlayPublicHandle(
+      "location",
+      CAMPAIGN_ID,
+      "location-a",
+    );
+    const dueReceivableHandle = deriveCampaignPlayPublicHandle(
+      "obligation",
+      CAMPAIGN_ID,
+      deriveCampaignPlayObligationId(CAMPAIGN_ID, "actor-d", "actor-player", "copper"),
+    );
+    const hiddenReceivableHandle = deriveCampaignPlayPublicHandle(
+      "obligation",
+      CAMPAIGN_ID,
+      deriveCampaignPlayObligationId(CAMPAIGN_ID, "actor-a", "actor-player", "copper"),
+    );
+    const scene = {
+      currentLocation: {
+        handle: currentLocationHandle,
+        name: "North Harbor Docks",
+        description: "A rain-dark quay beside the signal office.",
+      },
+      visibleActors: [{
+        handle: debtorHandle,
+        name: "Ilya Venn",
+        monogram: "IV",
+        descriptor: "Person nearby",
+        accent: "slate" as const,
+      }],
+      visibleRoutes: [],
+      visiblePressures: [],
+      possessions: [],
+      obligations: [
+        {
+          handle: dueReceivableHandle,
+          direction: "receivable" as const,
+          counterpartyHandle: debtorHandle,
+          counterpartyName: "Ilya Venn",
+          unitKey: "copper" as const,
+          outstandingAmount: 12,
+        },
+        {
+          handle: hiddenReceivableHandle,
+          direction: "receivable" as const,
+          counterpartyHandle: hiddenDebtorHandle,
+          counterpartyName: "Mara Venn",
+          unitKey: "copper" as const,
+          outstandingAmount: 9,
+        },
+        {
+          handle: deriveCampaignPlayPublicHandle(
+            "obligation",
+            CAMPAIGN_ID,
+            deriveCampaignPlayObligationId(CAMPAIGN_ID, "actor-player", "actor-d", "copper"),
+          ),
+          direction: "payable" as const,
+          counterpartyHandle: debtorHandle,
+          counterpartyName: "Ilya Venn",
+          unitKey: "copper" as const,
+          outstandingAmount: 4,
+        },
+      ],
+      commitments: [],
+    };
+    const intents = availableIntents(
+      fixture.handle,
+      "turn-receivable-control",
+      null,
+      scene,
+      "actor-player",
+      null,
+      1,
+    );
+    const collectionIntents = intents.filter((intent) => intent.obligationBinding !== undefined);
+    expect(collectionIntents).toHaveLength(1);
+    expect(collectionIntents[0]).toMatchObject({
+      label: "Collect 12 copper from Ilya Venn",
+      kind: "contact",
+      targets: [{ handle: debtorHandle, kind: "actor" }],
+      obligationBinding: {
+        obligationHandle: dueReceivableHandle,
+        debtorHandle,
+        creditorHandle: playerHandle,
+        unitKey: "copper",
+        amount: 12,
+      },
+    });
+
+    const hiddenDebtorIntents = availableIntents(
+      fixture.handle,
+      "turn-receivable-hidden",
+      null,
+      { ...scene, visibleActors: [] },
+      "actor-player",
+      null,
+      1,
+    );
+    expect(hiddenDebtorIntents.some((intent) => intent.obligationBinding !== undefined)).toBe(false);
+
+    const unrelatedDebtIntents = availableIntents(
+      fixture.handle,
+      "turn-receivable-unrelated",
+      null,
+      {
+        ...scene,
+        obligations: scene.obligations.filter((obligation) => obligation.direction === "payable"),
+      },
+      "actor-player",
+      null,
+      1,
+    );
+    expect(unrelatedDebtIntents.some((intent) => intent.obligationBinding !== undefined)).toBe(false);
+  });
+
+  it("publishes delivery when the commitment counterparty is not visible", () => {
+    const fixture = createVisibilityFixture();
+    const destinationHandle = deriveCampaignPlayPublicHandle(
+      "location",
+      CAMPAIGN_ID,
+      "location-a",
+    );
+    const hiddenCounterpartyHandle = deriveCampaignPlayPublicHandle(
+      "actor",
+      CAMPAIGN_ID,
+      "actor-c",
+    );
+    const commitmentHandle = deriveCampaignPlayPublicHandle(
+      "commitment",
+      CAMPAIGN_ID,
+      "commitment-hidden-counterparty",
+    );
+    const intents = availableIntents(
+      fixture.handle,
+      "turn-commitment-hidden-counterparty",
+      null,
+      {
+        currentLocation: {
+          handle: destinationHandle,
+          name: "North Harbor Docks",
+          description: "A rain-dark quay beside the signal office.",
+        },
+        visibleActors: [],
+        visibleRoutes: [],
+        visiblePressures: [],
+        possessions: [{
+          handle: deriveCampaignPlayPublicHandle("possession", CAMPAIGN_ID, "cargo-crate"),
+          name: "Cargo crate",
+          quantity: 1,
+        }],
+        obligations: [],
+        commitments: [{
+          handle: commitmentHandle,
+          kind: "paid_delivery" as const,
+          status: "active" as const,
+          counterpartyHandle: hiddenCounterpartyHandle,
+          counterpartyName: "Sel Bell",
+          title: "Carry the cargo crate",
+          subjectName: "Cargo crate",
+          destinationHandle,
+          destinationName: "North Harbor Docks",
+          feeUnit: "copper" as const,
+          feeAmount: 12,
+          paymentTiming: "on_completion" as const,
+          dueWorldTimeLabel: "Day 1, 00:50",
+        }],
+      },
+      "actor-player",
+      null,
+      1,
+    );
+    const commitmentIntents = intents.filter((intent) => intent.commitmentBinding !== undefined);
+    expect(commitmentIntents).toHaveLength(1);
+    expect(commitmentIntents[0]).toMatchObject({
+      kind: "attempt",
+      label: "Deliver Cargo crate at North Harbor Docks",
+      commitmentBinding: {
+        commitmentHandle,
+        action: "deliver",
+        counterpartyHandle: hiddenCounterpartyHandle,
+      },
+    });
+    expect(intents.some((intent) => intent.kind === "contact" &&
+      intent.targets.some((target) => target.handle === hiddenCounterpartyHandle))).toBe(false);
+    expect(intents.some((intent) => intent.commitmentBinding?.action === "collect")).toBe(false);
+  });
+
+  it.each(["occupied", "strained", "incapacitated"] as const)(
+    "suppresses collection and delivery while the player is %s",
+    (condition) => {
+      const fixture = createVisibilityFixture();
+      setPresentActorCondition(fixture.handle, "actor-player", condition);
+      const intents = availableIntents(
+        fixture.handle,
+        `turn-player-${condition}`,
+        null,
+        commitmentIntentScene(true),
+        "actor-player",
+        null,
+        1,
+      );
+      expect(intents.some((intent) => intent.commitmentBinding?.action === "collect")).toBe(false);
+      expect(intents.some((intent) => intent.commitmentBinding?.action === "deliver")).toBe(false);
+    },
+  );
+
+  it("suppresses collection when the visible counterparty has any present condition", () => {
+    const fixture = createVisibilityFixture();
+    setPresentActorCondition(fixture.handle, "actor-c", "strained");
+    const intents = availableIntents(
+      fixture.handle,
+      "turn-counterparty-strained",
+      null,
+      commitmentIntentScene(true),
+      "actor-player",
+      null,
+      1,
+    );
+    expect(intents.some((intent) => intent.commitmentBinding?.action === "collect")).toBe(false);
+  });
+
+  it("keeps delivery available when a remote counterparty has a present condition", () => {
+    const fixture = createVisibilityFixture();
+    setPresentActorCondition(fixture.handle, "actor-c", "incapacitated");
+    const scene = commitmentIntentScene(false);
+    const intents = availableIntents(
+      fixture.handle,
+      "turn-remote-counterparty-condition",
+      null,
+      scene,
+      "actor-player",
+      null,
+      1,
+    );
+    expect(intents.some((intent) => intent.commitmentBinding?.action === "deliver")).toBe(true);
+  });
+
+  it("omits an open decision after the player leaves the actor's scene on reload", () => {
+    const fixture = createVisibilityFixture(
+      ["inspect"],
+      false,
+      "none",
+      {
+        actor: "openingActor",
+        kind: "offer",
+        summary: "A sealed ledger is offered at the harbor steps.",
+        acceptLabel: "Carry the sealed ledger",
+        declineLabel: "Leave the sealed ledger",
+      },
+    );
+    expect(fixture.handle.sqlite.prepare(`SELECT actor_id AS actorId, location_id AS locationId
+      FROM actor_placements WHERE campaign_id = ? AND actor_id IN ('actor-c', 'actor-player')
+      AND placement_kind = 'present' ORDER BY actor_id`).all(CAMPAIGN_ID)).toEqual([
+      { actorId: "actor-c", locationId: "location-c" },
+      { actorId: "actor-player", locationId: "location-a" },
+    ]);
+
+    const result = createCampaignPlayVisibilityService(fixture.handle).projectTurn({
+      token: fixture.visibilityToken,
+      actionContext: null,
+      sourceMoment: null,
+      committedAt: 1_650,
+      mutationId: "visibility-decision-reload",
+    });
+
+    const actorHandle = deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-c");
+    expect(result.packet.visibleActors.some((actor) => actor.handle === actorHandle)).toBe(false);
+    expect(result.packet.availableIntents.filter((intent) => intent.decisionBinding !== undefined))
+      .toEqual([]);
+    expect(result.packet.availableIntents.some((intent) => intent.targets.some((target) =>
+      target.handle === actorHandle))).toBe(false);
+    expect(result.packet.newObservations.some((observation) =>
+      observation.decision?.actorHandle === actorHandle)).toBe(false);
   });
 
   it("suggests the shortest open route toward a pending opening aftermath", () => {

@@ -1,12 +1,18 @@
 import type { LanguageModel } from "ai";
 import { z } from "zod";
-import { CAMPAIGN_PLAY_LIMITS, CAMPAIGN_PLAY_ROUTE_STATE_VALUES } from "@worldforge/shared";
+import {
+  CAMPAIGN_PLAY_LIMITS,
+  CAMPAIGN_PLAY_ROUTE_STATE_VALUES,
+  type CampaignPlayCommitmentBinding,
+} from "@worldforge/shared";
 import {
   getSafeGenerateObjectErrorCode,
+  getSafeGenerateObjectSchemaDiagnostics,
   getSafeGenerateObjectTrace,
   isSafeGenerateObjectContractErrorCode,
   safeGenerateObject,
   type SafeGenerateErrorCode,
+  type SafeGenerateObjectSchemaDiagnostics,
   type SafeGenerateResult,
   type SafeGenerateTrace,
 } from "../ai/generate-object-safe.js";
@@ -23,6 +29,7 @@ import {
   CAMPAIGN_PLAY_COMMAND_METADATA,
   campaignPlayActorConditionSchema,
   campaignPlayElapsedBoundsSchema,
+  campaignPlayDecisionAcceptEffectSchema,
   campaignPlayGoalStatusSchema,
   campaignPlayPressureStatusSchema,
   campaignPlayUncertaintyResolutionSchema,
@@ -41,6 +48,7 @@ import {
   deriveCampaignPlayObligationId,
   deriveCampaignPlayPossessionId,
   deriveCampaignPlayPossessionKey,
+  deriveCampaignPlayPublicHandle,
   deriveCampaignPlaySupportActorIds,
   hashCampaignPlayProjection,
   type CampaignPlayLiveRouteState,
@@ -48,6 +56,8 @@ import {
 import type { CampaignPlayActorContinuity } from "./actor-continuity.js";
 import {
   deriveCampaignPlayCommandId,
+  deriveCampaignPlayCommitmentId,
+  deriveCampaignPlayDecisionKey,
   preflightCampaignPlayRulebook,
   type CampaignPlayRulebookAuthority,
   type CampaignPlayRulebookDenialCode,
@@ -81,6 +91,12 @@ const ALL_RESOURCE_EFFECT_KINDS = new Set<ResourceEffectKind>([
   "incur_actor_obligation",
   "pay_actor_obligation",
 ]);
+const CONTACT_LIFECYCLE_ASSERTION_VALUES = [
+  "contact_response",
+  "reopen_completed_commitment",
+] as const;
+const contactLifecycleAssertionSchema = z.enum(CONTACT_LIFECYCLE_ASSERTION_VALUES);
+type ContactLifecycleAssertion = z.infer<typeof contactLifecycleAssertionSchema>;
 
 function createExposureProposalSchema(handleSchema: z.ZodType<string>) {
   return z.discriminatedUnion("mode", [
@@ -189,9 +205,36 @@ function createEffectProposalSchema(
   return z.discriminatedUnion("kind", selected);
 }
 
+function createAcceptedBilateralDealSchema(
+  contactDetail: string,
+  actorHandleSchema: z.ZodType<string> = handle,
+  destinationHandleSchema: z.ZodType<string> = handle,
+) {
+  return z.object({
+    contactDetail: z.literal(contactDetail),
+    counterpartyActorHandle: actorHandleSchema,
+    summary: text(CAMPAIGN_PLAY_LIMITS.text),
+    acceptLabel: line(CAMPAIGN_PLAY_LIMITS.label),
+    declineLabel: line(CAMPAIGN_PLAY_LIMITS.label),
+    acceptEffect: z.object({
+      kind: z.literal("paid_delivery"),
+      title: line(CAMPAIGN_PLAY_LIMITS.label),
+      subjectName: line(CAMPAIGN_PLAY_LIMITS.name),
+      destinationHandle: destinationHandleSchema,
+      feeUnit: z.literal("copper"),
+      feeAmount: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+      paymentTiming: z.literal("on_completion"),
+      dueInMinutes: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes).optional(),
+    }).strict(),
+    completionCondition: z.literal("deliver_subject_to_destination"),
+  }).strict();
+}
+
 function createProposalSchema(
   handleSchema: z.ZodType<string>,
   permittedResourceEffectKinds: ReadonlySet<ResourceEffectKind> = ALL_RESOURCE_EFFECT_KINDS,
+  contactDetail?: string,
+  requireContactLifecycleAssertion = false,
 ) {
   const exposureSchema = createExposureProposalSchema(handleSchema);
   const effectSchema = createEffectProposalSchema(
@@ -199,15 +242,183 @@ function createProposalSchema(
     exposureSchema,
     permittedResourceEffectKinds,
   );
-  return z.object({
+  const baseShape = {
     elapsedMinutes: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes),
     effects: z.array(effectSchema).min(1).max(CAMPAIGN_PLAY_LIMITS.commandsPerBatch - 1),
-  }).strict();
+  };
+  if (contactDetail === undefined) return z.object(baseShape).strict();
+  return z.object({
+    ...baseShape,
+    decisionProposal: createCertifiedContactDecisionProposalSchema(contactDetail),
+    acceptedDeal: createAcceptedBilateralDealSchema(contactDetail, handleSchema, handleSchema)
+      .nullable().optional(),
+    ...(requireContactLifecycleAssertion
+      ? { lifecycleAssertion: contactLifecycleAssertionSchema }
+      : {}),
+  }).strict().superRefine((proposal, context) => {
+    if (proposal.acceptedDeal !== undefined && proposal.acceptedDeal !== null
+      && proposal.decisionProposal.kind !== "none") {
+      context.addIssue({
+        code: "custom",
+        path: ["acceptedDeal"],
+        message: "An accepted deal requires decisionProposal.kind=none.",
+      });
+    }
+  });
 }
 
 const exposureProposalSchema = createExposureProposalSchema(handle);
 const effectProposalSchema = createEffectProposalSchema(handle, exposureProposalSchema);
 export const campaignPlayGameMasterProposalSchema = createProposalSchema(handle);
+
+function contactAffectedHandlesSchema(
+  playerActorHandle: string,
+  targetActorHandle: string,
+) {
+  const handles = [playerActorHandle, targetActorHandle] as [string, string];
+  return z.array(z.enum(handles))
+    .length(2)
+    .refine((values) => new Set(values).size === 2);
+}
+
+function createCertifiedContactProposalSchema(
+  playerActorHandle: string,
+  targetActorHandle: string,
+  contactDetail: string,
+) {
+  return z.object({
+    elapsedMinutes: z.literal(1),
+    effects: z.array(z.object({
+      kind: z.literal("record_world_event"),
+      eventClass: z.enum(["dialogue", "interaction"]),
+      performingActorHandle: z.literal(targetActorHandle),
+      summary: text(CAMPAIGN_PLAY_LIMITS.text),
+      affectedHandles: contactAffectedHandlesSchema(playerActorHandle, targetActorHandle),
+    }).strict()).length(1),
+    decisionProposal: createCertifiedContactDecisionProposalSchema(contactDetail),
+  }).strict();
+}
+
+function createCertifiedContactToolProposalSchema(
+  playerActorHandle: string,
+  targetActorHandle: string,
+  performerKey: string,
+  contactDetail: string,
+) {
+  const stringValue = z.string().trim().min(1);
+  return z.object({
+    elapsedMinutes: z.literal(1),
+    effectOrder: z.array(z.literal("record_world_event")).length(1),
+    record_world_event: z.array(z.object({
+      eventClass: z.enum(["dialogue", "interaction"]),
+      performingActorKey: z.literal(performerKey),
+      summary: stringValue.max(CAMPAIGN_PLAY_LIMITS.text),
+      affectedHandles: contactAffectedHandlesSchema(playerActorHandle, targetActorHandle),
+    }).strict()).length(1),
+    decisionProposal: createCertifiedContactDecisionProposalSchema(contactDetail),
+  }).strict();
+}
+
+function createCertifiedContactDecisionProposalSchema(contactDetail: string) {
+  return z.object({
+    kind: z.enum(["none", "offer", "paid_delivery", "unpaid_delivery"]),
+    contactDetail: z.literal(contactDetail),
+    summary: text(CAMPAIGN_PLAY_LIMITS.text).nullable(),
+    acceptLabel: line(CAMPAIGN_PLAY_LIMITS.label).nullable(),
+    declineLabel: line(CAMPAIGN_PLAY_LIMITS.label).nullable(),
+    acceptEffect: campaignPlayDecisionAcceptEffectSchema.nullable(),
+  }).strict().superRefine((proposal, context) => {
+    const hasOfferFields = proposal.summary !== null
+      || proposal.acceptLabel !== null
+      || proposal.declineLabel !== null
+      || proposal.acceptEffect !== null;
+    if (proposal.kind === "none" && hasOfferFields) {
+      context.addIssue({
+        code: "custom",
+        path: ["kind"],
+        message: "A non-offer contact must use null proposal fields.",
+      });
+    }
+    if (proposal.kind === "offer" && (
+      proposal.summary === null
+      || proposal.acceptLabel === null
+      || proposal.declineLabel === null
+      || proposal.acceptEffect !== null
+    )) {
+      context.addIssue({
+        code: "custom",
+        path: ["acceptEffect"],
+        message: "An offer proposal requires exact choice fields and a null acceptEffect.",
+      });
+    }
+    if (proposal.kind === "paid_delivery" && (
+      proposal.summary === null
+      || proposal.acceptLabel === null
+      || proposal.declineLabel === null
+      || proposal.acceptEffect?.kind !== "paid_delivery"
+    )) {
+      context.addIssue({
+        code: "custom",
+        path: ["acceptEffect"],
+        message: "A paid-delivery proposal requires complete typed offer fields.",
+      });
+    }
+    if (proposal.kind === "unpaid_delivery" && (
+      proposal.summary === null
+      || proposal.acceptLabel === null
+      || proposal.declineLabel === null
+      || proposal.acceptEffect?.kind !== "unpaid_delivery"
+    )) {
+      context.addIssue({
+        code: "custom",
+        path: ["acceptEffect"],
+        message: "An unpaid-delivery proposal requires complete typed offer fields.",
+      });
+    }
+  });
+}
+
+type CertifiedContactDecisionProposal = z.infer<
+  ReturnType<typeof createCertifiedContactDecisionProposalSchema>
+>;
+
+type AcceptedBilateralDeal = z.infer<
+  ReturnType<typeof createAcceptedBilateralDealSchema>
+>;
+
+interface DecodedCampaignPlayContactProposal {
+  proposal: unknown;
+  decisionProposal: CertifiedContactDecisionProposal | null;
+  acceptedDeal: AcceptedBilateralDeal | null;
+  lifecycleAssertion: ContactLifecycleAssertion | null;
+}
+
+function decodeContactDecisionProposal(
+  rawProposal: unknown,
+  contactDetail: string,
+): CertifiedContactDecisionProposal {
+  const parsed = z.object({
+    decisionProposal: createCertifiedContactDecisionProposalSchema(contactDetail),
+  }).safeParse(rawProposal);
+  if (!parsed.success) {
+    toolContractFailure({ phase: "provider_extraction", coordinate: "proposal.decisionProposal" });
+  }
+  return parsed.data.decisionProposal;
+}
+
+function decodeAcceptedBilateralDeal(
+  rawProposal: unknown,
+  contactDetail: string,
+): AcceptedBilateralDeal | null {
+  const parsed = z.object({
+    acceptedDeal: createAcceptedBilateralDealSchema(contactDetail).nullable().optional(),
+  }).safeParse(rawProposal);
+  if (!parsed.success) {
+    toolContractFailure({ phase: "provider_extraction", coordinate: "proposal.acceptedDeal" });
+  }
+  return parsed.data.acceptedDeal ?? null;
+}
+
 const MECHANICAL_AUTHORITY_FAILED_CHECK_VALUES = [
   "player_intent_unfulfilled",
   "possession_authority_missing",
@@ -241,6 +452,10 @@ const CAMPAIGN_ROUTE_AUTHORITY_BOUNDARY =
   "ROUTE_AUTHORITY governs campaign route edges and their traversal state or requirements. A location description or ordinary wayfinding to a person, shop, counter, room, row, landmark, or destination is not a route claim by itself. Such information must still be grounded in SOURCE_MOMENT, VISIBLE_FACTS, ACTOR_CONTINUITY, or ACTOR_DIRECTIVES, and must not be turned into a campaign edge, an intermediate waypoint on an edge, a detour, an open/restricted/blocked route state, or a traversal requirement.";
 const MECHANICAL_REVIEW_ROUTE_AUTHORITY_BOUNDARY =
   "Do not classify an ordinary location description or ordinary wayfinding as route_authority_missing unless the prose actually asserts a campaign route edge, an intermediate waypoint on that edge, a detour, a route state, or a traversal requirement. Continue to reject every such route-edge claim not entailed by ROUTE_AUTHORITY, including unsupported payment, permission, stamp, credential, checkpoint, blockage, detour, or access condition. Grounding of non-route location information remains owned by the existing source/directive contracts; this Reviewer must neither authorize nor reject it as route mechanics.";
+const CAMPAIGN_PLAY_AMBIENT_PRESENTATION_BOUNDARY =
+  "A named or unnamed one-off person may appear in an actorless discovery or scene as ambient presentation, including incidental commerce, a quoted price, a brief promise, or movement, only when that detail does not respond to or target the player, create a future control, reply, relationship, access, ownership, custody, debt, payment, commitment, or obligation, alter canonical actor, pressure, route, or location state, or become a fact the game later relies on. Do not assign that person an actor handle, subject, or typed effect. If the activity is actionable or consequential, use a canonical or materialized actor and the matching typed authority.";
+const CAMPAIGN_PLAY_CONTACT_DECISION_BOUNDARY =
+  "For a one-actor contact, DECISION_PROPOSAL is an explicit pending-control contract. Reserve kind=offer for a pure non-monetary choice whose entire durable meaning is only the player's accepted or declined decision; it must not promise, require, or rely on future work, service, delivery, performance, payment, compensation, debt, duty, custody, access, permission, or relationship transition, and it must use acceptEffect=null. Any such mechanical transition requires kind=paid_delivery or kind=unpaid_delivery with the exact matching typed acceptEffect. paid_delivery carries its existing copper fee and on_completion terms; unpaid_delivery carries no fee or payment terms. If exact delivery authority is unavailable or the service/payment negotiation is incomplete, use kind=none with all decision fields null (summary, acceptLabel, declineLabel, and acceptEffect); do not expose an Accept control. A delivery proposal remains pending and does not apply its effect before acceptance. Never turn event or decision prose into typed authority.";
 const MECHANICAL_REVIEW_OUTPUT_CONTRACT = [
   "REVIEW_OUTPUT_CONTRACT",
   "Return exactly one object with exactly these keys: verdict, reason, failedChecks. failedChecks is mandatory.",
@@ -254,6 +469,10 @@ function mechanicalAuthorityReviewInput(
   ruling: CampaignPlayJudgeRuling,
   resolution: CampaignPlayUncertaintyResolution,
   obligationAuthority: CampaignPlayObligationAuthority,
+  decisionProposal: CertifiedContactDecisionProposal | null = null,
+  acceptedDeal: AcceptedBilateralDeal | null = null,
+  lifecycleContext: CompletedPaidDeliveryLifecycleContext | null = null,
+  lifecycleAssertion: ContactLifecycleAssertion | null = null,
 ) {
   const proposal = campaignPlayGameMasterProposalSchema.parse(rawProposal);
   const { originalText: _originalText, ...structuredIntent } = ruling.normalizedIntent;
@@ -277,7 +496,8 @@ function mechanicalAuthorityReviewInput(
       && effect.possessionHandle !== null
       ? [effect.possessionHandle]
       : []));
-  if (events.length === 0 && transformedPossessionHandles.size === 0) return null;
+  if (events.length === 0 && transformedPossessionHandles.size === 0
+    && decisionProposal === null && acceptedDeal === null && lifecycleContext === null) return null;
   const sourcePossessions = frame.visibleFacts.filter((fact) =>
     fact.kind === "possession" && transformedPossessionHandles.has(fact.handle));
   return {
@@ -288,6 +508,10 @@ function mechanicalAuthorityReviewInput(
     sourcePossessions,
     normalizedIntent: structuredIntent,
     resolution,
+    decisionProposal,
+    acceptedDeal,
+    lifecycleContext,
+    lifecycleAssertion,
     authority: {
       possessionEffectAuthority: ruling.possessionEffectAuthority,
       requiredObligationEffect: ruling.requiredObligationEffect,
@@ -317,6 +541,10 @@ function mechanicalAuthorityReviewPrompt(
     "When a contact action consists of the player delivering speech, confirmation, a promise, or a future plan, one grounded dialogue or interaction response from each required targeted actor proves that the contact and delivery occurred. Do not require the response to repeat the player's words or turn ordinary acknowledgement into a bargain, debt, duty, payment, or tracked obligation.",
     "For limited or setback, reject player_intent_unfulfilled when any material part silently disappears. The effects must state what completed, what did not, and the concrete resulting state allowed by RESOLUTION. Do not demand cosmetic wording or invent new authority; judge semantic coverage of the supplied intent only.",
     "A record_world_event is presentation evidence, never mechanical authority.",
+    CAMPAIGN_PLAY_CONTACT_DECISION_BOUNDARY,
+    "For acceptedDeal, accept only exact structured copper paid_delivery terms with completionCondition=deliver_subject_to_destination: the exact subject, an authorized visible destination, and paymentTiming=on_completion. The same-turn decision_open -> decision_resolve(accept) -> create_player_commitment sequence represents the player's concrete proposal and the NPC's explicit acceptance; never infer acceptance from prose. Unsupported denominations remain unresolved.",
+    "Reject kind=offer when its structured decision or event terms describe or rely on future work, service, delivery, performance, payment, compensation, debt, duty, custody, access, permission, or relationship transition without the exact typed paid_delivery or unpaid_delivery authority. Treat that as other_mechanical_authority_mismatch unless a more specific existing possession, obligation, or route check applies. For incomplete unsupported service or payment negotiation, accept only kind=none with all decision fields null. Do not repair a misclassified offer by filtering its prose; reject the structured proposal and let the recovery request regenerate the correct kind.",
+    CAMPAIGN_PLAY_AMBIENT_PRESENTATION_BOUNDARY,
     "Reject when an event summary says or implies that an actor durably acquires, spends, consumes, transforms, gives, receives, or transfers a possession unless typedResourceEffects contains the matching possession effect.",
     "Reject when an event summary says or implies that a debt is incurred, increased, paid, reduced, settled, square, fulfilled, or complete unless typedResourceEffects contains the matching obligation effect.",
     "A quote, offer, request, promise, acceptance in principle, refusal, counteroffer, inspection, handling, or transport may remain an event without a resource effect only while the summary leaves custody, quantities, debt balances, payment, and bargained return unchanged.",
@@ -325,8 +553,16 @@ function mechanicalAuthorityReviewPrompt(
     "Apply the possession and obligation rules to an actor's mechanical custody, quantity, debtor or creditor balance, payment, or completed bargain. A statement about an untracked scene document's classification, validity, filing, disposal procedure, or history is not by itself an actor possession or obligation change.",
     "For each adjust_actor_possession transform, compare normalizedIntent, sourcePossessions, and the effect's name and summary. Accept only when the name is a concise durable identity for the complete retained possession after the transform: it preserves the source container or item, includes every material new content or state established by the accepted action, and does not imply an untracked split or remainder.",
     "Reject a transform that reuses the source name, names only remaining empty containers while omitting what was collected or sealed inside the set, or otherwise relies on summary to carry material possession state missing from name. Do not require transient handling, scene description, or cosmetic detail in the name.",
-    "OBLIGATION_AUTHORITY is the exact Judge-owned obligation transition for this action. When kind is none, event prose may describe an offer, quote, request, promise, acceptance in principle, refusal, counteroffer, or future plan only while every debt balance, payment, and completed bargain remains unchanged. Do not say or imply that anyone now owes, is due, must pay, has paid, is square, settled, fulfilled, or has completed a bargained return. When kind is incur_actor_obligation or pay_actor_obligation, include exactly the matching permitted typed effect and make the prose agree with it. Do not invent parties, handles, units, amounts, payment, or another obligation.",
+    "OBLIGATION_AUTHORITY is the exact Judge-owned obligation transition for this action. When kind is none, event prose may describe an offer, quote, request, promise, acceptance in principle, refusal, counteroffer, or future plan only while every debt balance, payment, and completed bargain remains unchanged. If CONTACT_LIFECYCLE_CONTEXT supplies an existing completed paid_delivery and outstanding receivable, the event may truthfully report those typed facts as unchanged, including that the receivable remains due, but it must not create, increase, reduce, settle, pay, or otherwise transition any balance, payment, obligation, or completed commitment. Without that supplied context, do not say or imply that anyone now owes, is due, must pay, has paid, is square, settled, fulfilled, or has completed a bargained return. When kind is incur_actor_obligation or pay_actor_obligation, include exactly the matching permitted typed effect and make the prose agree with it. Do not invent parties, handles, units, amounts, payment, or another obligation.",
+    "For certified contact, preserve DECISION_PROPOSAL in the event's terms and apply the contact decision boundary exactly: pure status-only kind=offer with acceptEffect=null, exact kind=paid_delivery or kind=unpaid_delivery with its matching typed effect, or kind=none with all fields null for atmospheric or incomplete unsupported service/payment negotiation.",
     "When OBLIGATION_AUTHORITY kind is none, player-authored words such as square, settled, paid, or fulfilled remain an attempted statement, not an established outcome. Do not repeat or paraphrase them as accepted mechanical truth in an event summary.",
+    ...(input.lifecycleContext === null
+      ? []
+      : [
+        `CONTACT_LIFECYCLE_CONTEXT=${JSON.stringify(input.lifecycleContext)}`,
+        `CONTACT_LIFECYCLE_ASSERTION=${JSON.stringify(input.lifecycleAssertion)}`,
+        "When CONTACT_LIFECYCLE_CONTEXT is present, lifecycleAssertion=contact_response is the only ordinary-contact result: it may acknowledge or report the completed paid delivery and outstanding receivable while leaving commitment, payment, and obligation state unchanged. lifecycleAssertion=reopen_completed_commitment identifies any proposal that reopens, reaccepts, resets, or otherwise restarts those completed delivery terms. Generic contact has no authority for that lifecycle transition; reject it as other_mechanical_authority_mismatch even when event prose presents the stale terms as current acceptance. Do not repair a mismatched assertion by filtering prose.",
+      ]),
     "ROUTE_AUTHORITY is code-owned. Reject route topology or access statements that are not entailed by it. A claim about payment, permission, a stamp, credential, checkpoint, intermediate location, blockage, or detour must match the corresponding route fact.",
     MECHANICAL_REVIEW_ROUTE_AUTHORITY_BOUNDARY,
     "A route claim asserts where traversal goes or what traversal requires. Words such as passage, bond, stamp, clearance, gate, permit, or contract in a document, filing, job, title, or other non-traversal context do not by themselves assert route topology or access; judge the sentence's actual claim.",
@@ -479,6 +715,8 @@ function createToolProposalSchema(
   permittedResourceEffectKinds: ReadonlySet<ResourceEffectKind>,
   worldEventPerformerHandles: readonly string[],
   resourceAuthority: ToolResourceAuthority,
+  contactDetail?: string,
+  requireContactLifecycleAssertion = false,
 ) {
   const allHandles = [...map.keys(), NEW_SUPPORT_ACTOR_HANDLE];
   const performerKeyVocabulary = createToolPerformerKeyVocabulary(worldEventPerformerHandles);
@@ -595,7 +833,7 @@ function createToolProposalSchema(
         : bounded,
     ];
   })) as typeof arrays;
-  return z.object({
+  const baseShape = {
     elapsedMinutes: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes),
     effectOrder: z.array(effectKindSchema).min(1).max(CAMPAIGN_PLAY_LIMITS.commandsPerBatch - 1),
     move_actor: boundedArrays.move_actor,
@@ -610,7 +848,22 @@ function createToolProposalSchema(
     incur_actor_obligation: boundedArrays.incur_actor_obligation,
     pay_actor_obligation: boundedArrays.pay_actor_obligation,
     record_world_event: boundedArrays.record_world_event,
-  }).strict().superRefine((transport, context) => {
+  };
+  const schema = contactDetail === undefined
+    ? z.object(baseShape).strict()
+    : z.object({
+        ...baseShape,
+        decisionProposal: createCertifiedContactDecisionProposalSchema(contactDetail),
+        acceptedDeal: createAcceptedBilateralDealSchema(
+          contactDetail,
+          toolHandleSchema(actorHandles),
+          toolHandleSchema(handlesByKind("location")),
+        ).nullable().optional(),
+        ...(requireContactLifecycleAssertion
+          ? { lifecycleAssertion: contactLifecycleAssertionSchema }
+          : {}),
+      }).strict();
+  return schema.superRefine((transport, context) => {
     const total = TOOL_EFFECT_KINDS.reduce((count, kind) => count + transport[kind].length, 0);
     if (total < 1 || total > CAMPAIGN_PLAY_LIMITS.commandsPerBatch - 1) {
       context.addIssue({
@@ -618,6 +871,22 @@ function createToolProposalSchema(
         path: ["effectOrder"],
         message: "The supplied effect items must fit one Rulebook command batch.",
       });
+    }
+    if (contactDetail !== undefined) {
+      const contactTransport = transport as unknown as {
+        acceptedDeal?: AcceptedBilateralDeal | null;
+        decisionProposal?: CertifiedContactDecisionProposal;
+        lifecycleAssertion?: ContactLifecycleAssertion;
+      };
+      if (contactTransport.acceptedDeal !== undefined
+        && contactTransport.acceptedDeal !== null
+        && contactTransport.decisionProposal?.kind !== "none") {
+        context.addIssue({
+          code: "custom",
+          path: ["acceptedDeal"],
+          message: "An accepted deal requires decisionProposal.kind=none.",
+        });
+      }
     }
   });
 }
@@ -657,9 +926,28 @@ type CampaignPlayGameMasterContractRejectedPhase =
   | "compilation"
   | "review";
 
+type CampaignPlayGameMasterSchemaIssueCode =
+  | "custom"
+  | "invalid_element"
+  | "invalid_key"
+  | "invalid_literal"
+  | "invalid_type"
+  | "invalid_union"
+  | "invalid_value"
+  | "too_big"
+  | "too_small"
+  | "unrecognized_keys"
+  | "unknown";
+
+interface CampaignPlayGameMasterSchemaIssue {
+  readonly code: CampaignPlayGameMasterSchemaIssueCode;
+  readonly path: string;
+}
+
 export interface CampaignPlayGameMasterContractDiagnostic {
   readonly phase: CampaignPlayGameMasterContractDiagnosticPhase;
   readonly coordinate: string;
+  readonly schemaIssue?: CampaignPlayGameMasterSchemaIssue;
 }
 
 export interface CampaignPlayGameMasterContractFailureDiagnostic {
@@ -713,6 +1001,74 @@ function toolContractFailure(
   const error = new CampaignPlayGameMasterError("model_contract_failed", null);
   rememberCampaignPlayGameMasterContractDiagnostic(error, diagnostic);
   throw error;
+}
+
+const CAMPAIGN_PLAY_GAME_MASTER_SCHEMA_ISSUE_CODES = new Set<CampaignPlayGameMasterSchemaIssueCode>([
+  "custom",
+  "invalid_element",
+  "invalid_key",
+  "invalid_literal",
+  "invalid_type",
+  "invalid_union",
+  "invalid_value",
+  "too_big",
+  "too_small",
+  "unrecognized_keys",
+]);
+
+function sanitizeCampaignPlayGameMasterSchemaIssueCode(
+  code: unknown,
+): CampaignPlayGameMasterSchemaIssueCode {
+  return typeof code === "string"
+    && CAMPAIGN_PLAY_GAME_MASTER_SCHEMA_ISSUE_CODES.has(code as CampaignPlayGameMasterSchemaIssueCode)
+    ? code as CampaignPlayGameMasterSchemaIssueCode
+    : "unknown";
+}
+
+function sanitizeCampaignPlayGameMasterSchemaIssuePath(
+  path: readonly (string | number)[],
+): string | undefined {
+  if (path.length === 0 || path.length > 4 || path[0] !== "record_world_event") {
+    return undefined;
+  }
+  if (path.length === 1) return "record_world_event";
+  const itemIndex = path[1];
+  if (typeof itemIndex !== "number" || !Number.isSafeInteger(itemIndex) || itemIndex < 0 || itemIndex > 999) {
+    return undefined;
+  }
+  const itemPath = `record_world_event[${itemIndex}]`;
+  if (path.length === 2) return itemPath;
+  const field = path[2];
+  if (field !== "eventClass" && field !== "performingActorKey" && field !== "summary" && field !== "affectedHandles") {
+    return undefined;
+  }
+  if (path.length === 3) return `${itemPath}.${field}`;
+  if (field !== "affectedHandles") return undefined;
+  const affectedHandleIndex = path[3];
+  return typeof affectedHandleIndex === "number"
+    && Number.isSafeInteger(affectedHandleIndex)
+    && affectedHandleIndex >= 0
+    && affectedHandleIndex <= 999
+    ? `${itemPath}.affectedHandles[${affectedHandleIndex}]`
+    : undefined;
+}
+
+function contractDiagnosticFromSafeSchemaDiagnostics(
+  diagnostics: SafeGenerateObjectSchemaDiagnostics | null,
+): CampaignPlayGameMasterContractDiagnostic | undefined {
+  for (const issue of diagnostics?.schemaIssues ?? []) {
+    const coordinate = sanitizeCampaignPlayGameMasterSchemaIssuePath(issue.path);
+    if (coordinate === undefined) continue;
+    return {
+      phase: "provider_extraction",
+      coordinate,
+      schemaIssue: {
+        code: sanitizeCampaignPlayGameMasterSchemaIssueCode(issue.code),
+        path: coordinate,
+      },
+    };
+  }
+  return undefined;
 }
 
 function sanitizeToolProviderCoordinate(path: readonly PropertyKey[]): string {
@@ -1019,7 +1375,9 @@ function decodeToolProposal(
   frame: CampaignPlayGameMasterFrame,
   ruling: CampaignPlayJudgeRuling,
   resolution: CampaignPlayUncertaintyResolution,
-) {
+  contactDetail?: string,
+  requireContactLifecycleAssertion = false,
+): DecodedCampaignPlayContactProposal {
   const resourceAuthority = createToolResourceAuthority(map, frame, ruling, resolution);
   const performerKeyVocabulary = createToolPerformerKeyVocabulary(worldEventPerformerHandles);
   const providerParsed = createToolProposalSchema(
@@ -1027,6 +1385,8 @@ function decodeToolProposal(
     permittedResourceEffectKinds,
     worldEventPerformerHandles,
     resourceAuthority,
+    contactDetail,
+    requireContactLifecycleAssertion,
   ).safeParse(rawProposal);
   if (!providerParsed.success) {
     toolContractFailure({
@@ -1071,13 +1431,110 @@ function decodeToolProposal(
   if (!exactParsed.success) {
     toolContractFailure({ phase: "domain_mismatch", coordinate: "proposal.domain" });
   }
-  return exactParsed.data;
+  return {
+    proposal: exactParsed.data,
+    decisionProposal: contactDetail === undefined
+      ? null
+      : decodeContactDecisionProposal(providerParsed.data, contactDetail),
+    acceptedDeal: contactDetail === undefined
+      ? null
+      : ((providerParsed.data as unknown as { acceptedDeal?: AcceptedBilateralDeal | null }).acceptedDeal
+        ?? null),
+    lifecycleAssertion: contactDetail === undefined || !requireContactLifecycleAssertion
+      ? null
+      : ((providerParsed.data as unknown as { lifecycleAssertion: ContactLifecycleAssertion }).lifecycleAssertion),
+  };
+}
+
+function decodeCertifiedContactProposal(
+  rawProposal: unknown,
+  playerActorHandle: string,
+  targetActorHandle: string,
+  contactDetail: string,
+): DecodedCampaignPlayContactProposal {
+  const parsed = createCertifiedContactProposalSchema(
+    playerActorHandle,
+    targetActorHandle,
+    contactDetail,
+  ).safeParse(rawProposal);
+  if (!parsed.success) {
+    toolContractFailure({ phase: "provider_extraction", coordinate: "proposal.schema" });
+  }
+  return {
+    proposal: {
+      elapsedMinutes: parsed.data.elapsedMinutes,
+      effects: parsed.data.effects,
+    },
+    decisionProposal: parsed.data.decisionProposal,
+    acceptedDeal: null,
+    lifecycleAssertion: null,
+  };
+}
+
+function decodeCertifiedContactToolProposal(
+  rawProposal: unknown,
+  playerActorHandle: string,
+  targetActorHandle: string,
+  performerKey: string,
+  contactDetail: string,
+): DecodedCampaignPlayContactProposal {
+  const parsed = createCertifiedContactToolProposalSchema(
+    playerActorHandle,
+    targetActorHandle,
+    performerKey,
+    contactDetail,
+  ).safeParse(rawProposal);
+  if (!parsed.success) {
+    toolContractFailure({ phase: "provider_extraction", coordinate: "proposal.schema" });
+  }
+  const effect = parsed.data.record_world_event[0];
+  if (effect === undefined) {
+    toolContractFailure({ phase: "private_decode", coordinate: "record_world_event.cardinality" });
+  }
+  return {
+    proposal: {
+      elapsedMinutes: parsed.data.elapsedMinutes,
+      effects: [{
+        kind: "record_world_event" as const,
+        eventClass: effect.eventClass,
+        performingActorHandle: targetActorHandle,
+        summary: effect.summary,
+        affectedHandles: effect.affectedHandles,
+      }],
+    },
+    decisionProposal: parsed.data.decisionProposal,
+    acceptedDeal: null,
+    lifecycleAssertion: null,
+  };
 }
 
 export interface CampaignPlayGameMasterHandleBinding {
   handle: string;
   reference: CampaignPlayEntityRef;
 }
+
+interface CampaignPlayCommitmentAuthorityBase {
+  binding: CampaignPlayCommitmentBinding;
+  commitmentId: string;
+  action: "collect" | "deliver";
+  performerActorId: string;
+  counterpartyActorId: string;
+  counterpartyHandle: string;
+  subjectName: string;
+  destinationHandle: string;
+  possessionId: string | null;
+  possessionHandle: string | null;
+}
+
+export type CampaignPlayCommitmentAuthority = CampaignPlayCommitmentAuthorityBase & (
+  | {
+      commitmentKind: "paid_delivery";
+      feeAmount: number;
+    }
+  | {
+      commitmentKind: "unpaid_delivery";
+    }
+);
 
 export interface CampaignPlayGameMasterFrame {
   sourceMoment: string;
@@ -1087,6 +1544,204 @@ export interface CampaignPlayGameMasterFrame {
   actorContinuity: CampaignPlayActorContinuity[];
   rulebookFrame: CampaignPlayRulebookFrame;
   authority: CampaignPlayRulebookAuthority;
+  commitmentAuthority?: CampaignPlayCommitmentAuthority;
+}
+
+export type CampaignPlayGameMasterContract = "certified_contact";
+
+interface CertifiedContactContext {
+  playerActorHandle: string;
+  targetActorHandle: string;
+  currentLocationHandle: string;
+  contactDetail: string;
+  lifecycleContext: CompletedPaidDeliveryLifecycleContext | null;
+}
+
+interface CompletedPaidDeliveryLifecycleContext {
+  completedCommitment: {
+    kind: "paid_delivery";
+    status: "completed";
+    title: string;
+    subjectName: string;
+    destinationHandle: string;
+    feeUnit: "copper";
+    feeAmount: number;
+    paymentTiming: "on_completion";
+  };
+  outstandingReceivable: {
+    unitKey: "copper";
+    outstandingAmount: number;
+  };
+}
+
+function completedPaidDeliveryLifecycleContext(
+  frame: CampaignPlayGameMasterFrame,
+  playerActorId: string,
+  targetActorId: string,
+): CompletedPaidDeliveryLifecycleContext | null {
+  const commitment = frame.rulebookFrame.commitments.find((candidate) =>
+    candidate.kind === "paid_delivery"
+      && candidate.status === "completed"
+      && candidate.performerActorId === playerActorId
+      && candidate.counterpartyActorId === targetActorId,
+  );
+  const receivable = frame.rulebookFrame.obligations.find((candidate) =>
+    candidate.debtorActorId === targetActorId
+      && candidate.creditorActorId === playerActorId
+      && candidate.unitKey === "copper"
+      && candidate.outstandingAmount > 0,
+  );
+  if (commitment === undefined || commitment.kind !== "paid_delivery" || receivable === undefined) {
+    return null;
+  }
+  return {
+    completedCommitment: {
+      kind: "paid_delivery",
+      status: "completed",
+      title: commitment.title,
+      subjectName: commitment.subjectName,
+      destinationHandle: commitment.destinationHandle,
+      feeUnit: commitment.feeUnit,
+      feeAmount: commitment.feeAmount,
+      paymentTiming: commitment.paymentTiming,
+    },
+    outstandingReceivable: {
+      unitKey: receivable.unitKey,
+      outstandingAmount: receivable.outstandingAmount,
+    },
+  };
+}
+
+function requireCertifiedContactContext(
+  frame: CampaignPlayGameMasterFrame,
+  ruling: CampaignPlayJudgeRuling,
+  resolution: CampaignPlayUncertaintyResolution,
+): CertifiedContactContext {
+  const map = bindings(frame);
+  const playerActorId = frame.authority.actorId;
+  if (playerActorId === null) {
+    throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
+  }
+  const playerActorHandle = [...map.entries()].find(([, reference]) =>
+    reference.kind === "actor" && reference.id === playerActorId,
+  )?.[0];
+  const targetedActorHandles = ruling.normalizedIntent.targets
+    .filter((target) => target.kind === "actor")
+    .map((target) => target.handle);
+  const targetActorHandle = targetedActorHandles.length === 1
+    ? targetedActorHandles[0]
+    : undefined;
+  const targetReference = targetActorHandle === undefined
+    ? undefined
+    : map.get(targetActorHandle);
+  const playerPlacement = frame.rulebookFrame.placements.find((placement) =>
+    placement.actorId === playerActorId && placement.placementKind === "present",
+  );
+  const currentLocationHandle = playerPlacement === undefined
+    ? undefined
+    : [...map.entries()].find(([, reference]) =>
+      reference.kind === "location" && reference.id === playerPlacement.locationId,
+    )?.[0];
+  const intent = ruling.normalizedIntent;
+  const contactInvariantHolds = ruling.disposition === "deterministic"
+    && intent.source === "suggested"
+    && intent.kind === "contact"
+    && intent.choiceHandle !== null
+    && intent.originalText.length > 0
+    && intent.targets.length === 1
+    && intent.targets[0]?.kind === "actor"
+    && intent.targets[0]?.handle === targetActorHandle
+    && intent.method !== null
+    && intent.stakes === null
+    && ruling.movementRouteHandle === null
+    && ruling.possessionEffectAuthority.kind === "none"
+    && ruling.requiredObligationEffect.kind === "none"
+    && ruling.citedVisibleFactHandles.length === 0
+    && ruling.uncertainty.kind === "none"
+    && ruling.resultBounds.minimum === "success"
+    && ruling.resultBounds.maximum === "success"
+    && ruling.elapsedBounds.minimumMinutes === 1
+    && ruling.elapsedBounds.maximumMinutes === 1
+    && resolution.kind === "deterministic"
+    && resolution.result === "success";
+  if (
+    !contactInvariantHolds
+    || playerActorHandle === undefined
+    || targetActorHandle === undefined
+    || targetReference?.kind !== "actor"
+    || targetReference.id === playerActorId
+    || currentLocationHandle === undefined
+  ) {
+    throw new CampaignPlayGameMasterError("ruling_invalid", null);
+  }
+  return {
+    playerActorHandle,
+    targetActorHandle,
+    currentLocationHandle,
+    contactDetail: intent.method!,
+    lifecycleContext: null,
+  };
+}
+
+function genericContactContext(
+  frame: CampaignPlayGameMasterFrame,
+  ruling: CampaignPlayJudgeRuling,
+  _resolution: CampaignPlayUncertaintyResolution,
+): CertifiedContactContext | null {
+  const intent = ruling.normalizedIntent;
+  if (intent.kind !== "contact") return null;
+  const targetedActorHandles = intent.targets
+    .filter((target) => target.kind === "actor")
+    .map((target) => target.handle);
+  if (targetedActorHandles.length !== 1 || intent.method === null) return null;
+
+  const map = bindings(frame);
+  const playerActorId = frame.authority.actorId;
+  const playerActorHandle = playerActorId === null
+    ? undefined
+    : [...map.entries()].find(([, reference]) =>
+      reference.kind === "actor" && reference.id === playerActorId,
+    )?.[0];
+  const targetActorHandle = targetedActorHandles[0];
+  const targetReference = map.get(targetActorHandle);
+  const playerPlacement = playerActorId === null
+    ? undefined
+    : frame.rulebookFrame.placements.find((placement) =>
+      placement.actorId === playerActorId && placement.placementKind === "present",
+    );
+  const currentLocationHandle = playerPlacement === undefined
+    ? undefined
+    : [...map.entries()].find(([, reference]) =>
+      reference.kind === "location" && reference.id === playerPlacement.locationId,
+    )?.[0];
+  const targetPresent = targetReference?.kind === "actor"
+    && frame.rulebookFrame.placements.some((placement) =>
+      placement.actorId === targetReference.id
+      && placement.placementKind === "present"
+      && placement.locationId === playerPlacement?.locationId,
+    );
+  if (
+    playerActorId === null
+    || playerActorHandle === undefined
+    || targetReference?.kind !== "actor"
+    || targetReference.id === playerActorId
+    || playerPlacement === undefined
+    || currentLocationHandle === undefined
+    || !targetPresent
+  ) {
+    throw new CampaignPlayGameMasterError("ruling_invalid", null);
+  }
+  return {
+    playerActorHandle,
+    targetActorHandle,
+    currentLocationHandle,
+    contactDetail: intent.method,
+    lifecycleContext: completedPaidDeliveryLifecycleContext(
+      frame,
+      playerActorId,
+      targetReference.id,
+    ),
+  };
 }
 
 export interface CampaignPlayGameMasterRequest {
@@ -1097,6 +1752,7 @@ export interface CampaignPlayGameMasterRequest {
   model: LanguageModel;
   temperature: number;
   budget: CampaignPlayModelBudget;
+  contract?: CampaignPlayGameMasterContract;
   structuredOutputMode?: "auto" | "tool";
   signal?: AbortSignal;
   recoveryFeedback?: CampaignPlayGameMasterRecoveryFeedback;
@@ -1423,6 +2079,8 @@ function requireRef(
 function constrainedProposalSchema(
   map: ReadonlyMap<string, CampaignPlayEntityRef>,
   permittedResourceEffectKinds: ReadonlySet<ResourceEffectKind> = ALL_RESOURCE_EFFECT_KINDS,
+  contactDetail?: string,
+  requireContactLifecycleAssertion = false,
 ) {
   const allowedHandles = [...map.keys(), NEW_SUPPORT_ACTOR_HANDLE];
   if (allowedHandles.length === 0) {
@@ -1431,6 +2089,8 @@ function constrainedProposalSchema(
   return createProposalSchema(
     z.enum(allowedHandles as [string, ...string[]]),
     permittedResourceEffectKinds,
+    contactDetail,
+    requireContactLifecycleAssertion,
   );
 }
 
@@ -1934,6 +2594,26 @@ function compileEffect(
       if (owner.id !== frame.authority.actorId) {
         throw new CampaignPlayGameMasterError("model_contract_failed", null);
       }
+      const commitmentAuthority = frame.commitmentAuthority;
+      if (commitmentAuthority !== undefined) {
+        if (commitmentAuthority.action === "collect") {
+          if (
+            effect.operation !== "acquire"
+            || effect.possessionHandle !== null
+            || effect.quantity !== 1
+            || effect.name !== commitmentAuthority.subjectName
+          ) {
+            throw new CampaignPlayGameMasterError("model_contract_failed", null);
+          }
+        } else if (
+          effect.operation !== "spend"
+          || effect.possessionHandle !== commitmentAuthority.possessionHandle
+          || effect.quantity !== 1
+          || effect.name !== null
+        ) {
+          throw new CampaignPlayGameMasterError("model_contract_failed", null);
+        }
+      }
       const existingRef = effect.possessionHandle === null
         ? null
         : requireRef(map, effect.possessionHandle, "possession");
@@ -2010,7 +2690,9 @@ function compileEffect(
           },
         }];
       }
-      const name = creates ? effect.name! : existing!.name;
+      const name = commitmentAuthority?.action === "collect"
+        ? commitmentAuthority.subjectName
+        : creates ? effect.name! : existing!.name;
       const possessionKey = creates
         ? deriveCampaignPlayPossessionKey(name)
         : existing!.possessionKey;
@@ -2047,6 +2729,23 @@ function compileEffect(
     case "incur_actor_obligation": {
       const debtor = requireRef(map, effect.debtorActorHandle, "actor");
       const creditor = requireRef(map, effect.creditorActorHandle, "actor");
+      const commitmentAuthority = frame.commitmentAuthority;
+      const playerHandle = [...map.entries()].find(([, reference]) =>
+        reference.kind === "actor" && reference.id === frame.authority.actorId,
+      )?.[0];
+      if (commitmentAuthority !== undefined) {
+        if (
+          commitmentAuthority.action !== "deliver"
+          || commitmentAuthority.commitmentKind !== "paid_delivery"
+          || effect.debtorActorHandle !== commitmentAuthority.counterpartyHandle
+          || playerHandle === undefined
+          || effect.creditorActorHandle !== playerHandle
+          || effect.unitKey !== "copper"
+          || effect.amount !== commitmentAuthority.feeAmount
+        ) {
+          throw new CampaignPlayGameMasterError("model_contract_failed", null);
+        }
+      }
       const counterparty = debtor.id === frame.authority.actorId ? creditor : debtor;
       const counterpartyIsTargeted = ruling.normalizedIntent.targets.some((target) =>
         target.kind === "actor" && target.handle === (
@@ -2054,11 +2753,17 @@ function compileEffect(
             ? effect.creditorActorHandle
             : effect.debtorActorHandle
         ));
+      const commitmentCounterpartyBound = commitmentAuthority?.commitmentKind === "paid_delivery"
+        && commitmentAuthority.action === "deliver"
+        && effect.debtorActorHandle === commitmentAuthority.counterpartyHandle
+        && effect.creditorActorHandle === playerHandle
+        && effect.unitKey === "copper"
+        && effect.amount === commitmentAuthority.feeAmount;
       if (
         debtor.id === creditor.id
         || (debtor.id !== frame.authority.actorId && creditor.id !== frame.authority.actorId)
         || counterparty.id === frame.authority.actorId
-        || !counterpartyIsTargeted
+        || (!commitmentCounterpartyBound && !counterpartyIsTargeted)
       ) {
         throw new CampaignPlayGameMasterError("model_contract_failed", null);
       }
@@ -2263,6 +2968,8 @@ function compile(
   resolutionInput: CampaignPlayUncertaintyResolution,
   uncertaintyAuthority: CampaignPlayUncertaintyAuthority | null,
   rawProposal: unknown,
+  contactDecisionProposal: CertifiedContactDecisionProposal | null = null,
+  acceptedDeal: AcceptedBilateralDeal | null = null,
 ): Omit<CampaignPlayGameMasterCandidate, "modelEvidence" | "semanticReview"> {
   const map = bindings(frame);
   const ruling = normalizeReceivableCollectionAuthority(
@@ -2289,6 +2996,60 @@ function compile(
   const parsed = campaignPlayGameMasterProposalSchema.safeParse(rawProposal);
   if (!parsed.success) throw new CampaignPlayGameMasterError("model_contract_failed", null, null, { cause: parsed.error });
   const proposal = parsed.data;
+  const contactContext = contactDecisionProposal === null && acceptedDeal === null
+    ? null
+    : genericContactContext(frame, ruling, resolution);
+  if ((contactDecisionProposal !== null || acceptedDeal !== null)
+    && (contactContext === null
+      || (contactDecisionProposal !== null
+        && contactDecisionProposal.contactDetail !== contactContext.contactDetail)
+      || (acceptedDeal !== null && acceptedDeal.contactDetail !== contactContext.contactDetail))) {
+    throw new CampaignPlayGameMasterError("model_contract_failed", null);
+  }
+  const actionableContactProposal = acceptedDeal === null
+    && (contactDecisionProposal?.kind === "offer"
+      || contactDecisionProposal?.kind === "paid_delivery"
+      || contactDecisionProposal?.kind === "unpaid_delivery")
+    ? contactDecisionProposal
+    : null;
+  const deliveryEffect = (contactDecisionProposal?.kind === "paid_delivery"
+    && contactDecisionProposal.acceptEffect?.kind === "paid_delivery")
+    || (contactDecisionProposal?.kind === "unpaid_delivery"
+      && contactDecisionProposal.acceptEffect?.kind === "unpaid_delivery")
+    ? contactDecisionProposal.acceptEffect
+    : null;
+  if ((contactDecisionProposal?.kind === "paid_delivery"
+    || contactDecisionProposal?.kind === "unpaid_delivery")
+    && deliveryEffect === null) {
+    throw new CampaignPlayGameMasterError("model_contract_failed", null);
+  }
+  const acceptedDeliveryEffect = acceptedDeal?.acceptEffect ?? null;
+  if (acceptedDeal !== null && contactDecisionProposal?.kind !== "none") {
+    throw new CampaignPlayGameMasterError("model_contract_failed", null);
+  }
+  const deliveryForValidation = deliveryEffect ?? acceptedDeliveryEffect;
+  if (deliveryForValidation !== null) {
+    const destination = map.get(deliveryForValidation.destinationHandle);
+    const destinationAuthorized = destination?.kind === "location"
+      && frame.authority.authorizedRefs.some((reference) =>
+        reference.kind === "location" && reference.id === destination.id);
+    if (!destinationAuthorized) {
+      throw new CampaignPlayGameMasterError("model_contract_failed", null);
+    }
+  }
+  const deliveryDestinationHandle = deliveryForValidation === null
+    ? null
+    : (() => {
+        const destination = map.get(deliveryForValidation.destinationHandle);
+        if (destination?.kind !== "location") {
+          throw new CampaignPlayGameMasterError("model_contract_failed", null);
+        }
+        return deriveCampaignPlayPublicHandle(
+          "location",
+          frame.rulebookFrame.campaignId,
+          destination.id,
+        );
+      })();
   const repeatedActorDialogueChecks: CampaignPlayGameMasterRecoveryCheck[] = [];
   proposal.effects.forEach((effect, effectIndex) => {
     if (
@@ -2436,6 +3197,27 @@ function compile(
       throw new CampaignPlayGameMasterError("model_contract_failed", null);
     }
   }
+  const commitmentSettlement = frame.commitmentAuthority?.action === "deliver"
+    && CAMPAIGN_PLAY_RESULT_TIER_VALUES.indexOf(resolution.result)
+      >= CAMPAIGN_PLAY_RESULT_TIER_VALUES.indexOf("success");
+  if (commitmentSettlement) {
+    const authority = frame.commitmentAuthority!;
+    const paidEffectsValid = authority.commitmentKind === "paid_delivery" &&
+      proposal.effects.length === 2 &&
+      proposal.effects.some((effect) => effect.kind === "adjust_actor_possession") &&
+      proposal.effects.some((effect) => effect.kind === "incur_actor_obligation") &&
+      proposal.effects.every((effect) =>
+        effect.kind === "adjust_actor_possession" || effect.kind === "incur_actor_obligation");
+    const unpaidEffectsValid = authority.commitmentKind === "unpaid_delivery" &&
+      proposal.effects.length === 1 &&
+      proposal.effects[0]?.kind === "adjust_actor_possession";
+    if (
+      authority.possessionId === null || authority.possessionId === undefined ||
+      (!paidEffectsValid && !unpaidEffectsValid)
+    ) {
+      throw new CampaignPlayGameMasterError("model_contract_failed", null);
+    }
+  }
   const movementEffects = proposal.effects.flatMap((effect, index) =>
     effect.kind === "move_actor" ? [{ effect, index }] : []);
   const playerMovementEffects = movementEffects.filter(({ effect }) => effect.actorHandle === null);
@@ -2459,6 +3241,7 @@ function compile(
     if (
       ruling.normalizedIntent.kind !== "contact"
       || targetsNamedActor
+      || ruling.normalizedIntent.stakes === null
       || !responseNamesNewActor
       || CAMPAIGN_PLAY_RESULT_TIER_VALUES.indexOf(resolution.result)
         < CAMPAIGN_PLAY_RESULT_TIER_VALUES.indexOf("limited")
@@ -2541,13 +3324,15 @@ function compile(
     ruling,
     resolution,
     proposal,
+    contactDecisionProposal,
+    acceptedDeal,
   }).slice(0, 32)}`;
   const argumentsList: CommandArguments[] = [];
   const scopeOverflowChecks: CampaignPlayGameMasterRecoveryCheck[] = [];
   const initialElapsedMinutes = movement !== null && localSceneEffects.length === 1
     ? movement.travelCost
     : proposal.elapsedMinutes;
-  if (initialElapsedMinutes > 0) {
+  if (initialElapsedMinutes > 0 && !commitmentSettlement) {
     argumentsList.push({ kind: "advance_world_time", elapsedMinutes: initialElapsedMinutes,
       readScope: [], writeScope: [], exposure: { mode: "protected" } });
   }
@@ -2599,6 +3384,208 @@ function compile(
       perceptionLocationId = localMove.toLocationId;
     }
   }
+  if (actionableContactProposal !== null) {
+    if (frame.authority.turnId === null || contactContext === null) {
+      throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
+    }
+    const targetReference = map.get(contactContext.targetActorHandle);
+    if (targetReference?.kind !== "actor") {
+      throw new CampaignPlayGameMasterError("model_contract_failed", null);
+    }
+    const decisionKey = deriveCampaignPlayDecisionKey(
+      frame.rulebookFrame.campaignId,
+      frame.authority.turnId,
+      targetReference.id,
+      "offer",
+    );
+    argumentsList.push({
+      kind: "decision_open",
+      decisionKey,
+      actorId: targetReference.id,
+      actorHandle: deriveCampaignPlayPublicHandle(
+        "actor",
+        frame.rulebookFrame.campaignId,
+        targetReference.id,
+      ),
+      decisionKind: "offer",
+      sourceTurnId: frame.authority.turnId,
+      summary: actionableContactProposal.summary!,
+      acceptLabel: actionableContactProposal.acceptLabel!,
+      declineLabel: actionableContactProposal.declineLabel!,
+      acceptEffect: deliveryEffect === null
+        ? null
+        : {
+            ...deliveryEffect,
+            destinationHandle: deliveryDestinationHandle!,
+          },
+      readScope: [targetReference],
+      writeScope: [{ kind: "decision", id: decisionKey }],
+      exposure: { mode: "protected" },
+    });
+  }
+  if (acceptedDeal !== null) {
+    if (
+      frame.authority.turnId === null
+      || contactContext === null
+      || acceptedDeliveryEffect === null
+      || acceptedDeliveryEffect.kind !== "paid_delivery"
+      || acceptedDeal.counterpartyActorHandle !== contactContext.targetActorHandle
+      || frame.authority.actorId === null
+    ) {
+      throw new CampaignPlayGameMasterError("model_contract_failed", null);
+    }
+    const targetReference = map.get(contactContext.targetActorHandle);
+    const destinationReference = requireRef(
+      map,
+      acceptedDeliveryEffect.destinationHandle,
+      "location",
+    );
+    if (targetReference?.kind !== "actor" || targetReference.id === frame.authority.actorId) {
+      throw new CampaignPlayGameMasterError("model_contract_failed", null);
+    }
+    const playerReference = { kind: "actor" as const, id: frame.authority.actorId };
+    const targetHandle = deriveCampaignPlayPublicHandle(
+      "actor",
+      frame.rulebookFrame.campaignId,
+      targetReference.id,
+    );
+    const decisionKey = deriveCampaignPlayDecisionKey(
+      frame.rulebookFrame.campaignId,
+      frame.authority.turnId,
+      targetReference.id,
+      "offer",
+    );
+    const commitmentId = deriveCampaignPlayCommitmentId(
+      frame.rulebookFrame.campaignId,
+      decisionKey,
+    );
+    const acceptedWorldTimeMinutes = frame.rulebookFrame.worldTimeMinutes === null
+      ? null
+      : frame.rulebookFrame.worldTimeMinutes
+        + argumentsList
+          .filter((command): command is Extract<CommandArguments, { kind: "advance_world_time" }> =>
+            command.kind === "advance_world_time")
+          .reduce((total, command) => total + command.elapsedMinutes, 0);
+    if (
+      acceptedWorldTimeMinutes === null
+      || acceptedWorldTimeMinutes > CAMPAIGN_PLAY_LIMITS.worldTimeMinutes
+    ) {
+      throw new CampaignPlayGameMasterError("model_contract_failed", null);
+    }
+    const dueWorldTimeMinutes = acceptedDeliveryEffect.dueInMinutes === undefined
+      ? null
+      : acceptedWorldTimeMinutes + acceptedDeliveryEffect.dueInMinutes;
+    if (
+      dueWorldTimeMinutes !== null
+      && dueWorldTimeMinutes > CAMPAIGN_PLAY_LIMITS.worldTimeMinutes
+    ) {
+      throw new CampaignPlayGameMasterError("model_contract_failed", null);
+    }
+    const decisionReference = { kind: "decision" as const, id: decisionKey };
+    const commitmentReference = { kind: "commitment" as const, id: commitmentId };
+    argumentsList.push({
+      kind: "decision_open",
+      decisionKey,
+      actorId: targetReference.id,
+      actorHandle: targetHandle,
+      decisionKind: "offer",
+      sourceTurnId: frame.authority.turnId,
+      summary: acceptedDeal.summary,
+      acceptLabel: acceptedDeal.acceptLabel,
+      declineLabel: acceptedDeal.declineLabel,
+      acceptEffect: {
+        ...acceptedDeliveryEffect,
+        destinationHandle: deliveryDestinationHandle!,
+      },
+      readScope: [targetReference],
+      writeScope: [decisionReference],
+      exposure: { mode: "protected" },
+    });
+    argumentsList.push({
+      kind: "decision_resolve",
+      decisionKey,
+      actorId: targetReference.id,
+      actorHandle: targetHandle,
+      decisionKind: "offer",
+      sourceTurnId: frame.authority.turnId,
+      summary: acceptedDeal.summary,
+      selectedLabel: acceptedDeal.acceptLabel,
+      disposition: "accept",
+      readScope: [targetReference, decisionReference],
+      writeScope: [decisionReference],
+      exposure: { mode: "protected" },
+    });
+    const commitmentRefs = [
+      commitmentReference,
+      playerReference,
+      targetReference,
+      decisionReference,
+      destinationReference,
+    ];
+    argumentsList.push({
+      kind: "create_player_commitment",
+      commitmentId,
+      sourceDecisionKey: decisionKey,
+      sourceTurnId: frame.authority.turnId,
+      performerActorId: frame.authority.actorId,
+      counterpartyActorId: targetReference.id,
+      title: acceptedDeliveryEffect.title,
+      subjectName: acceptedDeliveryEffect.subjectName,
+      destinationHandle: deliveryDestinationHandle!,
+      acceptedWorldTimeMinutes,
+      dueWorldTimeMinutes,
+      commitmentKind: "paid_delivery",
+      feeUnit: "copper",
+      feeAmount: acceptedDeliveryEffect.feeAmount,
+      paymentTiming: "on_completion",
+      affectedRefs: commitmentRefs,
+      readScope: commitmentRefs.slice(1),
+      writeScope: [commitmentReference],
+      exposure: { mode: "protected" },
+    });
+  }
+  if (commitmentSettlement) {
+    const authority = frame.commitmentAuthority!;
+    const commitmentRef = { kind: "commitment" as const, id: authority.commitmentId };
+    const performerRef = { kind: "actor" as const, id: authority.performerActorId };
+    const counterpartyRef = { kind: "actor" as const, id: authority.counterpartyActorId };
+    const possessionRef = { kind: "possession" as const, id: authority.possessionId! };
+    const destinationRef = requireRef(map, authority.destinationHandle, "location");
+    const baseCompletionRefs = [
+      commitmentRef,
+      performerRef,
+      counterpartyRef,
+      possessionRef,
+      destinationRef,
+    ];
+    const obligationRef = authority.commitmentKind === "paid_delivery"
+      ? {
+          kind: "obligation" as const,
+          id: deriveCampaignPlayObligationId(
+            frame.rulebookFrame.campaignId,
+            authority.counterpartyActorId,
+            authority.performerActorId,
+            "copper",
+          ),
+        }
+      : null;
+    const completionRefs = obligationRef === null
+      ? baseCompletionRefs
+      : [...baseCompletionRefs, obligationRef];
+    argumentsList.push({
+      kind: "complete_player_commitment",
+      commitmentId: authority.commitmentId,
+      performerActorId: authority.performerActorId,
+      counterpartyActorId: authority.counterpartyActorId,
+      deliveryPossessionId: authority.possessionId!,
+      affectedRefs: completionRefs,
+      readScope: completionRefs,
+      writeScope: obligationRef === null
+        ? [possessionRef, commitmentRef]
+        : [possessionRef, obligationRef, commitmentRef],
+      exposure: { mode: "protected" },
+    });
+  }
   if (scopeOverflowChecks.length > 0) {
     const error = new CampaignPlayGameMasterError("model_contract_failed", null);
     rememberCampaignPlayGameMasterRecoveryFeedback(error, {
@@ -2646,6 +3633,84 @@ function compile(
   return freeze({ batch: preflight.batch, preflight, batchHash: hashCampaignPlayProjection(preflight.batch) });
 }
 
+function certifiedContactPrompt(
+  frame: CampaignPlayGameMasterFrame,
+  ruling: CampaignPlayJudgeRuling,
+  resolution: CampaignPlayUncertaintyResolution,
+  context: CertifiedContactContext,
+  recoveryFeedback?: CampaignPlayGameMasterRecoveryFeedback,
+): string {
+  const map = bindings(frame);
+  const intent = ruling.normalizedIntent;
+  const targetDirectives = actorDirectives(frame, ruling, map)
+    .filter((directive) => directive.handle === context.targetActorHandle);
+  const targetContinuity = frame.actorContinuity.filter((continuity) =>
+    continuity.actorHandle === context.targetActorHandle,
+  );
+  const canonicalPeople = [
+    ...frame.rulebookFrame.acceptedWorld.actors,
+    ...frame.rulebookFrame.runtimeActors,
+  ]
+    .filter((actor) => actor.kind === "person")
+    .map((actor) => ({ handle: [...map.entries()].find(([, reference]) =>
+      reference.kind === "actor" && reference.id === actor.id,
+    )?.[0] ?? null, name: actor.name }))
+    .filter((person) => person.handle !== null);
+  const compactIntent = {
+    source: intent.source,
+    choiceHandle: intent.choiceHandle,
+    kind: intent.kind,
+    originalText: intent.originalText,
+    targets: intent.targets,
+    method: intent.method,
+  };
+  const compactRuling = {
+    disposition: ruling.disposition,
+    resultBounds: ruling.resultBounds,
+    elapsedBounds: ruling.elapsedBounds,
+    uncertainty: ruling.uncertainty,
+  };
+  const instructions = [
+    "You are the Campaign Play Game Master for one certified contact.",
+    "Produce the grounded response to the admitted player delivery; do not invent a second action or a new durable state change.",
+    "Return exactly one strict object with elapsedMinutes=1 and one record_world_event item. The item must be dialogue or interaction, must use the exact target actor handle as performingActorHandle, and must include the player and target handles exactly once in affectedHandles.",
+    CAMPAIGN_PLAY_CONTACT_DECISION_BOUNDARY,
+    "For kind=offer, provide exact summary, acceptLabel, and declineLabel describing only that pure status-only choice. For kind=paid_delivery, provide the existing actionable contract with a concrete subject, visible destination handle, positive copper fee, on_completion timing, and meaningful accept/decline controls. For kind=unpaid_delivery, provide a concrete subject and visible destination handle with no fee or payment terms, plus meaningful accept/decline controls.",
+    "An offer or delivery proposal is pending only: it is not acceptance, agreement, payment, possession, delivery, reward, access, debt, obligation, or world change before acceptance. Do not invent hidden actors, cargo facts, or extra terms.",
+    "The compiler owns advance_world_time(1) and direct perception at CURRENT_LOCATION_HANDLE; do not represent either as an event item.",
+    "The response must answer the current player intent in new words, remain grounded in the source moment, target directives, target continuity, and canonical people, and preserve the exact admitted ruling and resolution.",
+    `SOURCE_MOMENT=${JSON.stringify(frame.sourceMoment)}`,
+    `PLAYER_PROFILE=${JSON.stringify(frame.playerProfile)}`,
+    `PLAYER_INTENT=${JSON.stringify(compactIntent)}`,
+    `RULING=${JSON.stringify(compactRuling)}`,
+    `RESOLUTION=${JSON.stringify({ kind: resolution.kind, result: resolution.result })}`,
+    `TARGET_ACTOR_DIRECTIVES=${JSON.stringify(targetDirectives)}`,
+    `TARGET_ACTOR_CONTINUITY=${JSON.stringify(targetContinuity)}`,
+    `REQUIRED_TARGET_RESPONSE=${JSON.stringify([context.targetActorHandle])}`,
+    `CANONICAL_PEOPLE=${JSON.stringify(canonicalPeople)}`,
+    `HANDLE_BINDINGS=${JSON.stringify({
+      playerActorHandle: context.playerActorHandle,
+      targetActorHandle: context.targetActorHandle,
+      currentLocationHandle: context.currentLocationHandle,
+    })}`,
+    `CONTACT_DETAIL=${JSON.stringify(context.contactDetail)}`,
+    `EVENT_RULE=${JSON.stringify({
+      eventClasses: ["dialogue", "interaction"],
+      performingActorHandle: context.targetActorHandle,
+      affectedHandles: [context.playerActorHandle, context.targetActorHandle],
+      exposure: { channel: "direct_perception", locationHandle: context.currentLocationHandle },
+    })}`,
+  ];
+  if (recoveryFeedback !== undefined) {
+    instructions.push([
+      "GAME_MASTER_RECOVERY",
+      "Generate a new response from the unchanged source moment, profile, intent, ruling, resolution, directives, and continuity. Correct every listed safe check while preserving the exact contact transport.",
+      `RECOVERY_DIAGNOSTIC=${JSON.stringify(recoveryFeedback)}`,
+    ].join("\n"));
+  }
+  return instructions.join("\n");
+}
+
 function prompt(
   frame: CampaignPlayGameMasterFrame,
   ruling: CampaignPlayJudgeRuling,
@@ -2653,6 +3718,7 @@ function prompt(
   recoveryFeedback?: CampaignPlayGameMasterRecoveryFeedback,
   obligationAuthority?: CampaignPlayObligationAuthority,
   toolMode = false,
+  contactContext: CertifiedContactContext | null = null,
 ): string {
   const effectiveRuling = normalizeReceivableCollectionAuthority(frame, ruling);
   const canonicalObligation = obligationAuthority ?? canonicalObligationAuthority(effectiveRuling);
@@ -2770,6 +3836,25 @@ function prompt(
     toolMode
       ? "set_actor_condition array items have exactly these fields: exposure, actorHandle, condition, operation, and summary; do not add kind. condition must be exactly occupied, strained, or incapacitated; operation must be exactly set or clear. affectedHandles is forbidden. If none of those three conditions fits the resolved result, do not use set_actor_condition; commit the result through another authorized effect."
       : "set_actor_condition has exactly these fields: kind, exposure, actorHandle, condition, operation, and summary. condition must be exactly occupied, strained, or incapacitated; operation must be exactly set or clear. affectedHandles is forbidden. If none of those three conditions fits the resolved result, do not use set_actor_condition; commit the result through another authorized effect.",
+    ...(contactContext === null
+      ? []
+      : [
+        "This one-actor contact requires decisionProposal. Copy CONTACT_DETAIL exactly. Apply the contact decision boundary exactly. For kind=offer, provide non-null summary, acceptLabel, and declineLabel only for the pure status-only choice. For kind=paid_delivery, use only the existing typed paid-delivery effect. For kind=unpaid_delivery, use only the exact typed unpaid-delivery effect with no fee or payment fields. For kind=none, all decision fields must be null. The proposal is pending: do not grant reward, access, ownership, debt, obligation, or any other world change before explicit acceptance.",
+        "For acceptedDeal, emit it only when the targeted NPC explicitly accepts this turn's concrete player-proposed paid-delivery deal. Include the exact target counterpartyActorHandle, typed paid_delivery with feeUnit=copper, an authorized visible destination, paymentTiming=on_completion, and completionCondition=deliver_subject_to_destination, plus summary and accept/decline labels. Set decisionProposal.kind=none. If the denomination is silver, gold, or another unsupported unit, or the subject, destination, payment timing, or completion condition is incomplete, do not emit acceptedDeal; clarify or counter in copper, or leave the negotiation unresolved. Prose never creates a commitment.",
+         CAMPAIGN_PLAY_CONTACT_DECISION_BOUNDARY,
+         `CONTACT_DETAIL=${JSON.stringify(contactContext.contactDetail)}`,
+         `CONTACT_BINDINGS=${JSON.stringify({
+           playerActorHandle: contactContext.playerActorHandle,
+           targetActorHandle: contactContext.targetActorHandle,
+           currentLocationHandle: contactContext.currentLocationHandle,
+         })}`,
+         ...(contactContext.lifecycleContext === null
+           ? []
+           : [
+             `CONTACT_LIFECYCLE_CONTEXT=${JSON.stringify(contactContext.lifecycleContext)}`,
+             "When CONTACT_LIFECYCLE_CONTEXT is present, lifecycleAssertion is required. Use contact_response only for a truthful acknowledgement or status response that leaves the completed commitment and outstanding receivable unchanged. Use reopen_completed_commitment only when the response would reopen, reaccept, or reset completed delivery terms; generic contact has no authority for that transition and Mechanical Authority will reject it as other_mechanical_authority_mismatch. Do not restate stale acceptance as current lifecycle truth.",
+           ]),
+       ]),
     "Resolve only the exact PLAYER_INTENT. PLAYER_INTENT owns the player's method and scope. Preserve every concrete trade, material, tool, target, and explicit exclusion or refusal it states; never substitute a nearby profession or revive a rejected method to fit SOURCE_MOMENT. A generic approach, observation, or wait does not authorize an offer, transaction, repair specialty, tool use, disclosure, promise, or commitment absent from PLAYER_INTENT. Prior scene prose may explain context but cannot add a player action. Result tiers change the degree of success inside the admitted scope; they never create trust, permission, leverage, knowledge, or access. strong_success makes the scoped result more useful; it does not turn an unfamiliar actor into a fully cooperative informant.",
     "A direct question identifies the topic but never gives the speaker a reason to answer. Do not disclose a third party's identity, location, contact channel, or private case details, and do not recruit the player to find or report on that person, unless ACTOR_DIRECTIVES or VISIBLE_FACTS establish a concrete speaker-side reason: consent or already-public status, duty or authority, established trust, reciprocal value already supplied or explicitly committed in PLAYER_INTENT, or an immediate safety need. Otherwise have the speaker withhold, deflect, ask the player's purpose, or name a condition. Do not invent a quest.",
     "For a wait, watch, observation, or other untargeted passage of time, commit only the player's scoped action and the sensory result established by the primary resolution. Do not say that a nonplayer actor stayed still, held a post, continued an activity, did nothing, failed to react, or occupied an unchanged end-of-turn position throughout elapsedMinutes. Autonomous actor scheduling runs after the primary batch and owns what those actors do during the same turn. No actor effect in this batch means their intervening behavior is unknown, not that they remained inactive. Do not freeze their later state in an actorless summary.",
@@ -2784,8 +3869,8 @@ function prompt(
     "ACTOR_DIRECTIVES is protected roleplay authority for each agent actor targeted by PLAYER_INTENT. Use the person's profile, present conditions, active goals, and relations to choose what they actually say or do. These directives establish characterization and decision pressure, not player knowledge or permission to disclose protected facts. Never quote a hidden goal or motive merely because it appears there.",
     "For an attempt with nonplayer actor targets, their response is part of the outcome. Use ACTOR_DIRECTIVES and a dialogue or interaction effect before any actorless physical result. A successful roll resolves the player's effort; it does not create permission or cooperation.",
     `REQUIRED_ACTOR_RESPONSES is the complete code-owned list for this proposal. For every listed handle, include one dialogue or interaction record_world_event with ${toolMode ? "that actor's supplied performingActorKey" : "that exact performingActorHandle"} before the first actorless discovery or scene event. An empty list requires none. Omitting, delaying, or replacing a required response with actorless prose invalidates the whole proposal.`,
-    "CANONICAL_PEOPLE is the complete durable person roster at the start of this call, not permission to disclose anyone. Mention a listed person only when VISIBLE_FACTS, ACTOR_CONTINUITY, or ACTOR_DIRECTIVES supports the reference. A person name outside this list does not identify an actor, even when SOURCE_MOMENT or prior prose mentions it. Do not repeat that name as established identity. Unless the materialize_support_actor contract below applies, an unlisted resident cannot own a job, payment, permission, appointment, access, or future reply.",
-    `Use materialize_support_actor only for a contact with unnamed ambient residents in CURRENT_EXACT_SCENE, with no actor target, when one concrete person voluntarily gives an identity-bearing reply or takes a specific continuing stake that must persist beyond this paragraph. Silence, refusal without identity, a passing glance, crowd noise, generic service, or scenery is not enough. Return at most one. Set actorHandle exactly to introduced-support-actor. Give the person a stable name and compact summary, then state one goal, the motivation behind it, and one stationary next action that belongs to the person rather than the player. nextIntentKind must be observe, contact, wait, or attempt; move is not allowed. ${toolMode ? "nextAction is a required string; return the empty string when the domain action is omitted." : "nextAction may be omitted only when goal already states the concrete action."} observableTrace is the sensory evidence that next action would leave in the scene. cadenceMinutes is when this person may next act. Put materialize_support_actor immediately before one dialogue or interaction record_world_event ${supportPerformerInstruction} and whose affectedHandles includes that handle. The event contains the person's actual words or action. Code derives every identity, placement, role, priority, plan step, timing bounds, scope, version, and receipt; it persists the goal and plan and admits the person to the normal scheduler.`,
+    `CANONICAL_PEOPLE is the complete durable person roster at the start of this call, not permission to disclose anyone. Mention a listed person only when VISIBLE_FACTS, ACTOR_CONTINUITY, or ACTOR_DIRECTIVES supports the reference. A person name outside this list does not identify an actor, even when SOURCE_MOMENT or prior prose mentions it. Do not repeat that name as established identity. It may appear in an actorless discovery or scene only under this ambient presentation boundary: ${CAMPAIGN_PLAY_AMBIENT_PRESENTATION_BOUNDARY} Unless the materialize_support_actor contract below applies, an unlisted resident cannot own a job, payment, permission, appointment, access, or future reply.`,
+    `Use materialize_support_actor only for a contact with unnamed ambient residents in CURRENT_EXACT_SCENE, with no actor target, when one concrete person voluntarily gives an identity-bearing reply and takes a specific continuing stake that must persist beyond this paragraph. Identity alone is atmosphere. Silence, refusal without identity, a passing glance, crowd noise, generic service, or scenery is not enough. Return at most one. Set actorHandle exactly to introduced-support-actor. Give the person a stable name and compact summary, then state one goal, the motivation behind it, and one stationary next action that belongs to the person rather than the player. nextIntentKind must be observe, contact, wait, or attempt; move is not allowed. ${toolMode ? "nextAction is a required string; return the empty string when the domain action is omitted." : "nextAction may be omitted only when goal already states the concrete action."} observableTrace is the sensory evidence that next action would leave in the scene. cadenceMinutes is when this person may next act. Put materialize_support_actor immediately before one dialogue or interaction record_world_event ${supportPerformerInstruction} and whose affectedHandles includes that handle. The event contains the person's actual words or action. Code derives every identity, placement, role, priority, plan step, timing bounds, scope, version, and receipt; it persists the goal and plan and admits the person to the normal scheduler.`,
     `For contact with a roster person, write that targeted person's actual spoken reply, silence, gesture, or action in the record_world_event summary and ${toolMode ? "copy the person's supplied performer key into performingActorKey" : "copy the person's handle into performingActorHandle"}. The performer must be one of PLAYER_INTENT's actor targets. The only exception is introduced-support-actor immediately after its materialize_support_actor effect. Do not replace the exchange with audit labels such as common knowledge, offers no interpretation, nothing further, or has nothing to share. If the person withholds something, show the words or action used to withhold it. A concrete deflection, counterquestion, or condition is useful when ACTOR_DIRECTIVES support one.`,
     CAMPAIGN_ROUTE_AUTHORITY_BOUNDARY,
     "ROUTE_AUTHORITY is code-owned route topology and access for the current action. Every route or access statement in event prose must match it. Do not invent payment, permission, stamps, credentials, checkpoints, intermediate locations, blockage, or detours.",
@@ -2806,7 +3891,7 @@ function prompt(
     "Order movement effects as origin interaction, player move_actor with null actorHandle, optional companion move_actor with the targeted actorHandle, then arrival or destination interaction. Put any record_world_event describing the arrival after the movement effects and use eventClass scene for an actorless arrival. Every person described as present in a destination summary must already be there or have a preceding accepted move_actor effect, and their handle must appear in affectedHandles.",
     "A committed PLAYER_MOVEMENT places the player inside the destination's shared location scene. An arrival summary must not leave the player outside a door, gate, or other access boundary unless supplied route or location authority already represents that boundary. If an unnamed recipient does not answer, report only the lack of a reply; do not claim that the destination is empty or inaccessible.",
     "DESTINATION_SCENE is code-authoritative arrival context when PLAYER_MOVEMENT is non-null. Its description contains only player-visible surface facts, and every name in presentPeople is directly perceivable and identifiable in that exact scene. Ground the arrival in this context. Do not call the scene empty, move a listed person behind an unentered boundary, or contradict their presence. Do not make a listed person speak or act unless the accepted effects establish that action.",
-    `record_world_event accepts exactly four eventClass values: dialogue, interaction, discovery, or scene. These are eventClass values only and must never appear in kind. Dialogue and interaction mean that a targeted nonplayer actor performs the event: set ${performerField} to ${toolMode ? "that actor's supplied key" : "that actor"} and include the same actor handle in affectedHandles. The introduced-support-actor exception is valid only immediately after materialize_support_actor. Discovery and scene are actorless: set ${performerField} to ${actorlessPerformerValue}, and do not use their summary to make a person speak, decide, transact, disclose information, become a contact, move, depart, arrive, follow, accompany anyone, or otherwise change location. Actor placement changes only through an accepted move_actor or materialize_support_actor effect; dialogue, intention, gesture, and SOURCE_MOMENT prose are not movement authority. When PLAYER_INTENT targets no actor, every record_world_event must be actorless unless it is the required event immediately following materialize_support_actor. A player's physical attempt that has no nonplayer performer must use its typed effect or an actorless discovery/scene result. For an observe result that changes no durable entity, return exactly one effect shaped as ${recordWorldEventObservationShape}; do not add a second inspect, observe, discover, reveal, or describe effect. Use scene for an arrival or other directly perceived situation that is neither observation nor contact. Return a grounded summary and grounded affectedHandles. Omit exposure from record_world_event; code attaches direct perception at the player's current location at that effect's chronological position.`,
+    `record_world_event accepts exactly four eventClass values: dialogue, interaction, discovery, or scene. These are eventClass values only and must never appear in kind. Dialogue and interaction mean that a targeted nonplayer actor performs the event: set ${performerField} to ${toolMode ? "that actor's supplied key" : "that actor"} and include the same actor handle in affectedHandles. The introduced-support-actor exception is valid only immediately after materialize_support_actor. Discovery and scene are actorless: set ${performerField} to ${actorlessPerformerValue}, and may carry ambient presentation prose only under this boundary: ${CAMPAIGN_PLAY_AMBIENT_PRESENTATION_BOUNDARY} Do not use an actorless summary to establish an actor, subject, player-facing response, contact, decision, or durable or later-relied-on person state. Actor placement changes only through an accepted move_actor or materialize_support_actor effect; dialogue, intention, gesture, ambient movement prose, and SOURCE_MOMENT prose are not movement authority. When PLAYER_INTENT targets no actor, every record_world_event must be actorless unless it is the required event immediately following materialize_support_actor. A player's physical attempt that has no nonplayer performer must use its typed effect or an actorless discovery/scene result. For an observe result that changes no durable entity, return exactly one effect shaped as ${recordWorldEventObservationShape}; do not add a second inspect, observe, discover, reveal, or describe effect. Use scene for an arrival or other directly perceived situation that is neither observation nor contact. Return a grounded summary and grounded affectedHandles. Omit exposure from record_world_event; code attaches direct perception at the player's current location at that effect's chronological position.`,
     "When a contact action only delivers the player's speech, confirmation, promise, or future plan, complete it with one grounded dialogue or interaction response from each required targeted actor. Their acknowledgement proves that the contact occurred; do not repeat the player's wording or invent an agreement, debt, duty, payment, or obligation effect.",
     "record_world_event may quote a price, warning, request, or possible charge, but it never creates, increases, reduces, pays, or settles a binding obligation. Use the matching typed obligation effect for authoritative debt changes.",
     resourceEffectKinds.has("adjust_actor_possession")
@@ -2846,7 +3931,7 @@ function prompt(
         ? "The application enforces requiredObligationEffect cardinality and injects its exact kind, parties, handles, unit, and amount. The matching obligation array has exactly one item when required and the other obligation array is empty. Do not echo authority fields. Prose never creates or settles an obligation."
         : "requiredObligationEffect in RULING is code-enforced Judge authority. Include exactly one matching obligation effect and no other obligation effect. Match both actor directions and every supplied handle, unit, and amount. Omitting, duplicating, reversing, or changing that effect invalidates the whole proposal before Rulebook execution. Prose never creates or settles an obligation."
       : "",
-    "OBLIGATION_AUTHORITY is the exact Judge-owned obligation transition for this action. When kind is none, event prose may describe an offer, quote, request, promise, acceptance in principle, refusal, counteroffer, or future plan only while every debt balance, payment, and completed bargain remains unchanged. Do not say or imply that anyone now owes, is due, must pay, has paid, is square, settled, fulfilled, or has completed a bargained return. When kind is incur_actor_obligation or pay_actor_obligation, include exactly the matching permitted typed effect and make the prose agree with it. Do not invent parties, handles, units, amounts, payment, or another obligation.",
+    "OBLIGATION_AUTHORITY is the exact Judge-owned obligation transition for this action. When kind is none, event prose may describe an offer, quote, request, promise, acceptance in principle, refusal, counteroffer, or future plan only while every debt balance, payment, and completed bargain remains unchanged. If CONTACT_LIFECYCLE_CONTEXT supplies an existing completed paid_delivery and outstanding receivable, the event may truthfully report those typed facts as unchanged, including that the receivable remains due, but it must not create, increase, reduce, settle, pay, or otherwise transition any balance, payment, obligation, or completed commitment. Without that supplied context, do not say or imply that anyone now owes, is due, must pay, has paid, is square, settled, fulfilled, or has completed a bargained return. When kind is incur_actor_obligation or pay_actor_obligation, include exactly the matching permitted typed effect and make the prose agree with it. Do not invent parties, handles, units, amounts, payment, or another obligation.",
     "When OBLIGATION_AUTHORITY kind is none, player-authored words such as square, settled, paid, or fulfilled are inert intent text. Do not repeat or paraphrase them as an accepted outcome; record only the grounded response while debt and payment state remain unchanged.",
     resourceEffectKinds.has("adjust_actor_possession")
       ? `Every non-null adjust_actor_possession name must be at most ${CAMPAIGN_PLAY_LIMITS.name} characters. Keep the name short and put state, contents, provenance, and other details in summary.`
@@ -2916,10 +4001,15 @@ function prompt(
         && check.reviewFailedChecks.includes("player_intent_unfulfilled"),
     );
     const recoveryInstruction = [
-      "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. For mechanical_authority_rejected, make every mechanically durable claim in each event summary agree with the typed resource effects and ROUTE_AUTHORITY. If no typed authority changes a possession, obligation, or route, keep the event summary non-mechanical.",
+      "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. For mechanical_authority_rejected, make every mechanically durable claim in each event summary agree with the typed resource effects and ROUTE_AUTHORITY. If no typed authority changes a possession, obligation, or route, keep the event summary non-mechanical. For a contact decision mismatch, use kind=none with all decision fields null unless the exact typed paid_delivery or unpaid_delivery contract is present; never recover a work, service, delivery, payment, compensation, debt, duty, custody, access, permission, or relationship transition as a null-effect kind=offer.",
       ...(contractDiagnostic === undefined
         ? []
-        : [`The previous tool response failed the ${contractDiagnostic.phase} contract at ${contractDiagnostic.coordinate}. Return the same fixed object shape with that coordinate corrected. Do not add prose or change any code-owned field.`]),
+        : [
+          `The previous tool response failed the ${contractDiagnostic.phase} contract at ${contractDiagnostic.coordinate}. Return the same fixed object shape with that coordinate corrected. Do not add prose or change any code-owned field.`,
+          ...(contractDiagnostic.schemaIssue === undefined
+            ? []
+            : [`The bounded schema issue is ${contractDiagnostic.schemaIssue.code} at ${contractDiagnostic.schemaIssue.path}. Correct that field using only the fixed contract and supplied vocabulary; do not change any other field.`]),
+        ]),
       ...(hasPlayerIntentUnfulfilled
         ? ["For player_intent_unfulfilled, resolve every material part of PLAYER_INTENT under RESOLUTION. A successful proposal must state the completed outcome of each named task, target, tool, delivery, contact, inspection, and explicit exclusion; travel alone cannot satisfy an additional task. For contact that only delivers the player's speech, confirmation, promise, or future plan, a grounded response from every required targeted actor proves completion without repeating the player's wording or creating a new agreement or obligation. A limited result or setback must state the concrete outcome of each part instead of dropping it. Use only existing authority and do not invent a replacement action."]
         : []),
@@ -2959,10 +4049,22 @@ function prompt(
       "TOOL_MODE_OUTPUT_CONTRACT",
       "Return one strict object with elapsedMinutes, effectOrder, and one required array for every effect kind: move_actor, enter_local_scene, set_route_state, set_actor_condition, update_actor_relation, update_actor_goal, advance_pressure, adjust_actor_possession, materialize_support_actor, incur_actor_obligation, pay_actor_obligation, and record_world_event.",
       "Each array item contains only the fields owned by that kind and never contains kind or fields from another kind. Return every required effect array. Set effectOrder to one effect kind per effect, in chronological order. Repeat a kind once for each row in that partition; rows are consumed in array order. Do not duplicate, omit, or invent an entry.",
+      `record_world_event items have exactly eventClass (dialogue, interaction, discovery, or scene), performingActorKey (one of ${JSON.stringify([...performerKeyVocabulary.map(({ key }) => key), ""])}), summary (at most ${CAMPAIGN_PLAY_LIMITS.text} characters), and affectedHandles (one or more exact copies from ALLOWED_HANDLES=${JSON.stringify(allowedHandles)} with no duplicates). Copy the supplied actor key for dialogue or interaction and use "" only for actorless discovery or scene.`,
       "Resource mechanics are code-owned and must not be echoed. For adjust_actor_possession, supply summary and affectedHandles, plus a non-empty name exactly for acquire with possessionHandle=null or transform; omit name for existing-stack acquire and spend. For incur_actor_obligation and pay_actor_obligation, supply only summary and affectedHandles.",
       "For move_actor.actorHandle and record_world_event.performingActorKey, include the required field and return the empty string \"\" when the domain value is null. For materialize_support_actor.nextAction, include the required string and return the empty string \"\" when the domain value is omitted. Never emit JSON null or omit a required field.",
       "For record_world_event, use only the supplied performingActorKey values. Use \"\" only for an actorless discovery or scene event.",
       "For exposure, always include predicates: use [] for protected, and use non-empty channel-specific predicates for projectable. Every predicate always includes channel, anchorHandle, visibleForMinutes, and triggers. Use visibleForMinutes=0 except for local_aftermath, and use triggers=[] except for route_state, which requires one to three unique triggers. Preserve effect order and return no prose.",
+      ...(contactContext === null
+        ? []
+        : [
+           "Include the required decisionProposal object alongside the effect arrays, using the exact contactDetail and pending-choice boundary above.",
+           "When the NPC explicitly accepts the player's concrete copper paid-delivery proposal this turn, include acceptedDeal and set decisionProposal.kind=none; otherwise omit acceptedDeal.",
+           ...(contactContext.lifecycleContext === null
+             ? []
+             : [
+               "When CONTACT_LIFECYCLE_CONTEXT is present, also include lifecycleAssertion as contact_response or reopen_completed_commitment. Choose contact_response for acknowledgement/status with no commitment, payment, or obligation effect; choose reopen_completed_commitment for a proposed reopening, reacceptance, or reset of completed terms, which generic contact cannot authorize.",
+             ]),
+         ]),
     ].join("\n"));
   }
   return instructions.filter((instruction) => instruction.length > 0).join("\n");
@@ -2997,6 +4099,20 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
         || admittedResolution.data.result === "no_effect") {
         throw new CampaignPlayGameMasterError("no_effect_ruling", null);
       }
+      const certifiedContact = request.contract === "certified_contact"
+        ? requireCertifiedContactContext(
+          request.frame,
+          admittedRuling.data,
+          admittedResolution.data,
+        )
+        : null;
+      const genericContact = request.contract === "certified_contact"
+        ? null
+        : genericContactContext(
+          request.frame,
+          admittedRuling.data,
+          admittedResolution.data,
+        );
       const effectiveRuling = normalizeReceivableCollectionAuthority(
         request.frame,
         admittedRuling.data,
@@ -3030,27 +4146,59 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
       let safeGenerationCode: SafeGenerateErrorCode | null = null;
       let planningStarted = false;
       try {
-      const promptText = prompt(
-        request.frame,
-        effectiveRuling,
-        admittedResolution.data,
-        request.recoveryFeedback,
-        obligationAuthority,
-        toolMode,
-      );
+      const contactPerformerKey = certifiedContact === null
+        ? null
+        : createToolPerformerKeyVocabulary([certifiedContact.targetActorHandle])[0]?.key;
+      const promptText = certifiedContact === null
+        ? prompt(
+          request.frame,
+          effectiveRuling,
+          admittedResolution.data,
+          request.recoveryFeedback,
+          obligationAuthority,
+          toolMode,
+          genericContact,
+        )
+        : certifiedContactPrompt(
+          request.frame,
+          effectiveRuling,
+          admittedResolution.data,
+          certifiedContact,
+          request.recoveryFeedback,
+        );
       let generated: SafeGenerateResult<unknown>;
       try {
         planningStarted = true;
         generated = await dependencies.generateObject({
           model: request.model,
-          schema: (toolMode
-            ? createToolProposalSchema(
-              handleMap,
-              permittedEffects,
-              worldEventPerformerHandles,
-              toolResourceAuthority!,
-            )
-            : constrainedProposalSchema(handleMap, permittedEffects)) as z.ZodType<unknown>,
+          schema: (certifiedContact !== null
+            ? toolMode
+              ? createCertifiedContactToolProposalSchema(
+                certifiedContact.playerActorHandle,
+                certifiedContact.targetActorHandle,
+                contactPerformerKey!,
+                certifiedContact.contactDetail,
+              )
+              : createCertifiedContactProposalSchema(
+                certifiedContact.playerActorHandle,
+                certifiedContact.targetActorHandle,
+                certifiedContact.contactDetail,
+              )
+            : toolMode
+              ? createToolProposalSchema(
+                handleMap,
+                permittedEffects,
+                worldEventPerformerHandles,
+                toolResourceAuthority!,
+                genericContact?.contactDetail,
+                genericContact?.lifecycleContext !== null,
+              )
+              : constrainedProposalSchema(
+                handleMap,
+                permittedEffects,
+                genericContact?.contactDetail,
+                genericContact?.lifecycleContext !== null,
+              )) as z.ZodType<unknown>,
           prompt: promptText,
           temperature: request.temperature,
           maxOutputTokens: request.budget.maximumOutputTokens,
@@ -3078,10 +4226,12 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
           toolMode ? undefined : { cause },
         );
         if (toolMode && isSafeGenerateObjectContractErrorCode(safeCode)) {
-          const contractDiagnostic = {
-            phase: "provider_extraction",
+          const contractDiagnostic = contractDiagnosticFromSafeSchemaDiagnostics(
+            getSafeGenerateObjectSchemaDiagnostics(cause),
+          ) ?? {
+            phase: "provider_extraction" as const,
             coordinate: "proposal.provider_response",
-          } as const;
+          };
           rememberCampaignPlayGameMasterContractDiagnostic(error, contractDiagnostic);
           rememberCampaignPlayGameMasterRecoveryFeedback(error, {
             diagnostic: "game_master_semantic_validation_mismatch",
@@ -3102,7 +4252,72 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
       }
       phase = "compilation";
       try {
-        const proposal = toolMode
+        const decodedContact = certifiedContact !== null
+          ? toolMode
+            ? decodeCertifiedContactToolProposal(
+              generated.object,
+              certifiedContact.playerActorHandle,
+              certifiedContact.targetActorHandle,
+              contactPerformerKey!,
+              certifiedContact.contactDetail,
+            )
+            : decodeCertifiedContactProposal(
+              generated.object,
+              certifiedContact.playerActorHandle,
+              certifiedContact.targetActorHandle,
+              certifiedContact.contactDetail,
+            )
+          : null;
+        const decodedGeneric = certifiedContact === null && genericContact !== null
+          ? toolMode
+            ? decodeToolProposal(
+              generated.object,
+              handleMap,
+              permittedEffects,
+              worldEventPerformerHandles,
+                request.frame,
+                effectiveRuling,
+                admittedResolution.data,
+                genericContact.contactDetail,
+                genericContact.lifecycleContext !== null,
+              )
+            : (() => {
+                const parsed = constrainedProposalSchema(
+                  handleMap,
+                  permittedEffects,
+                  genericContact.contactDetail,
+                  genericContact.lifecycleContext !== null,
+                ).safeParse(generated.object);
+                if (!parsed.success) {
+                  throw new CampaignPlayGameMasterError(
+                    "model_contract_failed",
+                    null,
+                    null,
+                    { cause: parsed.error },
+                  );
+                }
+                return {
+                  proposal: {
+                    elapsedMinutes: parsed.data.elapsedMinutes,
+                    effects: parsed.data.effects,
+                  },
+                  decisionProposal: decodeContactDecisionProposal(
+                    parsed.data,
+                    genericContact.contactDetail,
+                  ),
+                  acceptedDeal: decodeAcceptedBilateralDeal(
+                    parsed.data,
+                    genericContact.contactDetail,
+                  ),
+                  lifecycleAssertion: (parsed.data as {
+                    lifecycleAssertion?: ContactLifecycleAssertion;
+                  }).lifecycleAssertion ?? null,
+                };
+              })()
+          : null;
+        const decodedContactResult: DecodedCampaignPlayContactProposal | null =
+          decodedContact ?? decodedGeneric;
+        const proposal = decodedContactResult?.proposal ?? (toolMode
           ? decodeToolProposal(
             generated.object,
             handleMap,
@@ -3111,21 +4326,27 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
             request.frame,
             effectiveRuling,
             admittedResolution.data,
-          )
-          : generated.object;
+          ).proposal
+          : generated.object);
         const compiled = compile(
-            request.frame,
-            effectiveRuling,
-            admittedResolution.data,
-            request.uncertaintyAuthority,
-            proposal,
-          );
+          request.frame,
+          effectiveRuling,
+          admittedResolution.data,
+          request.uncertaintyAuthority,
+          proposal,
+          decodedContactResult?.decisionProposal ?? null,
+          decodedContactResult?.acceptedDeal ?? null,
+        );
         const reviewInput = mechanicalAuthorityReviewInput(
           proposal,
           request.frame,
           effectiveRuling,
           admittedResolution.data,
           obligationAuthority,
+          decodedContactResult?.decisionProposal ?? null,
+          decodedContactResult?.acceptedDeal ?? null,
+          genericContact?.lifecycleContext ?? null,
+          decodedContactResult?.lifecycleAssertion ?? null,
         );
         if (reviewInput === null) {
           return freeze({

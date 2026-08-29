@@ -443,6 +443,13 @@ export function fromRichParsedCharacter(
       tier: "key",
       displayName: rich.name,
       canonicalStatus: opts.canonicalStatus ?? "original",
+      behavioralCore: {
+        motives: [],
+        pressureResponses: [],
+        taboos: [],
+        attachments: [],
+        selfImage: rich.personaSummary,
+      },
       personality: {
         summary: rich.personalitySummary,
         voice: rich.personalityVoice,

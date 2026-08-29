@@ -1,10 +1,16 @@
 import crypto from "node:crypto";
 import type {
   CampaignPlayConsequence,
+  CampaignPlayDecisionAcceptEffect,
+  CampaignPlayDecisionDisposition,
+  CampaignPlayDecisionKind,
+  CampaignPlayDecisionStatus,
+  CampaignPlayDecisionOutcome,
   CampaignPlayJournalEntry,
   CampaignPlayNarratorPacket,
   CampaignPlaySuggestedAction,
   CampaignPlayVisibleActor,
+  CampaignPlayVisibleCommitment,
   CampaignPlayVisibleLocation,
   CampaignPlayVisibleObligation,
   CampaignPlayVisiblePossession,
@@ -159,6 +165,23 @@ export interface CampaignPlayLiveActorObligation {
   outstandingAmount: number;
 }
 
+export interface CampaignPlayLivePendingDecision {
+  decisionKey: string;
+  actorId: string;
+  actorHandle: string;
+  kind: CampaignPlayDecisionKind;
+  status: CampaignPlayDecisionStatus;
+  sourceTurnId: string;
+  summary: string;
+  acceptLabel: string;
+  declineLabel: string;
+  acceptEffect: CampaignPlayDecisionAcceptEffect | null;
+  resolutionEventId: string | null;
+  resolutionTurnId: string | null;
+  resolutionDisposition: CampaignPlayDecisionDisposition | null;
+  worldVersion: number;
+}
+
 export interface CampaignPlayHumanMechanicalIdentity {
   actorId: string;
   recordHash: string;
@@ -179,6 +202,7 @@ export interface CampaignPlayMechanicalProjectionInput {
   goals: readonly CampaignPlayLiveGoal[];
   possessions: readonly CampaignPlayLiveActorPossession[];
   obligations: readonly CampaignPlayLiveActorObligation[];
+  pendingDecisions?: readonly CampaignPlayLivePendingDecision[];
 }
 
 export interface CampaignPlayRuntimeProjectionInput {
@@ -225,11 +249,13 @@ export interface CampaignPlayPublicProjectionInput {
   visiblePressures: readonly CampaignPlayVisiblePressure[];
   possessions: readonly CampaignPlayVisiblePossession[];
   obligations: readonly CampaignPlayVisibleObligation[];
+  commitments: readonly CampaignPlayVisibleCommitment[];
   consequences: readonly CampaignPlayConsequence[];
   journal: readonly CampaignPlayPublicJournalEntry[];
   narration: CampaignPlayProjectionRecord | null;
   narrationOperation?: CampaignPlayProjectionRecord | null;
   utilityActions?: readonly CampaignPlaySuggestedAction[];
+  decisionOutcomes?: readonly CampaignPlayDecisionOutcome[];
 }
 
 export interface CampaignPlayPublicJournalEntry {
@@ -743,7 +769,8 @@ function isAcceptedMechanicalBase(input: CampaignPlayMechanicalProjectionInput):
     input.relations.length === 0 &&
     input.goals.length === 0 &&
     input.possessions.length === 0 &&
-    input.obligations.length === 0;
+    input.obligations.length === 0 &&
+    (input.pendingDecisions?.length ?? 0) === 0;
 }
 
 export function projectCampaignPlayMechanicalTruth(
@@ -797,6 +824,7 @@ export function projectCampaignPlayMechanicalTruth(
       input.obligations,
       (row) => `${row.debtorActorId}\u0000${row.creditorActorId}\u0000${row.unitKey}\u0000${row.obligationId}`,
     ),
+    pendingDecisions: sortByText(input.pendingDecisions ?? [], (row) => row.decisionKey),
   });
 }
 
@@ -948,7 +976,44 @@ export function projectCampaignPlayPublicState(
       unitKey: row.unitKey,
       outstandingAmount: row.outstandingAmount,
     })), (row) => row.handle),
+    commitments: sortByText(input.commitments.map((row) => {
+      const common = {
+        handle: row.handle,
+        status: row.status,
+        counterpartyHandle: row.counterpartyHandle,
+        counterpartyName: row.counterpartyName,
+        title: row.title,
+        subjectName: row.subjectName,
+        destinationHandle: row.destinationHandle,
+        destinationName: row.destinationName,
+        dueWorldTimeLabel: row.dueWorldTimeLabel,
+      };
+      return row.kind === "paid_delivery"
+        ? {
+            ...common,
+            kind: "paid_delivery" as const,
+            feeUnit: row.feeUnit,
+            feeAmount: row.feeAmount,
+            paymentTiming: row.paymentTiming,
+          }
+        : {
+            ...common,
+            kind: "unpaid_delivery" as const,
+          };
+    }), (row) => row.handle),
     consequences: input.consequences.map(publicConsequence),
+    decisionOutcomes: [...(input.decisionOutcomes ?? [])]
+      .sort((left, right) => compareText(left.decisionKey, right.decisionKey))
+      .map((outcome) => ({
+        decisionKey: outcome.decisionKey,
+        actorHandle: outcome.actorHandle,
+        kind: outcome.kind,
+        disposition: outcome.disposition,
+        status: outcome.status,
+        sourceTurnId: outcome.sourceTurnId,
+        summary: outcome.summary,
+        acceptEffect: outcome.acceptEffect,
+      })),
     journal: [...input.journal]
       .sort((left, right) =>
         compareNumber(left.worldTimeMinutes, right.worldTimeMinutes) ||

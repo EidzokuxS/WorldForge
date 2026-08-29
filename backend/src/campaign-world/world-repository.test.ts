@@ -27,6 +27,7 @@ import {
   CAMPAIGN_B,
   candidateFixture,
   createMigratedCampaign,
+  evidenceFixture,
   sourceFixture,
 } from "./world-repository.test-support.js";
 
@@ -864,6 +865,171 @@ describe("Campaign World repository", () => {
           outputTokens: null,
           totalTokens: null,
         },
+      }),
+      "invalid_build_transition",
+    );
+  });
+
+  it.each([
+    ["cast first", "world_cast", "world_connections"],
+    ["connections first", "world_connections", "world_cast"],
+  ] as const)(
+    "accepts overlapping branch completion in either order for %s",
+    (_label, firstCompleted, secondCompleted) => {
+      const source = sourceFixture();
+      acquire(repository, BUILD_ID, source);
+      repository.recordStageStarted({
+        buildId: BUILD_ID,
+        stage: "world_frame",
+        createdAt: 1_010,
+      });
+      repository.recordStageCompleted({
+        buildId: BUILD_ID,
+        stage: "world_frame",
+        evidence: evidenceFixture("world_frame"),
+        createdAt: 1_011,
+      });
+      repository.recordStageStarted({
+        buildId: BUILD_ID,
+        stage: "world_cast",
+        createdAt: 1_012,
+      });
+      repository.recordStageStarted({
+        buildId: BUILD_ID,
+        stage: "world_connections",
+        createdAt: 1_013,
+      });
+
+      expect(repository.loadLatestBuild()).toMatchObject({
+        status: "running",
+        stage: "world_connections",
+      });
+      expectRepositoryError(
+        () => repository.recordStageStarted({
+          buildId: BUILD_ID,
+          stage: "validation",
+          createdAt: 1_014,
+        }),
+        "invalid_build_transition",
+      );
+
+      repository.recordStageCompleted({
+        buildId: BUILD_ID,
+        stage: firstCompleted,
+        evidence: evidenceFixture(firstCompleted),
+        createdAt: 1_015,
+      });
+      expect(repository.loadLatestBuild()).toMatchObject({ stage: "world_connections" });
+      expectRepositoryError(
+        () => repository.recordStageStarted({
+          buildId: BUILD_ID,
+          stage: "validation",
+          createdAt: 1_016,
+        }),
+        "invalid_build_transition",
+      );
+
+      repository.recordStageCompleted({
+        buildId: BUILD_ID,
+        stage: secondCompleted,
+        evidence: evidenceFixture(secondCompleted),
+        createdAt: 1_017,
+      });
+      repository.recordStageStarted({
+        buildId: BUILD_ID,
+        stage: "validation",
+        createdAt: 1_018,
+      });
+      expect(repository.loadLatestBuild()).toMatchObject({ stage: "validation" });
+      repository.recordStageCompleted({
+        buildId: BUILD_ID,
+        stage: "validation",
+        createdAt: 1_019,
+      });
+      repository.recordStageStarted({
+        buildId: BUILD_ID,
+        stage: "persistence",
+        createdAt: 1_020,
+      });
+      expect(repository.loadLatestBuild()).toMatchObject({ stage: "persistence" });
+
+      const events = repository.loadBuildEvents(BUILD_ID);
+      expect(events.map((event) => `${event.type}:${"stage" in event ? event.stage : ""}`)).toEqual([
+        "build_started:",
+        "stage_started:world_frame",
+        "stage_completed:world_frame",
+        "stage_started:world_cast",
+        "stage_started:world_connections",
+        `stage_completed:${firstCompleted}`,
+        `stage_completed:${secondCompleted}`,
+        "stage_started:validation",
+        "stage_completed:validation",
+        "stage_started:persistence",
+      ]);
+    },
+  );
+
+  it("rejects branch completion before start and duplicate overlap transitions", () => {
+    const source = sourceFixture();
+    acquire(repository, BUILD_ID, source);
+    repository.recordStageStarted({
+      buildId: BUILD_ID,
+      stage: "world_frame",
+      createdAt: 1_010,
+    });
+    expectRepositoryError(
+      () => repository.recordStageCompleted({
+        buildId: BUILD_ID,
+        stage: "world_connections",
+        evidence: evidenceFixture("world_connections"),
+        createdAt: 1_011,
+      }),
+      "invalid_build_transition",
+    );
+    repository.recordStageCompleted({
+      buildId: BUILD_ID,
+      stage: "world_frame",
+      evidence: evidenceFixture("world_frame"),
+      createdAt: 1_012,
+    });
+    repository.recordStageStarted({
+      buildId: BUILD_ID,
+      stage: "world_cast",
+      createdAt: 1_013,
+    });
+    repository.recordStageStarted({
+      buildId: BUILD_ID,
+      stage: "world_connections",
+      createdAt: 1_014,
+    });
+    expectRepositoryError(
+      () => repository.recordStageStarted({
+        buildId: BUILD_ID,
+        stage: "world_cast",
+        createdAt: 1_015,
+      }),
+      "invalid_build_transition",
+    );
+    expectRepositoryError(
+      () => repository.recordStageStarted({
+        buildId: BUILD_ID,
+        stage: "world_connections",
+        createdAt: 1_016,
+      }),
+      "invalid_build_transition",
+    );
+    repository.recordStageCompleted({
+      buildId: BUILD_ID,
+      stage: "world_cast",
+      evidence: evidenceFixture("world_cast"),
+      createdAt: 1_017,
+    });
+    expectRepositoryError(
+      () => repository.recordStageCompleted({
+        buildId: BUILD_ID,
+        stage: "world_cast",
+        evidence: evidenceFixture("world_cast"),
+        createdAt: 1_018,
       }),
       "invalid_build_transition",
     );

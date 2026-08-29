@@ -104,4 +104,85 @@ describe("ActionDock", () => {
     await user.click(utility);
     expect(onSuggested).toHaveBeenCalledWith("utility-wait");
   });
+
+  it("preserves a typed commitment binding when a delivery control is selected", async () => {
+    const user = userEvent.setup();
+    const onSuggested = vi.fn();
+    const commitmentBinding = {
+      commitmentHandle: "commitment-active",
+      action: "deliver" as const,
+      counterpartyHandle: "actor-orsa",
+      subjectName: "Sealed dispatch",
+      destinationHandle: "location-north-cut",
+    };
+    render(<ActionDock
+      draft=""
+      inputLocked={false}
+      journalOpen={false}
+      journalTriggerRef={createRef()}
+      onDraftChange={vi.fn()}
+      onJournalOpen={vi.fn()}
+      onSubmitFreeform={vi.fn()}
+      onSubmitSuggested={onSuggested}
+      pendingAdmission={false}
+      suggestedActions={[{
+        choiceHandle: "choice-deliver-dispatch",
+        label: "Deliver Sealed dispatch at North Cut",
+        commitmentBinding,
+      }]}
+      utilityActions={[]}
+      suggestionsHeadingRef={createRef()}
+      textareaRef={createRef()}
+    />);
+
+    await user.click(screen.getByRole("button", {
+      name: "Deliver Sealed dispatch at North Cut",
+    }));
+    expect(onSuggested).toHaveBeenCalledWith(
+      "choice-deliver-dispatch",
+      undefined,
+      commitmentBinding,
+    );
+  });
+
+  it("preserves a typed receivable binding when a collection control is selected", async () => {
+    const user = userEvent.setup();
+    const onSuggested = vi.fn();
+    const obligationBinding = {
+      obligationHandle: "obligation-aldous",
+      debtorHandle: "actor-aldous",
+      creditorHandle: "actor-mara",
+      unitKey: "copper" as const,
+      amount: 12,
+    };
+    render(<ActionDock
+      draft=""
+      inputLocked={false}
+      journalOpen={false}
+      journalTriggerRef={createRef()}
+      onDraftChange={vi.fn()}
+      onJournalOpen={vi.fn()}
+      onSubmitFreeform={vi.fn()}
+      onSubmitSuggested={onSuggested}
+      pendingAdmission={false}
+      suggestedActions={[{
+        choiceHandle: "choice-collect-debt",
+        label: "Collect 12 copper from Aldous Crane",
+        obligationBinding,
+      }]}
+      utilityActions={[]}
+      suggestionsHeadingRef={createRef()}
+      textareaRef={createRef()}
+    />);
+
+    await user.click(screen.getByRole("button", {
+      name: "Collect 12 copper from Aldous Crane",
+    }));
+    expect(onSuggested).toHaveBeenCalledWith(
+      "choice-collect-debt",
+      undefined,
+      undefined,
+      obligationBinding,
+    );
+  });
 });

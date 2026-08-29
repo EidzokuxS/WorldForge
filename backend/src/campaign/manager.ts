@@ -5,6 +5,7 @@ import { closeDb, connectDb, getDb } from "../db/index.js";
 import { runMigrations } from "../db/migrate.js";
 import { campaigns } from "../db/schema.js";
 import type {
+  CampaignPlayerIdentityClaim,
   CampaignWorldbookSelection,
   CampaignMeta,
   IpResearchContext,
@@ -30,6 +31,7 @@ export type { CampaignMeta } from "@worldforge/shared";
 export type CampaignConfigFile = {
   name: string;
   premise: string;
+  playerIdentity?: CampaignPlayerIdentityClaim;
   seeds?: WorldSeeds;
   ipContext?: IpResearchContext;
   premiseDivergence?: PremiseDivergence;
@@ -59,6 +61,29 @@ function ensureCampaignsDir() {
   }
 }
 
+export function parseCampaignPlayerIdentityClaim(
+  value: unknown,
+): CampaignPlayerIdentityClaim | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (
+    typeof value !== "object"
+    || value === null
+    || Array.isArray(value)
+    || Object.keys(value).length !== 1
+    || !Object.hasOwn(value, "displayName")
+    || typeof (value as { displayName?: unknown }).displayName !== "string"
+  ) {
+    throw new AppError("Campaign config.json playerIdentity is invalid.", 500);
+  }
+  const displayName = (value as { displayName: string }).displayName.trim();
+  if (displayName.length === 0 || displayName.length > 200) {
+    throw new AppError("Campaign config.json playerIdentity is invalid.", 500);
+  }
+  return { displayName };
+}
+
 function parseCampaignConfigSnapshot(rawConfig: string): CampaignConfigSnapshot {
   let parsedValue: unknown;
   try {
@@ -78,12 +103,14 @@ function parseCampaignConfigSnapshot(rawConfig: string): CampaignConfigSnapshot 
   if (!parsed.name || typeof parsed.createdAt !== "number") {
     throw new AppError("Campaign config.json is invalid.", 500);
   }
+  const playerIdentity = parseCampaignPlayerIdentityClaim(parsed.playerIdentity);
 
   return {
     raw,
     config: {
       name: parsed.name,
       premise: parsed.premise ?? "",
+      ...(playerIdentity ? { playerIdentity } : {}),
       seeds: parseWorldSeeds(parsed.seeds) ?? undefined,
       ipContext: parsed.ipContext ?? undefined,
       premiseDivergence: parsed.premiseDivergence ?? undefined,
@@ -198,6 +225,7 @@ export async function createCampaign(
     worldgenSourceHint?: string | null;
     worldgenResearchEnabled?: boolean | null;
     worldbookSelection?: CampaignWorldbookSelection[] | null;
+    playerIdentity?: CampaignPlayerIdentityClaim | null;
   },
 ): Promise<CampaignMeta> {
   const trimmedName = name.trim();
@@ -205,6 +233,9 @@ export async function createCampaign(
   if (!trimmedName) {
     throw new AppError("Campaign name is required.", 400);
   }
+  const playerIdentity = parseCampaignPlayerIdentityClaim(
+    initialContext?.playerIdentity ?? undefined,
+  );
   // Premise is optional when worldbook provides context
 
   if (hasAnyActiveTurn()) {
@@ -240,6 +271,7 @@ export async function createCampaign(
     writeCampaignConfig(campaignDir, {
       name: trimmedName,
       premise: trimmedPremise,
+      ...(playerIdentity ? { playerIdentity } : {}),
       seeds,
       ipContext: initialContext?.ipContext ?? undefined,
       premiseDivergence: initialContext?.premiseDivergence ?? undefined,

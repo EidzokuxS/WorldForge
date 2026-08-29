@@ -163,6 +163,7 @@ export type {
   PressureUrgency,
   RouteCost,
   ActorRelationType,
+  CampaignPlayerIdentityClaim,
   CampaignWorldSourceReference,
   CampaignWorldSource,
   CampaignWorldLocation,
@@ -182,6 +183,8 @@ export type {
   CampaignWorldAcceptanceReceipt,
 } from "./campaign-world.js";
 
+export { normalizeCampaignIdentityName } from "./campaign-world.js";
+
 export {
   CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES,
   CAMPAIGN_PLAY_LIMITS,
@@ -200,6 +203,10 @@ export {
   CAMPAIGN_PLAY_SSE_EVENT_TYPE_VALUES,
   CAMPAIGN_PLAY_CHARACTER_SOURCE_VALUES,
   CAMPAIGN_PLAY_NARRATION_OPERATION_STATUS_VALUES,
+  CAMPAIGN_PLAY_DECISION_KIND_VALUES,
+  CAMPAIGN_PLAY_DECISION_STATUS_VALUES,
+  CAMPAIGN_PLAY_DECISION_DISPOSITION_VALUES,
+  CAMPAIGN_PLAY_COMMITMENT_ACTION_VALUES,
 } from "./campaign-play.js";
 
 export type {
@@ -229,7 +236,21 @@ export type {
   CampaignPlayVisiblePressure,
   CampaignPlayVisiblePossession,
   CampaignPlayVisibleObligation,
+  CampaignPlayObligationSettlement,
   CampaignPlayConsequence,
+  CampaignPlayDecisionBinding,
+  CampaignPlayObligationBinding,
+  CampaignPlayCommitmentAction,
+  CampaignPlayCommitmentBinding,
+  CampaignPlayDecisionOutcome,
+  CampaignPlayDecisionAcceptEffect,
+  CampaignPlayPlayerCommitment,
+  CampaignPlayVisibleCommitment,
+  CampaignPlayOpeningDecision,
+  CampaignPlayDecisionObservation,
+  CampaignPlayDecisionKind,
+  CampaignPlayDecisionStatus,
+  CampaignPlayDecisionDisposition,
   CampaignPlayJournalEntry,
   CampaignPlayAvailableIntent,
   CampaignPlayOpeningContext,

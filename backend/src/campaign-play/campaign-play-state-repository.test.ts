@@ -27,6 +27,8 @@ import {
 } from "./campaign-play-state-repository.js";
 import {
   deriveCampaignPlayCommandId,
+  deriveCampaignPlayCommitmentId,
+  deriveCampaignPlayReceiptId,
   executeCampaignPlayRulebookBatch,
   preflightCampaignPlayRulebook,
   type CampaignPlayRulebookFrame,
@@ -38,6 +40,7 @@ import {
   deriveCampaignPlayPossessionId,
   deriveCampaignPlayPossessionKey,
   deriveCampaignPlayPublicHandle,
+  hashCampaignPlayProjection,
   type CampaignPlayProjectionRecord,
 } from "./campaign-play-projection.js";
 
@@ -180,7 +183,13 @@ function insertAdmittedTurn(
     priorWorldVersion: number;
     priorRuntimeRevision: number;
   },
+  options: {
+    turnId?: string;
+    turnKind?: "opening" | "player_action";
+  } = {},
 ): void {
+  const turnId = options.turnId ?? "turn-opening";
+  const turnKind = options.turnKind ?? "opening";
   context.sqlite.prepare(`
     INSERT INTO campaign_play_turns (
       id, campaign_id, turn_kind, supersedes_turn_id, input_json, input_hash,
@@ -190,17 +199,35 @@ function insertAdmittedTurn(
       model_selection_json, public_packet_hash, interrupted_stage, error_code,
       resume_eligible, mutation_audit_json, submitted_at, updated_at, completed_at
     ) VALUES (
-      'turn-opening', ?, 'opening', NULL, '{}', ?, 'opening-one', ?, ?, ?, NULL,
+      ?, ?, ?, NULL, '{}', ?, ?, ?, ?, ?, NULL,
       'admitted', ?, 1, NULL, 0, NULL, '{}', NULL, NULL, NULL, 0, '{}', 1600, 1600, NULL
     )
   `).run(
+    turnId,
     context.campaignId,
+    turnKind,
     HASH_A,
+    `${turnKind}-${turnId}`,
     context.priorWorldVersion,
     context.priorRuntimeRevision,
     context.priorWorldVersion,
     HASH_B,
   );
+}
+
+function completeAdmittedTurn(
+  context: { sqlite: CampaignPlayDatabaseHandle["sqlite"] },
+  turnId: string,
+  worldVersion: number,
+  completedAt: number,
+): void {
+  context.sqlite.prepare(`
+    UPDATE campaign_play_turns
+    SET stage = 'completed', final_world_version = ?,
+      public_packet_hash = ?, mutation_audit_json = '{"kind":"control_budget_continuity"}',
+      completed_at = ?, updated_at = ?
+    WHERE id = ?
+  `).run(worldVersion, HASH_C, completedAt, completedAt, turnId);
 }
 
 function characterBootstrapFrame(
@@ -223,6 +250,7 @@ function characterBootstrapFrame(
     actorConditions: [],
     possessions: [],
     obligations: [],
+    commitments: [],
     pressureStates: [],
     placements: world.placements.map((row) => ({
       placementId: row.id,
@@ -1399,6 +1427,905 @@ describe("Campaign Play atomic Rulebook execution", () => {
       .toEqual({ receipts: 1, events: 1 });
   });
 
+  it("persists and completes a paid-delivery commitment through the atomic rulebook batches", () => {
+    const { handle, repository, state } = createEligibleState();
+    const character = prepareCharacterBatch(state);
+    const characterState = repository.commitMechanicalAndRuntime({
+      worldVersionAdvance: 1,
+      event: {
+        eventId: "runtime-commitment-character",
+        turnId: null,
+        kind: "character_created",
+        workerEpoch: null,
+        protectedPayloadHash: HASH_C,
+        createdAt: 1_400,
+      },
+      mutate(context) {
+        executeCampaignPlayRulebookBatch({
+          ...character,
+          context,
+          turnId: null,
+          createdAt: 1_400,
+          persistPlayerCharacter: persistCharacter,
+        });
+      },
+    });
+
+    repository.commitRuntime({
+      event: {
+        eventId: "runtime-commitment-opening-admitted",
+        turnId: "turn-opening",
+        kind: "turn_admitted",
+        workerEpoch: null,
+        protectedPayloadHash: HASH_B,
+        createdAt: 1_500,
+      },
+      mutate(context) {
+        insertAdmittedTurn(context, { turnId: "turn-opening", turnKind: "opening" });
+      },
+    });
+
+    const openingFrame = openingBootstrapFrame(characterState);
+    const startingMacroId = openingFrame.acceptedWorld.locations.find((row) => row.isStarting)!.id;
+    const destination = openingFrame.acceptedWorld.locations.find((row) =>
+      row.kind === "persistent_sublocation" && row.parentLocationId === startingMacroId)!;
+    const agent = openingFrame.acceptedWorld.actors.find((candidate) =>
+      candidate.kind === "person"
+      && candidate.controller === "agent"
+      && openingFrame.acceptedWorld.placements.some((placement) =>
+        placement.actorId === candidate.id && placement.locationId === destination.id));
+    if (!agent) throw new Error("Commitment fixture requires an agent at the player destination.");
+    const destinationHandle = deriveCampaignPlayPublicHandle(
+      "location",
+      openingFrame.campaignId,
+      destination.id,
+    );
+    const acceptEffect = {
+      kind: "paid_delivery" as const,
+      title: "Carry the statue",
+      subjectName: "a stone statue",
+      destinationHandle,
+      feeUnit: "copper" as const,
+      feeAmount: 3,
+      paymentTiming: "on_completion" as const,
+      dueInMinutes: 35,
+    };
+    const decisionKey = `decision:${hashCampaignPlayProjection({
+      campaignId: openingFrame.campaignId,
+      sourceOpeningTurnId: "turn-opening",
+      actorId: agent.id,
+      kind: "offer",
+    }).slice(0, 32)}`;
+    const openingBatchId = "batch-commitment-opening";
+    const openingRoot = { kind: "turn" as const, turnId: "turn-opening" };
+    const openingInputs = [
+      {
+        kind: "initialize_player_placement" as const,
+        actorId: "actor-player",
+        locationId: destination.id,
+        readScope: [
+          { kind: "actor" as const, id: "actor-player" },
+          { kind: "location" as const, id: destination.id },
+        ],
+        writeScope: [
+          { kind: "actor" as const, id: "actor-player" },
+          { kind: "location" as const, id: destination.id },
+        ],
+      },
+      {
+        kind: "initialize_world_time" as const,
+        worldTimeMinutes: 0,
+        readScope: [],
+        writeScope: [],
+      },
+      ...openingFrame.acceptedWorld.pressures.map((pressure) => ({
+        kind: "initialize_pressure_state" as const,
+        pressureId: pressure.id,
+        progress: 0,
+        status: "active" as const,
+        readScope: [{ kind: "pressure" as const, id: pressure.id }],
+        writeScope: [{ kind: "pressure" as const, id: pressure.id }],
+      })),
+      {
+        kind: "decision_open" as const,
+        decisionKey,
+        actorId: agent.id,
+        actorHandle: deriveCampaignPlayPublicHandle("actor", openingFrame.campaignId, agent.id),
+        decisionKind: "offer" as const,
+        sourceTurnId: "turn-opening",
+        summary: "Sennet offers a paid night delivery.",
+        acceptLabel: "Agree on a fee and take the night job",
+        declineLabel: "Decline the night job",
+        acceptEffect,
+        readScope: [{ kind: "actor" as const, id: agent.id }],
+        writeScope: [{ kind: "decision" as const, id: decisionKey }],
+      },
+    ];
+    let openingExpectedWorldVersion = openingFrame.worldVersion;
+    const openingCommands = openingInputs.map((input, order) => {
+      const command = {
+        ...input,
+        commandId: deriveCampaignPlayCommandId(
+          openingFrame.campaignId,
+          "turn-opening",
+          openingBatchId,
+          order,
+        ),
+        batchId: openingBatchId,
+        order,
+        causalParent: order === 0
+          ? openingRoot
+          : {
+            kind: "command" as const,
+            commandId: deriveCampaignPlayCommandId(
+              openingFrame.campaignId,
+              "turn-opening",
+              openingBatchId,
+              order - 1,
+            ),
+          },
+        source: { kind: "system" as const, system: "opening_bootstrap" as const },
+        expectedWorldVersion: openingExpectedWorldVersion,
+        exposure: { mode: "protected" as const },
+      };
+      openingExpectedWorldVersion += 1;
+      return command;
+    });
+    const openingPreflight = preflightCampaignPlayRulebook({
+      frame: openingFrame,
+      authority: {
+        purpose: "opening",
+        turnId: "turn-opening",
+        actorId: "actor-player",
+        rootParent: openingRoot,
+        authorizedRefs: [
+          { kind: "actor", id: "actor-player" },
+          { kind: "actor", id: agent.id },
+          ...openingFrame.acceptedWorld.locations.map((row) => ({ kind: "location" as const, id: row.id })),
+          ...openingFrame.acceptedWorld.pressures.map((row) => ({ kind: "pressure" as const, id: row.id })),
+        ],
+        witnessActorIds: [],
+        knownWorldEventIds: [],
+      },
+      batch: {
+        batchId: openingBatchId,
+        baseWorldVersion: openingFrame.worldVersion,
+        commands: openingCommands,
+      },
+    });
+    if (!openingPreflight.accepted) {
+      throw new Error(`Commitment opening preflight failed: ${openingPreflight.denial.code}`);
+    }
+    repository.commitMechanicalAndRuntime({
+      worldVersionAdvance: openingCommands.length,
+      event: {
+        eventId: "runtime-commitment-opening-settled",
+        turnId: "turn-opening",
+        kind: "primary_settled",
+        workerEpoch: 1,
+        protectedPayloadHash: HASH_C,
+        createdAt: 1_600,
+      },
+      mutate(context) {
+        executeCampaignPlayRulebookBatch({
+          frame: openingFrame,
+          accepted: openingPreflight,
+          context,
+          turnId: "turn-opening",
+          createdAt: 1_600,
+        });
+        context.sqlite.prepare(`UPDATE campaign_play_states
+          SET setup_phase = 'ready', opened_at = ? WHERE campaign_id = ?`)
+          .run(1_600, context.campaignId);
+        completeAdmittedTurn(context, "turn-opening", context.targetWorldVersion, 1_600);
+      },
+    });
+
+    const ready = loadCampaignPlayRulebookFrame(handle);
+    const resolveTurnId = "turn-commitment-decision-resolve";
+    repository.commitRuntime({
+      event: {
+        eventId: "runtime-commitment-decision-resolve-admitted",
+        turnId: resolveTurnId,
+        kind: "turn_admitted",
+        workerEpoch: null,
+        protectedPayloadHash: HASH_B,
+        createdAt: 1_620,
+      },
+      mutate(context) {
+        insertAdmittedTurn(context, { turnId: resolveTurnId, turnKind: "player_action" });
+      },
+    });
+    const resolveFrame = loadCampaignPlayRulebookFrame(handle);
+    const resolveBatchId = "batch-commitment-decision-resolve";
+    const resolveRoot = { kind: "turn" as const, turnId: resolveTurnId };
+    const resolveCommand = {
+      commandId: deriveCampaignPlayCommandId(
+        resolveFrame.campaignId,
+        resolveTurnId,
+        resolveBatchId,
+        0,
+      ),
+      batchId: resolveBatchId,
+      order: 0,
+      kind: "decision_resolve" as const,
+      causalParent: resolveRoot,
+      source: { kind: "system" as const, system: "game_master" as const },
+      expectedWorldVersion: resolveFrame.worldVersion,
+      readScope: [
+        { kind: "actor" as const, id: agent.id },
+        { kind: "decision" as const, id: decisionKey },
+      ],
+      writeScope: [{ kind: "decision" as const, id: decisionKey }],
+      exposure: { mode: "protected" as const },
+      decisionKey,
+      actorId: agent.id,
+      actorHandle: deriveCampaignPlayPublicHandle("actor", resolveFrame.campaignId, agent.id),
+      decisionKind: "offer" as const,
+      sourceTurnId: "turn-opening",
+      summary: "Sennet offers a paid night delivery.",
+      selectedLabel: "Agree on a fee and take the night job",
+      disposition: "accept" as const,
+    };
+    const resolvePreflight = preflightCampaignPlayRulebook({
+      frame: resolveFrame,
+      authority: {
+        purpose: "player_action",
+        turnId: resolveTurnId,
+        actorId: "actor-player",
+        rootParent: resolveRoot,
+        authorizedRefs: [
+          { kind: "actor", id: "actor-player" },
+          { kind: "actor", id: agent.id },
+          { kind: "decision", id: decisionKey },
+        ],
+        witnessActorIds: [],
+        knownWorldEventIds: [],
+      },
+      batch: {
+        batchId: resolveBatchId,
+        baseWorldVersion: resolveFrame.worldVersion,
+        commands: [resolveCommand],
+      },
+    });
+    if (!resolvePreflight.accepted) {
+      throw new Error(`Decision resolution preflight failed: ${resolvePreflight.denial.code}`);
+    }
+    repository.commitMechanicalAndRuntime({
+      worldVersionAdvance: 1,
+      event: {
+        eventId: "runtime-commitment-decision-resolved",
+        turnId: resolveTurnId,
+        kind: "primary_settled",
+        workerEpoch: 1,
+        protectedPayloadHash: HASH_C,
+        createdAt: 1_630,
+      },
+      mutate(context) {
+        executeCampaignPlayRulebookBatch({
+          frame: resolveFrame,
+          accepted: resolvePreflight,
+          context,
+          turnId: resolveTurnId,
+          createdAt: 1_630,
+        });
+        completeAdmittedTurn(context, resolveTurnId, context.targetWorldVersion, 1_630);
+      },
+    });
+
+    const createTurnId = "turn-commitment-create";
+    repository.commitRuntime({
+      event: {
+        eventId: "runtime-commitment-create-admitted",
+        turnId: createTurnId,
+        kind: "turn_admitted",
+        workerEpoch: null,
+        protectedPayloadHash: HASH_B,
+        createdAt: 1_640,
+      },
+      mutate(context) {
+        insertAdmittedTurn(context, { turnId: createTurnId, turnKind: "player_action" });
+      },
+    });
+    const createFrame = loadCampaignPlayRulebookFrame(handle);
+    const commitmentId = deriveCampaignPlayCommitmentId(createFrame.campaignId, decisionKey);
+    const createBatchId = "batch-commitment-create";
+    const createRoot = { kind: "turn" as const, turnId: createTurnId };
+    const createRefs = [
+      { kind: "commitment" as const, id: commitmentId },
+      { kind: "actor" as const, id: "actor-player" },
+      { kind: "actor" as const, id: agent.id },
+      { kind: "decision" as const, id: decisionKey },
+      { kind: "location" as const, id: destination.id },
+    ];
+    const createCommand = {
+      commandId: deriveCampaignPlayCommandId(
+        createFrame.campaignId,
+        createTurnId,
+        createBatchId,
+        0,
+      ),
+      batchId: createBatchId,
+      order: 0,
+      kind: "create_player_commitment" as const,
+      causalParent: createRoot,
+      source: { kind: "system" as const, system: "game_master" as const },
+      expectedWorldVersion: createFrame.worldVersion,
+      readScope: createRefs.slice(1),
+      writeScope: [createRefs[0]!],
+      exposure: { mode: "protected" as const },
+      commitmentId,
+      sourceDecisionKey: decisionKey,
+      sourceTurnId: "turn-opening",
+      performerActorId: "actor-player",
+      counterpartyActorId: agent.id,
+      commitmentKind: "paid_delivery" as const,
+      title: acceptEffect.title,
+      subjectName: acceptEffect.subjectName,
+      destinationHandle,
+      feeUnit: "copper" as const,
+      feeAmount: acceptEffect.feeAmount,
+      paymentTiming: "on_completion" as const,
+      acceptedWorldTimeMinutes: createFrame.worldTimeMinutes!,
+      dueWorldTimeMinutes: createFrame.worldTimeMinutes! + acceptEffect.dueInMinutes,
+      affectedRefs: createRefs,
+    };
+    const commitmentAuthority = {
+      purpose: "player_action" as const,
+      turnId: createTurnId,
+      actorId: "actor-player",
+      rootParent: createRoot,
+      authorizedRefs: [
+        { kind: "actor" as const, id: "actor-player" },
+        { kind: "actor" as const, id: agent.id },
+        { kind: "decision" as const, id: decisionKey },
+        { kind: "location" as const, id: destination.id },
+      ],
+      witnessActorIds: [],
+      knownWorldEventIds: [],
+    };
+    const createPreflight = preflightCampaignPlayRulebook({
+      frame: createFrame,
+      authority: commitmentAuthority,
+      batch: {
+        batchId: createBatchId,
+        baseWorldVersion: createFrame.worldVersion,
+        commands: [createCommand],
+      },
+    });
+    if (!createPreflight.accepted) {
+      throw new Error(`Commitment creation preflight failed: ${createPreflight.denial.code}`);
+    }
+    const createState = repository.commitMechanicalAndRuntime({
+      worldVersionAdvance: 1,
+      event: {
+        eventId: "runtime-commitment-created",
+        turnId: createTurnId,
+        kind: "actor_job_transitioned",
+        workerEpoch: 1,
+        protectedPayloadHash: HASH_C,
+        createdAt: 1_650,
+      },
+      mutate(context) {
+        executeCampaignPlayRulebookBatch({
+          frame: createFrame,
+          accepted: createPreflight,
+          context,
+          turnId: createTurnId,
+          createdAt: 1_650,
+        });
+        completeAdmittedTurn(context, createTurnId, context.targetWorldVersion, 1_650);
+      },
+    });
+    const sourceReceiptId = deriveCampaignPlayReceiptId(
+      createFrame.campaignId,
+      createTurnId,
+      createBatchId,
+      0,
+    );
+    const createdRow = handle.sqlite.prepare(`SELECT
+      commitment_id AS commitmentId, campaign_id AS campaignId,
+      performer_actor_id AS performerActorId, counterparty_actor_id AS counterpartyActorId,
+      kind, status, title, subject_name AS subjectName,
+      destination_handle AS destinationHandle, fee_unit AS feeUnit,
+      fee_amount AS feeAmount, payment_timing AS paymentTiming,
+      accepted_world_time_minutes AS acceptedWorldTimeMinutes,
+      due_world_time_minutes AS dueWorldTimeMinutes,
+      source_decision_key AS sourceDecisionKey, source_turn_id AS sourceTurnId,
+      source_receipt_id AS sourceReceiptId, completion_turn_id AS completionTurnId,
+      completion_receipt_id AS completionReceiptId, world_version AS worldVersion
+      FROM campaign_play_commitments WHERE campaign_id = ?`).get(createFrame.campaignId);
+    expect(createdRow).toEqual({
+      commitmentId,
+      campaignId: createFrame.campaignId,
+      performerActorId: "actor-player",
+      counterpartyActorId: agent.id,
+      kind: "paid_delivery",
+      status: "active",
+      title: acceptEffect.title,
+      subjectName: acceptEffect.subjectName,
+      destinationHandle,
+      feeUnit: "copper",
+      feeAmount: acceptEffect.feeAmount,
+      paymentTiming: "on_completion",
+      acceptedWorldTimeMinutes: 0,
+      dueWorldTimeMinutes: acceptEffect.dueInMinutes,
+      sourceDecisionKey: decisionKey,
+      sourceTurnId: "turn-opening",
+      sourceReceiptId,
+      completionTurnId: null,
+      completionReceiptId: null,
+      worldVersion: createFrame.worldVersion + 1,
+    });
+    expect(createState.authority.worldVersion).toBe(createFrame.worldVersion + 1);
+    expect(handle.sqlite.prepare(`SELECT
+      (SELECT count(*) FROM campaign_play_commitments WHERE campaign_id = ?) AS commitments,
+      (SELECT count(*) FROM campaign_play_actor_obligations WHERE campaign_id = ?) AS obligations,
+      (SELECT count(*) FROM campaign_play_actor_possessions WHERE campaign_id = ?) AS possessions,
+      (SELECT count(*) FROM campaign_play_commands WHERE campaign_id = ? AND command_kind = 'create_player_commitment') AS commands,
+      (SELECT count(*) FROM campaign_play_receipts WHERE campaign_id = ? AND receipt_id = ?) AS receipts,
+      (SELECT count(*) FROM campaign_play_events WHERE campaign_id = ? AND event_kind = 'player_commitment_created') AS events`
+    ).get(
+      createFrame.campaignId,
+      createFrame.campaignId,
+      createFrame.campaignId,
+      createFrame.campaignId,
+      createFrame.campaignId,
+      sourceReceiptId,
+      createFrame.campaignId,
+    )).toEqual({ commitments: 1, obligations: 0, possessions: 0, commands: 1, receipts: 1, events: 1 });
+    expect(loadCampaignPlayRulebookFrame(handle).commitments).toMatchObject([{
+      commitmentId,
+      sourceReceiptId,
+      status: "active",
+      dueWorldTimeMinutes: acceptEffect.dueInMinutes,
+    }]);
+
+    const countsBeforeCreateReplay = handle.sqlite.prepare(`SELECT
+      (SELECT count(*) FROM campaign_play_commitments WHERE campaign_id = ?) AS commitments,
+      (SELECT count(*) FROM campaign_play_commands WHERE campaign_id = ?) AS commands,
+      (SELECT count(*) FROM campaign_play_receipts WHERE campaign_id = ?) AS receipts,
+      (SELECT count(*) FROM campaign_play_events WHERE campaign_id = ?) AS events`
+    ).get(createFrame.campaignId, createFrame.campaignId, createFrame.campaignId, createFrame.campaignId);
+    expect(() => repository.commitMechanicalAndRuntime({
+      worldVersionAdvance: 1,
+      event: {
+        eventId: "runtime-commitment-create-replay",
+        turnId: createTurnId,
+        kind: "actor_job_transitioned",
+        workerEpoch: 1,
+        protectedPayloadHash: HASH_C,
+        createdAt: 1_651,
+      },
+      mutate(context) {
+        executeCampaignPlayRulebookBatch({
+          frame: createFrame,
+          accepted: createPreflight,
+          context,
+          turnId: createTurnId,
+          createdAt: 1_651,
+        });
+      },
+    })).toThrow();
+    expect(handle.sqlite.prepare(`SELECT
+      (SELECT count(*) FROM campaign_play_commitments WHERE campaign_id = ?) AS commitments,
+      (SELECT count(*) FROM campaign_play_commands WHERE campaign_id = ?) AS commands,
+      (SELECT count(*) FROM campaign_play_receipts WHERE campaign_id = ?) AS receipts,
+      (SELECT count(*) FROM campaign_play_events WHERE campaign_id = ?) AS events`
+    ).get(createFrame.campaignId, createFrame.campaignId, createFrame.campaignId, createFrame.campaignId))
+      .toEqual(countsBeforeCreateReplay);
+
+    const invalidCases = [
+      {
+        name: "performer",
+        command: { ...createCommand, performerActorId: agent.id },
+      },
+      {
+        name: "counterparty",
+        command: { ...createCommand, counterpartyActorId: "actor-player" },
+      },
+      {
+        name: "destination",
+        command: {
+          ...createCommand,
+          destinationHandle: deriveCampaignPlayPublicHandle(
+            "location",
+            createFrame.campaignId,
+            createFrame.acceptedWorld.locations.find((location) => location.id !== destination.id)!.id,
+          ),
+        },
+      },
+    ];
+    for (const invalid of invalidCases) {
+      const invalidPreflight = preflightCampaignPlayRulebook({
+        frame: loadCampaignPlayRulebookFrame(handle),
+        authority: {
+          ...commitmentAuthority,
+          authorizedRefs: [
+            ...commitmentAuthority.authorizedRefs,
+            ...createFrame.acceptedWorld.actors.map((actorRow) => ({ kind: "actor" as const, id: actorRow.id })),
+            ...createFrame.acceptedWorld.locations.map((location) => ({ kind: "location" as const, id: location.id })),
+          ],
+        },
+        batch: {
+          batchId: createBatchId,
+          baseWorldVersion: createFrame.worldVersion,
+          commands: [invalid.command],
+        },
+      });
+      expect(invalidPreflight.accepted, invalid.name).toBe(false);
+    }
+
+    const cargoTurnId = "turn-commitment-cargo";
+    repository.commitRuntime({
+      event: {
+        eventId: "runtime-commitment-cargo-admitted",
+        turnId: cargoTurnId,
+        kind: "turn_admitted",
+        workerEpoch: null,
+        protectedPayloadHash: HASH_B,
+        createdAt: 1_655,
+      },
+      mutate(context) {
+        insertAdmittedTurn(context, { turnId: cargoTurnId, turnKind: "player_action" });
+      },
+    });
+    const cargoFrame = loadCampaignPlayRulebookFrame(handle);
+    const deliveryPossessionKey = deriveCampaignPlayPossessionKey(acceptEffect.subjectName);
+    const deliveryPossessionId = deriveCampaignPlayPossessionId(
+      cargoFrame.campaignId,
+      "actor-player",
+      deliveryPossessionKey,
+    );
+    const cargoBatchId = "batch-commitment-cargo";
+    const cargoRoot = { kind: "turn" as const, turnId: cargoTurnId };
+    const cargoCommand = {
+      commandId: deriveCampaignPlayCommandId(
+        cargoFrame.campaignId,
+        cargoTurnId,
+        cargoBatchId,
+        0,
+      ),
+      batchId: cargoBatchId,
+      order: 0,
+      kind: "adjust_actor_possession" as const,
+      causalParent: cargoRoot,
+      source: { kind: "system" as const, system: "game_master" as const },
+      expectedWorldVersion: cargoFrame.worldVersion,
+      readScope: [
+        { kind: "actor" as const, id: "actor-player" },
+        { kind: "possession" as const, id: deliveryPossessionId },
+      ],
+      writeScope: [{ kind: "possession" as const, id: deliveryPossessionId }],
+      exposure: { mode: "protected" as const },
+      actorId: "actor-player",
+      possessionId: deliveryPossessionId,
+      possessionKey: deliveryPossessionKey,
+      name: acceptEffect.subjectName,
+      quantityDelta: 1,
+      summary: "The traveler takes the stone statue for delivery.",
+      affectedRefs: [
+        { kind: "actor" as const, id: "actor-player" },
+        { kind: "possession" as const, id: deliveryPossessionId },
+      ],
+    };
+    const cargoAuthority = {
+      purpose: "player_action" as const,
+      turnId: cargoTurnId,
+      actorId: "actor-player",
+      rootParent: cargoRoot,
+      authorizedRefs: [
+        { kind: "actor" as const, id: "actor-player" },
+        { kind: "possession" as const, id: deliveryPossessionId },
+      ],
+      witnessActorIds: [],
+      knownWorldEventIds: [],
+    };
+    const cargoPreflight = preflightCampaignPlayRulebook({
+      frame: cargoFrame,
+      authority: cargoAuthority,
+      batch: {
+        batchId: cargoBatchId,
+        baseWorldVersion: cargoFrame.worldVersion,
+        commands: [cargoCommand],
+      },
+    });
+    if (!cargoPreflight.accepted) {
+      throw new Error(`Commitment cargo preflight failed: ${cargoPreflight.denial.code}`);
+    }
+    repository.commitMechanicalAndRuntime({
+      worldVersionAdvance: 1,
+      event: {
+        eventId: "runtime-commitment-cargo-created",
+        turnId: cargoTurnId,
+        kind: "actor_job_transitioned",
+        workerEpoch: 1,
+        protectedPayloadHash: HASH_C,
+        createdAt: 1_656,
+      },
+      mutate(context) {
+        executeCampaignPlayRulebookBatch({
+          frame: cargoFrame,
+          accepted: cargoPreflight,
+          context,
+          turnId: cargoTurnId,
+          createdAt: 1_656,
+        });
+        completeAdmittedTurn(context, cargoTurnId, context.targetWorldVersion, 1_656);
+      },
+    });
+    expect(handle.sqlite.prepare(`SELECT quantity FROM campaign_play_actor_possessions
+      WHERE campaign_id = ? AND possession_id = ?`).get(
+      cargoFrame.campaignId,
+      deliveryPossessionId,
+    )).toEqual({ quantity: 1 });
+
+    const completeTurnId = "turn-commitment-complete";
+    repository.commitRuntime({
+      event: {
+        eventId: "runtime-commitment-complete-admitted",
+        turnId: completeTurnId,
+        kind: "turn_admitted",
+        workerEpoch: null,
+        protectedPayloadHash: HASH_B,
+        createdAt: 1_660,
+      },
+      mutate(context) {
+        insertAdmittedTurn(context, { turnId: completeTurnId, turnKind: "player_action" });
+      },
+    });
+    const completeFrame = loadCampaignPlayRulebookFrame(handle);
+    const completeBatchId = "batch-commitment-complete";
+    const completeRoot = { kind: "turn" as const, turnId: completeTurnId };
+    const completionObligationId = deriveCampaignPlayObligationId(
+      completeFrame.campaignId,
+      agent.id,
+      "actor-player",
+      "copper",
+    );
+    const completionRefs = [
+      { kind: "commitment" as const, id: commitmentId },
+      { kind: "actor" as const, id: "actor-player" },
+      { kind: "actor" as const, id: agent.id },
+      { kind: "possession" as const, id: deliveryPossessionId },
+      { kind: "location" as const, id: destination.id },
+      { kind: "obligation" as const, id: completionObligationId },
+    ];
+    const spendCommand = {
+      commandId: deriveCampaignPlayCommandId(
+        completeFrame.campaignId,
+        completeTurnId,
+        completeBatchId,
+        0,
+      ),
+      batchId: completeBatchId,
+      order: 0,
+      kind: "adjust_actor_possession" as const,
+      causalParent: completeRoot,
+      source: { kind: "system" as const, system: "game_master" as const },
+      expectedWorldVersion: completeFrame.worldVersion,
+      readScope: [
+        { kind: "actor" as const, id: "actor-player" },
+        { kind: "possession" as const, id: deliveryPossessionId },
+      ],
+      writeScope: [{ kind: "possession" as const, id: deliveryPossessionId }],
+      exposure: { mode: "protected" as const },
+      actorId: "actor-player",
+      possessionId: deliveryPossessionId,
+      possessionKey: deliveryPossessionKey,
+      name: acceptEffect.subjectName,
+      quantityDelta: -1,
+      summary: "The traveler hands over the stone statue.",
+      affectedRefs: [
+        { kind: "actor" as const, id: "actor-player" },
+        { kind: "possession" as const, id: deliveryPossessionId },
+      ],
+    };
+    const incurCommand = {
+      commandId: deriveCampaignPlayCommandId(
+        completeFrame.campaignId,
+        completeTurnId,
+        completeBatchId,
+        1,
+      ),
+      batchId: completeBatchId,
+      order: 1,
+      kind: "incur_actor_obligation" as const,
+      causalParent: {
+        kind: "command" as const,
+        commandId: spendCommand.commandId,
+      },
+      source: { kind: "system" as const, system: "game_master" as const },
+      expectedWorldVersion: completeFrame.worldVersion + 1,
+      readScope: [
+        { kind: "actor" as const, id: agent.id },
+        { kind: "actor" as const, id: "actor-player" },
+        { kind: "obligation" as const, id: completionObligationId },
+      ],
+      writeScope: [{ kind: "obligation" as const, id: completionObligationId }],
+      exposure: { mode: "protected" as const },
+      debtorActorId: agent.id,
+      creditorActorId: "actor-player",
+      obligationId: completionObligationId,
+      unitKey: "copper" as const,
+      amount: acceptEffect.feeAmount,
+      summary: "The employer owes the agreed delivery fee.",
+      affectedRefs: [
+        { kind: "actor" as const, id: agent.id },
+        { kind: "actor" as const, id: "actor-player" },
+        { kind: "obligation" as const, id: completionObligationId },
+      ],
+    };
+    const completeCommand = {
+      commandId: deriveCampaignPlayCommandId(
+        completeFrame.campaignId,
+        completeTurnId,
+        completeBatchId,
+        2,
+      ),
+      batchId: completeBatchId,
+      order: 2,
+      kind: "complete_player_commitment" as const,
+      causalParent: {
+        kind: "command" as const,
+        commandId: incurCommand.commandId,
+      },
+      source: { kind: "system" as const, system: "game_master" as const },
+      expectedWorldVersion: completeFrame.worldVersion + 2,
+      readScope: completionRefs,
+      writeScope: [
+        { kind: "possession" as const, id: deliveryPossessionId },
+        { kind: "obligation" as const, id: completionObligationId },
+        { kind: "commitment" as const, id: commitmentId },
+      ],
+      exposure: { mode: "protected" as const },
+      commitmentId,
+      performerActorId: "actor-player",
+      counterpartyActorId: agent.id,
+      deliveryPossessionId,
+      affectedRefs: completionRefs,
+    };
+    const completionCommands = [spendCommand, incurCommand, completeCommand];
+    const completeAuthority = {
+      purpose: "player_action" as const,
+      turnId: completeTurnId,
+      actorId: "actor-player",
+      rootParent: completeRoot,
+      authorizedRefs: completionRefs,
+      witnessActorIds: [],
+      knownWorldEventIds: [],
+    };
+    const completePreflight = preflightCampaignPlayRulebook({
+      frame: completeFrame,
+      authority: completeAuthority,
+      batch: {
+        batchId: completeBatchId,
+        baseWorldVersion: completeFrame.worldVersion,
+        commands: completionCommands,
+      },
+    });
+    if (!completePreflight.accepted) {
+      throw new Error(`Commitment completion preflight failed: ${completePreflight.denial.code}`);
+    }
+    const completedState = repository.commitMechanicalAndRuntime({
+      worldVersionAdvance: 3,
+      event: {
+        eventId: "runtime-commitment-completed",
+        turnId: completeTurnId,
+        kind: "actor_job_transitioned",
+        workerEpoch: 1,
+        protectedPayloadHash: HASH_C,
+        createdAt: 1_670,
+      },
+      mutate(context) {
+        executeCampaignPlayRulebookBatch({
+          frame: completeFrame,
+          accepted: completePreflight,
+          context,
+          turnId: completeTurnId,
+          createdAt: 1_670,
+        });
+        completeAdmittedTurn(context, completeTurnId, context.targetWorldVersion, 1_670);
+      },
+    });
+    const completionReceiptId = deriveCampaignPlayReceiptId(
+      completeFrame.campaignId,
+      completeTurnId,
+      completeBatchId,
+      2,
+    );
+    expect(handle.sqlite.prepare(`SELECT status,
+      completion_turn_id AS completionTurnId,
+      completion_receipt_id AS completionReceiptId,
+      world_version AS worldVersion
+      FROM campaign_play_commitments WHERE campaign_id = ? AND commitment_id = ?`).get(
+      completeFrame.campaignId,
+      commitmentId,
+    )).toEqual({
+      status: "completed",
+      completionTurnId: completeTurnId,
+      completionReceiptId,
+      worldVersion: completeFrame.worldVersion + 3,
+    });
+    expect(completedState.authority.worldVersion).toBe(completeFrame.worldVersion + 3);
+    expect(handle.sqlite.prepare(`SELECT
+      (SELECT count(*) FROM campaign_play_actor_obligations WHERE campaign_id = ?) AS obligations,
+      (SELECT count(*) FROM campaign_play_actor_possessions WHERE campaign_id = ?) AS possessions,
+      (SELECT count(*) FROM campaign_play_events WHERE campaign_id = ? AND event_kind = 'player_commitment_completed') AS events,
+      (SELECT count(*) FROM campaign_play_receipts WHERE campaign_id = ? AND receipt_id = ?) AS receipts`
+    ).get(
+      completeFrame.campaignId,
+      completeFrame.campaignId,
+      completeFrame.campaignId,
+      completeFrame.campaignId,
+      completionReceiptId,
+    )).toEqual({ obligations: 1, possessions: 1, events: 1, receipts: 1 });
+    expect(handle.sqlite.prepare(`SELECT
+      debtor_actor_id AS debtorActorId, creditor_actor_id AS creditorActorId,
+      unit_key AS unitKey, principal_amount AS principalAmount,
+      outstanding_amount AS outstandingAmount
+      FROM campaign_play_actor_obligations
+      WHERE campaign_id = ? AND obligation_id = ?`).get(
+      completeFrame.campaignId,
+      completionObligationId,
+    )).toEqual({
+      debtorActorId: agent.id,
+      creditorActorId: "actor-player",
+      unitKey: "copper",
+      principalAmount: acceptEffect.feeAmount,
+      outstandingAmount: acceptEffect.feeAmount,
+    });
+    expect(handle.sqlite.prepare(`SELECT quantity FROM campaign_play_actor_possessions
+      WHERE campaign_id = ? AND possession_id = ?`).get(
+      completeFrame.campaignId,
+      deliveryPossessionId,
+    )).toEqual({ quantity: 0 });
+    const reloadedFrame = loadCampaignPlayRulebookFrame(handle);
+    expect(reloadedFrame.commitments).toMatchObject([{
+      commitmentId,
+      status: "completed",
+      completionTurnId: completeTurnId,
+      completionReceiptId,
+    }]);
+    expect(repository.loadState()!.authority.worldHash).toBe(completedState.authority.worldHash);
+
+    expect(() => repository.commitMechanicalAndRuntime({
+      worldVersionAdvance: 1,
+      event: {
+        eventId: "runtime-commitment-complete-replay",
+        turnId: completeTurnId,
+        kind: "actor_job_transitioned",
+        workerEpoch: null,
+        protectedPayloadHash: HASH_C,
+        createdAt: 1_671,
+      },
+      mutate(context) {
+        executeCampaignPlayRulebookBatch({
+          frame: completeFrame,
+          accepted: completePreflight,
+          context,
+          turnId: completeTurnId,
+          createdAt: 1_671,
+        });
+      },
+    })).toThrow();
+    expect(handle.sqlite.prepare(`SELECT count(*) AS count
+      FROM campaign_play_commitments WHERE campaign_id = ? AND status = 'completed'`).get(
+      completeFrame.campaignId,
+    )).toEqual({ count: 1 });
+
+    const completedReplayPreflight = preflightCampaignPlayRulebook({
+      frame: reloadedFrame,
+      authority: completeAuthority,
+      batch: {
+        batchId: completeBatchId,
+        baseWorldVersion: reloadedFrame.worldVersion,
+        commands: completionCommands,
+      },
+    });
+    expect(completedReplayPreflight.accepted).toBe(false);
+  });
+
   it("rolls back every ledger and authority write at each injected transaction boundary", () => {
     const { handle, repository, state } = createEligibleState(CAMPAIGN_B);
     const prepared = prepareCharacterBatch(state);
@@ -1913,6 +2840,7 @@ describe("Campaign Play state repository transactions", () => {
       visiblePressures: [],
       possessions: [],
       obligations: [],
+      commitments: [],
       newObservations: [],
       consequences: [],
       continuity: [],

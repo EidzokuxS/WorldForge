@@ -804,7 +804,7 @@ function insertActorReplanAttempt(
 }
 
 describe("Campaign Play core and Rulebook storage", () => {
-  it("migrates fresh campaign databases with the twenty-eight Campaign Play tables", () => {
+  it("migrates fresh campaign databases with the Campaign Play tables", () => {
     const databasePath = createMigratedCampaign(root, CAMPAIGN_A);
     const sqlite = new Database(databasePath);
     try {
@@ -826,6 +826,8 @@ describe("Campaign Play core and Rulebook storage", () => {
         { name: "campaign_play_actor_schedules" },
         { name: "campaign_play_characters" },
         { name: "campaign_play_commands" },
+        { name: "campaign_play_commitments" },
+        { name: "campaign_play_decisions" },
         { name: "campaign_play_event_exposures" },
         { name: "campaign_play_events" },
         { name: "campaign_play_model_stages" },
@@ -1011,6 +1013,637 @@ describe("Campaign Play core and Rulebook storage", () => {
     }
   });
 
+  it("persists certified decision and commitment terminal results through the migration guard", () => {
+    createAcceptedCampaign(CAMPAIGN_A);
+    const handle = openPlay(CAMPAIGN_A);
+    insertPlayState(handle);
+
+    const state = handle.sqlite.prepare(`
+      SELECT world_version AS worldVersion, runtime_revision AS runtimeRevision
+      FROM campaign_play_states WHERE campaign_id = ?
+    `).get(CAMPAIGN_A) as { worldVersion: number; runtimeRevision: number };
+    const insertCompletedTurn = (
+      routeKind: "certified_decision" | "certified_commitment" | "certified_obligation",
+      options: {
+        id?: string;
+        includeCommitmentCertificate?: boolean;
+        includeObligationCertificate?: boolean;
+        modelRouteKind?: string;
+      } = {},
+    ) => {
+      const turnId = options.id ?? `turn-${routeKind.replaceAll("_", "-")}`;
+      const includeCertificate = routeKind === "certified_commitment"
+        ? options.includeCommitmentCertificate !== false
+        : routeKind === "certified_obligation"
+          ? options.includeObligationCertificate !== false
+          : true;
+      const inputJson = JSON.stringify({
+        frame: {
+          executionRoute: routeKind === "certified_decision"
+            ? { kind: routeKind, certificate: { publicResult: { disposition: "deterministic" } } }
+            : {
+              kind: routeKind,
+              ...(includeCertificate ? {
+                certificate: {
+                  ...(routeKind === "certified_commitment"
+                    ? {
+                        actionSchemaVersion: 1,
+                        resolver: "code_owned",
+                        campaignId: CAMPAIGN_A,
+                        turnId,
+                        action: "collect",
+                      }
+                    : {
+                        actionSchemaVersion: 1,
+                        resolver: "code_owned",
+                        campaignId: CAMPAIGN_A,
+                        turnId,
+                        sourceTurnId: "source-turn",
+                        sourceMomentId: "source-moment",
+                        sourceMomentHash: HASH_A,
+                        sourcePacketHash: HASH_A,
+                        acceptedWorldVersion: state.worldVersion,
+                        baseWorldVersion: state.worldVersion,
+                        baseRuntimeRevision: 1,
+                        actorId: "actor-player",
+                        actorHandle: "actor-player",
+                        choiceHandle: "choice-collect",
+                        label: "Collect 3 copper from Mara Venn",
+                        obligationId: "obligation-id",
+                        obligationHandle: "obligation-handle",
+                        obligationBinding: {
+                          obligationHandle: "obligation-handle",
+                          debtorHandle: "actor-mara",
+                          creditorHandle: "actor-player",
+                          unitKey: "copper",
+                          amount: 3,
+                        },
+                        debtorActorId: "actor-mara",
+                        debtorActorHandle: "actor-mara",
+                        debtorName: "Mara Venn",
+                        creditorActorId: "actor-player",
+                        creditorActorHandle: "actor-player",
+                        unitKey: "copper",
+                        amount: 3,
+                        locationId: "location-a",
+                        locationHandle: "location-a",
+                        creditorPossessionId: "possession-copper",
+                        creditorPossessionKey: "copper",
+                        creditorPossessionName: "Copper",
+                      }),
+                },
+                certificateHash: "a".repeat(64),
+              } : {}),
+            },
+        },
+      });
+      const modelSelectionJson = JSON.stringify({ routeKind: options.modelRouteKind ?? routeKind });
+      expect(() => handle.sqlite.prepare(`
+      INSERT INTO campaign_play_turns (
+        id, campaign_id, turn_kind, supersedes_turn_id, input_json, input_hash,
+        idempotency_key, expected_world_version, expected_runtime_revision,
+        base_world_version, final_world_version, stage, frame_hash,
+        next_event_sequence, worker_lease_owner, worker_epoch,
+        worker_lease_expires_at, model_selection_json, public_packet_hash,
+        interrupted_stage, error_code, resume_eligible, mutation_audit_json,
+        submitted_at, updated_at, completed_at
+      ) VALUES (
+        @id, @campaignId, 'player_action', NULL, @inputJson, @inputHash,
+        @idempotencyKey, @worldVersion, @runtimeRevision, @worldVersion,
+        @worldVersion, 'completed', @frameHash, 1, NULL, 0, NULL,
+        @modelSelectionJson, @publicPacketHash, NULL, NULL, 0, '{}',
+        @submittedAt, @updatedAt, @completedAt
+      )
+      `).run({
+        id: turnId,
+        campaignId: CAMPAIGN_A,
+        inputJson,
+        inputHash: HASH_A,
+        idempotencyKey: `${turnId}-terminal`,
+        worldVersion: state.worldVersion,
+        runtimeRevision: state.runtimeRevision,
+        frameHash: HASH_B,
+        modelSelectionJson,
+        publicPacketHash: HASH_C,
+        submittedAt: routeKind === "certified_decision" ? 1_400 : 1_600,
+        updatedAt: routeKind === "certified_decision" ? 1_400 : 1_600,
+        completedAt: routeKind === "certified_decision" ? 1_500 : 1_700,
+      })).not.toThrow();
+    };
+
+    insertCompletedTurn("certified_decision");
+    insertCompletedTurn("certified_commitment");
+    insertCompletedTurn("certified_obligation");
+    expect(() => insertCompletedTurn("certified_commitment", {
+      id: "turn-certified-commitment-missing-certificate",
+      includeCommitmentCertificate: false,
+    })).toThrow();
+    expect(() => insertCompletedTurn("certified_commitment", {
+      id: "turn-certified-commitment-mismatched-selection",
+      modelRouteKind: "certified_decision",
+    })).toThrow();
+    expect(() => insertCompletedTurn("certified_obligation", {
+      id: "turn-certified-obligation-missing-certificate",
+      includeObligationCertificate: false,
+    })).toThrow();
+    expect(() => insertCompletedTurn("certified_obligation", {
+      id: "turn-certified-obligation-mismatched-selection",
+      modelRouteKind: "certified_commitment",
+    })).toThrow();
+    expect(handle.sqlite.prepare(`
+      SELECT count(*) AS count FROM campaign_play_turn_results
+      WHERE turn_id IN (?, ?, ?, ?)
+    `).get(
+      "turn-certified-commitment-missing-certificate",
+      "turn-certified-commitment-mismatched-selection",
+      "turn-certified-obligation-missing-certificate",
+      "turn-certified-obligation-mismatched-selection",
+    )).toEqual({ count: 0 });
+
+    expect(handle.sqlite.prepare(`
+      SELECT terminal_reason AS terminalReason
+      FROM campaign_play_turn_results WHERE turn_id = ?
+    `).get("turn-certified-decision")).toEqual({ terminalReason: "action_resolved" });
+    expect(handle.sqlite.prepare(`
+      SELECT terminal_reason AS terminalReason
+      FROM campaign_play_turn_results WHERE turn_id = ?
+    `).get("turn-certified-commitment")).toEqual({ terminalReason: "action_resolved" });
+    expect(handle.sqlite.prepare(`
+      SELECT terminal_reason AS terminalReason
+      FROM campaign_play_turn_results WHERE turn_id = ?
+    `).get("turn-certified-obligation")).toEqual({ terminalReason: "action_resolved" });
+    const triggerSql = handle.sqlite.prepare(`
+      SELECT name, sql FROM sqlite_schema
+      WHERE type = 'trigger' AND name IN (
+        'campaign_play_turn_results_insert_guard',
+        'campaign_play_turn_terminal_result',
+        'campaign_play_turn_terminal_result_insert'
+      ) ORDER BY name
+    `).all() as Array<{ name: string; sql: string }>;
+    expect(triggerSql).toHaveLength(3);
+    expect(triggerSql.every((trigger) => trigger.sql.includes("'certified_decision'"))).toBe(true);
+    expect(triggerSql.every((trigger) => trigger.sql.includes("'certified_observe'"))).toBe(true);
+    const branchMarkers: Record<string, string> = {
+      campaign_play_turn_results_insert_guard: `json_extract(t.input_json, '$.frame.executionRoute.kind') = 'certified_commitment'
+          AND json_extract(t.input_json, '$.frame.executionRoute.certificate.actionSchemaVersion') = 1
+          AND json_extract(t.input_json, '$.frame.executionRoute.certificate.resolver') = 'code_owned'
+          AND json_extract(t.input_json, '$.frame.executionRoute.certificate.campaignId') = t.campaign_id
+          AND json_extract(t.input_json, '$.frame.executionRoute.certificate.turnId') = t.id
+          AND json_extract(t.input_json, '$.frame.executionRoute.certificate.action') IN ('collect', 'deliver')
+          AND json_type(t.input_json, '$.frame.executionRoute.certificateHash') = 'text'
+          AND length(json_extract(t.input_json, '$.frame.executionRoute.certificateHash')) = 64
+          AND json_extract(t.input_json, '$.frame.executionRoute.certificateHash') NOT GLOB '*[^0-9a-fA-F]*'
+          AND json_extract(t.model_selection_json, '$.routeKind') = json_extract(t.input_json, '$.frame.executionRoute.kind')`,
+      campaign_play_turn_terminal_result: `json_extract(NEW.input_json, '$.frame.executionRoute.kind') = 'certified_commitment'
+      AND json_extract(NEW.input_json, '$.frame.executionRoute.certificate.actionSchemaVersion') = 1
+      AND json_extract(NEW.input_json, '$.frame.executionRoute.certificate.resolver') = 'code_owned'
+      AND json_extract(NEW.input_json, '$.frame.executionRoute.certificate.campaignId') = NEW.campaign_id
+      AND json_extract(NEW.input_json, '$.frame.executionRoute.certificate.turnId') = NEW.id
+      AND json_extract(NEW.input_json, '$.frame.executionRoute.certificate.action') IN ('collect', 'deliver')
+      AND json_type(NEW.input_json, '$.frame.executionRoute.certificateHash') = 'text'
+      AND length(json_extract(NEW.input_json, '$.frame.executionRoute.certificateHash')) = 64
+      AND json_extract(NEW.input_json, '$.frame.executionRoute.certificateHash') NOT GLOB '*[^0-9a-fA-F]*'
+      AND json_extract(NEW.model_selection_json, '$.routeKind') = json_extract(NEW.input_json, '$.frame.executionRoute.kind')`,
+      campaign_play_turn_terminal_result_insert: `json_extract(NEW.input_json, '$.frame.executionRoute.kind') = 'certified_commitment'
+      AND json_extract(NEW.input_json, '$.frame.executionRoute.certificate.actionSchemaVersion') = 1
+      AND json_extract(NEW.input_json, '$.frame.executionRoute.certificate.resolver') = 'code_owned'
+      AND json_extract(NEW.input_json, '$.frame.executionRoute.certificate.campaignId') = NEW.campaign_id
+      AND json_extract(NEW.input_json, '$.frame.executionRoute.certificate.turnId') = NEW.id
+      AND json_extract(NEW.input_json, '$.frame.executionRoute.certificate.action') IN ('collect', 'deliver')
+      AND json_type(NEW.input_json, '$.frame.executionRoute.certificateHash') = 'text'
+      AND length(json_extract(NEW.input_json, '$.frame.executionRoute.certificateHash')) = 64
+      AND json_extract(NEW.input_json, '$.frame.executionRoute.certificateHash') NOT GLOB '*[^0-9a-fA-F]*'
+      AND json_extract(NEW.model_selection_json, '$.routeKind') = json_extract(NEW.input_json, '$.frame.executionRoute.kind')`,
+    };
+    for (const trigger of triggerSql) {
+      expect(trigger.sql).toContain(branchMarkers[trigger.name]);
+    }
+  });
+
+  it("rejects direct decision table mutations without Rulebook evidence", () => {
+    createAcceptedCampaign(CAMPAIGN_A);
+    const handle = openPlay(CAMPAIGN_A);
+    insertPlayState(handle);
+    const sourceTurnId = "decision-source";
+    insertTurn(handle, { id: sourceTurnId, idempotencyKey: "decision-source" });
+    const state = handle.sqlite.prepare(`
+      SELECT world_version AS worldVersion, world_hash AS worldHash
+      FROM campaign_play_states WHERE campaign_id = ?
+    `).get(CAMPAIGN_A) as { worldVersion: number; worldHash: string };
+    const resultWorldVersion = state.worldVersion + 1;
+    const payload = {
+      decisionKey: "decision-guard",
+      actorId: "actor-c",
+      actorHandle: "Sel Bell",
+      decisionKind: "offer",
+      sourceTurnId,
+      summary: "A guarded opening offer.",
+      acceptLabel: "Accept offer",
+      declineLabel: "Decline offer",
+    };
+    const payloadJson = JSON.stringify(payload);
+    const commandId = "command-decision-open-guard";
+    const receiptId = "receipt-decision-open-guard";
+    handle.sqlite.prepare(`
+      INSERT INTO campaign_play_commands (
+        command_id, campaign_id, turn_id, batch_id, command_order, command_kind,
+        causal_parent_json, source_json, expected_world_version,
+        read_scope_json, write_scope_json, exposure_policy_json,
+        arguments_hash, protected_payload_json, protected_payload_hash, created_at
+      ) VALUES (?, ?, ?, ?, 0, 'decision_open', ?, ?, ?, '[]', '[]', ?, ?, ?, ?, 2000)
+    `).run(
+      commandId,
+      CAMPAIGN_A,
+      sourceTurnId,
+      "batch-decision-open-guard",
+      JSON.stringify({ kind: "turn", turnId: sourceTurnId }),
+      JSON.stringify({ kind: "system", system: "game_master" }),
+      state.worldVersion,
+      JSON.stringify({ mode: "protected" }),
+      HASH_A,
+      payloadJson,
+      HASH_B,
+    );
+    handle.sqlite.prepare(`
+      INSERT INTO campaign_play_receipts (
+        receipt_id, campaign_id, turn_id, command_id, command_kind, outcome,
+        applied_world_mutation, prior_world_version, result_world_version,
+        prior_world_hash, result_world_hash, causal_event_ids_json,
+        protected_payload_json, protected_payload_hash, created_at
+      ) VALUES (?, ?, ?, ?, 'decision_open', 'applied', 1, ?, ?, ?, ?, ?, '{}', ?, 2000)
+    `).run(
+      receiptId,
+      CAMPAIGN_A,
+      sourceTurnId,
+      commandId,
+      state.worldVersion,
+      resultWorldVersion,
+      state.worldHash,
+      HASH_B,
+      JSON.stringify(["decision-open-event"]),
+      HASH_C,
+    );
+
+    const insertDecision = (decisionKey: string, actorId: string) => handle.sqlite.prepare(`
+      INSERT INTO campaign_play_decisions (
+        decision_key, campaign_id, actor_id, actor_handle, decision_kind,
+        source_turn_id, status, summary, accept_label, decline_label,
+        opened_at, resolved_at, resolution_turn_id, resolution_event_id,
+        world_version, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 'offer', ?, 'open', ?, ?, ?, 2000, NULL, NULL, NULL, ?, 2000, 2000)
+    `).run(
+      decisionKey,
+      CAMPAIGN_A,
+      actorId,
+      payload.actorHandle,
+      sourceTurnId,
+      payload.summary,
+      payload.acceptLabel,
+      payload.declineLabel,
+      resultWorldVersion,
+    );
+
+    expect(() => insertDecision("decision-invalid-actor", "foreign-actor"))
+      .toThrow(/campaign_play_decision_campaign_mismatch/);
+    expect(handle.sqlite.prepare(`
+      SELECT count(*) AS count FROM campaign_play_decisions
+      WHERE campaign_id = ?
+    `).get(CAMPAIGN_A)).toEqual({ count: 0 });
+
+    insertDecision(payload.decisionKey, payload.actorId);
+    expect(() => handle.sqlite.prepare(`
+      UPDATE campaign_play_decisions
+      SET status = 'accepted', world_version = ?, updated_at = 2001
+      WHERE decision_key = ?
+    `).run(resultWorldVersion + 1, payload.decisionKey))
+      .toThrow(/campaign_play_decision_transition_invalid/);
+    expect(() => handle.sqlite.prepare(`
+      DELETE FROM campaign_play_decisions WHERE decision_key = ?
+    `).run(payload.decisionKey))
+      .toThrow(/campaign_play_decision_immutable/);
+    expect(handle.sqlite.prepare(`
+      SELECT status, world_version AS worldVersion FROM campaign_play_decisions
+      WHERE decision_key = ?
+    `).get(payload.decisionKey)).toEqual({ status: "open", worldVersion: resultWorldVersion });
+  });
+
+  it("binds decision resolutions to durable payloads and the exact decision ref", () => {
+    type DecisionKind = "offer" | "yes_no";
+    type DecisionFixture = {
+      decisionKey: string;
+      actorId: string;
+      actorHandle: string;
+      decisionKind: DecisionKind;
+      sourceTurnId: string;
+      summary: string;
+      acceptLabel: string;
+      declineLabel: string;
+      openedAt: number;
+    };
+    type ResolveOptions = {
+      suffix: string;
+      disposition: "accept" | "decline";
+      summary?: string;
+      selectedLabel?: string;
+      eventDecisionKey?: string;
+    };
+
+    const setup = (campaignId: string): CampaignPlayDatabaseHandle => {
+      createAcceptedCampaign(campaignId);
+      const handle = openPlay(campaignId);
+      insertPlayState(handle);
+      return handle;
+    };
+
+    const openDecision = (
+      handle: CampaignPlayDatabaseHandle,
+      suffix: string,
+      decisionKind: DecisionKind,
+      openedAt: number,
+    ): DecisionFixture => {
+      const sourceTurnId = `decision-source-${suffix}`;
+      const state = handle.sqlite.prepare(`
+        SELECT world_version AS worldVersion, world_hash AS worldHash
+        FROM campaign_play_states WHERE campaign_id = ?
+      `).get(handle.campaignId) as { worldVersion: number; worldHash: string };
+      insertTurn(handle, {
+        id: sourceTurnId,
+        idempotencyKey: sourceTurnId,
+        stage: "failed",
+        finalWorldVersion: state.worldVersion,
+        errorCode: "invalid_input",
+        completedAt: openedAt,
+      });
+      const decision: DecisionFixture = {
+        decisionKey: `decision-binding-${suffix}`,
+        actorId: "actor-c",
+        actorHandle: "Sel Bell",
+        decisionKind,
+        sourceTurnId,
+        summary: `Durable summary ${suffix}.`,
+        acceptLabel: `Accept ${suffix}`,
+        declineLabel: `Decline ${suffix}`,
+        openedAt,
+      };
+      const payloadJson = JSON.stringify({
+        decisionKey: decision.decisionKey,
+        actorId: decision.actorId,
+        actorHandle: decision.actorHandle,
+        decisionKind: decision.decisionKind,
+        sourceTurnId: decision.sourceTurnId,
+        summary: decision.summary,
+        acceptLabel: decision.acceptLabel,
+        declineLabel: decision.declineLabel,
+      });
+      const commandId = `command-decision-open-${suffix}`;
+      const receiptId = `receipt-decision-open-${suffix}`;
+      const resultWorldVersion = state.worldVersion + 1;
+      const resultWorldHash = state.worldHash === HASH_A ? HASH_B : HASH_A;
+      handle.sqlite.prepare(`
+        INSERT INTO campaign_play_commands (
+          command_id, campaign_id, turn_id, batch_id, command_order, command_kind,
+          causal_parent_json, source_json, expected_world_version,
+          read_scope_json, write_scope_json, exposure_policy_json,
+          arguments_hash, protected_payload_json, protected_payload_hash, created_at
+        ) VALUES (?, ?, ?, ?, 0, 'decision_open', ?, ?, ?, '[]', '[]', ?, ?, ?, ?, ?)
+      `).run(
+        commandId,
+        handle.campaignId,
+        sourceTurnId,
+        `batch-decision-open-${suffix}`,
+        JSON.stringify({ kind: "turn", turnId: sourceTurnId }),
+        JSON.stringify({ kind: "system", system: "game_master" }),
+        state.worldVersion,
+        JSON.stringify({ mode: "protected" }),
+        HASH_B,
+        payloadJson,
+        HASH_C,
+        openedAt,
+      );
+      handle.sqlite.prepare(`
+        INSERT INTO campaign_play_receipts (
+          receipt_id, campaign_id, turn_id, command_id, command_kind, outcome,
+          applied_world_mutation, prior_world_version, result_world_version,
+          prior_world_hash, result_world_hash, causal_event_ids_json,
+          protected_payload_json, protected_payload_hash, created_at
+        ) VALUES (?, ?, ?, ?, 'decision_open', 'applied', 1, ?, ?, ?, ?, ?, '{}', ?, ?)
+      `).run(
+        receiptId,
+        handle.campaignId,
+        sourceTurnId,
+        commandId,
+        state.worldVersion,
+        resultWorldVersion,
+        state.worldHash,
+        resultWorldHash,
+        JSON.stringify([`decision-open-event-${suffix}`]),
+        HASH_C,
+        openedAt,
+      );
+      handle.sqlite.prepare(`
+        INSERT INTO campaign_play_decisions (
+          decision_key, campaign_id, actor_id, actor_handle, decision_kind,
+          source_turn_id, status, summary, accept_label, decline_label,
+          opened_at, resolved_at, resolution_turn_id, resolution_event_id,
+          world_version, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?)
+      `).run(
+        decision.decisionKey,
+        handle.campaignId,
+        decision.actorId,
+        decision.actorHandle,
+        decision.decisionKind,
+        decision.sourceTurnId,
+        decision.summary,
+        decision.acceptLabel,
+        decision.declineLabel,
+        decision.openedAt,
+        resultWorldVersion,
+        decision.openedAt,
+        decision.openedAt,
+      );
+      handle.sqlite.prepare(`
+        UPDATE campaign_play_states
+        SET world_version = ?, world_hash = ?, updated_at = ?
+        WHERE campaign_id = ?
+      `).run(resultWorldVersion, resultWorldHash, openedAt, handle.campaignId);
+      return decision;
+    };
+
+    const resolveDecision = (
+      handle: CampaignPlayDatabaseHandle,
+      decision: DecisionFixture,
+      options: ResolveOptions,
+    ): void => {
+      const resolutionTurnId = `decision-resolution-${options.suffix}`;
+      const state = handle.sqlite.prepare(`
+        SELECT world_version AS worldVersion, world_hash AS worldHash
+        FROM campaign_play_states WHERE campaign_id = ?
+      `).get(handle.campaignId) as { worldVersion: number; worldHash: string };
+      const resolvedAt = decision.openedAt + 1000;
+      insertTurn(handle, {
+        id: resolutionTurnId,
+        idempotencyKey: resolutionTurnId,
+        stage: "failed",
+        finalWorldVersion: state.worldVersion,
+        errorCode: "invalid_input",
+        completedAt: resolvedAt,
+      });
+      const status = options.disposition === "accept" ? "accepted" : "declined";
+      const payloadJson = JSON.stringify({
+        decisionKey: decision.decisionKey,
+        actorId: decision.actorId,
+        actorHandle: decision.actorHandle,
+        decisionKind: decision.decisionKind,
+        sourceTurnId: decision.sourceTurnId,
+        summary: options.summary ?? decision.summary,
+        selectedLabel: options.selectedLabel ?? (
+          options.disposition === "accept" ? decision.acceptLabel : decision.declineLabel
+        ),
+        disposition: options.disposition,
+      });
+      const commandId = `command-decision-resolve-${options.suffix}`;
+      const receiptId = `receipt-decision-resolve-${options.suffix}`;
+      const eventId = `decision-event-${options.suffix}`;
+      const resultWorldVersion = state.worldVersion + 1;
+      const resultWorldHash = state.worldHash === HASH_A ? HASH_B : HASH_A;
+      const sourceJson = JSON.stringify({ kind: "system", system: "game_master" });
+      handle.sqlite.prepare(`
+        INSERT INTO campaign_play_commands (
+          command_id, campaign_id, turn_id, batch_id, command_order, command_kind,
+          causal_parent_json, source_json, expected_world_version,
+          read_scope_json, write_scope_json, exposure_policy_json,
+          arguments_hash, protected_payload_json, protected_payload_hash, created_at
+        ) VALUES (?, ?, ?, ?, 0, 'decision_resolve', ?, ?, ?, '[]', '[]', ?, ?, ?, ?, ?)
+      `).run(
+        commandId,
+        handle.campaignId,
+        resolutionTurnId,
+        `batch-decision-resolve-${options.suffix}`,
+        JSON.stringify({ kind: "turn", turnId: resolutionTurnId }),
+        sourceJson,
+        state.worldVersion,
+        JSON.stringify({ mode: "protected" }),
+        HASH_B,
+        payloadJson,
+        HASH_C,
+        resolvedAt,
+      );
+      handle.sqlite.prepare(`
+        INSERT INTO campaign_play_receipts (
+          receipt_id, campaign_id, turn_id, command_id, command_kind, outcome,
+          applied_world_mutation, prior_world_version, result_world_version,
+          prior_world_hash, result_world_hash, causal_event_ids_json,
+          protected_payload_json, protected_payload_hash, created_at
+        ) VALUES (?, ?, ?, ?, 'decision_resolve', 'applied', 1, ?, ?, ?, ?, ?, '{}', ?, ?)
+      `).run(
+        receiptId,
+        handle.campaignId,
+        resolutionTurnId,
+        commandId,
+        state.worldVersion,
+        resultWorldVersion,
+        state.worldHash,
+        resultWorldHash,
+        JSON.stringify([eventId]),
+        HASH_C,
+        resolvedAt,
+      );
+      handle.sqlite.prepare(`
+        INSERT INTO campaign_play_events (
+          event_id, campaign_id, turn_id, command_id, receipt_id, parent_event_id,
+          event_kind, source_json, world_time_minutes, world_version,
+          affected_refs_json, before_payload_json, after_payload_json,
+          payload_hash, created_at
+        ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, '{}', ?, ?, ?)
+      `).run(
+        eventId,
+        handle.campaignId,
+        resolutionTurnId,
+        commandId,
+        receiptId,
+        options.disposition === "accept" ? "decision_accepted" : "decision_declined",
+        sourceJson,
+        resultWorldVersion,
+        JSON.stringify([
+          { kind: "actor", id: decision.actorId },
+          { kind: "decision", id: options.eventDecisionKey ?? decision.decisionKey },
+        ]),
+        payloadJson,
+        HASH_A,
+        resolvedAt,
+      );
+      handle.sqlite.prepare(`
+        UPDATE campaign_play_states
+        SET world_version = ?, world_hash = ?, updated_at = ?
+        WHERE campaign_id = ?
+      `).run(resultWorldVersion, resultWorldHash, resolvedAt, handle.campaignId);
+      handle.sqlite.prepare(`
+        UPDATE campaign_play_decisions
+        SET status = ?, resolved_at = ?, resolution_turn_id = ?,
+          resolution_event_id = ?, world_version = ?, updated_at = ?
+        WHERE decision_key = ?
+      `).run(
+        status,
+        resolvedAt,
+        resolutionTurnId,
+        eventId,
+        resultWorldVersion,
+        resolvedAt,
+        decision.decisionKey,
+      );
+    };
+
+    const summaryHandle = setup("33333333-3333-4333-8333-333333333333");
+    const summaryDecision = openDecision(summaryHandle, "summary", "offer", 2000);
+    expect(() => resolveDecision(summaryHandle, summaryDecision, {
+      suffix: "summary",
+      disposition: "accept",
+      summary: "Tampered summary.",
+    })).toThrow(/campaign_play_decision_resolve_receipt_invalid/);
+
+    const labelHandle = setup("44444444-4444-4444-8444-444444444444");
+    const labelDecision = openDecision(labelHandle, "label", "offer", 2000);
+    expect(() => resolveDecision(labelHandle, labelDecision, {
+      suffix: "label",
+      disposition: "accept",
+      selectedLabel: "Tampered label",
+    })).toThrow(/campaign_play_decision_resolve_receipt_invalid/);
+
+    const wrongRefHandle = setup("55555555-5555-4555-8555-555555555555");
+    const targetDecision = openDecision(wrongRefHandle, "target", "offer", 2000);
+    const decoyDecision = openDecision(wrongRefHandle, "decoy", "yes_no", 2100);
+    expect(() => resolveDecision(wrongRefHandle, targetDecision, {
+      suffix: "wrong-ref",
+      disposition: "accept",
+      eventDecisionKey: decoyDecision.decisionKey,
+    })).toThrow(/campaign_play_decision_resolve_receipt_invalid/);
+    expect(wrongRefHandle.sqlite.prepare(`
+      SELECT count(*) AS count FROM campaign_play_events
+      WHERE event_id = ?
+    `).get("decision-event-wrong-ref")).toEqual({ count: 1 });
+
+    const acceptHandle = setup("66666666-6666-4666-8666-666666666666");
+    const acceptDecision = openDecision(acceptHandle, "accept", "offer", 2000);
+    expect(() => resolveDecision(acceptHandle, acceptDecision, {
+      suffix: "accept",
+      disposition: "accept",
+    })).not.toThrow();
+    expect(acceptHandle.sqlite.prepare(`
+      SELECT status FROM campaign_play_decisions WHERE decision_key = ?
+    `).get(acceptDecision.decisionKey)).toEqual({ status: "accepted" });
+
+    const declineHandle = setup("77777777-7777-4777-8777-777777777777");
+    const declineDecision = openDecision(declineHandle, "decline", "offer", 2000);
+    expect(() => resolveDecision(declineHandle, declineDecision, {
+      suffix: "decline",
+      disposition: "decline",
+    })).not.toThrow();
+    expect(declineHandle.sqlite.prepare(`
+      SELECT status FROM campaign_play_decisions WHERE decision_key = ?
+    `).get(declineDecision.decisionKey)).toEqual({ status: "declined" });
+  });
+
   it("rejects local scenes without a matching Rulebook receipt", () => {
     createAcceptedCampaign(CAMPAIGN_A);
     const handle = openPlay(CAMPAIGN_A);
@@ -1184,10 +1817,35 @@ describe("Campaign Play core and Rulebook storage", () => {
       .get() as { sql: string };
     expect(after.sql).toContain("job.defer_reason = 'actor_capacity'");
     expect(opened.sqlite.prepare(`SELECT max(created_at) AS latest
-      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_787_254_078_110 });
-    expect((opened.sqlite.prepare(`SELECT sql FROM sqlite_master
+      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_787_701_600_000 });
+    const terminalResultTriggerSql = opened.sqlite.prepare(`SELECT sql FROM sqlite_master
       WHERE type = 'trigger' AND name = 'campaign_play_turn_terminal_result'`)
-      .get() as { sql: string }).sql).toContain("'certified_observe'");
+      .get() as { sql: string };
+    expect(terminalResultTriggerSql.sql).toContain("'certified_observe'");
+    expect(terminalResultTriggerSql.sql).toContain(
+      `json_extract(NEW.input_json, '$.frame.executionRoute.kind') = 'certified_commitment'
+      AND json_extract(NEW.input_json, '$.frame.executionRoute.certificate.actionSchemaVersion') = 1
+      AND json_extract(NEW.input_json, '$.frame.executionRoute.certificate.resolver') = 'code_owned'
+      AND json_extract(NEW.input_json, '$.frame.executionRoute.certificate.campaignId') = NEW.campaign_id
+      AND json_extract(NEW.input_json, '$.frame.executionRoute.certificate.turnId') = NEW.id
+      AND json_extract(NEW.input_json, '$.frame.executionRoute.certificate.action') IN ('collect', 'deliver')
+      AND json_type(NEW.input_json, '$.frame.executionRoute.certificateHash') = 'text'
+      AND length(json_extract(NEW.input_json, '$.frame.executionRoute.certificateHash')) = 64
+      AND json_extract(NEW.input_json, '$.frame.executionRoute.certificateHash') NOT GLOB '*[^0-9a-fA-F]*'
+      AND json_extract(NEW.model_selection_json, '$.routeKind') = json_extract(NEW.input_json, '$.frame.executionRoute.kind')`,
+    );
+    const commandSourceTriggerSql = opened.sqlite.prepare(`SELECT sql FROM sqlite_master
+      WHERE type = 'trigger' AND name = 'campaign_play_commands_insert_guard'`)
+      .get() as { sql: string };
+    for (const sourceSystem of [
+      "'character_bootstrap'",
+      "'opening_bootstrap'",
+      "'game_master'",
+      "'actor_scheduler'",
+      "'commitment_executor'",
+    ]) {
+      expect(commandSourceTriggerSql.sql).toContain(sourceSystem);
+    }
     expect((opened.sqlite.pragma("table_info('campaign_play_actor_schedules')") as Array<{
       name: string;
       notnull: number;

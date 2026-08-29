@@ -192,7 +192,8 @@ export function campaignPlayMayAutomaticallyResumeExternalStage(input: {
   turnKind: LoadedCampaignPlayTurn["turnKind"];
   interruptedStage: CampaignPlayClaimableTurnStage | null;
   routeKind: "full_authority" | "certified_move" | "certified_wait" | "certified_contact"
-    | "certified_observe" | undefined;
+    | "certified_decision"
+    | "certified_observe" | "certified_commitment" | "certified_obligation" | undefined;
   errorCode: string;
   attempt: number;
   automaticRecoveryEnabled: boolean;
@@ -212,14 +213,17 @@ export function campaignPlayMayAutomaticallyResumeExternalStage(input: {
   }
   if (input.turnKind === "opening") {
     return input.errorCode === "model_contract_invalid"
-      && input.interruptedStage === "visibility_projected";
+      && (input.interruptedStage === "admitted"
+        || input.interruptedStage === "visibility_projected");
   }
   if (input.turnKind !== "player_action") return false;
   if (input.errorCode !== "model_contract_invalid") return false;
   if (input.routeKind === "full_authority") {
     return input.interruptedStage === "admitted" || input.interruptedStage === "judged";
   }
-  return input.routeKind?.startsWith("certified_") === true
+  return input.routeKind !== "certified_commitment" &&
+    input.routeKind !== "certified_obligation" &&
+    input.routeKind?.startsWith("certified_") === true
     && input.interruptedStage === "admitted";
 }
 

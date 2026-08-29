@@ -144,17 +144,10 @@ function worldSeedsToDna(value: unknown): CampaignWorldDna | null {
   }
 
   const culturalFlavor = value.culturalFlavor.map((entry, index) => {
-    const normalized = requiredTrimmedString(
+    return requiredTrimmedString(
       entry,
       `seeds.culturalFlavor[${index}]`,
     );
-    if (normalized.includes(";")) {
-      throw new CampaignWorldSourceError(
-        "campaign_dna_invalid",
-        "Stored cultural flavor entries cannot contain the reserved semicolon delimiter.",
-      );
-    }
-    return normalized;
   });
 
   return {
@@ -167,7 +160,7 @@ function worldSeedsToDna(value: unknown): CampaignWorldDna | null {
       value.centralConflict,
       "seeds.centralConflict",
     ),
-    culturalFlavor: culturalFlavor.join("; "),
+    culturalFlavor: culturalFlavor.join("\n"),
     environment: requiredTrimmedString(value.environment, "seeds.environment"),
     wildcard: requiredTrimmedString(value.wildcard, "seeds.wildcard"),
   };
@@ -208,19 +201,10 @@ function dnaToWorldSeeds(value: CampaignWorldDna): WorldSeeds {
   }
   assertExactDnaFields(value);
 
-  const flavorSegments = requiredTrimmedString(
+  const culturalFlavor = [requiredTrimmedString(
     value.culturalFlavor,
     "dna.culturalFlavor",
-  ).split(";");
-  const culturalFlavor = flavorSegments.map((entry, index) => {
-    if (entry.trim().length === 0) {
-      throw new CampaignWorldSourceError(
-        "campaign_dna_invalid",
-        `Campaign DNA cultural flavor entry ${index + 1} is empty.`,
-      );
-    }
-    return entry.trim();
-  });
+  )];
 
   return {
     geography: requiredTrimmedString(value.geography, "dna.geography"),
@@ -598,6 +582,7 @@ function loadSource(
     dna,
     researchSummary: normalizedResearchSummary,
     sourceReferences: references,
+    ...(config.playerIdentity ? { playerIdentity: config.playerIdentity } : {}),
   };
 
   return {

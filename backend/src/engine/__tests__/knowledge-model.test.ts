@@ -107,6 +107,41 @@ describe("knowledge model", () => {
     });
   });
 
+  it("orders equal-score knowledge with equal timestamps by canonical id", () => {
+    const records = ["first", "second", "third"].map((label) =>
+      recordActorKnowledge({
+        campaignId: CAMPAIGN_ID,
+        actorId: "npc-scout",
+        route: "memory",
+        statement: `Shared ${label} memory.`,
+        subjectRefs: ["shared-ref"],
+      }),
+    );
+    const createdAt = 1_700_000_000_000;
+    for (const record of records) {
+      getDb()
+        .update(actorKnowledgeRecords)
+        .set({ createdAt })
+        .where(eq(actorKnowledgeRecords.id, record.id))
+        .run();
+    }
+
+    const expectedIds = records.map((record) => record.id).sort();
+    const firstRead = listActorKnowledge({
+      campaignId: CAMPAIGN_ID,
+      actorId: "npc-scout",
+      subjectRefs: ["shared-ref"],
+    }).map((record) => record.id);
+    const secondRead = listActorKnowledge({
+      campaignId: CAMPAIGN_ID,
+      actorId: "npc-scout",
+      subjectRefs: ["shared-ref"],
+    }).map((record) => record.id);
+
+    expect(firstRead).toEqual(expectedIds);
+    expect(secondRead).toEqual(expectedIds);
+  });
+
   it("invalidates future knowledge after rollback restore", () => {
     commitAuthorityTrace({
       campaignId: CAMPAIGN_ID,

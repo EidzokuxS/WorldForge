@@ -7,6 +7,7 @@ import {
 import type { CampaignPlayDatabaseHandle } from "./campaign-play-database.js";
 import {
   createCampaignPlayStateRepository,
+  loadCampaignPlayRulebookFrame,
   type LoadedCampaignPlayState,
 } from "./campaign-play-state-repository.js";
 import {
@@ -20,11 +21,17 @@ import {
   type CampaignPlayRulebookFrame,
   type ExecutedCampaignPlayRulebookBatch,
 } from "./rulebook.js";
+import {
+  assertCampaignPlayPlayerIdentityBinding,
+  CampaignPlayPlayerIdentityBindingError,
+} from "./player-identity.js";
 
 export type CampaignPlayPlayerBootstrapErrorCode =
   | "bootstrap_state_invalid"
   | "bootstrap_stale"
-  | "bootstrap_profile_invalid";
+  | "bootstrap_profile_invalid"
+  | "player_identity_mismatch"
+  | "player_identity_conflict";
 
 export class CampaignPlayPlayerBootstrapError extends Error {
   constructor(
@@ -50,7 +57,10 @@ export interface BootstrappedCampaignPlayPlayer {
   execution: ExecutedCampaignPlayRulebookBatch;
 }
 
-function bootstrapFrame(state: LoadedCampaignPlayState): CampaignPlayRulebookFrame {
+function bootstrapFrame(
+  state: LoadedCampaignPlayState,
+  loadedFrame: CampaignPlayRulebookFrame,
+): CampaignPlayRulebookFrame {
   const world = state.acceptedReview;
   return {
     campaignId: world.campaignId,
@@ -68,6 +78,7 @@ function bootstrapFrame(state: LoadedCampaignPlayState): CampaignPlayRulebookFra
     actorConditions: [],
     possessions: [],
     obligations: [],
+    commitments: loadedFrame.commitments,
     pressureStates: [],
     placements: world.placements.map((row) => ({
       placementId: row.id,
@@ -156,8 +167,35 @@ export function bootstrapCampaignPlayPlayer(
     );
   }
   validatePreparedCharacter(handle.campaignId, input.character);
+  try {
+    assertCampaignPlayPlayerIdentityBinding({
+      playerIdentity: before.acceptedReview.source.playerIdentity,
+      playerDisplayName: input.character.record.identity.displayName,
+      acceptedActors: before.acceptedReview.actors,
+    });
+  } catch (error) {
+    if (error instanceof CampaignPlayPlayerIdentityBindingError) {
+      throw new CampaignPlayPlayerBootstrapError(error.code, error.message);
+    }
+    throw error;
+  }
 
-  const frame = bootstrapFrame(before);
+  const loadedFrame = loadCampaignPlayRulebookFrame(handle);
+  if (
+    loadedFrame.campaignId !== before.authority.campaignId
+    || loadedFrame.acceptedWorldVersion !== before.authority.acceptedWorldVersion
+    || loadedFrame.acceptedContentHash !== before.authority.acceptedContentHash
+    || loadedFrame.setupPhase !== before.authority.setupPhase
+    || loadedFrame.worldVersion !== before.authority.worldVersion
+    || loadedFrame.worldTimeMinutes !== before.authority.worldTimeMinutes
+    || loadedFrame.human !== null
+  ) {
+    throw new CampaignPlayPlayerBootstrapError(
+      "bootstrap_state_invalid",
+      "Campaign Play player bootstrap frame is inconsistent with its durable authority.",
+    );
+  }
+  const frame = bootstrapFrame(before, loadedFrame);
   const rootParent = {
     kind: "accepted_world" as const,
     campaignId: frame.campaignId,

@@ -12,6 +12,7 @@ import {
 } from "./world-builder.js";
 import {
   createCampaignWorldBuildService,
+  CAMPAIGN_WORLD_SERVICE_BUILDER_BUDGET_MS,
   type CampaignWorldBuildService,
 } from "./world-build-service.js";
 import { openCampaignWorldDatabase } from "./world-database.js";
@@ -37,7 +38,7 @@ const DNA: CampaignWorldDna = {
   geography: "A ring of stormbound islands",
   politicalStructure: "Independent harbor councils",
   centralConflict: "The sea routes are failing",
-  culturalFlavor: "Salt-worn ritual; Communal songs",
+  culturalFlavor: "Salt-worn ritual\nCommunal songs",
   environment: "Cold ocean winds and luminous reefs",
   wildcard: "Maps change after every eclipse",
 };
@@ -160,6 +161,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   closeDb();
   if (previousCampaignsRoot === undefined) {
     delete process.env.GSD_CAMPAIGNS_ROOT;
@@ -170,7 +172,8 @@ afterEach(() => {
 });
 
 describe("Campaign World build service", () => {
-  it("registers before returning and builds from the frozen source snapshot", async () => {
+  it("registers before returning and accepts a builder settlement at 209.999 seconds", async () => {
+    vi.useFakeTimers();
     const sourceService = createCampaignWorldSourceService();
     const source = sourceService.load(CAMPAIGN_A);
     const load = vi.fn((campaignId: string) => sourceService.load(campaignId));
@@ -198,6 +201,9 @@ describe("Campaign World build service", () => {
     writeConfig(CAMPAIGN_A, "A caller changed the config after acquisition.");
     const completion = service.waitForBuild(CAMPAIGN_A, started.buildId);
     expect(completion).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(209_999);
+    expect(CAMPAIGN_WORLD_SERVICE_BUILDER_BUDGET_MS).toBe(215_000);
+    expect(vi.getTimerCount()).toBe(1);
     controlled.release();
     await completion;
 
@@ -214,6 +220,95 @@ describe("Campaign World build service", () => {
     }
     expect(load).toHaveBeenCalledOnce();
     expect(service.hasLiveCoordinator(CAMPAIGN_A, started.buildId)).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("fails at exactly 215 seconds and observes a late builder settlement", async () => {
+    vi.useFakeTimers();
+    const sourceService = createCampaignWorldSourceService();
+    const source = sourceService.load(CAMPAIGN_A);
+    const entered = deferred<CampaignWorldSource>();
+    const lateResult = deferred<ReturnType<typeof candidateFixture>>();
+    let abortSignal: AbortSignal | undefined;
+    let lateSettlementObserved = false;
+    const builder: CampaignWorldBuilder = {
+      async build(request) {
+        abortSignal = request.abortSignal;
+        await request.observer?.onStageStarted("world_frame");
+        entered.resolve(request.source);
+        const candidate = await lateResult.promise;
+        lateSettlementObserved = true;
+        await request.observer?.onStageStarted("world_frame");
+        await request.observer?.onStageCompleted(evidenceFixture("world_frame"));
+        return candidate;
+      },
+    };
+    const service = createCampaignWorldBuildService({
+      sourceService,
+      builder,
+      idFactory: () => "build-service-timeout",
+      now: (() => {
+        let current = 5_000;
+        return () => current++;
+      })(),
+    });
+
+    const started = await service.startBuild(buildRequest(source));
+    await entered;
+    const completion = service.waitForBuild(CAMPAIGN_A, started.buildId);
+    expect(completion).not.toBeNull();
+
+    await vi.advanceTimersByTimeAsync(214_999);
+    expect(abortSignal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await completion;
+
+    expect(abortSignal?.aborted).toBe(true);
+    expect(service.hasLiveCoordinator(CAMPAIGN_A, started.buildId)).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+
+    const handle = openCampaignWorldDatabase(CAMPAIGN_A);
+    try {
+      const repository = createCampaignWorldRepository(handle);
+      expect(repository.loadLatestBuild()).toMatchObject({
+        status: "failed",
+        errorCode: "world_build_timed_out",
+      });
+      expect(repository.loadWorld()).toBeNull();
+      const events = repository.loadBuildEvents(started.buildId);
+      expect(events.filter((event) => event.type === "build_failed")).toHaveLength(1);
+      expect(events.filter((event) => event.type === "build_completed")).toHaveLength(0);
+      expect(events.filter((event) => event.type === "stage_started")).toHaveLength(1);
+      expect(events.at(-1)).toMatchObject({
+        type: "build_failed",
+        errorCode: "world_build_timed_out",
+      });
+      expect(handle.sqlite.prepare(
+        "SELECT COUNT(*) AS count FROM campaign_world_build_stages WHERE build_id = ?",
+      ).get(started.buildId)).toEqual({ count: 0 });
+    } finally {
+      handle.close();
+    }
+
+    lateResult.resolve(candidateFixture(source));
+    await vi.runAllTicks();
+    expect(lateSettlementObserved).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+
+    const lateHandle = openCampaignWorldDatabase(CAMPAIGN_A);
+    try {
+      const repository = createCampaignWorldRepository(lateHandle);
+      const events = repository.loadBuildEvents(started.buildId);
+      expect(repository.loadLatestBuild()).toMatchObject({
+        status: "failed",
+        errorCode: "world_build_timed_out",
+      });
+      expect(events.filter((event) => event.type === "build_failed")).toHaveLength(1);
+      expect(events.filter((event) => event.type === "build_completed")).toHaveLength(0);
+      expect(events.filter((event) => event.type === "stage_completed")).toHaveLength(0);
+    } finally {
+      lateHandle.close();
+    }
   });
 
   it("turns provider failure into one durable terminal failure", async () => {

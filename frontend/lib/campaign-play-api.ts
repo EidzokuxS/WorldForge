@@ -1,6 +1,9 @@
 import {
   CAMPAIGN_PLAY_CHARACTER_SOURCE_VALUES,
+  CAMPAIGN_PLAY_COMMITMENT_ACTION_VALUES,
   CAMPAIGN_PLAY_CONSEQUENCE_CUE_VALUES,
+  CAMPAIGN_PLAY_DECISION_DISPOSITION_VALUES,
+  CAMPAIGN_PLAY_DECISION_KIND_VALUES,
   CAMPAIGN_PLAY_EFFECT_KIND_VALUES,
   CAMPAIGN_PLAY_LIMITS,
   CAMPAIGN_PLAY_NARRATION_OPERATION_STATUS_VALUES,
@@ -16,6 +19,11 @@ import {
   type CampaignPlayCharacterResearch,
   type CampaignPlayCharacterResearchResponse,
   type CampaignPlayConsequence,
+  type CampaignPlayCommitmentBinding,
+  type CampaignPlayDecisionAcceptEffect,
+  type CampaignPlayDecisionBinding,
+  type CampaignPlayDecisionObservation,
+  type CampaignPlayDecisionOutcome,
   type CampaignPlayErrorResponse,
   type CampaignPlayGeneratePlayerDraftRequest,
   type CampaignPlayJournalEntry,
@@ -25,9 +33,11 @@ import {
   type CampaignPlayNarrationOperation,
   type CampaignPlayNarrationRecoveryRequest,
   type CampaignPlayNarrationRecoveryResponse,
+  type CampaignPlayObligationBinding,
   type CampaignPlayOpeningAdmissionRequest,
   type CampaignPlayOpeningDetailOption,
   type CampaignPlayOpeningLocationOption,
+  type CampaignPlayOpeningDecision,
   type CampaignPlayParsePlayerCardRequest,
   type CampaignPlayPublicCharacter,
   type CampaignPlayPublicErrorCode,
@@ -44,6 +54,7 @@ import {
   type CampaignPlayTurnReadResponse,
   type CampaignPlayTurnPublicResult,
   type CampaignPlayVisibleActor,
+  type CampaignPlayVisibleCommitment,
   type CampaignPlayVisibleLocation,
   type CampaignPlayVisibleObligation,
   type CampaignPlayVisiblePossession,
@@ -382,6 +393,48 @@ function parseVisibleObligation(value: unknown): CampaignPlayVisibleObligation |
   return asParsed<CampaignPlayVisibleObligation>(value);
 }
 
+function parseVisibleCommitment(value: unknown): CampaignPlayVisibleCommitment | null {
+  if (!isObject(value)) return null;
+  const commonKeys = [
+    "handle",
+    "kind",
+    "status",
+    "counterpartyHandle",
+    "counterpartyName",
+    "title",
+    "subjectName",
+    "destinationHandle",
+    "destinationName",
+    "dueWorldTimeLabel",
+  ];
+  const exactKeys = value.kind === "paid_delivery"
+    ? [...commonKeys, "feeUnit", "feeAmount", "paymentTiming"]
+    : commonKeys;
+  if (
+    !hasExactKeys(value, exactKeys) ||
+    !isHandle(value.handle) ||
+    (value.kind !== "paid_delivery" && value.kind !== "unpaid_delivery") ||
+    (value.status !== "active" && value.status !== "completed") ||
+    !isHandle(value.counterpartyHandle) ||
+    !isName(value.counterpartyName) ||
+    !isLabel(value.title) ||
+    !isName(value.subjectName) ||
+    !isHandle(value.destinationHandle) ||
+    !isName(value.destinationName) ||
+    !(value.dueWorldTimeLabel === null || isLabel(value.dueWorldTimeLabel))
+  ) {
+    return null;
+  }
+  if (
+    value.kind === "paid_delivery" &&
+    (value.feeUnit !== "copper" ||
+      !isPositiveInteger(value.feeAmount) ||
+      value.feeAmount > CAMPAIGN_PLAY_LIMITS.possessionQuantity ||
+      value.paymentTiming !== "on_completion")
+  ) return null;
+  return asParsed<CampaignPlayVisibleCommitment>(value);
+}
+
 function parseConsequence(value: unknown): CampaignPlayConsequence | null {
   if (
     !isObject(value) ||
@@ -399,15 +452,199 @@ function parseConsequence(value: unknown): CampaignPlayConsequence | null {
   return asParsed<CampaignPlayConsequence>(value);
 }
 
-function parseJournalEntry(value: unknown): CampaignPlayJournalEntry | null {
+function parseDecisionBinding(value: unknown): CampaignPlayDecisionBinding | null {
   if (
     !isObject(value) ||
-    !hasExactKeys(value, ["observationHandle", "title", "text", "whereOrRoute", "worldTimeLabel", "consequence"]) ||
+    !hasExactKeys(value, ["decisionKey", "actorHandle", "kind", "disposition"]) ||
+    !isId(value.decisionKey) ||
+    !isHandle(value.actorHandle) ||
+    !isOneOf(value.kind, CAMPAIGN_PLAY_DECISION_KIND_VALUES) ||
+    !isOneOf(value.disposition, CAMPAIGN_PLAY_DECISION_DISPOSITION_VALUES)
+  ) {
+    return null;
+  }
+  return asParsed<CampaignPlayDecisionBinding>(value);
+}
+
+function parseDecisionAcceptEffect(value: unknown): CampaignPlayDecisionAcceptEffect | null {
+  if (!isObject(value)) return null;
+  if (
+    value.kind === "grant_player_possession" &&
+    hasExactKeys(value, ["kind", "name"]) &&
+    isName(value.name)
+  ) {
+    return asParsed<CampaignPlayDecisionAcceptEffect>(value);
+  }
+  const hasDueInMinutes = Object.prototype.hasOwnProperty.call(value, "dueInMinutes");
+  if (value.kind === "unpaid_delivery") {
+    const unpaidKeys = hasDueInMinutes
+      ? ["kind", "title", "subjectName", "destinationHandle", "dueInMinutes"]
+      : ["kind", "title", "subjectName", "destinationHandle"];
+    if (
+      !hasExactKeys(value, unpaidKeys) ||
+      !isLabel(value.title) ||
+      !isName(value.subjectName) ||
+      !isHandle(value.destinationHandle) ||
+      (hasDueInMinutes &&
+        (!isPositiveInteger(value.dueInMinutes) ||
+          value.dueInMinutes > CAMPAIGN_PLAY_LIMITS.elapsedMinutes))
+    ) return null;
+    return asParsed<CampaignPlayDecisionAcceptEffect>(value);
+  }
+  const expectedKeys = hasDueInMinutes
+    ? [
+        "kind",
+        "title",
+        "subjectName",
+        "destinationHandle",
+        "feeUnit",
+        "feeAmount",
+        "paymentTiming",
+        "dueInMinutes",
+      ]
+    : [
+        "kind",
+        "title",
+        "subjectName",
+        "destinationHandle",
+        "feeUnit",
+        "feeAmount",
+        "paymentTiming",
+      ];
+  if (
+    !hasExactKeys(value, expectedKeys) ||
+    value.kind !== "paid_delivery" ||
+    !isLabel(value.title) ||
+    !isName(value.subjectName) ||
+    !isHandle(value.destinationHandle) ||
+    value.feeUnit !== "copper" ||
+    !isPositiveInteger(value.feeAmount) ||
+    value.feeAmount > CAMPAIGN_PLAY_LIMITS.possessionQuantity ||
+    value.paymentTiming !== "on_completion" ||
+    (hasDueInMinutes &&
+      (!isPositiveInteger(value.dueInMinutes) ||
+        value.dueInMinutes > CAMPAIGN_PLAY_LIMITS.elapsedMinutes))
+  ) {
+    return null;
+  }
+  return asParsed<CampaignPlayDecisionAcceptEffect>(value);
+}
+
+function parseDecisionOutcome(value: unknown): CampaignPlayDecisionOutcome | null {
+  if (
+    !isObject(value) ||
+    !hasExactKeys(value, [
+      "decisionKey",
+      "actorHandle",
+      "kind",
+      "disposition",
+      "status",
+      "sourceTurnId",
+      "summary",
+      "acceptEffect",
+    ]) ||
+    !isId(value.decisionKey) ||
+    !isHandle(value.actorHandle) ||
+    !isOneOf(value.kind, CAMPAIGN_PLAY_DECISION_KIND_VALUES) ||
+    !isOneOf(value.disposition, CAMPAIGN_PLAY_DECISION_DISPOSITION_VALUES) ||
+    !isOneOf(value.status, ["accepted", "declined"] as const) ||
+    !isId(value.sourceTurnId) ||
+    !isText(value.summary) ||
+    (value.acceptEffect !== null && parseDecisionAcceptEffect(value.acceptEffect) === null)
+  ) {
+    return null;
+  }
+  return asParsed<CampaignPlayDecisionOutcome>(value);
+}
+
+function parseOpeningDecision(value: unknown): CampaignPlayOpeningDecision | null {
+  if (!isObject(value)) return null;
+  const hasAcceptEffect = Object.prototype.hasOwnProperty.call(value, "acceptEffect");
+  const expectedKeys = hasAcceptEffect
+    ? [
+        "decisionKey",
+        "actorName",
+        "actorHandle",
+        "kind",
+        "summary",
+        "acceptLabel",
+        "declineLabel",
+        "acceptEffect",
+      ]
+    : [
+        "decisionKey",
+        "actorName",
+        "actorHandle",
+        "kind",
+        "summary",
+        "acceptLabel",
+        "declineLabel",
+      ];
+  if (
+    !hasExactKeys(value, expectedKeys) ||
+    !isId(value.decisionKey) ||
+    !isName(value.actorName) ||
+    !isHandle(value.actorHandle) ||
+    !isOneOf(value.kind, CAMPAIGN_PLAY_DECISION_KIND_VALUES) ||
+    !isText(value.summary) ||
+    !isLabel(value.acceptLabel) ||
+    !isLabel(value.declineLabel) ||
+    (hasAcceptEffect &&
+      value.acceptEffect !== null &&
+      parseDecisionAcceptEffect(value.acceptEffect) === null)
+  ) {
+    return null;
+  }
+  return asParsed<CampaignPlayOpeningDecision>(value);
+}
+
+function parseDecisionObservation(value: unknown): CampaignPlayDecisionObservation | null {
+  if (
+    !isObject(value) ||
+    !hasExactKeys(value, [
+      "decisionKey",
+      "actorName",
+      "actorHandle",
+      "kind",
+      "disposition",
+      "summary",
+      "selectedLabel",
+    ]) ||
+    !isId(value.decisionKey) ||
+    !isName(value.actorName) ||
+    !isHandle(value.actorHandle) ||
+    !isOneOf(value.kind, CAMPAIGN_PLAY_DECISION_KIND_VALUES) ||
+    !isOneOf(value.disposition, CAMPAIGN_PLAY_DECISION_DISPOSITION_VALUES) ||
+    !isText(value.summary) ||
+    !isLabel(value.selectedLabel)
+  ) {
+    return null;
+  }
+  return asParsed<CampaignPlayDecisionObservation>(value);
+}
+
+function parseJournalEntry(value: unknown): CampaignPlayJournalEntry | null {
+  if (!isObject(value)) return null;
+  const hasDecision = Object.prototype.hasOwnProperty.call(value, "decision");
+  const hasDecisionOutcome = Object.prototype.hasOwnProperty.call(value, "decisionOutcome");
+  if (
+    !hasExactKeys(value, [
+      "observationHandle",
+      "title",
+      "text",
+      "whereOrRoute",
+      "worldTimeLabel",
+      "consequence",
+      ...(hasDecision ? ["decision"] : []),
+      ...(hasDecisionOutcome ? ["decisionOutcome"] : []),
+    ]) ||
     !isHandle(value.observationHandle) ||
     !isLabel(value.title) ||
     !isText(value.text) ||
     !(value.whereOrRoute === null || isLabel(value.whereOrRoute)) ||
-    !isLabel(value.worldTimeLabel)
+    !isLabel(value.worldTimeLabel) ||
+    (hasDecision && parseOpeningDecision(value.decision) === null) ||
+    (hasDecisionOutcome && parseDecisionObservation(value.decisionOutcome) === null)
   ) {
     return null;
   }
@@ -417,12 +654,72 @@ function parseJournalEntry(value: unknown): CampaignPlayJournalEntry | null {
   return asParsed<CampaignPlayJournalEntry>(value);
 }
 
-function parseSuggestedAction(value: unknown): CampaignPlaySuggestedAction | null {
+function parseCommitmentBinding(value: unknown): CampaignPlayCommitmentBinding | null {
   if (
     !isObject(value) ||
-    !hasExactKeys(value, ["choiceHandle", "label"]) ||
+    !hasExactKeys(value, [
+      "commitmentHandle",
+      "action",
+      "counterpartyHandle",
+      "subjectName",
+      "destinationHandle",
+    ]) ||
+    !isHandle(value.commitmentHandle) ||
+    !isOneOf(value.action, CAMPAIGN_PLAY_COMMITMENT_ACTION_VALUES) ||
+    !isHandle(value.counterpartyHandle) ||
+    !isName(value.subjectName) ||
+    !isHandle(value.destinationHandle)
+  ) {
+    return null;
+  }
+  return asParsed<CampaignPlayCommitmentBinding>(value);
+}
+
+function parseObligationBinding(value: unknown): CampaignPlayObligationBinding | null {
+  if (
+    !isObject(value) ||
+    !hasExactKeys(value, [
+      "obligationHandle",
+      "debtorHandle",
+      "creditorHandle",
+      "unitKey",
+      "amount",
+    ]) ||
+    !isHandle(value.obligationHandle) ||
+    !isHandle(value.debtorHandle) ||
+    !isHandle(value.creditorHandle) ||
+    value.unitKey !== "copper" ||
+    !isPositiveInteger(value.amount) ||
+    value.amount > CAMPAIGN_PLAY_LIMITS.possessionQuantity
+  ) {
+    return null;
+  }
+  return asParsed<CampaignPlayObligationBinding>(value);
+}
+
+function parseSuggestedAction(value: unknown): CampaignPlaySuggestedAction | null {
+  const hasDecisionBinding = isObject(value) &&
+    Object.prototype.hasOwnProperty.call(value, "decisionBinding");
+  const hasCommitmentBinding = isObject(value) &&
+    Object.prototype.hasOwnProperty.call(value, "commitmentBinding");
+  const hasObligationBinding = isObject(value) &&
+    Object.prototype.hasOwnProperty.call(value, "obligationBinding");
+  const bindingKeys = hasDecisionBinding
+    ? ["decisionBinding"]
+    : hasCommitmentBinding
+      ? ["commitmentBinding"]
+      : hasObligationBinding
+        ? ["obligationBinding"]
+        : [];
+  if (
+    !isObject(value) ||
+    [hasDecisionBinding, hasCommitmentBinding, hasObligationBinding].filter(Boolean).length > 1 ||
+    !hasExactKeys(value, ["choiceHandle", "label", ...bindingKeys]) ||
     !isHandle(value.choiceHandle) ||
-    !isLabel(value.label)
+    !isLabel(value.label) ||
+    (hasDecisionBinding && parseDecisionBinding(value.decisionBinding) === null) ||
+    (hasCommitmentBinding && parseCommitmentBinding(value.commitmentBinding) === null) ||
+    (hasObligationBinding && parseObligationBinding(value.obligationBinding) === null)
   ) {
     return null;
   }
@@ -459,17 +756,11 @@ function parseNarration(value: unknown): CampaignPlayNarration | null {
     }
     return asParsed<{ beatId: string }>(item);
   }, CAMPAIGN_PLAY_LIMITS.narrationBeats, 1);
-  const suggestedActions = parseArray<{ choiceHandle: string }>(value.suggestedActions, (item) => {
-    if (
-      !isObject(item) ||
-      !hasExactKeys(item, ["choiceHandle", "label"]) ||
-      !isHandle(item.choiceHandle) ||
-      !isLabel(item.label)
-    ) {
-      return null;
-    }
-    return asParsed<{ choiceHandle: string }>(item);
-  }, CAMPAIGN_PLAY_LIMITS.suggestedActions);
+  const suggestedActions = parseArray(
+    value.suggestedActions,
+    parseSuggestedAction,
+    CAMPAIGN_PLAY_LIMITS.suggestedActions,
+  );
   const effects = parseArray<{ beatId: string | null }>(value.effects, (item) => {
     if (
       !isObject(item) ||
@@ -523,13 +814,11 @@ function parseNarrationOperation(value: unknown): CampaignPlayNarrationOperation
   }
   const receiptIds = parseArray(value.receiptIds, (item) => isId(item) ? item : null,
     CAMPAIGN_PLAY_LIMITS.commandsPerBatch);
-  const suggestedActions = parseArray(value.conciseResult.suggestedActions, (item) => {
-    if (
-      !isObject(item) || !hasExactKeys(item, ["choiceHandle", "label"]) ||
-      !isHandle(item.choiceHandle) || !isLabel(item.label)
-    ) return null;
-    return asParsed<{ choiceHandle: string; label: string }>(item);
-  }, CAMPAIGN_PLAY_LIMITS.suggestedActions);
+  const suggestedActions = parseArray(
+    value.conciseResult.suggestedActions,
+    parseSuggestedAction,
+    CAMPAIGN_PLAY_LIMITS.suggestedActions,
+  );
   if (
     receiptIds === null || suggestedActions === null ||
     !isUnique(receiptIds as string[]) ||
@@ -702,10 +991,12 @@ function parseState(value: unknown): CampaignPlayState | null {
       "visiblePressures",
       "possessions",
       "obligations",
+      "commitments",
       "narration",
       "narrationOperation",
       "utilityActions",
       "consequences",
+      "decisionOutcomes",
       "activeTurn",
       "journalCursor",
       "projectionHash",
@@ -753,6 +1044,11 @@ function parseState(value: unknown): CampaignPlayState | null {
     parseVisibleObligation,
     CAMPAIGN_PLAY_LIMITS.visibleObligations,
   );
+  const commitments = parseArray(
+    value.commitments,
+    parseVisibleCommitment,
+    CAMPAIGN_PLAY_LIMITS.visibleCommitments,
+  );
   const narration = value.narration === null ? null : parseNarration(value.narration);
   const narrationOperation = value.narrationOperation === null
     ? null
@@ -767,6 +1063,11 @@ function parseState(value: unknown): CampaignPlayState | null {
     parseConsequence,
     CAMPAIGN_PLAY_LIMITS.newObservations,
   );
+  const decisionOutcomes = parseArray(
+    value.decisionOutcomes,
+    parseDecisionOutcome,
+    CAMPAIGN_PLAY_LIMITS.continuityEntries,
+  );
   const activeTurn = value.activeTurn === null ? null : parsePublicTurn(value.activeTurn);
   if (
     (character === null && value.character !== null) ||
@@ -777,10 +1078,12 @@ function parseState(value: unknown): CampaignPlayState | null {
     visiblePressures === null ||
     possessions === null ||
     obligations === null ||
+    commitments === null ||
     (narration === null && value.narration !== null) ||
     (narrationOperation === null && value.narrationOperation !== null) ||
     utilityActions === null ||
     consequences === null ||
+    decisionOutcomes === null ||
     (activeTurn === null && value.activeTurn !== null) ||
     !isUnique(openingOptions.map((option) => option.locationHandle)) ||
     !isUnique(utilityActions.map((action) => action.choiceHandle))

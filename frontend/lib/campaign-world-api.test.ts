@@ -124,6 +124,25 @@ describe("Campaign World API", () => {
     });
   });
 
+  it("round-trips an optional player identity and rejects malformed identity responses", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        ...source,
+        playerIdentity: { displayName: "Brina Hael" },
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        ...source,
+        playerIdentity: { displayName: "Brina Hael", actorId: "actor:brina" },
+      })));
+
+    await expect(loadCampaignWorldSource("campaign one")).resolves.toMatchObject({
+      playerIdentity: { displayName: "Brina Hael" },
+    });
+    await expect(loadCampaignWorldSource("campaign one")).rejects.toMatchObject({
+      code: "invalid_campaign_world_response",
+    });
+  });
+
   it("surfaces only the current nested error contract", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({
       error: {

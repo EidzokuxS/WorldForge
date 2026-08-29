@@ -3,7 +3,9 @@ import type { LanguageModel } from "ai";
 import { z } from "zod";
 import {
   CAMPAIGN_PLAY_LIMITS,
+  type CampaignPlayDecisionAcceptEffect,
   type CampaignWorldReview,
+  type CampaignPlayOpeningDecision,
 } from "@worldforge/shared";
 import {
   getSafeGenerateObjectErrorCode,
@@ -19,9 +21,12 @@ import {
 } from "../ai/structured-output-capabilities.js";
 import { createLogger } from "../lib/index.js";
 import {
+  CAMPAIGN_PLAY_COMMAND_METADATA,
   campaignPlayActorPlanSchema,
   campaignPlayActorScheduleSchema,
   campaignPlayBootstrapCommandSchema,
+  campaignPlayDecisionAcceptEffectSchema,
+  decisionOpenCommandSchema,
   campaignPlayExposurePredicateSchema,
   recordWorldEventCommandSchema,
   setRouteStateCommandSchema,
@@ -33,6 +38,7 @@ import {
 } from "./contracts.js";
 import {
   canonicalizeCampaignPlayProjection,
+  deriveCampaignPlayPublicHandle,
   hashCampaignPlayProjection,
 } from "./campaign-play-projection.js";
 import { buildCampaignPlayOpeningPrompt } from "./opening-prompts.js";
@@ -58,6 +64,22 @@ const boundedLine = (maximum: number) => z.string().min(1).max(maximum)
   .refine((value) => !value.includes("\n") && !value.includes("\r"));
 const boundedText = (maximum: number) => z.string().min(1).max(maximum)
   .refine((value) => value === value.trim());
+const campaignPlayOpeningDecisionObjectSchema = z.object({
+  actor: z.enum(["openingActor", "supportActor"]),
+  kind: z.enum(["offer", "yes_no", "demand"]),
+  summary: boundedText(CAMPAIGN_PLAY_LIMITS.text),
+  acceptLabel: boundedLine(CAMPAIGN_PLAY_LIMITS.label),
+  declineLabel: boundedLine(CAMPAIGN_PLAY_LIMITS.label),
+  acceptEffect: campaignPlayDecisionAcceptEffectSchema.nullable().optional(),
+}).strict().superRefine((decision, context) => {
+  if (decision.acceptLabel === decision.declineLabel) {
+    context.addIssue({
+      code: "custom",
+      path: ["declineLabel"],
+      message: "Decision branches must have distinct immediate actions.",
+    });
+  }
+});
 
 export const campaignPlayOpeningProposalSchema = z.object({
   start: z.object({
@@ -68,6 +90,7 @@ export const campaignPlayOpeningProposalSchema = z.object({
   scene: z.object({
     candidateId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
   }).strict(),
+  decision: campaignPlayOpeningDecisionObjectSchema.nullable().optional(),
   playerPremise: z.object({
     motivationIndex: z.number().int().safe().nonnegative()
       .max(CAMPAIGN_PLAY_LIMITS.characterList * 2 - 1),
@@ -76,12 +99,161 @@ export const campaignPlayOpeningProposalSchema = z.object({
     summary: boundedText(CAMPAIGN_PLAY_LIMITS.text),
     routeRestriction: z.object({
       reason: boundedLine(CAMPAIGN_PLAY_LIMITS.shortText),
-    }).strict().nullable(),
+    }).strict().nullable().default(null),
   }).strict().nullable(),
 }).strict();
 
 export type CampaignPlayOpeningProposal =
   z.infer<typeof campaignPlayOpeningProposalSchema>;
+
+const campaignPlayOpeningTransportAcceptanceSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("no_mechanical_effect"),
+  }).strict(),
+  z.object({
+    kind: z.literal("grant_player_possession"),
+    name: boundedLine(CAMPAIGN_PLAY_LIMITS.name),
+  }).strict(),
+  z.object({
+    kind: z.literal("paid_delivery"),
+    title: boundedLine(CAMPAIGN_PLAY_LIMITS.label),
+    subjectName: boundedLine(CAMPAIGN_PLAY_LIMITS.name),
+    destinationHandle: boundedLine(CAMPAIGN_PLAY_LIMITS.handle),
+    feeUnit: z.literal("copper"),
+    feeAmount: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+    paymentTiming: z.literal("on_completion"),
+    dueInMinutes: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes)
+      .optional(),
+  }).strict(),
+  z.object({
+    kind: z.literal("unpaid_delivery"),
+    title: boundedLine(CAMPAIGN_PLAY_LIMITS.label),
+    subjectName: boundedLine(CAMPAIGN_PLAY_LIMITS.name),
+    destinationHandle: boundedLine(CAMPAIGN_PLAY_LIMITS.handle),
+    dueInMinutes: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes)
+      .optional(),
+  }).strict(),
+]);
+type CampaignPlayOpeningTransportAcceptance = z.infer<
+  typeof campaignPlayOpeningTransportAcceptanceSchema
+>;
+
+const campaignPlayOpeningToolAcceptanceSchema = z.object({
+  kind: z.enum([
+    "no_mechanical_effect",
+    "grant_player_possession",
+    "paid_delivery",
+    "unpaid_delivery",
+  ]),
+  name: boundedLine(CAMPAIGN_PLAY_LIMITS.name).optional(),
+  title: boundedLine(CAMPAIGN_PLAY_LIMITS.label).optional(),
+  subjectName: boundedLine(CAMPAIGN_PLAY_LIMITS.name).optional(),
+  destinationHandle: boundedLine(CAMPAIGN_PLAY_LIMITS.handle).optional(),
+  feeUnit: z.enum(["copper"]).optional(),
+  feeAmount: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity).optional(),
+  paymentTiming: z.enum(["on_completion"]).optional(),
+    dueInMinutes: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes)
+      .optional(),
+}).strict();
+
+const campaignPlayOpeningTransportDecisionSchema = z.object({
+  actor: z.enum(["openingActor", "supportActor"]),
+  kind: z.enum(["offer", "yes_no", "demand"]),
+  summary: boundedText(CAMPAIGN_PLAY_LIMITS.text),
+  acceptLabel: boundedLine(CAMPAIGN_PLAY_LIMITS.label),
+  declineLabel: boundedLine(CAMPAIGN_PLAY_LIMITS.label),
+  acceptance: campaignPlayOpeningTransportAcceptanceSchema,
+}).strict().superRefine((decision, context) => {
+  if (decision.acceptLabel === decision.declineLabel) {
+    context.addIssue({
+      code: "custom",
+      path: ["declineLabel"],
+      message: "Decision branches must have distinct immediate actions.",
+    });
+  }
+});
+
+const campaignPlayOpeningProviderSchema = campaignPlayOpeningProposalSchema.extend({
+  decision: campaignPlayOpeningTransportDecisionSchema.nullable(),
+});
+
+function expectedOpeningDestinationHandle(
+  frame: CampaignPlayOpeningFrame,
+  sceneCandidates: readonly CampaignPlayOpeningSceneCandidate[],
+  candidateId: string,
+): string {
+  const candidate = sceneCandidates.find((value) => value.candidateId === candidateId);
+  const route = candidate === undefined
+    ? undefined
+    : frame.acceptedWorld.routes.find((value) =>
+        value.id === candidate.routeId
+        && value.fromLocationId === candidate.sceneLocationId
+        && value.toLocationId !== candidate.sceneLocationId,
+      );
+  const destination = route === undefined
+    ? undefined
+    : frame.acceptedWorld.locations.find((value) => value.id === route.toLocationId);
+  if (destination === undefined) fail("model_contract_failed");
+  return deriveCampaignPlayPublicHandle("location", frame.campaignId, destination.id);
+}
+
+function canonicalizeOpeningAcceptance(
+  frame: CampaignPlayOpeningFrame,
+  sceneCandidates: readonly CampaignPlayOpeningSceneCandidate[],
+  candidateId: string,
+  raw: unknown,
+): CampaignPlayDecisionAcceptEffect | null {
+  const parsed = campaignPlayOpeningTransportAcceptanceSchema.safeParse(raw);
+  if (!parsed.success) fail("model_contract_failed", parsed.error);
+  const acceptance = parsed.data as CampaignPlayOpeningTransportAcceptance;
+  switch (acceptance.kind) {
+    case "no_mechanical_effect":
+      return null;
+    case "grant_player_possession":
+      return { kind: "grant_player_possession", name: acceptance.name };
+    case "paid_delivery": {
+      const expectedDestinationHandle = expectedOpeningDestinationHandle(
+        frame,
+        sceneCandidates,
+        candidateId,
+      );
+      if (acceptance.destinationHandle !== expectedDestinationHandle) {
+        fail("model_contract_failed");
+      }
+      return {
+        kind: "paid_delivery",
+        title: acceptance.title,
+        subjectName: acceptance.subjectName,
+        destinationHandle: acceptance.destinationHandle,
+        feeUnit: acceptance.feeUnit,
+        feeAmount: acceptance.feeAmount,
+        paymentTiming: acceptance.paymentTiming,
+        ...(acceptance.dueInMinutes === undefined
+          ? {}
+          : { dueInMinutes: acceptance.dueInMinutes }),
+      } as unknown as CampaignPlayDecisionAcceptEffect;
+    }
+    case "unpaid_delivery": {
+      const expectedDestinationHandle = expectedOpeningDestinationHandle(
+        frame,
+        sceneCandidates,
+        candidateId,
+      );
+      if (acceptance.destinationHandle !== expectedDestinationHandle) {
+        fail("model_contract_failed");
+      }
+      return {
+        kind: "unpaid_delivery",
+        title: acceptance.title,
+        subjectName: acceptance.subjectName,
+        destinationHandle: acceptance.destinationHandle,
+        ...(acceptance.dueInMinutes === undefined
+          ? {}
+          : { dueInMinutes: acceptance.dueInMinutes }),
+      } as unknown as CampaignPlayDecisionAcceptEffect;
+    }
+  }
+}
 
 /**
  * Z.AI strict tools do not reliably accept the exact opening proposal's
@@ -126,7 +298,20 @@ function openingPlannerToolSchemaForFrame(
         summary: boundedText(CAMPAIGN_PLAY_LIMITS.text),
         routeRestriction,
       }).strict();
-  return z.object({ start, scene, playerPremise }).strict();
+  // Keep the provider-facing schema free of JSON-Schema unions/consts. The
+  // state-dependent requirements are enforced mechanically by the decoder
+  // below, then the authoritative proposal schema validates the normalized
+  // structure.
+  const decision = z.object({
+    state: z.enum(["none", "present"]),
+    actor: z.enum(["openingActor", "supportActor"]).optional(),
+    kind: z.enum(["offer", "yes_no", "demand"]).optional(),
+    summary: boundedText(CAMPAIGN_PLAY_LIMITS.text).optional(),
+    acceptLabel: boundedLine(CAMPAIGN_PLAY_LIMITS.label).optional(),
+    declineLabel: boundedLine(CAMPAIGN_PLAY_LIMITS.label).optional(),
+    acceptance: campaignPlayOpeningToolAcceptanceSchema.optional(),
+  }).strict();
+  return z.object({ start, scene, playerPremise, decision }).strict();
 }
 
 function decodeOpeningPlannerToolResult(
@@ -143,6 +328,7 @@ function decodeOpeningPlannerToolResult(
   if (!transportResult.success) fail("model_contract_failed", transportResult.error);
 
   const transportPremise = transportResult.data.playerPremise;
+  const transportDecision = transportResult.data.decision;
   const playerPremise = "state" in transportPremise
     ? null
     : (() => {
@@ -167,10 +353,83 @@ function decodeOpeningPlannerToolResult(
           routeRestriction: { reason: reasonResult.data },
         };
       })();
+  const decisionProposal = transportDecision.state === "none"
+    ? (() => {
+        if (
+          transportDecision.actor !== undefined
+          || transportDecision.kind !== undefined
+          || transportDecision.summary !== undefined
+          || transportDecision.acceptLabel !== undefined
+          || transportDecision.declineLabel !== undefined
+          || transportDecision.acceptance !== undefined
+        ) {
+          fail("model_contract_failed");
+        }
+        return null;
+      })()
+    : (() => {
+        if (
+          transportDecision.actor === undefined
+          || transportDecision.kind === undefined
+          || transportDecision.summary === undefined
+          || transportDecision.acceptLabel === undefined
+          || transportDecision.declineLabel === undefined
+          || transportDecision.acceptance === undefined
+        ) {
+          fail("model_contract_failed");
+        }
+        return {
+          actor: transportDecision.actor,
+          kind: transportDecision.kind,
+          summary: transportDecision.summary,
+          acceptLabel: transportDecision.acceptLabel,
+          declineLabel: transportDecision.declineLabel,
+          acceptEffect: canonicalizeOpeningAcceptance(
+            frame,
+            sceneCandidates,
+            transportResult.data.scene.candidateId,
+            transportDecision.acceptance,
+          ),
+        };
+      })();
   const proposalResult = campaignPlayOpeningProposalSchema.safeParse({
     start: transportResult.data.start,
     scene: transportResult.data.scene,
+    decision: decisionProposal,
     playerPremise,
+  });
+  if (!proposalResult.success) fail("model_contract_failed", proposalResult.error);
+  return proposalResult.data;
+}
+
+function decodeOpeningPlannerProviderResult(
+  frame: CampaignPlayOpeningFrame,
+  sceneCandidates: readonly CampaignPlayOpeningSceneCandidate[],
+  raw: unknown,
+): CampaignPlayOpeningProposal {
+  const providerResult = campaignPlayOpeningProviderSchema.safeParse(raw);
+  if (!providerResult.success) fail("model_contract_failed", providerResult.error);
+  const providerDecision = providerResult.data.decision;
+  const decision = providerDecision === null
+    ? null
+    : {
+        actor: providerDecision.actor,
+        kind: providerDecision.kind,
+        summary: providerDecision.summary,
+        acceptLabel: providerDecision.acceptLabel,
+        declineLabel: providerDecision.declineLabel,
+        acceptEffect: canonicalizeOpeningAcceptance(
+          frame,
+          sceneCandidates,
+          providerResult.data.scene.candidateId,
+          providerDecision.acceptance,
+        ),
+      };
+  const proposalResult = campaignPlayOpeningProposalSchema.safeParse({
+    start: providerResult.data.start,
+    scene: providerResult.data.scene,
+    decision,
+    playerPremise: providerResult.data.playerPremise,
   });
   if (!proposalResult.success) fail("model_contract_failed", proposalResult.error);
   return proposalResult.data;
@@ -249,6 +508,7 @@ export interface CampaignPlayOpeningExposureSeed {
 export interface CampaignPlayOpeningNarratorFacts {
   location: { id: string; name: string; description: string };
   player: { role: string; arrivalMode: string; immediateSituation: string };
+  decision?: CampaignPlayOpeningDecision | null;
   supportActor: { id: string; name: string; summary: string };
   pressure: { id: string; name: string; description: string; trajectory: string };
   route: {
@@ -260,12 +520,15 @@ export interface CampaignPlayOpeningNarratorFacts {
 }
 
 type CampaignPlayOpeningCommand = CampaignPlayBootstrapCommand |
-  Extract<CampaignPlayCommand, { kind: "record_world_event" | "set_route_state" }>;
+  Extract<CampaignPlayCommand, {
+    kind: "record_world_event" | "set_route_state" | "decision_open"
+  }>;
 
 const campaignPlayOpeningCommandSchema: z.ZodType<CampaignPlayOpeningCommand> = z.union([
   campaignPlayBootstrapCommandSchema,
   recordWorldEventCommandSchema,
   setRouteStateCommandSchema,
+  decisionOpenCommandSchema,
 ]);
 
 export interface CampaignPlayOpeningArtifact {
@@ -280,6 +543,16 @@ export interface CampaignPlayOpeningArtifact {
   start: CampaignPlayOpeningStart;
   bootstrapCommands: CampaignPlayOpeningCommand[];
   playerPremise: { motivation: string; commandId: string } | null;
+  decision?: {
+    decisionKey: string;
+    actorId: string;
+    actorHandle: string;
+    kind: "offer" | "yes_no" | "demand";
+    summary: string;
+    acceptLabel: string;
+    declineLabel: string;
+    acceptEffect?: CampaignPlayOpeningDecision["acceptEffect"];
+  } | null;
   actorPlans: CampaignPlayActorPlan[];
   actorSchedules: CampaignPlayActorSchedule[];
   exposureSeed: CampaignPlayOpeningExposureSeed | null;
@@ -297,6 +570,16 @@ const openingNarratorFactsSchema = z.object({
     arrivalMode: boundedLine(CAMPAIGN_PLAY_LIMITS.shortText),
     immediateSituation: boundedText(CAMPAIGN_PLAY_LIMITS.text),
   }).strict(),
+  decision: z.object({
+    decisionKey: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
+    actorName: boundedLine(CAMPAIGN_PLAY_LIMITS.name),
+    actorHandle: boundedLine(CAMPAIGN_PLAY_LIMITS.handle),
+    kind: z.enum(["offer", "yes_no", "demand"]),
+    summary: boundedText(CAMPAIGN_PLAY_LIMITS.text),
+    acceptLabel: boundedLine(CAMPAIGN_PLAY_LIMITS.label),
+    declineLabel: boundedLine(CAMPAIGN_PLAY_LIMITS.label),
+    acceptEffect: campaignPlayDecisionAcceptEffectSchema.nullable().optional(),
+  }).strict().nullable().optional().default(null),
   supportActor: z.object({
     id: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
     name: boundedLine(CAMPAIGN_PLAY_LIMITS.name),
@@ -333,7 +616,17 @@ export const campaignPlayOpeningArtifactSchema: z.ZodType<CampaignPlayOpeningArt
     playerPremise: z.object({
       motivation: boundedLine(CAMPAIGN_PLAY_LIMITS.label),
       commandId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
-    }).strict().nullable(),
+    }).strict().nullable().default(null),
+    decision: z.object({
+      decisionKey: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
+      actorId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
+      actorHandle: boundedLine(CAMPAIGN_PLAY_LIMITS.handle),
+      kind: z.enum(["offer", "yes_no", "demand"]),
+      summary: boundedText(CAMPAIGN_PLAY_LIMITS.text),
+      acceptLabel: boundedLine(CAMPAIGN_PLAY_LIMITS.label),
+      declineLabel: boundedLine(CAMPAIGN_PLAY_LIMITS.label),
+      acceptEffect: campaignPlayDecisionAcceptEffectSchema.nullable().optional(),
+    }).strict().nullable().optional().default(null),
     actorPlans: z.array(campaignPlayActorPlanSchema).max(OPENING_MAX_ELIGIBLE_ACTORS),
     actorSchedules: z.array(campaignPlayActorScheduleSchema).min(1).max(OPENING_MAX_ELIGIBLE_ACTORS),
     exposureSeed: z.object({
@@ -670,6 +963,7 @@ function compileBootstrapCommands(
   startLocationId: string,
   premiseRouteId: string,
   playerPremise: CampaignPlayOpeningProposal["playerPremise"],
+  decision: NonNullable<CampaignPlayOpeningProposal["decision"]> | null,
   openingActorId: string,
   supportActorId: string,
 ): CampaignPlayOpeningCommand[] {
@@ -762,8 +1056,47 @@ function compileBootstrapCommands(
             { kind: "location" as const, id: startLocationId },
           ],
         }]),
+    ...(decision === null
+      ? []
+      : [{
+          kind: "decision_open" as const,
+          source,
+          readScope: [{
+            kind: "actor" as const,
+            id: decision.actor === "openingActor" ? openingActorId : supportActorId,
+          }],
+          writeScope: [{
+            kind: "decision" as const,
+            id: stableId("decision", {
+              campaignId: frame.campaignId,
+              sourceOpeningTurnId: frame.turnId,
+              actorId: decision.actor === "openingActor" ? openingActorId : supportActorId,
+              kind: decision.kind,
+            }),
+          }],
+          exposure: { mode: "protected" as const },
+          decisionKey: stableId("decision", {
+            campaignId: frame.campaignId,
+            sourceOpeningTurnId: frame.turnId,
+            actorId: decision.actor === "openingActor" ? openingActorId : supportActorId,
+            kind: decision.kind,
+          }),
+          actorId: decision.actor === "openingActor" ? openingActorId : supportActorId,
+          actorHandle: deriveCampaignPlayPublicHandle(
+            "actor",
+            frame.campaignId,
+            decision.actor === "openingActor" ? openingActorId : supportActorId,
+          ),
+          decisionKind: decision.kind,
+          sourceTurnId: frame.turnId,
+          summary: decision.summary,
+          acceptLabel: decision.acceptLabel,
+          declineLabel: decision.declineLabel,
+          acceptEffect: decision.acceptEffect ?? null,
+        }]),
   ];
   const commands: CampaignPlayOpeningCommand[] = [];
+  let expectedWorldVersion = frame.baseWorldVersion;
   for (const [order, input] of inputs.entries()) {
     const causalParent = order === 0
       ? { kind: "turn" as const, turnId: frame.turnId }
@@ -779,9 +1112,12 @@ function compileBootstrapCommands(
       commandId,
       batchId,
       order,
-      expectedWorldVersion: frame.baseWorldVersion + order,
+      expectedWorldVersion,
       causalParent,
     }));
+    if (CAMPAIGN_PLAY_COMMAND_METADATA[commands[order]!.kind].mechanicalMutation) {
+      expectedWorldVersion += 1;
+    }
   }
   return commands;
 }
@@ -842,6 +1178,9 @@ function compileScene(
     : undefined;
   const supportPresent = support
     && isActorPresentAtScene(world, support.id, start.sceneLocationId);
+  const decisionActor = proposal.decision === undefined || proposal.decision === null
+    ? null
+    : proposal.decision.actor === "openingActor" ? openingActor : support;
   if (
     !location
     || !openingActor
@@ -851,6 +1190,7 @@ function compileScene(
     || !pressure
     || !route
     || !destination
+    || (proposal.decision !== undefined && proposal.decision !== null && !decisionActor)
   ) {
     fail("opening_proposal_invalid");
   }
@@ -865,6 +1205,27 @@ function compileScene(
         arrivalMode: start.arrivalMode,
         immediateSituation: start.immediateSituation,
       },
+      decision: proposal.decision === undefined || proposal.decision === null
+        ? null
+        : {
+            decisionKey: stableId("decision", {
+              campaignId: frame.campaignId,
+              sourceOpeningTurnId: frame.turnId,
+              actorId: decisionActor!.id,
+              kind: proposal.decision.kind,
+            }),
+            actorName: decisionActor!.name,
+            actorHandle: deriveCampaignPlayPublicHandle(
+              "actor",
+              frame.campaignId,
+              decisionActor!.id,
+            ),
+            kind: proposal.decision.kind,
+            summary: proposal.decision.summary,
+            acceptLabel: proposal.decision.acceptLabel,
+            declineLabel: proposal.decision.declineLabel,
+            acceptEffect: proposal.decision.acceptEffect ?? null,
+          },
       supportActor: { id: support.id, name: support.name, summary: support.summary },
       pressure: {
         id: pressure.id,
@@ -917,6 +1278,193 @@ function successfulEvidence(trace: Readonly<SafeGenerateTrace>): CampaignPlayOpe
     fail("model_contract_failed", undefined, evidence);
   }
   return evidence;
+}
+
+const OPENING_SEMANTIC_REVIEW_FAILED_CHECK_VALUES: ["decision_authority_mismatch"] = [
+  "decision_authority_mismatch",
+];
+
+const openingSemanticReviewFailedCheckSchema = z.enum(OPENING_SEMANTIC_REVIEW_FAILED_CHECK_VALUES);
+
+/**
+ * Native structured output receives the domain contract, whose branches make
+ * the accepted/rejected cross-field invariant explicit to the provider.
+ */
+export const campaignPlayOpeningSemanticReviewSchema = z.discriminatedUnion("verdict", [
+  z.object({
+    verdict: z.literal("accepted"),
+    reason: boundedLine(CAMPAIGN_PLAY_LIMITS.text),
+    failedChecks: z.array(openingSemanticReviewFailedCheckSchema).length(0),
+  }).strict(),
+  z.object({
+    verdict: z.literal("rejected"),
+    reason: boundedLine(CAMPAIGN_PLAY_LIMITS.text),
+    failedChecks: z.array(openingSemanticReviewFailedCheckSchema).length(1),
+  }).strict(),
+]);
+
+/**
+ * Tool-mode structured output stays flat/provider-compatible; the parsed
+ * object is checked against the explicit domain contract after generation.
+ */
+const campaignPlayOpeningSemanticReviewToolSchema = z.object({
+  verdict: z.enum(["accepted", "rejected"]),
+  reason: boundedLine(CAMPAIGN_PLAY_LIMITS.text),
+  failedChecks: z.array(openingSemanticReviewFailedCheckSchema).min(0).max(1),
+}).strict().superRefine((review, context) => {
+  const expectsFailedChecks = review.verdict === "rejected";
+  if (expectsFailedChecks !== (review.failedChecks.length > 0)) {
+    context.addIssue({
+      code: "custom",
+      path: ["failedChecks"],
+      message: "accepted requires failedChecks=[]; rejected requires one failed check.",
+    });
+  }
+});
+
+type CampaignPlayOpeningSemanticReview = z.infer<
+  typeof campaignPlayOpeningSemanticReviewSchema
+>;
+
+interface CampaignPlayOpeningSemanticReviewInput {
+  readonly canonicalGrounding: {
+    readonly player: {
+      readonly actorId: string;
+      readonly name: string;
+    };
+    readonly selectedScene: {
+      readonly candidateId: string;
+      readonly sceneLocationId: string;
+      readonly sceneName: string;
+      readonly openingActor: { readonly id: string; readonly name: string };
+      readonly supportActor: { readonly id: string; readonly name: string };
+      readonly pressure: { readonly id: string; readonly name: string };
+      readonly route: {
+        readonly id: string;
+        readonly destinationId: string;
+        readonly destinationName: string;
+        readonly destinationHandle: string;
+        readonly travelCost: number;
+      };
+    };
+  };
+  readonly proposal: {
+    readonly start: CampaignPlayOpeningProposal["start"];
+    readonly scene: CampaignPlayOpeningProposal["scene"];
+    readonly decision: NonNullable<CampaignPlayOpeningProposal["decision"]> | null;
+    readonly playerPremise: CampaignPlayOpeningProposal["playerPremise"];
+  };
+}
+
+function openingSemanticReviewInput(
+  frame: CampaignPlayOpeningFrame,
+  sceneCandidates: readonly CampaignPlayOpeningSceneCandidate[],
+  proposal: CampaignPlayOpeningProposal,
+): CampaignPlayOpeningSemanticReviewInput {
+  const candidate = sceneCandidates.find((value) =>
+    value.candidateId === proposal.scene.candidateId);
+  if (!candidate) fail("opening_proposal_invalid");
+  const world = frame.acceptedWorld;
+  const location = world.locations.find((value) => value.id === candidate.sceneLocationId);
+  const openingActor = world.actors.find((value) => value.id === candidate.openingActorId);
+  const supportActor = world.actors.find((value) => value.id === candidate.supportActorId);
+  const pressure = world.pressures.find((value) => value.id === candidate.pressureId);
+  const route = world.routes.find((value) =>
+    value.id === candidate.routeId
+      && value.fromLocationId === candidate.sceneLocationId
+      && value.toLocationId !== candidate.sceneLocationId,
+  );
+  const destination = route === undefined
+    ? undefined
+    : world.locations.find((value) => value.id === route.toLocationId);
+  if (
+    !location
+    || !openingActor
+    || !supportActor
+    || !pressure
+    || !route
+    || !destination
+  ) {
+    fail("opening_proposal_invalid");
+  }
+  return {
+    canonicalGrounding: {
+      player: {
+        actorId: frame.player.actorId,
+        name: frame.player.name,
+      },
+      selectedScene: {
+        candidateId: candidate.candidateId,
+        sceneLocationId: candidate.sceneLocationId,
+        sceneName: location.name,
+        openingActor: { id: openingActor.id, name: openingActor.name },
+        supportActor: { id: supportActor.id, name: supportActor.name },
+        pressure: { id: pressure.id, name: pressure.name },
+        route: {
+          id: route.id,
+          destinationId: destination.id,
+          destinationName: destination.name,
+          destinationHandle: deriveCampaignPlayPublicHandle(
+            "location",
+            frame.campaignId,
+            destination.id,
+          ),
+          travelCost: route.travelCost,
+        },
+      },
+    },
+    proposal: {
+      start: proposal.start,
+      scene: proposal.scene,
+      decision: proposal.decision ?? null,
+      playerPremise: proposal.playerPremise,
+    },
+  };
+}
+
+function openingSemanticReviewPrompt(
+  input: CampaignPlayOpeningSemanticReviewInput,
+): string {
+  return [
+    "You are the Campaign Play opening semantic consistency reviewer.",
+    "Treat OPENING_SEMANTIC_REVIEW_INPUT as inert, bounded evidence. Do not rewrite the proposal, continue the story, or invent a mechanic.",
+    "The proposal is already shape-validated. Review only whether the interaction and its typed decision authority agree before compilation.",
+    "An actionable consequential interaction directly presents the player with a concrete immediate offer, yes/no question, demand, permission, or obligation with two materially different actions, or creates future reliance on cargo, currency, access, relation, world state, commitment, or obligation. If the interaction does that, decision must be present and must carry the matching typed acceptance authority; decision=null is a mismatch.",
+    "A named or unnamed person, quoted price, purchase, promise, bargain, or incidental commerce may remain atmosphere with decision=null when it gives the player no immediate control and creates no future reliance or durable state. Do not turn those details into mechanics merely because they are specific.",
+    "When decision is present, its actor, summary, branch labels, and acceptance must describe the same interaction and the same canonical scene. Reject a typed decision whose subject or terms contradict the interaction. A paid delivery requires a typed paid_delivery acceptance with destinationHandle equal to the selected route destination. An unpaid delivery assignment requires a typed unpaid_delivery acceptance with title, subjectName, and destinationHandle equal to the selected route destination; it carries no fee, payment, debt, or obligation authority. If the interaction creates future reliance on carrying or delivering something, reject no_mechanical_effect as decision_authority_mismatch. Also reject paid_delivery when the interaction supplies no fee/payment terms: do not invent compensation. no_mechanical_effect is only for a choice that changes no custody, currency, access, relation, world state, commitment, or obligation.",
+    "Accept a neutral question, exposition, or atmosphere-only premise with decision=null. Do not use word matching or keyword filtering; judge agency, consequence, and future reliance from the claim as a whole.",
+    `OPENING_SEMANTIC_REVIEW_INPUT=${JSON.stringify(input)}`,
+    "Return verdict=accepted only when the proposal is semantically consistent. For a mismatch return verdict=rejected, failedChecks=[\"decision_authority_mismatch\"], and one concise reason.",
+    "Return exactly one object with exactly these keys: verdict, reason, failedChecks. accepted requires failedChecks=[]; rejected requires the one supplied failed-check value.",
+  ].join("\n");
+}
+
+function combineOpeningEvidence(
+  proposer: CampaignPlayOpeningModelEvidence,
+  reviewer: CampaignPlayOpeningModelEvidence,
+): CampaignPlayOpeningModelEvidence {
+  // Proposer/reviewer/recovery subcalls aggregate usage in one planner
+  // execution; only SafeGenerate transport retries set retryUsed.
+  const addNullable = (left: number | null, right: number | null): number | null =>
+    left === null || right === null ? null : left + right;
+  return {
+    requestedStrategy: "strict_object",
+    actualStrategy: proposer.actualStrategy === reviewer.actualStrategy
+      ? proposer.actualStrategy
+      : null,
+    totalAttempts: Math.max(proposer.totalAttempts, reviewer.totalAttempts),
+    repairUsed: proposer.repairUsed || reviewer.repairUsed,
+    retryUsed: proposer.retryUsed || reviewer.retryUsed,
+    textFallbackUsed: proposer.textFallbackUsed || reviewer.textFallbackUsed,
+    responseModel: proposer.responseModel === reviewer.responseModel
+      ? proposer.responseModel
+      : null,
+    finishReason: reviewer.finishReason,
+    errorCode: reviewer.errorCode ?? proposer.errorCode,
+    inputTokens: addNullable(proposer.inputTokens, reviewer.inputTokens),
+    outputTokens: addNullable(proposer.outputTokens, reviewer.outputTokens),
+    totalTokens: addNullable(proposer.totalTokens, reviewer.totalTokens),
+  };
 }
 
 const codeOnlyEvidence: CampaignPlayOpeningModelEvidence = {
@@ -993,11 +1541,26 @@ export function createCampaignPlayOpeningPlanner(
       start.sceneLocationId,
       narratorFacts.route.id,
       proposal.playerPremise,
+      proposal.decision ?? null,
       openingActorId,
       supportActorId,
     );
     const premiseCommand = bootstrapCommands.find((command) =>
       command.kind === "record_world_event");
+    const decisionCommand = bootstrapCommands.find((command) =>
+      command.kind === "decision_open");
+    const compiledDecision = decisionCommand?.kind === "decision_open"
+      ? {
+          decisionKey: decisionCommand.decisionKey,
+          actorId: decisionCommand.actorId,
+          actorHandle: decisionCommand.actorHandle,
+          kind: decisionCommand.decisionKind,
+          summary: decisionCommand.summary,
+          acceptLabel: decisionCommand.acceptLabel,
+          declineLabel: decisionCommand.declineLabel,
+          acceptEffect: decisionCommand.acceptEffect ?? null,
+        }
+      : null;
     const artifact = campaignPlayOpeningArtifactSchema.parse({
       artifactId: stableId("opening", { frameHash, proposalHash }),
       campaignId: frame.campaignId,
@@ -1015,6 +1578,7 @@ export function createCampaignPlayOpeningPlanner(
             motivation: frame.player.motivations[proposal.playerPremise.motivationIndex]!,
             commandId: premiseCommand!.commandId,
           },
+      decision: compiledDecision,
       actorPlans: [],
       actorSchedules: schedules,
       exposureSeed: null,
@@ -1057,75 +1621,222 @@ export function createCampaignPlayOpeningPlanner(
           errorCode: "structured_output_unavailable",
         });
       }
-      let generated;
-      try {
-        const toolMode = capability.primaryStrategy === "tool_mode";
-        const generationSchema = toolMode
-          ? openingPlannerToolSchemaForFrame(
-            request.frame,
-            startingConditions,
-            sceneCandidates,
-          ) as unknown as z.ZodType<CampaignPlayOpeningProposal>
-          : campaignPlayOpeningProposalSchema;
-        generated = await dependencies.generateObject({
-          model: request.model,
-          schema: generationSchema,
-          prompt: buildCampaignPlayOpeningPrompt(
-            request.frame,
-            startingConditions,
-            sceneCandidates,
-            toolMode ? "tool_mode" : "native",
-          ),
-          temperature: request.temperature,
-          maxOutputTokens: Math.min(request.maxOutputTokens, OPENING_MAX_OUTPUT_TOKENS),
-          abortSignal: request.signal,
-          mode: "auto",
-          strictSchema: true,
-          allowRepair: false,
-          allowTextFallback: false,
-          retries: 1,
-          timeout: { totalMs: 180_000 },
-        });
-      } catch (error) {
-        const code = getSafeGenerateObjectErrorCode(error);
-        const trace = getSafeGenerateObjectTrace(error);
-        recordCampaignPlayOpeningNoObjectDiagnostics(
-          dependencies.diagnosticsLogger ?? log,
-          error,
-          code,
-          trace,
-        );
-        const plannerCode: CampaignPlayOpeningPlannerErrorCode =
-          isSafeGenerateObjectContractErrorCode(code)
-            ? "model_contract_failed"
-            : "transport_interrupted";
-        const evidence: CampaignPlayOpeningModelEvidence = {
-          ...codeOnlyEvidence,
-          actualStrategy: trace?.strategy ?? trace?.capability?.actualMode ?? null,
-          repairUsed: trace?.strategy === "repair" || trace?.repair !== undefined,
-          retryUsed: trace?.strategy === "full_retry",
-          textFallbackUsed: trace?.strategy === "text_fallback",
-          responseModel: trace?.response?.modelId ?? null,
-          finishReason: trace?.finishReason ?? null,
-          errorCode: code ?? plannerCode,
-        };
-        fail(plannerCode, error, evidence);
-      }
-      const modelEvidence = successfulEvidence(generated.trace);
-      try {
-        const proposal = capability.primaryStrategy === "tool_mode"
+      const toolMode = capability.primaryStrategy === "tool_mode";
+      const generationSchema = toolMode
+        ? openingPlannerToolSchemaForFrame(
+          request.frame,
+          startingConditions,
+          sceneCandidates,
+        ) as unknown as z.ZodType<CampaignPlayOpeningProposal>
+        : campaignPlayOpeningProviderSchema as unknown as z.ZodType<CampaignPlayOpeningProposal>;
+      const proposalPrompt = buildCampaignPlayOpeningPrompt(
+        request.frame,
+        startingConditions,
+        sceneCandidates,
+        toolMode ? "tool_mode" : "native",
+      );
+      const generateOpeningObject = async (
+        prompt: string,
+        priorEvidence: CampaignPlayOpeningModelEvidence,
+      ) => {
+        try {
+          return await dependencies.generateObject({
+            model: request.model,
+            schema: generationSchema,
+            prompt,
+            temperature: request.temperature,
+            maxOutputTokens: Math.min(request.maxOutputTokens, OPENING_MAX_OUTPUT_TOKENS),
+            abortSignal: request.signal,
+            mode: "auto",
+            strictSchema: true,
+            allowRepair: false,
+            allowTextFallback: false,
+            retries: 1,
+            timeout: { totalMs: 180_000 },
+          });
+        } catch (error) {
+          const code = getSafeGenerateObjectErrorCode(error);
+          const trace = getSafeGenerateObjectTrace(error);
+          recordCampaignPlayOpeningNoObjectDiagnostics(
+            dependencies.diagnosticsLogger ?? log,
+            error,
+            code,
+            trace,
+          );
+          const plannerCode: CampaignPlayOpeningPlannerErrorCode =
+            isSafeGenerateObjectContractErrorCode(code)
+              ? "model_contract_failed"
+              : "transport_interrupted";
+          const failedEvidence: CampaignPlayOpeningModelEvidence = {
+            ...codeOnlyEvidence,
+            actualStrategy: trace?.strategy ?? trace?.capability?.actualMode ?? null,
+            repairUsed: trace?.strategy === "repair" || trace?.repair !== undefined,
+            retryUsed: trace?.strategy === "full_retry",
+            textFallbackUsed: trace?.strategy === "text_fallback",
+            responseModel: trace?.response?.modelId ?? null,
+            finishReason: trace?.finishReason ?? null,
+            errorCode: code ?? plannerCode,
+          };
+          const evidence = priorEvidence.actualStrategy === "fixture"
+            ? failedEvidence
+            : combineOpeningEvidence(priorEvidence, failedEvidence);
+          fail(plannerCode, error, evidence);
+        }
+      };
+      const decodeProposal = (raw: unknown): CampaignPlayOpeningProposal =>
+        toolMode
           ? decodeOpeningPlannerToolResult(
             request.frame,
             startingConditions,
             sceneCandidates,
-            generated.object,
+            raw,
           )
-          : generated.object;
+          : decodeOpeningPlannerProviderResult(
+            request.frame,
+            sceneCandidates,
+            raw,
+          );
+      const reviewOpeningProposal = async (
+        proposal: CampaignPlayOpeningProposal,
+        priorEvidence: CampaignPlayOpeningModelEvidence,
+      ): Promise<{
+        input: CampaignPlayOpeningSemanticReviewInput;
+        review: CampaignPlayOpeningSemanticReview;
+        evidence: CampaignPlayOpeningModelEvidence;
+      }> => {
+        const input = openingSemanticReviewInput(
+          request.frame,
+          sceneCandidates,
+          proposal,
+        );
+        let reviewed;
+        try {
+          reviewed = await dependencies.generateObject({
+            model: request.model,
+            schema: (toolMode
+              ? campaignPlayOpeningSemanticReviewToolSchema
+              : campaignPlayOpeningSemanticReviewSchema) as unknown as z.ZodType<CampaignPlayOpeningSemanticReview>,
+            prompt: openingSemanticReviewPrompt(input),
+            temperature: 0,
+            maxOutputTokens: Math.min(request.maxOutputTokens, OPENING_MAX_OUTPUT_TOKENS),
+            abortSignal: request.signal,
+            mode: "auto",
+            strictSchema: true,
+            allowRepair: false,
+            allowTextFallback: false,
+            retries: 1,
+            timeout: { totalMs: 180_000 },
+          });
+        } catch (error) {
+          const code = getSafeGenerateObjectErrorCode(error);
+          const trace = getSafeGenerateObjectTrace(error);
+          recordCampaignPlayOpeningNoObjectDiagnostics(
+            dependencies.diagnosticsLogger ?? log,
+            error,
+            code,
+            trace,
+          );
+          const plannerCode: CampaignPlayOpeningPlannerErrorCode =
+            isSafeGenerateObjectContractErrorCode(code)
+              ? "model_contract_failed"
+              : "transport_interrupted";
+          const failedEvidence: CampaignPlayOpeningModelEvidence = {
+            ...codeOnlyEvidence,
+            actualStrategy: trace?.strategy ?? trace?.capability?.actualMode ?? null,
+            repairUsed: trace?.strategy === "repair" || trace?.repair !== undefined,
+            retryUsed: trace?.strategy === "full_retry",
+            textFallbackUsed: trace?.strategy === "text_fallback",
+            responseModel: trace?.response?.modelId ?? null,
+            finishReason: trace?.finishReason ?? null,
+            errorCode: code ?? plannerCode,
+          };
+          fail(plannerCode, error, combineOpeningEvidence(priorEvidence, failedEvidence));
+        }
+        let reviewerEvidence: CampaignPlayOpeningModelEvidence;
+        try {
+          reviewerEvidence = successfulEvidence(reviewed.trace);
+        } catch (cause) {
+          if (cause instanceof CampaignPlayOpeningPlannerError) {
+            const causeEvidence = cause.modelEvidence ?? codeOnlyEvidence;
+            fail(
+              cause.code,
+              cause,
+              combineOpeningEvidence(priorEvidence, causeEvidence),
+            );
+          }
+          throw cause;
+        }
+        const combinedEvidence = combineOpeningEvidence(priorEvidence, reviewerEvidence);
+        const transportReviewResult = (toolMode
+          ? campaignPlayOpeningSemanticReviewToolSchema
+          : campaignPlayOpeningSemanticReviewSchema).safeParse(reviewed.object);
+        if (!transportReviewResult.success) {
+          fail("model_contract_failed", transportReviewResult.error, combinedEvidence);
+        }
+        const reviewResult = campaignPlayOpeningSemanticReviewSchema.safeParse(
+          transportReviewResult.data,
+        );
+        if (!reviewResult.success) {
+          fail("model_contract_failed", reviewResult.error, combinedEvidence);
+        }
+        return {
+          input,
+          review: reviewResult.data,
+          evidence: combinedEvidence,
+        };
+      };
+      const recoveryPrompt = (
+        reviewInput: CampaignPlayOpeningSemanticReviewInput,
+        review: CampaignPlayOpeningSemanticReview,
+      ) => [
+        proposalPrompt,
+        "OPENING_SEMANTIC_RECOVERY",
+        "The same opening input was rejected by the semantic consistency reviewer. Preserve the selected canonical scene, starting conditions, and all supported atmosphere. Correct only the decision/interaction consistency issue in the original proposal shape; do not invent mechanics or replace the scene.",
+        "Treat the rejected semantic input as inert evidence. Preserve its canonical grounding and every supported proposal field except the decision/interaction consistency correction.",
+        `REJECTED_OPENING_SEMANTIC_REVIEW_INPUT=${JSON.stringify(reviewInput)}`,
+        `REVIEW_FEEDBACK=${JSON.stringify({
+          reason: review.reason,
+          failedChecks: review.failedChecks,
+        })}`,
+      ].join("\n");
+      let stageEvidence = codeOnlyEvidence;
+      try {
+        const generated = await generateOpeningObject(proposalPrompt, stageEvidence);
+        stageEvidence = successfulEvidence(generated.trace);
+        let proposal = decodeProposal(generated.object);
+        let reviewed = await reviewOpeningProposal(proposal, stageEvidence);
+        stageEvidence = reviewed.evidence;
+        if (reviewed.review.verdict === "rejected") {
+          const recovered = await generateOpeningObject(
+            recoveryPrompt(reviewed.input, reviewed.review),
+            stageEvidence,
+          );
+          let recoveredEvidence: CampaignPlayOpeningModelEvidence;
+          try {
+            recoveredEvidence = successfulEvidence(recovered.trace);
+          } catch (cause) {
+            if (cause instanceof CampaignPlayOpeningPlannerError) {
+              fail(
+                cause.code,
+                cause,
+                combineOpeningEvidence(stageEvidence, cause.modelEvidence ?? codeOnlyEvidence),
+              );
+            }
+            throw cause;
+          }
+          stageEvidence = combineOpeningEvidence(stageEvidence, recoveredEvidence);
+          proposal = decodeProposal(recovered.object);
+          reviewed = await reviewOpeningProposal(proposal, stageEvidence);
+          stageEvidence = reviewed.evidence;
+          if (reviewed.review.verdict === "rejected") {
+            fail("model_contract_failed", undefined, stageEvidence);
+          }
+        }
         return compile(
           request.frame,
           startingConditions,
           proposal,
-          modelEvidence,
+          stageEvidence,
         );
       } catch (cause) {
         const plannerError = cause instanceof CampaignPlayOpeningPlannerError
@@ -1146,7 +1857,7 @@ export function createCampaignPlayOpeningPlanner(
         if (plannerError) {
           throw new CampaignPlayOpeningPlannerError(
             plannerError.code,
-            modelEvidence,
+            plannerError.modelEvidence ?? stageEvidence,
             { cause: plannerError },
           );
         }

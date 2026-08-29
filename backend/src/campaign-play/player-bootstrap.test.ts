@@ -16,7 +16,10 @@ import {
   createMigratedCampaign,
   sourceFixture,
 } from "../campaign-world/world-repository.test-support.js";
-import { calculateCampaignWorldContentHash } from "../campaign-world/world-snapshot.js";
+import {
+  calculateCampaignWorldContentHash,
+} from "../campaign-world/world-snapshot.js";
+import { calculateCampaignWorldSourceDigest } from "../campaign-world/world-source.js";
 import {
   openCampaignPlayDatabase,
   type CampaignPlayDatabaseHandle,
@@ -56,12 +59,25 @@ function track<T extends CampaignWorldDatabaseHandle | CampaignPlayDatabaseHandl
   return handle;
 }
 
-function createState() {
+function createState(playerIdentity?: { displayName: string }) {
   createMigratedCampaign(root, CAMPAIGN_ID);
   const worldHandle = openCampaignWorldDatabase(CAMPAIGN_ID);
   try {
     const worlds = createCampaignWorldRepository(worldHandle);
-    const source = sourceFixture(CAMPAIGN_ID);
+    const baseSource = sourceFixture(CAMPAIGN_ID);
+    const source = playerIdentity
+      ? {
+          ...baseSource,
+          playerIdentity,
+          sourceDigest: calculateCampaignWorldSourceDigest({
+            premise: baseSource.premise,
+            dna: baseSource.dna,
+            researchSummary: baseSource.researchSummary,
+            sourceReferences: baseSource.sourceReferences,
+            playerIdentity,
+          }),
+        }
+      : baseSource;
     worlds.acquireBuild({
       buildId: "build-player-bootstrap",
       source,
@@ -102,12 +118,15 @@ function createState() {
   return { handle, state };
 }
 
-function donorDraft(inventorySeed: string[] = ["Repair roll"]): CharacterDraft {
+function donorDraft(
+  inventorySeed: string[] = ["Repair roll"],
+  displayName = "Mara Venn",
+): CharacterDraft {
   return {
     identity: {
       role: "player",
       tier: "key",
-      displayName: "Mara Venn",
+      displayName,
       canonicalStatus: "original",
       behavioralCore: {
         attachments: [],
@@ -172,9 +191,9 @@ const generator = {
 
 const settings = { research: { enabled: false } } as unknown as Settings;
 
-function characterService(inventorySeed?: string[]) {
+function characterService(inventorySeed?: string[], displayName?: string) {
   return createCampaignPlayCharacterService({
-    ingestCharacterDraft: vi.fn(async () => donorDraft(inventorySeed)),
+    ingestCharacterDraft: vi.fn(async () => donorDraft(inventorySeed, displayName)),
   });
 }
 
@@ -223,8 +242,9 @@ async function prepareCharacter(
   sourceKind: "character_card" | "generated",
   acceptedWorld: ReturnType<typeof createState>["state"]["acceptedReview"],
   inventorySeed?: string[],
+  displayName?: string,
 ) {
-  const service = characterService(inventorySeed);
+  const service = characterService(inventorySeed, displayName);
   const context = { acceptedWorld, generator, settings };
   const intake = sourceKind === "character_card"
     ? await service.parsePlayerCard(
@@ -245,6 +265,57 @@ async function prepareCharacter(
 }
 
 describe("Campaign Play player bootstrap", () => {
+  it("binds a matching reserved player identity before creating the human actor", async () => {
+    const { handle, state } = createState({ displayName: "Brina Hael" });
+    const character = await prepareCharacter(
+      "generated",
+      state.acceptedReview,
+      undefined,
+      "Brina Hael",
+    );
+
+    expect(() => bootstrapCampaignPlayPlayer(handle, {
+      character,
+      expectedAcceptedWorldVersion: state.authority.acceptedWorldVersion,
+      expectedAcceptedContentHash: state.authority.acceptedContentHash,
+      expectedWorldVersion: state.authority.worldVersion,
+      expectedRuntimeRevision: state.authority.runtimeRevision,
+      createdAt: 1_400,
+    })).not.toThrow();
+  });
+
+  it("fails closed when the imported player name mismatches the reservation", async () => {
+    const { handle, state } = createState({ displayName: "Brina Hael" });
+    const character = await prepareCharacter("generated", state.acceptedReview);
+
+    expect(() => bootstrapCampaignPlayPlayer(handle, {
+      character,
+      expectedAcceptedWorldVersion: state.authority.acceptedWorldVersion,
+      expectedAcceptedContentHash: state.authority.acceptedContentHash,
+      expectedWorldVersion: state.authority.worldVersion,
+      expectedRuntimeRevision: state.authority.runtimeRevision,
+      createdAt: 1_400,
+    })).toThrowError(expect.objectContaining<Partial<CampaignPlayPlayerBootstrapError>>({
+      code: "player_identity_mismatch",
+    }));
+  });
+
+  it("fails closed when the reserved identity exactly conflicts with an accepted NPC", async () => {
+    const { handle, state } = createState({ displayName: "Mara Venn" });
+    const character = await prepareCharacter("generated", state.acceptedReview);
+
+    expect(() => bootstrapCampaignPlayPlayer(handle, {
+      character,
+      expectedAcceptedWorldVersion: state.authority.acceptedWorldVersion,
+      expectedAcceptedContentHash: state.authority.acceptedContentHash,
+      expectedWorldVersion: state.authority.worldVersion,
+      expectedRuntimeRevision: state.authority.runtimeRevision,
+      createdAt: 1_400,
+    })).toThrowError(expect.objectContaining<Partial<CampaignPlayPlayerBootstrapError>>({
+      code: "player_identity_conflict",
+    }));
+  });
+
   it.each(["character_card", "generated"] as const)(
     "commits one %s profile through Rulebook and reloads the same authority hashes",
     async (sourceKind) => {

@@ -13,7 +13,10 @@ import {
   buildStopSlopRules,
   buildWorldgenResearchContextBlock,
 } from "./scaffold-steps/prompt-utils.js";
-import { buildSeedSuggestionPromptContract } from "./prompt-contracts.js";
+import {
+  buildSeedSuggestionPromptContract,
+  buildWorldDnaPacketPromptContract,
+} from "./prompt-contracts.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -39,23 +42,14 @@ export interface SuggestedSeeds {
 }
 
 // ---------------------------------------------------------------------------
-// Internal types
-// ---------------------------------------------------------------------------
-
-interface DnaCategoryResult {
-  value: string | string[];
-  reasoning: string;
-}
-
-// ---------------------------------------------------------------------------
-// Category metadata (order matters — each sees previous)
+// Category metadata (order defines the canonical packet shape)
 // ---------------------------------------------------------------------------
 
 const categoryDescriptions: Record<SeedCategory, string> = {
   geography: "physical landscape, terrain, or spatial structure",
   politicalStructure: "how power is organized - government, authority, hierarchy",
   centralConflict: "the core tension or struggle driving the world",
-  culturalFlavor: "2-3 real-world or thematic cultural inspirations",
+  culturalFlavor: "2-3 concrete in-world cultural practices tied to the premise and current conflict",
   environment: "climate, weather, biomes, and sensory atmosphere — what you SEE, HEAR, SMELL walking through this world",
   wildcard: "one unexpected, unique element that makes this world stand out",
 };
@@ -80,8 +74,97 @@ const DNA_CATEGORIES: ReadonlyArray<{ key: SeedCategory; label: string }> = [
 ];
 
 // ---------------------------------------------------------------------------
-// Sequential DNA generation — 6 calls, each sees previous categories
+// Coherent DNA generation — one call for the complete packet
 // ---------------------------------------------------------------------------
+
+const WORLD_DNA_BACKEND_REF_REDACTION_MARKER = "[backend ref hidden]";
+
+function playerFacingWorldDnaText(maxLength: number) {
+  return z.string().min(1).max(maxLength).refine(
+    (value) => !value.includes(WORLD_DNA_BACKEND_REF_REDACTION_MARKER),
+    { message: "player-facing World DNA value must not contain backend redaction markers" },
+  );
+}
+
+const dnaCategorySchema = z.object({
+  value: playerFacingWorldDnaText(260),
+  reasoning: z.string().min(1).max(220),
+}).strict();
+
+const culturalFlavorSchema = z.object({
+  value: z.array(playerFacingWorldDnaText(80)).min(2).max(3),
+  reasoning: z.string().min(1).max(220),
+}).strict();
+
+const worldDnaSchema = z.object({
+  geography: dnaCategorySchema,
+  politicalStructure: dnaCategorySchema,
+  centralConflict: dnaCategorySchema,
+  culturalFlavor: culturalFlavorSchema,
+  environment: dnaCategorySchema,
+  wildcard: dnaCategorySchema,
+}).strict();
+
+const WORLD_DNA_OPERATION_BUDGET_MS = 100_000;
+const WORLD_DNA_OPERATION_TIMEOUT_MESSAGE =
+  "World DNA preparation did not finish within 100 seconds.";
+
+/**
+ * Bound this world-DNA operation even when a provider body consumer ignores
+ * AbortSignal. The provider promise remains observed after the budget wins so
+ * a late settlement cannot become an unhandled rejection or alter the caller.
+ */
+function withWorldDnaOperationBudget<T>(
+  operation: (abortSignal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const clearBudgetTimer = () => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    };
+
+    const settle = (settlement: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearBudgetTimer();
+      settlement();
+    };
+
+    timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      clearBudgetTimer();
+      controller.abort();
+      reject(new Error(WORLD_DNA_OPERATION_TIMEOUT_MESSAGE));
+    }, WORLD_DNA_OPERATION_BUDGET_MS);
+
+    let operationPromise: Promise<T>;
+    try {
+      operationPromise = Promise.resolve(operation(controller.signal));
+    } catch (error) {
+      settle(() => reject(error));
+      return;
+    }
+
+    operationPromise.then(
+      (value) => settle(() => resolve(value)),
+      (error) => settle(() => reject(error)),
+    );
+  });
+}
+
+function throwIfWorldDnaOperationTimedOut(abortSignal: AbortSignal): void {
+  if (abortSignal.aborted) {
+    throw new Error(WORLD_DNA_OPERATION_TIMEOUT_MESSAGE);
+  }
+}
 
 export async function suggestWorldSeeds(
   req: SuggestSeedsRequest
@@ -90,97 +173,95 @@ export async function suggestWorldSeeds(
   ipContext: IpResearchContext | null;
   premiseDivergence: PremiseDivergence | null;
 }> {
-  const researchArtifact = req.researchArtifact ?? null;
-  const ipContext = researchArtifact ? null : req.ipContext ?? null;
-  const premiseDivergence = researchArtifact
-    ? null
-    : req.premiseDivergence
-    ?? await interpretPremiseDivergence(ipContext, req.premise, req.role);
-  const results: Partial<Record<SeedCategory, DnaCategoryResult>> = {};
-  const accumulated: string[] = [];
-
-  for (const { key, label } of DNA_CATEGORIES) {
-    const isCultural = key === "culturalFlavor";
+  return withWorldDnaOperationBudget(async (abortSignal) => {
+    const researchArtifact = req.researchArtifact ?? null;
+    const ipContext = researchArtifact ? null : req.ipContext ?? null;
+    const premiseDivergence = researchArtifact
+      ? null
+      : req.premiseDivergence
+      ?? await interpretPremiseDivergence(ipContext, req.premise, req.role);
+    throwIfWorldDnaOperationTimedOut(abortSignal);
 
     const ipInstruction = researchArtifact
-      ? `Use the approved research context below to define the current ${label.toLowerCase()} from the raw premise and artifact-authored source usage rules.`
+      ? "Use the approved research context below to define one coherent World DNA packet from the raw premise and artifact-authored source usage rules."
       : ipContext
-        ? `This world is the ${ipContext.franchise} universe. Define its current ${label.toLowerCase()} by starting from canon and then applying only the interpreted divergence consequences. Use the franchise's own terminology.`
-        : `This is an original world. Generate a specific, concrete ${label.toLowerCase()} that follows logically from the premise.`;
-
+        ? `This world is the ${ipContext.franchise} universe. Define one coherent World DNA packet by starting from canon and then applying only the interpreted divergence consequences. Use the franchise's own terminology.`
+        : "This is an original world. Generate one specific, concrete World DNA packet that follows logically from the premise.";
     const ipBlock = buildWorldgenResearchContextBlock({
       researchArtifact,
       ipContext,
-      target: `${label} DNA`,
+      target: "World DNA packet",
     });
     const divergenceBlock = buildPremiseDivergenceBlock(premiseDivergence);
     const knownIpContract = researchArtifact
       ? ""
-      : buildKnownIpGenerationContract(ipContext, premiseDivergence, `${label} DNA`);
+      : buildKnownIpGenerationContract(ipContext, premiseDivergence, "World DNA packet");
     const characterStartGuardrail = buildCharacterStartGuardrail();
-    const outputContract = buildSeedSuggestionPromptContract();
+    const outputContract = buildWorldDnaPacketPromptContract();
 
-    const accumulatedSection = accumulated.length > 0
-      ? `\nALREADY ESTABLISHED DNA:\n${accumulated.join("\n")}\n\nYour ${label.toLowerCase()} MUST be consistent with the above. Do not contradict established DNA.`
-      : "";
+    const categoryRequirements = DNA_CATEGORIES.map(({ key, label }) => {
+      const categoryRule = categoryConstraints[key];
+      const outputShape = key === "culturalFlavor"
+        ? "value is an array of 2-3 compact, concrete diegetic practices; each item names a ritual, custom, value, language habit, or material practice plus a situation or consequence tied to the premise/world; use diegetic facts only, not real-world culture names, genre/style labels, or inspiration lists"
+        : "value is a concrete 1-2 sentence description naming specific places, systems, or conditions, not vague adjectives";
+      return `- ${label} (${categoryDescriptions[key]}): ${outputShape}; reasoning is one sentence explaining why it follows from the premise and the other packet fields.${categoryRule ? `\n  ${categoryRule}` : ""}`;
+    }).join("\n");
 
-    const constraint = categoryConstraints[key] ?? "";
-
-    const prompt = `You are defining the ${label} of a world for a text RPG engine.
+    const prompt = `You are defining a complete World DNA packet for a text RPG engine.
 
 ${outputContract}
 
 ${ipInstruction}
-${constraint ? `${constraint}\n` : ""}${ipBlock}
+${ipBlock}
 ${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenceBlock}\n` : ""}
 ${characterStartGuardrail}
 PREMISE: "${req.premise}"
-${accumulatedSection}
+
+WORLD DNA PACKET TASK:
+Return all six categories as one mutually consistent packet in this canonical order: Geography, Political Structure, Central Conflict, Cultural Flavor, Environment, Wildcard. Every category must be present with exactly a value and reasoning field. The reasoning for each category must explain its relationship to the same packet, not to an isolated category call.
+
+CATEGORY REQUIREMENTS:
+${categoryRequirements}
+
+MUTUAL CONSISTENCY AND NON-OVERLAP:
+- Make the six values describe one world with a shared premise, causal logic, terminology, and current state; do not contradict another category.
+- Keep Geography focused on physical landscape and spatial structure, Political Structure focused on how power is organized, and Central Conflict focused on the core struggle driving the world.
+- Keep Environment strictly physical and sensory: climate, weather, biomes, light, sounds, smells, seasons, flora, fauna, or natural hazards. Do not put territorial control, institutions, patrols, faction ownership, or who fights whom in Environment; those belong in Political Structure or Central Conflict.
+- Make Wildcard one unexpected, unique element that is not already covered or restated by Geography, Political Structure, Central Conflict, Cultural Flavor, or Environment.
 
 OUTPUT:
-- value: ${isCultural ? "An array of 2-3 specific cultural or thematic inspirations (real-world cultures, literary genres, historical periods)" : "A concrete 1-2 sentence description. Name specific places, systems, or conditions — not vague adjectives"}.
-- reasoning: 1 sentence explaining why this ${label.toLowerCase()} follows from the premise${accumulated.length > 0 ? " and established DNA" : ""}.
+- Return exactly one structured object containing the six nested category objects in the canonical order above.
 ${buildStopSlopRules()}`;
+    throwIfWorldDnaOperationTimedOut(abortSignal);
 
-    let categoryResult: DnaCategoryResult;
+    const result = await generateObject({
+      model: createModel(req.role.provider, { role: "generator", reasoningMode: "bypass" }),
+      schema: worldDnaSchema,
+      prompt,
+      temperature: req.role.temperature,
+      maxOutputTokens: clampTokens(req.role.maxTokens),
+      timeout: { totalMs: 90_000 },
+      abortSignal,
+      retries: 1,
+      allowTextFallback: false,
+      allowRepair: true,
+      maxRepairAttempts: 2,
+      strictSchema: true,
+      mode: "auto",
+    });
 
-    if (isCultural) {
-      const result = await generateObject({
-        model: createModel(req.role.provider),
-        schema: z.object({ value: z.array(z.string()).min(2).max(3), reasoning: z.string() }),
-        prompt,
-        temperature: req.role.temperature,
-        maxOutputTokens: clampTokens(req.role.maxTokens),
-      });
-      categoryResult = result.object;
-    } else {
-      const result = await generateObject({
-        model: createModel(req.role.provider),
-        schema: z.object({ value: z.string(), reasoning: z.string() }),
-        prompt,
-        temperature: req.role.temperature,
-        maxOutputTokens: clampTokens(req.role.maxTokens),
-      });
-      categoryResult = result.object;
-    }
-    results[key] = categoryResult;
+    const dna = result.object;
+    const seeds: SuggestedSeeds = {
+      geography: dna.geography.value,
+      politicalStructure: dna.politicalStructure.value,
+      centralConflict: dna.centralConflict.value,
+      culturalFlavor: dna.culturalFlavor.value,
+      environment: dna.environment.value,
+      wildcard: dna.wildcard.value,
+    };
 
-    const displayValue = Array.isArray(categoryResult.value)
-      ? categoryResult.value.join(", ")
-      : categoryResult.value;
-    accumulated.push(`- ${label}: ${displayValue} (Reasoning: ${categoryResult.reasoning})`);
-  }
-
-  const seeds: SuggestedSeeds = {
-    geography: results.geography!.value as string,
-    politicalStructure: results.politicalStructure!.value as string,
-    centralConflict: results.centralConflict!.value as string,
-    culturalFlavor: results.culturalFlavor!.value as string[],
-    environment: results.environment!.value as string,
-    wildcard: results.wildcard!.value as string,
-  };
-
-  return { seeds, ipContext, premiseDivergence };
+    return { seeds, ipContext, premiseDivergence };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -225,7 +306,7 @@ ${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenc
 ${characterStartGuardrail}
 PREMISE: "${req.premise}"
 
-OUTPUT: ${isCultural ? "An array of 2-3 specific cultural or thematic inspirations." : "A concrete 1-2 sentence description. Name specific places, systems, or conditions."}
+OUTPUT: ${isCultural ? "An array of 2-3 compact, concrete diegetic practices. Each item names a ritual, custom, value, language habit, or material practice plus a situation or consequence tied to the premise/world. Use diegetic facts only, not real-world culture names, genre/style labels, or inspiration lists." : "A concrete 1-2 sentence description. Name specific places, systems, or conditions."}
 ${buildStopSlopRules()}`;
 
   if (isCultural) {

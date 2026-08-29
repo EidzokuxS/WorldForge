@@ -294,9 +294,10 @@ function narratorActionSelections(packet: CampaignPlayNarratorPacket) {
   const latestVisiblePerformer = [...packet.consequences].reverse().find((consequence) =>
     consequence.performingActorHandle !== null && packet.visibleActors.some((actor) =>
       actor.handle === consequence.performingActorHandle))?.performingActorHandle ?? null;
-  const requiredReplyIndex = latestVisiblePerformer === null
+  const requiredReplyIndex = packet.actionContext?.intentKind === "contact" || latestVisiblePerformer === null
     ? -1
     : packet.availableIntents.findIndex((intent) => intent.kind === "contact"
+      && intent.decisionBinding === undefined
       && intent.targets.some((target) => target.kind === "actor"
         && target.handle === latestVisiblePerformer));
   const expectedActionCount = Math.min(
@@ -307,10 +308,16 @@ function narratorActionSelections(packet: CampaignPlayNarratorPacket) {
   const orderedIndexes = requiredReplyIndex < 0
     ? indexes
     : [requiredReplyIndex, ...indexes.filter((intentIndex) => intentIndex !== requiredReplyIndex)];
-  return orderedIndexes.slice(0, expectedActionCount).map((intentIndex) => ({
-    intentIndex,
-    detail: intentIndex === requiredReplyIndex ? "the immediate situation" : null,
-  }));
+  return orderedIndexes.slice(0, expectedActionCount).map((intentIndex) => {
+    return {
+      intentIndex,
+      detail: (
+        intentIndex === requiredReplyIndex
+          ? `What can you tell me about ${packet.currentLocation.name}?`
+          : null),
+      mode: null,
+    };
+  });
 }
 
 function openingNarratorFixture() {

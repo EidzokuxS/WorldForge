@@ -275,6 +275,10 @@ function subjectScore(record: ActorKnowledgeRecord, subjectRefs: readonly string
   return subjectRefs.reduce((score, ref) => score + (subjects.has(ref.toLowerCase()) ? 1 : 0), 0);
 }
 
+function compareCanonicalIds(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 export function listActorKnowledge(input: ListActorKnowledgeInput): ActorKnowledgeRecord[] {
   const clock = readWorldClock(input.campaignId);
   const effectiveWorldVersion = input.worldVersion ?? clock.worldVersion;
@@ -317,7 +321,12 @@ export function listActorKnowledge(input: ListActorKnowledgeInput): ActorKnowled
         + record.reliability / 200,
     }))
     .filter(({ score }) => tokens.length === 0 && subjectRefs.length === 0 ? true : score > 0)
-    .sort((a, b) => b.score - a.score || b.record.createdAt - a.record.createdAt)
+    .sort((a, b) =>
+      b.score - a.score
+      || b.record.createdAt - a.record.createdAt
+      // Use ascending lexical ids to keep equal-score/equal-time reads stable regardless of SQLite row order.
+      || compareCanonicalIds(a.record.id, b.record.id),
+    )
     .slice(0, input.limit ?? 12)
     .map(({ record }) => record);
 }

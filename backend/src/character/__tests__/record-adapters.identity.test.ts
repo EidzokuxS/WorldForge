@@ -1,13 +1,71 @@
 import { describe, expect, it } from "vitest";
 import {
+  createCharacterRecordFromDraft,
+  fromRichParsedCharacter,
   hydrateStoredNpcRecord,
   hydrateStoredPlayerRecord,
   fromLegacyNpcRow,
   fromLegacyPlayerRow,
   projectPlayerRecord,
 } from "../record-adapters.js";
+import type { RichParsedCharacter } from "../record-adapters.js";
 
 describe("record adapters richer identity hydration", () => {
+  it("keeps synthesized drives in the modern motivations field without mirroring them into legacy motives", () => {
+    const draft = fromRichParsedCharacter(
+      {
+        name: "Brina Hael",
+        race: "Human",
+        gender: "Female",
+        age: "Early 30s",
+        appearance: "A plainly dressed carrier with rope-worn shoulders.",
+        backgroundSummary: "She earns small fees carrying parcels and market bundles.",
+        personaSummary: "Plain-spoken, cautious, and reliable.",
+        personalitySummary: "Practical and careful with promises.",
+        personalityVoice: "Short, direct sentences.",
+        personalityDecisionStyle: "She weighs the fee before taking a job.",
+        personalityWorldview: "Honest work is the safest security.",
+        personalityContradictions: ["She avoids quarrels but takes risky deliveries."],
+        personalityMythology: "A fair promise is a promise kept.",
+        personalitySampleLines: ["Name the fee first."],
+        tags: ["Porter", "Common Folk", "Reliable"],
+        drives: ["Steady delivery work", "Enough coin for a bed"],
+        frictions: ["Every bundle may carry someone else's debt"],
+        shortTermGoals: [],
+        longTermGoals: [],
+        hp: 5,
+        equippedItems: [],
+        locationName: "Lower Ward",
+      } satisfies RichParsedCharacter,
+      {},
+    );
+    const record = createCharacterRecordFromDraft(draft, {
+      id: "player-rich",
+      campaignId: "camp-rich",
+    });
+
+    expect(record.identity.behavioralCore).toEqual({
+      motives: [],
+      pressureResponses: [],
+      taboos: [],
+      attachments: [],
+      selfImage: "Plain-spoken, cautious, and reliable.",
+    });
+    expect(record.motivations.drives).toEqual([
+      "Steady delivery work",
+      "Enough coin for a bed",
+    ]);
+    expect(record.motivations.frictions).toEqual([
+      "Every bundle may carry someone else's debt",
+    ]);
+    expect(record.identity.personality).toMatchObject({
+      summary: "Practical and careful with promises.",
+      voice: "Short, direct sentences.",
+      sampleLines: ["Name the fee first."],
+    });
+    expect(record.profile.personaSummary).toBe("Plain-spoken, cautious, and reliable.");
+  });
+
   it("backfills the three-layer identity baseline for legacy player rows", () => {
     const record = fromLegacyPlayerRow(
       {

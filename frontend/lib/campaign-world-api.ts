@@ -130,6 +130,16 @@ function parseSource(value: unknown, status: number): CampaignWorldSource {
     }
   }
 
+  if (value.playerIdentity !== undefined) {
+    if (
+      !isObject(value.playerIdentity)
+      || !hasExactKeys(value.playerIdentity, ["displayName"])
+      || !isNonEmptyString(value.playerIdentity.displayName)
+    ) {
+      throw invalidResponse(status);
+    }
+  }
+
   for (const reference of value.sourceReferences) {
     if (
       !isObject(reference)

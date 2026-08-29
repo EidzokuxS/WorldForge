@@ -19,14 +19,46 @@ import {
 } from "./campaign-play-projection.js";
 import {
   CAMPAIGN_PLAY_OPENING_NARRATOR_MAX_BEATS,
+  CAMPAIGN_PLAY_NARRATOR_MECHANICAL_TRUTH_FAILED_CHECKS,
+  campaignPlayNarratorMechanicalTruthReviewSchema,
+  campaignPlayNarratorRecoveryFeedbackSchema,
   CampaignPlayNarratorError,
   createCampaignPlayNarrator,
+  deriveCampaignPlayNarratorContractFailureDiagnostic,
+  type CampaignPlayNarratorModelEvidence,
   type CampaignPlayNarratorRecoveryFeedback,
   type CampaignPlayNarratorProposal,
 } from "./narrator.js";
 
 const narratorWarn = vi.hoisted(() => vi.fn());
 const narratorEvent = vi.hoisted(() => vi.fn());
+
+function isNullableJsonSchema(schema: unknown): boolean {
+  if (schema === null || typeof schema !== "object") return false;
+  const candidate = schema as { anyOf?: unknown; type?: unknown };
+  if (Array.isArray(candidate.anyOf)) {
+    return candidate.anyOf.some((entry) =>
+      entry !== null && typeof entry === "object" &&
+      (entry as { type?: unknown }).type === "null",
+    );
+  }
+  return Array.isArray(candidate.type) && candidate.type.includes("null");
+}
+
+function jsonSchemaEnum(schema: unknown): string[] | undefined {
+  if (schema === null || typeof schema !== "object") return undefined;
+  const candidate = schema as { enum?: unknown; anyOf?: unknown };
+  if (Array.isArray(candidate.enum) && candidate.enum.every((value) => typeof value === "string")) {
+    return candidate.enum;
+  }
+  if (Array.isArray(candidate.anyOf)) {
+    for (const entry of candidate.anyOf) {
+      const values = jsonSchemaEnum(entry);
+      if (values !== undefined) return values;
+    }
+  }
+  return undefined;
+}
 
 vi.mock("../lib/index.js", () => ({
   createLogger: (tag: string) => ({
@@ -80,6 +112,7 @@ function packetFixture(): CampaignPlayNarratorPacket {
     }],
     possessions: [],
     obligations: [],
+    commitments: [],
     newObservations: [],
     consequences: [],
     observationSubjects: [],
@@ -91,6 +124,633 @@ function packetFixture(): CampaignPlayNarratorPacket {
       kind: "observe",
       targets: [{ handle: "actor_public_keeper", kind: "actor" }],
     }],
+  };
+}
+
+function livePaidDeliveryPacket(): CampaignPlayNarratorPacket {
+  const packet = packetFixture();
+  return {
+    ...packet,
+    campaignId: "c1e3480d-c77f-4ec4-b7f0-4e1157ea2123",
+    turnId: "turn-player-action:ec60063386df0d308b8141588cf5e67f425058a8",
+    turnKind: "player_action",
+    openingContext: null,
+    actionContext: {
+      submittedText: "Two silver for the crate across the water, paid on delivery before the floodgates shut.",
+      intentKind: "contact",
+      disposition: "deterministic",
+      result: "success",
+      clarificationQuestion: null,
+    },
+    sourceMoment: "Sister Ashiya Voln waits at the Farbank Steps while Tansy keeps watch.",
+    currentLocation: {
+      handle: "location_farbank_steps",
+      name: "Farbank Steps",
+      description: "Wet steps descend toward the floodgates.",
+    },
+    visibleActors: [
+      {
+        handle: "actor_sister_ashiya_voln",
+        name: "Sister Ashiya Voln",
+        monogram: "SA",
+        descriptor: "A clinic sister with a weathered satchel.",
+        accent: "amber-7",
+      },
+      {
+        handle: "actor_tansy",
+        name: "Tansy",
+        monogram: "TA",
+        descriptor: "A ferryman's runner watching the water.",
+        accent: "blue-7",
+      },
+    ],
+    availableIntents: [{
+      handle: "choice_talk_sister_ashiya_voln",
+      label: "Talk to Sister Ashiya Voln",
+      kind: "contact",
+      targets: [{ handle: "actor_sister_ashiya_voln", kind: "actor" }],
+    }],
+  };
+}
+
+function livePaidDeliveryProposal(): CampaignPlayNarratorProposal {
+  return {
+    beats: [{
+      purpose: "consequence",
+      observationIndexes: [],
+      text: "Sister Ashiya Voln accepts the terms. A sealed medicine crate waits dock-side, and two silver will be paid on delivery before the floodgates shut.",
+    }],
+    actionSelections: [{
+      intentIndex: 0,
+      detail: null,
+      mode: null,
+    }],
+  };
+}
+
+function groundedCertifiedContactProposal(): CampaignPlayNarratorProposal {
+  return {
+    beats: [{
+      purpose: "consequence",
+      observationIndexes: [],
+      text: "Sister Ashiya Voln hears you from the Farbank Steps while the floodgates groan beyond her.",
+    }],
+    actionSelections: [{
+      intentIndex: 0,
+      detail: null,
+      mode: null,
+    }],
+  };
+}
+
+function settledReceivablePacket(): CampaignPlayNarratorPacket {
+  const packet = livePaidDeliveryPacket();
+  const submittedText = "Collect 12 copper from Aldous Crane";
+  const consequence = {
+    observationHandle: "observation-aldous-settlement",
+    performingActorHandle: "actor_aldous_crane",
+    performingActorName: "Aldous Crane",
+    whatChanged: "Aldous Crane pays you 12 copper, settling the receivable.",
+    whereOrRoute: "Farbank Steps",
+    worldTimeLabel: "Day 1, 00:10",
+    causalCue: "direct_perception" as const,
+  };
+  return {
+    ...packet,
+    turnId: "turn-aldous-settlement",
+    actionContext: {
+      submittedText,
+      intentKind: "contact",
+      disposition: "deterministic",
+      result: "success",
+      clarificationQuestion: null,
+      obligationSettlement: {
+        obligationHandle: "obligation_aldous_receivable",
+        debtorHandle: "actor_aldous_crane",
+        creditorHandle: "actor_player",
+        unitKey: "copper",
+        amount: 12,
+        status: "settled",
+        sourceTurnId: "turn-aldous-settlement",
+        summary: submittedText,
+      },
+    },
+    sourceMoment: "Aldous Crane stands at the Farbank Steps with the floodgates behind him.",
+    visibleActors: [{
+      handle: "actor_aldous_crane",
+      name: "Aldous Crane",
+      monogram: "AC",
+      descriptor: "A freight clerk with a rain-dark coat.",
+      accent: "amber-7",
+    }],
+    newObservations: [{
+      observationHandle: consequence.observationHandle,
+      title: "Receivable settled",
+      text: consequence.whatChanged,
+      whereOrRoute: consequence.whereOrRoute,
+      worldTimeLabel: consequence.worldTimeLabel,
+      consequence,
+    }],
+    consequences: [consequence],
+    availableIntents: [{
+      handle: "choice_wait_10",
+      label: "Wait 10 minutes",
+      kind: "wait",
+      targets: [],
+    }],
+  };
+}
+
+function settledReceivableProposal(text: string): CampaignPlayNarratorProposal {
+  return {
+    beats: [{
+      purpose: "consequence",
+      observationIndexes: [0],
+      text,
+    }],
+    actionSelections: [{
+      intentIndex: 0,
+      detail: null,
+      mode: null,
+    }],
+  };
+}
+
+function namedAtmosphericCommercePacket(): CampaignPlayNarratorPacket {
+  const packet = livePaidDeliveryPacket();
+  return {
+    ...packet,
+    sourceMoment: "Sister Ashiya Voln waits at the Farbank Steps while Tansy keeps watch. Odelia Vey, a dockside extra, is mentioned in yesterday's background purchase: three silver for river pears and a promise of fairer prices next week.",
+  };
+}
+
+function namedAtmosphericCommerceProposal(): CampaignPlayNarratorProposal {
+  return {
+    beats: [{
+      purpose: "consequence",
+      observationIndexes: [],
+      text: "Sister Ashiya Voln recalls Odelia Vey's old purchase: three silver for river pears, and a promise of fairer prices next week that never became today's work.",
+    }],
+    actionSelections: [{
+      intentIndex: 0,
+      detail: null,
+      mode: null,
+    }],
+  };
+}
+
+function decisionPacketWithManyIntents(): CampaignPlayNarratorPacket {
+  const packet = packetFixture();
+  const decisionBinding = {
+    decisionKey: "decision-harbor-share",
+    actorHandle: "actor_public_keeper",
+    kind: "offer" as const,
+  };
+  return {
+    ...packet,
+    turnId: "turn-opening-decision-controls",
+    availableIntents: [
+      {
+        handle: "choice_decision_accept",
+        label: "Accept — Carry the sealed ledger",
+        kind: "contact",
+        targets: [{ handle: "actor_public_keeper", kind: "actor" }],
+        decisionBinding: { ...decisionBinding, disposition: "accept" as const },
+      },
+      {
+        handle: "choice_decision_decline",
+        label: "Decline — Leave the sealed ledger",
+        kind: "contact",
+        targets: [{ handle: "actor_public_keeper", kind: "actor" }],
+        decisionBinding: { ...decisionBinding, disposition: "decline" as const },
+      },
+      {
+        handle: "choice_decision_observe_2",
+        label: "Examine the harbor steps",
+        kind: "observe",
+        targets: [{ handle: "location_public_harbor", kind: "location" }],
+      },
+      {
+        handle: "choice_decision_wait",
+        label: "Wait 10 minutes",
+        kind: "wait",
+        targets: [],
+      },
+      {
+        handle: "choice_decision_observe_4",
+        label: "Examine the signal ledger",
+        kind: "observe",
+        targets: [{ handle: "actor_public_keeper", kind: "actor" }],
+      },
+      {
+        handle: "choice_decision_observe_5",
+        label: "Examine the ferry rope",
+        kind: "observe",
+        targets: [{ handle: "location_public_harbor", kind: "location" }],
+      },
+      {
+        handle: "choice_decision_observe_6",
+        label: "Examine the wet stones",
+        kind: "observe",
+        targets: [{ handle: "location_public_harbor", kind: "location" }],
+      },
+    ],
+  };
+}
+
+function decisionAndRequiredReplyPacket(): CampaignPlayNarratorPacket {
+  const packet = decisionPacketWithManyIntents();
+  const consequence = {
+    observationHandle: "observation_decision_required_reply",
+    performingActorHandle: "actor_public_keeper",
+    performingActorName: "Mara Venn",
+    whatChanged: "Mara Venn waits for your answer.",
+    whereOrRoute: "Salt Harbor",
+    worldTimeLabel: "Day 1, 00:10",
+    causalCue: "direct_perception" as const,
+  };
+  return {
+    ...packet,
+    turnId: "turn-decision-required-reply",
+    turnKind: "player_action",
+    openingContext: null,
+    actionContext: {
+      submittedText: "Try to settle the harbor terms.",
+      intentKind: "attempt",
+      disposition: "uncertain",
+      result: "setback",
+      clarificationQuestion: null,
+    },
+    sourceMoment: "Mara Venn waits beside the rain-dark harbor steps.",
+    newObservations: [{
+      observationHandle: consequence.observationHandle,
+      title: "Mara waits for an answer",
+      text: consequence.whatChanged,
+      whereOrRoute: consequence.whereOrRoute,
+      worldTimeLabel: consequence.worldTimeLabel,
+      consequence,
+    }],
+    consequences: [consequence],
+    availableIntents: [
+      ...packet.availableIntents,
+      {
+        handle: "choice_decision_reply",
+        label: "Talk to Mara Venn",
+        kind: "contact" as const,
+        targets: [{ handle: "actor_public_keeper", kind: "actor" as const }],
+      },
+    ],
+  };
+}
+
+function r13DecisionPacket(): CampaignPlayNarratorPacket {
+  const packet = packetFixture();
+  const acceptBinding = {
+    decisionKey: "decision-r13-packet",
+    actorHandle: "actor_public_keeper",
+    kind: "offer" as const,
+    disposition: "accept" as const,
+  };
+  const outcome = {
+    decisionKey: acceptBinding.decisionKey,
+    actorHandle: acceptBinding.actorHandle,
+    kind: acceptBinding.kind,
+    disposition: acceptBinding.disposition,
+    status: "accepted" as const,
+    sourceTurnId: "turn-r13-packet",
+    summary: "Mara Venn agrees to the exchange.",
+    acceptEffect: null,
+  };
+  const consequence = {
+    observationHandle: "observation-r13-agreement",
+    performingActorHandle: "actor_public_keeper",
+    performingActorName: "Mara Venn",
+    whatChanged: "Mara Venn agrees to the exchange.",
+    whereOrRoute: "Salt Harbor",
+    worldTimeLabel: "Day 1, 00:10",
+    causalCue: "direct_perception" as const,
+  };
+  return {
+    ...packet,
+    turnId: "turn-r13-packet",
+    turnKind: "player_action",
+    openingContext: null,
+    sourceMoment: "Mara Venn waits beside the Salt Harbor steps.",
+    actionContext: {
+      submittedText: "Accept the offer.",
+      intentKind: "contact",
+      disposition: "deterministic",
+      result: "success",
+      clarificationQuestion: null,
+      decisionBinding: acceptBinding,
+      decisionOutcome: outcome,
+    },
+    newObservations: [{
+      observationHandle: consequence.observationHandle,
+      title: "Agreement",
+      text: consequence.whatChanged,
+      whereOrRoute: consequence.whereOrRoute,
+      worldTimeLabel: consequence.worldTimeLabel,
+      consequence,
+      decisionOutcome: {
+        decisionKey: outcome.decisionKey,
+        actorName: "Mara Venn",
+        actorHandle: outcome.actorHandle,
+        kind: outcome.kind,
+        disposition: outcome.disposition,
+        summary: outcome.summary,
+        selectedLabel: "Accept the sealed packet",
+      },
+    }],
+    consequences: [consequence],
+    availableIntents: [
+      {
+        handle: "choice-r13-accept",
+        label: "Accept the sealed packet",
+        kind: "contact",
+        targets: [{ handle: "actor_public_keeper", kind: "actor" }],
+        decisionBinding: acceptBinding,
+      },
+      {
+        handle: "choice-r13-decline",
+        label: "Decline the sealed packet",
+        kind: "contact",
+        targets: [{ handle: "actor_public_keeper", kind: "actor" }],
+        decisionBinding: { ...acceptBinding, disposition: "decline" as const },
+      },
+      {
+        handle: "choice-r13-inspect",
+        label: "Inspect packet Ruik just handed you",
+        kind: "observe",
+        targets: [{ handle: "actor_public_keeper", kind: "actor" }],
+      },
+      {
+        handle: "choice-r13-wait",
+        label: "Wait 10 minutes",
+        kind: "wait",
+        targets: [],
+      },
+    ],
+    decisionOutcomes: [outcome],
+  };
+}
+
+function r13TypedPossessionPacket(): CampaignPlayNarratorPacket {
+  const packet = r13DecisionPacket();
+  return {
+    ...packet,
+    possessions: [{
+      handle: "possession-r13-packet",
+      name: "Sealed packet",
+      quantity: 1,
+    }],
+    newObservations: packet.newObservations.map((observation) => ({
+      ...observation,
+      text: "Mara Venn places the sealed packet in your hands.",
+      consequence: {
+        ...observation.consequence!,
+        whatChanged: "Mara Venn places the sealed packet in your hands.",
+      },
+    })),
+    consequences: packet.consequences.map((consequence) => ({
+      ...consequence,
+      whatChanged: "Mara Venn places the sealed packet in your hands.",
+    })),
+    availableIntents: packet.availableIntents.map((intent, index) =>
+      index === 2 ? { ...intent, label: "Inspect the sealed packet" } : intent),
+  };
+}
+
+function r13AgreementPacket(): CampaignPlayNarratorPacket {
+  const packet = r13DecisionPacket();
+  return {
+    ...packet,
+    availableIntents: packet.availableIntents.map((intent, index) =>
+      index === 2 ? { ...intent, label: "Inspect the signal ledger" } : intent),
+  };
+}
+
+function r13DeclinedAgreementPacket(): CampaignPlayNarratorPacket {
+  const packet = r13AgreementPacket();
+  const actionContext = packet.actionContext;
+  if (actionContext === null || actionContext.decisionBinding === undefined ||
+      actionContext.decisionOutcome === undefined) {
+    throw new Error("R13 agreement fixture must include a settled decision");
+  }
+  const summary = "Mara Venn declines the exchange.";
+  const decisionBinding = {
+    ...actionContext.decisionBinding,
+    disposition: "decline" as const,
+  };
+  const decisionOutcome = {
+    ...actionContext.decisionOutcome,
+    disposition: "decline" as const,
+    status: "declined" as const,
+    summary,
+  };
+  return {
+    ...packet,
+    turnId: "turn-r13-declined-packet",
+    actionContext: {
+      ...actionContext,
+      submittedText: "Decline the offer.",
+      decisionBinding,
+      decisionOutcome,
+    },
+    newObservations: packet.newObservations.map((observation) => ({
+      ...observation,
+      title: "Decline",
+      text: summary,
+      consequence: observation.consequence === null
+        ? null
+        : { ...observation.consequence, whatChanged: summary },
+      decisionOutcome: observation.decisionOutcome === undefined
+        ? undefined
+        : {
+            ...observation.decisionOutcome,
+            disposition: "decline" as const,
+            summary,
+            selectedLabel: "Decline the sealed packet",
+          },
+    })),
+    consequences: packet.consequences.map((consequence) => ({
+      ...consequence,
+      whatChanged: summary,
+    })),
+    decisionOutcomes: [decisionOutcome],
+  };
+}
+
+function activeCommitmentPacket(): CampaignPlayNarratorPacket {
+  const packet = packetFixture();
+  const commitment = {
+    handle: "commitment_harbor_delivery",
+    kind: "paid_delivery" as const,
+    status: "active" as const,
+    counterpartyHandle: "actor_public_keeper",
+    counterpartyName: "Mara Venn",
+    title: "Carry the sealed dispatch",
+    subjectName: "Sealed dispatch",
+    destinationHandle: "location_public_market",
+    destinationName: "Flood Market",
+    feeUnit: "copper" as const,
+    feeAmount: 16,
+    paymentTiming: "on_completion" as const,
+    dueWorldTimeLabel: "Day 1, 00:30",
+  };
+  return {
+    ...packet,
+    commitments: [commitment],
+    availableIntents: [{
+      handle: "choice_collect_dispatch",
+      label: "Ask Mara Venn for Sealed dispatch",
+      kind: "contact",
+      targets: [{ handle: commitment.counterpartyHandle, kind: "actor" }],
+      commitmentBinding: {
+        commitmentHandle: commitment.handle,
+        action: "collect" as const,
+        counterpartyHandle: commitment.counterpartyHandle,
+        subjectName: commitment.subjectName,
+        destinationHandle: commitment.destinationHandle,
+      },
+    }],
+  };
+}
+
+function activeCommitmentPacketWithGenericIntents(
+  action: "collect" | "deliver",
+): CampaignPlayNarratorPacket {
+  const packet = activeCommitmentPacket();
+  const commitment = packet.commitments[0]!;
+  const commitmentIntent = {
+    handle: action === "deliver" ? "choice_deliver_dispatch" : "choice_collect_dispatch",
+    label: action === "deliver"
+      ? "Deliver Sealed dispatch at Flood Market"
+      : "Ask Mara Venn for Sealed dispatch",
+    kind: action === "deliver" ? "attempt" as const : "contact" as const,
+    targets: [{
+      handle: action === "deliver"
+        ? commitment.destinationHandle
+        : commitment.counterpartyHandle,
+      kind: action === "deliver" ? "location" as const : "actor" as const,
+    }],
+    commitmentBinding: {
+      commitmentHandle: commitment.handle,
+      action,
+      counterpartyHandle: commitment.counterpartyHandle,
+      subjectName: commitment.subjectName,
+      destinationHandle: commitment.destinationHandle,
+    },
+  };
+  const genericIntents = [
+    {
+      handle: "choice_generic_observe",
+      label: "Examine the ferry steps",
+      kind: "observe" as const,
+      targets: [{ handle: "location_public_harbor", kind: "location" as const }],
+    },
+    {
+      handle: "choice_generic_route",
+      label: "Go to Flood Market",
+      kind: "move" as const,
+      targets: [{ handle: "route_public_gate", kind: "route" as const }],
+    },
+    {
+      handle: "choice_generic_contact",
+      label: "Talk to Mara Venn",
+      kind: "contact" as const,
+      targets: [{ handle: "actor_public_keeper", kind: "actor" as const }],
+    },
+    {
+      handle: "choice_generic_wait",
+      label: "Wait 10 minutes",
+      kind: "wait" as const,
+      targets: [],
+    },
+  ];
+  return {
+    ...packet,
+    ...(action === "deliver"
+      ? {
+          currentLocation: {
+            ...packet.currentLocation,
+            handle: commitment.destinationHandle,
+            name: commitment.destinationName,
+          },
+          possessions: [{
+            handle: "possession_public_dispatch",
+            name: commitment.subjectName,
+            quantity: 1,
+          }],
+        }
+      : {}),
+    availableIntents: [...genericIntents, commitmentIntent],
+  };
+}
+
+function r32GenericMoveWithActiveDeliveryPacket(): CampaignPlayNarratorPacket {
+  const packet = activeCommitmentPacketWithGenericIntents("collect");
+  const destinationHandle = "location_quayside_customs";
+  const destinationName = "Quayside Customs Lane";
+  const commitment = packet.commitments[0]!;
+  const commitments = packet.commitments.map((candidate) => ({
+    ...candidate,
+    destinationHandle,
+    destinationName,
+  }));
+  return {
+    ...packet,
+    campaignId: "campaign-r32-generic-move",
+    turnId: "turn-r32-generic-move",
+    turnKind: "player_action",
+    openingContext: null,
+    sourceMoment: "Mara Venn waits beside the rain-dark ferry steps.",
+    actionContext: {
+      submittedText: "Ask Mara Venn about the delivery.",
+      intentKind: "contact",
+      disposition: "deterministic",
+      result: "success",
+      clarificationQuestion: null,
+    },
+    possessions: [],
+    commitments,
+    visibleRoutes: packet.visibleRoutes.map((route) => ({
+      ...route,
+      destinationHandle,
+      destinationName,
+    })),
+    availableIntents: packet.availableIntents.map((intent) => {
+      if (intent.kind === "move") {
+        return { ...intent, label: `Go to ${destinationName}` };
+      }
+      if (intent.commitmentBinding === undefined) return intent;
+      return {
+        ...intent,
+        label: `Ask ${commitment.counterpartyName} for ${commitment.subjectName}`,
+        commitmentBinding: {
+          ...intent.commitmentBinding,
+          destinationHandle,
+        },
+      };
+    }),
+  };
+}
+
+function r13Proposal(
+  text: string,
+): CampaignPlayNarratorProposal {
+  return {
+    beats: [{
+      purpose: "consequence",
+      observationIndexes: [0],
+      text,
+    }],
+    actionSelections: [
+      { intentIndex: 0, detail: null },
+      { intentIndex: 1, detail: null },
+      { intentIndex: 2, detail: null, mode: null },
+      { intentIndex: 3, detail: null },
+    ],
   };
 }
 
@@ -244,6 +904,85 @@ function r216RequiredReplyToolPacket(): CampaignPlayNarratorPacket {
   };
 }
 
+function contactFollowThroughDetailPacket(): CampaignPlayNarratorPacket {
+  const packet = r216RequiredReplyToolPacket();
+  return {
+    ...packet,
+    campaignId: "campaign-contact-detail-contract",
+    turnId: "turn-contact-detail-contract",
+    turnKind: "player_action",
+    openingContext: null,
+    sourceMoment: "Mara Venn waits beside the rain-swept harbor steps.",
+    actionContext: {
+      submittedText: "Ask Mara Venn about the uncertain share.",
+      intentKind: "contact",
+      disposition: "deterministic",
+      result: "success",
+      clarificationQuestion: null,
+    },
+    availableIntents: [
+      {
+        handle: "choice_detail_observe",
+        label: "Examine the wet signal ledger",
+        kind: "observe",
+        targets: [{ handle: "actor_public_keeper", kind: "actor" }],
+      },
+      {
+        handle: "choice_detail_move",
+        label: "Go to Flood Market",
+        kind: "move",
+        targets: [{ handle: "route_public_gate", kind: "route" }],
+      },
+      {
+        handle: "choice_detail_attempt",
+        label: "Work the jammed route",
+        kind: "attempt",
+        targets: [{ handle: "route_public_gate", kind: "route" }],
+      },
+      {
+        handle: "choice_detail_contact",
+        label: "Talk to Mara Venn",
+        kind: "contact",
+        targets: [{ handle: "actor_public_keeper", kind: "actor" }],
+      },
+    ],
+  };
+}
+
+function contactFollowThroughWaitPacket(): CampaignPlayNarratorPacket {
+  const packet = contactFollowThroughDetailPacket();
+  return {
+    ...packet,
+    campaignId: "campaign-contact-wait-detail-contract",
+    turnId: "turn-contact-wait-detail-contract",
+    availableIntents: [
+      ...packet.availableIntents,
+      {
+        handle: "choice_detail_wait",
+        label: "Wait 10 minutes",
+        kind: "wait",
+        targets: [],
+      },
+    ],
+  };
+}
+
+function contactFollowThroughDetailProposal(): CampaignPlayNarratorProposal {
+  return {
+    beats: [{
+      purpose: "consequence",
+      observationIndexes: [0],
+      text: "Mara Venn offers an uncertain share.",
+    }],
+    actionSelections: [
+      { intentIndex: 3, detail: null, mode: null },
+      { intentIndex: 1, detail: null, mode: null },
+      { intentIndex: 0, detail: null, mode: null },
+      { intentIndex: 2, detail: null, mode: null },
+    ],
+  };
+}
+
 function r161SourceReferenceText(): string {
   return "Vedris Kast doesn't turn from the guard post. His voice stays low, meant for Dren, not you. The post remains still.";
 }
@@ -339,11 +1078,56 @@ function trace(strategy: SafeGenerateTrace["strategy"] = "native_schema"): SafeG
       fallbackStrategy: "text_fallback",
       actualMode: "native_schema",
       reason: "test capability",
+      providerId: "test-provider",
     },
     usage: { inputTokens: 90, outputTokens: 70, totalTokens: 160 },
     response: { modelId: "test-model" },
     finishReason: "stop",
   };
+}
+
+type NarratorGenerateObjectOptions = Parameters<typeof safeGenerateObject>[0];
+
+type ReviewerCheck = typeof CAMPAIGN_PLAY_NARRATOR_MECHANICAL_TRUTH_FAILED_CHECKS[number];
+type ReviewerDimensions = Record<ReviewerCheck, "supported" | "unsupported">;
+type ReviewerReviewFixture = {
+  verdict: "approve" | "reject";
+  failedChecks: readonly ReviewerCheck[];
+  dimensions?: ReviewerDimensions;
+};
+
+function reviewerDimensions(
+  failedChecks: readonly ReviewerCheck[],
+): ReviewerDimensions {
+  const failed = new Set(failedChecks);
+  return Object.fromEntries(
+    CAMPAIGN_PLAY_NARRATOR_MECHANICAL_TRUTH_FAILED_CHECKS.map((check) => [
+      check,
+      failed.has(check) ? "unsupported" : "supported",
+    ]),
+  ) as ReviewerDimensions;
+}
+
+function reviewerAwareGenerateObject(
+  proposer:
+    | (() => unknown | Promise<unknown>)
+    | ((options: NarratorGenerateObjectOptions) => unknown | Promise<unknown>),
+  review: ReviewerReviewFixture = { verdict: "approve", failedChecks: [] },
+) {
+  return vi.fn(async (options: NarratorGenerateObjectOptions) => {
+    if (options.prompt?.includes("NARRATOR_COMPILED_CANDIDATE")) {
+      return {
+        object: {
+          ...review,
+          dimensions: review.dimensions ?? reviewerDimensions(review.failedChecks),
+        },
+        trace: trace(options.mode === "tool" ? "tool_mode" : "native_schema"),
+      };
+    }
+    return proposer.length === 0
+      ? (proposer as () => unknown | Promise<unknown>)()
+      : (proposer as (options: NarratorGenerateObjectOptions) => unknown | Promise<unknown>)(options);
+  });
 }
 
 function contractRejectionEvents(): Array<Record<string, unknown>> {
@@ -365,7 +1149,9 @@ describe("Campaign Play narrator contract rejection diagnostics", () => {
         model: {} as LanguageModel,
       }));
     const narrator = createCampaignPlayNarrator({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
     });
 
     let thrown: unknown;
@@ -385,6 +1171,17 @@ describe("Campaign Play narrator contract rejection diagnostics", () => {
     expect(thrown).toMatchObject({
       code: "transport_interrupted",
       modelEvidence: { errorCode: "text_fallback_disabled" },
+    });
+    expect(deriveCampaignPlayNarratorContractFailureDiagnostic(
+      thrown as CampaignPlayNarratorError,
+    )).toMatchObject({
+      owner: "narrator",
+      rejectionPhase: "generation",
+      safeGenerationCode: "text_fallback_disabled",
+      contractDiagnosticPhase: null,
+      contractDiagnosticCoordinate: null,
+      recoveryDiagnostic: null,
+      failedChecks: [],
     });
     expect(contractRejectionEvents()).toEqual([{
       narrationId: "narration-generation-diagnostic",
@@ -428,14 +1225,18 @@ describe("Campaign Play narrator contract rejection diagnostics", () => {
               text: "Rain needles the Salt Harbor steps.",
               observationIndexes: [],
             }],
-            selectedIntentKeys: ["intent0"],
+            selectedIntents: [{ key: "intent0", detail: null, mode: null }],
           },
         }],
         usage: { inputTokens: 12, outputTokens: 20, totalTokens: 32 },
         response: { modelId: "test-model" },
       } as never);
 
-    const narrator = createCampaignPlayNarrator();
+    const narrator = createCampaignPlayNarrator({
+      generateObject: reviewerAwareGenerateObject(
+        (options) => safeGenerateObject(options),
+      ) as unknown as typeof safeGenerateObject,
+    });
     const request = {
       narrationId: "narration-invalid-tool-recovery",
       packetBytes: canonicalizeCampaignPlayProjection(packetFixture()),
@@ -512,14 +1313,18 @@ describe("Campaign Play narrator contract rejection diagnostics", () => {
               text: "Rain needles the Salt Harbor steps.",
               observationIndexes: [],
             }],
-            selectedIntentKeys: ["intent0"],
+            selectedIntents: [{ key: "intent0", detail: null, mode: null }],
           },
         }],
         usage: { inputTokens: 12, outputTokens: 20, totalTokens: 32 },
         response: { modelId: "test-model" },
       } as never);
 
-    const narrator = createCampaignPlayNarrator();
+    const narrator = createCampaignPlayNarrator({
+      generateObject: reviewerAwareGenerateObject(
+        (options) => safeGenerateObject(options),
+      ) as unknown as typeof safeGenerateObject,
+    });
     const request = {
       narrationId: "narration-invalid-tool-recovery-generic",
       packetBytes: canonicalizeCampaignPlayProjection(packetFixture()),
@@ -575,12 +1380,16 @@ describe("Campaign Play narrator contract rejection diagnostics", () => {
         },
       ],
     };
-    const generateObject = vi.fn(async () => ({
+    const generateObject = vi.fn(async (
+      _options: Parameters<typeof safeGenerateObject>[0],
+    ) => ({
       object: proposalFixture(),
       trace: trace(),
     }));
     const narrator = createCampaignPlayNarrator({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
     });
 
     let thrown: unknown;
@@ -636,13 +1445,73 @@ describe("Campaign Play narrator contract rejection diagnostics", () => {
     expect(recorded).not.toContain("private model output");
   });
 
+  it("derives bounded private-decode and packet-validation coordinates without private output", () => {
+    const modelEvidence = { errorCode: "narration_invalid" } as CampaignPlayNarratorModelEvidence;
+    const privateDecode = deriveCampaignPlayNarratorContractFailureDiagnostic(
+      new CampaignPlayNarratorError(
+        "model_contract_failed",
+        modelEvidence,
+        {
+          recoveryFeedback: {
+            diagnostic: "narrator_generation_schema_mismatch",
+            failedChecks: [{ check: "generation_schema_invalid" }],
+            contractDiagnostic: {
+              phase: "private_decode",
+              coordinate: "selectedIntents",
+            },
+          },
+        },
+      ),
+    );
+    const packetValidation = deriveCampaignPlayNarratorContractFailureDiagnostic(
+      new CampaignPlayNarratorError(
+        "narration_invalid",
+        modelEvidence,
+        {
+          recoveryFeedback: {
+            diagnostic: "narrator_packet_validation_mismatch",
+            failedChecks: [{ check: "selected_action_count", actual: 1, expected: 2 }],
+            contractDiagnostic: {
+              phase: "packet_validation",
+              coordinate: "actionSelections",
+            },
+          },
+        },
+      ),
+    );
+
+    expect(privateDecode).toEqual({
+      owner: "narrator",
+      rejectionPhase: "evidence",
+      safeGenerationCode: null,
+      contractDiagnosticPhase: "private_decode",
+      contractDiagnosticCoordinate: "selectedIntents",
+      recoveryDiagnostic: "narrator_generation_schema_mismatch",
+      failedChecks: [{ check: "generation_schema_invalid" }],
+    });
+    expect(packetValidation).toEqual({
+      owner: "narrator",
+      rejectionPhase: "semantic",
+      safeGenerationCode: null,
+      contractDiagnosticPhase: "packet_validation",
+      contractDiagnosticCoordinate: "actionSelections",
+      recoveryDiagnostic: "narrator_packet_validation_mismatch",
+      failedChecks: [{ check: "selected_action_count", actual: 1, expected: 2 }],
+    });
+    expect(JSON.stringify({ privateDecode, packetValidation })).not.toContain("private model output");
+  });
+
   it("classifies evidence mismatches separately from semantic rejection", async () => {
-    const generateObject = vi.fn(async () => ({
+    const generateObject = vi.fn(async (
+      _options: Parameters<typeof safeGenerateObject>[0],
+    ) => ({
       object: proposalFixture(),
       trace: trace("repair"),
     }));
     const narrator = createCampaignPlayNarrator({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
     });
 
     await expect(narrator.narrate({
@@ -678,7 +1547,9 @@ describe("Campaign Play narrator contract rejection diagnostics", () => {
         text: "The system exposes actor_public_keeper beside the harbor.",
       }, ...proposalFixture().beats.slice(1)],
     };
-    const generateObject = vi.fn(async () => ({
+    const generateObject = vi.fn(async (
+      _options: Parameters<typeof safeGenerateObject>[0],
+    ) => ({
       object: invalidProposal,
       trace: trace(),
     }));
@@ -717,7 +1588,7 @@ describe("Campaign Play narrator contract rejection diagnostics", () => {
 
     narratorEvent.mockClear();
     const validNarrator = createCampaignPlayNarrator({
-      generateObject: vi.fn(async () => ({
+      generateObject: reviewerAwareGenerateObject(async () => ({
         object: proposalFixture(),
         trace: trace(),
       })) as unknown as typeof safeGenerateObject,
@@ -731,6 +1602,760 @@ describe("Campaign Play narrator contract rejection diagnostics", () => {
       budget,
     })).resolves.toBeDefined();
     expect(contractRejectionEvents()).toEqual([]);
+  });
+});
+
+describe("Campaign Play narrator mechanical truth reviewer", () => {
+  const requestFor = (
+    packet: CampaignPlayNarratorPacket,
+    narrationId: string,
+    signal?: AbortSignal,
+  ) => ({
+    narrationId,
+    packetBytes: canonicalizeCampaignPlayProjection(packet),
+    createdAt: 1_000,
+    model: structuredModel(),
+    temperature: 0.5,
+    budget,
+    ...(signal === undefined ? {} : { signal }),
+  });
+
+  it("rejects the live paid-delivery candidate when unsupported dimensions approve by mistake", async () => {
+    const packet = livePaidDeliveryPacket();
+    const proposal = livePaidDeliveryProposal();
+    const generateObject = reviewerAwareGenerateObject(
+      async () => ({ object: proposal, trace: trace() }),
+      {
+        verdict: "approve",
+        failedChecks: [],
+        dimensions: {
+          ...reviewerDimensions([]),
+          unsupported_obligation_or_payment: "unsupported",
+          hidden_or_unobserved_fact: "unsupported",
+          unsupported_action_target: "unsupported",
+        },
+      },
+    );
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    await expect(narrator.narrate(
+      requestFor(packet, "narration-live-paid-delivery"),
+    )).rejects.toMatchObject({
+      code: "narration_invalid",
+      recoveryFeedback: {
+        diagnostic: "narrator_packet_validation_mismatch",
+        failedChecks: [
+          { check: "unsupported_obligation_or_payment" },
+          { check: "hidden_or_unobserved_fact" },
+          { check: "unsupported_action_target" },
+        ],
+      },
+    });
+    expect(generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it("accepts a grounded certified contact without inventing a typed deal", async () => {
+    const packet = livePaidDeliveryPacket();
+    const proposal = groundedCertifiedContactProposal();
+    const generateObject = reviewerAwareGenerateObject(
+      async () => ({ object: proposal, trace: trace() }),
+    );
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const result = await narrator.narrate(
+      requestFor(packet, "narration-grounded-certified-contact"),
+    );
+    expect(result.narration.displayText).toContain(
+      "Sister Ashiya Voln hears you from the Farbank Steps",
+    );
+    expect(result.narration.suggestedActions[0]?.label).toBe(
+      "Talk to Sister Ashiya Voln",
+    );
+    expect(generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it("accepts the exact typed receivable settlement in the narrator packet", async () => {
+    const packet = settledReceivablePacket();
+    const proposal = settledReceivableProposal(
+      "Aldous Crane pays you 12 copper, and the receivable settles.",
+    );
+    const generateObject = reviewerAwareGenerateObject(
+      async () => ({ object: proposal, trace: trace() }),
+    );
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const result = await narrator.narrate(
+      requestFor(packet, "narration-aldous-settlement"),
+    );
+    expect(result.narration.displayText).toContain(
+      "Aldous Crane pays you 12 copper",
+    );
+    expect(generateObject).toHaveBeenCalledTimes(2);
+    const reviewerOptions = generateObject.mock.calls[1]![0] as NarratorGenerateObjectOptions;
+    const prompt = reviewerOptions.prompt ?? "";
+    expect(prompt).toContain("obligationSettlement");
+    expect(prompt).toContain("obligation_aldous_receivable");
+    expect(prompt).toContain("actor_aldous_crane");
+    expect(prompt).toContain("actor_player");
+    expect(prompt).toContain('"amount":12');
+    expect(prompt).toContain('"status":"settled"');
+    expect(prompt).toContain(
+      "debtor identified by debtorHandle paid you exactly amount unitKey",
+    );
+  });
+
+  it("rejects a narrator claim that changes a typed receivable settlement", async () => {
+    const packet = settledReceivablePacket();
+    const proposal = settledReceivableProposal(
+      "Aldous Crane pays you 11 copper, and another debt is cleared.",
+    );
+    const generateObject = reviewerAwareGenerateObject(
+      async () => ({ object: proposal, trace: trace() }),
+      {
+        verdict: "reject",
+        failedChecks: ["unsupported_obligation_or_payment"],
+      },
+    );
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    await expect(narrator.narrate(
+      requestFor(packet, "narration-aldous-settlement-mismatch"),
+    )).rejects.toMatchObject({
+      code: "narration_invalid",
+      recoveryFeedback: {
+        diagnostic: "narrator_packet_validation_mismatch",
+        failedChecks: [{ check: "unsupported_obligation_or_payment" }],
+      },
+    });
+    expect(generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it("approves named atmospheric commerce without creating mechanical state", async () => {
+    const packet = namedAtmosphericCommercePacket();
+    const proposal = namedAtmosphericCommerceProposal();
+    const generateObject = reviewerAwareGenerateObject(
+      async () => ({ object: proposal, trace: trace() }),
+    );
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const result = await narrator.narrate(
+      requestFor(packet, "narration-named-atmospheric-commerce"),
+    );
+    expect(result.narration.displayText).toContain("Odelia Vey's old purchase");
+    expect(result.narration.displayText).toContain("three silver");
+    expect(result.narration.displayText).toContain("promise of fairer prices");
+    expect(result.narration.suggestedActions[0]?.label).toBe(
+      "Talk to Sister Ashiya Voln",
+    );
+    expect(generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it("applies the same mechanical review to same-input recovery", async () => {
+    const packet = livePaidDeliveryPacket();
+    const proposal = livePaidDeliveryProposal();
+    const generateObject = reviewerAwareGenerateObject(
+      async () => ({ object: proposal, trace: trace() }),
+      {
+        verdict: "approve",
+        failedChecks: [],
+        dimensions: {
+          ...reviewerDimensions([]),
+          unsupported_obligation_or_payment: "unsupported",
+          hidden_or_unobserved_fact: "unsupported",
+          unsupported_action_target: "unsupported",
+        },
+      },
+    );
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    const request = requestFor(packet, "narration-live-paid-delivery-first");
+
+    let recoveryFeedback: CampaignPlayNarratorRecoveryFeedback | undefined;
+    let firstError: unknown;
+    try {
+      await narrator.narrate(request);
+    } catch (cause) {
+      firstError = cause;
+      if (cause instanceof CampaignPlayNarratorError) {
+        recoveryFeedback = cause.recoveryFeedback ?? undefined;
+      }
+    }
+    expect(firstError).toMatchObject({
+      code: "narration_invalid",
+      recoveryFeedback: {
+        diagnostic: "narrator_packet_validation_mismatch",
+        failedChecks: [
+          { check: "unsupported_obligation_or_payment" },
+          { check: "hidden_or_unobserved_fact" },
+          { check: "unsupported_action_target" },
+        ],
+      },
+    });
+    expect(recoveryFeedback).toBeDefined();
+    await expect(narrator.narrate({
+      ...request,
+      narrationId: "narration-live-paid-delivery-recovery",
+      recoveryFeedback,
+    })).rejects.toMatchObject({
+      code: "narration_invalid",
+      recoveryFeedback: {
+        diagnostic: "narrator_packet_validation_mismatch",
+        failedChecks: [
+          { check: "unsupported_obligation_or_payment" },
+          { check: "hidden_or_unobserved_fact" },
+          { check: "unsupported_action_target" },
+        ],
+      },
+    });
+    expect(generateObject).toHaveBeenCalledTimes(4);
+    const firstReviewerPrompt = String(
+      (generateObject.mock.calls[1]![0] as NarratorGenerateObjectOptions).prompt ?? "",
+    );
+    const recoveryReviewerPrompt = String(
+      (generateObject.mock.calls[3]![0] as NarratorGenerateObjectOptions).prompt ?? "",
+    );
+    expect(firstReviewerPrompt).toContain("MECHANICAL_TRUTH_DIMENSION_CHECKLIST");
+    expect(recoveryReviewerPrompt).toContain("MECHANICAL_TRUTH_DIMENSION_CHECKLIST");
+  });
+
+  it("rejects an R13-shaped false custody claim and unavailable packet action before narration result", async () => {
+    const packet = r13DecisionPacket();
+    const proposal = r13Proposal(
+      "Mara Venn agrees to the exchange; the sealed packet is now yours.",
+    );
+    const generateObject = reviewerAwareGenerateObject(
+      async () => ({ object: proposal, trace: trace() }),
+      {
+        verdict: "reject",
+        failedChecks: [
+          "unsupported_possession_or_custody",
+          "unsupported_action_target",
+        ],
+      },
+    );
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    let thrown: unknown;
+    try {
+      await narrator.narrate(requestFor(packet, "narration-r13-false-custody"));
+    } catch (cause) {
+      thrown = cause;
+    }
+    expect(thrown).toBeInstanceOf(CampaignPlayNarratorError);
+    expect(thrown).toMatchObject({
+      code: "narration_invalid",
+      recoveryFeedback: {
+        diagnostic: "narrator_packet_validation_mismatch",
+        failedChecks: [
+          { check: "unsupported_possession_or_custody" },
+          { check: "unsupported_action_target" },
+        ],
+      },
+    });
+    expect(JSON.stringify(thrown)).not.toContain("sealed packet is now yours");
+    expect(JSON.stringify(thrown)).not.toContain("Ruik just handed you");
+    expect(generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects active commitment prose that claims custody, completion, or payment", async () => {
+    const packet = activeCommitmentPacket();
+    const proposal: CampaignPlayNarratorProposal = {
+      beats: [{
+        purpose: "orientation",
+        observationIndexes: [],
+        text: "Mara Venn hands you the sealed dispatch; you carry it to Flood Market and collect the fee.",
+      }],
+      actionSelections: [{ intentIndex: 0, detail: null }],
+    };
+    const generateObject = reviewerAwareGenerateObject(
+      async () => ({ object: proposal, trace: trace() }),
+      {
+        verdict: "reject",
+        failedChecks: [
+          "unsupported_possession_or_custody",
+          "unsupported_obligation_or_payment",
+        ],
+      },
+    );
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    await expect(narrator.narrate(
+      requestFor(packet, "narration-active-commitment-boundary"),
+    )).rejects.toMatchObject({
+      code: "narration_invalid",
+      recoveryFeedback: {
+        diagnostic: "narrator_packet_validation_mismatch",
+        failedChecks: [
+          { check: "unsupported_possession_or_custody" },
+          { check: "unsupported_obligation_or_payment" },
+        ],
+      },
+    });
+    const reviewerOptions = generateObject.mock.calls[1]![0] as NarratorGenerateObjectOptions;
+    const prompt = reviewerOptions.prompt ?? "";
+    expect(prompt).toContain("commitment_harbor_delivery");
+    expect(prompt).toContain("Sealed dispatch");
+    expect(prompt).toContain("active commitment is outstanding");
+    expect(prompt).toContain("payment or debt");
+  });
+
+  it("approves a no-effect accepted decision phrased only as agreement", async () => {
+    const packet = r13AgreementPacket();
+    const proposal = r13Proposal(
+      "You accept Mara Venn's offer; the agreement stands as she described it.",
+    );
+    const proposer = vi.fn(async () => ({ object: proposal, trace: trace() }));
+    const generateObject = reviewerAwareGenerateObject(() => proposer());
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const request = requestFor(packet, "narration-r13-valid-agreement");
+    const result = await narrator.narrate(request);
+    expect(result.narration.displayText).toContain("agreement stands");
+    expect(result.narration.displayText).not.toContain("now yours");
+    expect(result.modelEvidence).toMatchObject({
+      requestedStrategy: "strict_object",
+      actualStrategy: "native_schema",
+      totalAttempts: 1,
+      repairUsed: false,
+      retryUsed: false,
+      textFallbackUsed: false,
+      actualProviderId: "test-provider",
+      responseModel: "test-model",
+      inputTokens: 180,
+      outputTokens: 140,
+      totalTokens: 320,
+    });
+    expect(generateObject).toHaveBeenCalledTimes(2);
+    const reviewerOptions = generateObject.mock.calls[1]![0] as NarratorGenerateObjectOptions;
+    expect(reviewerOptions.temperature).toBe(0);
+    expect(reviewerOptions.strictSchema).toBe(true);
+    expect(reviewerOptions.allowRepair).toBe(false);
+    expect(reviewerOptions.allowTextFallback).toBe(false);
+    expect(reviewerOptions.retries).toBe(1);
+    expect(reviewerOptions.model).toBe(request.model);
+  });
+
+  it("approves an exact no-effect declined decision as the choice only", async () => {
+    const packet = r13DeclinedAgreementPacket();
+    const proposal = r13Proposal(
+      "You choose the exact \"Decline the sealed packet\" response; Mara Venn declines the exchange.",
+    );
+    const generateObject = reviewerAwareGenerateObject(
+      async () => ({ object: proposal, trace: trace() }),
+    );
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const result = await narrator.narrate(
+      requestFor(packet, "narration-r13-valid-decline"),
+    );
+    expect(result.narration.displayText).toContain("Decline the sealed packet");
+    expect(result.narration.displayText).toContain("declines the exchange");
+    expect(result.narration.displayText).not.toContain("now yours");
+    expect(generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects null-effect offer prose that claims mechanics are already fulfilled", async () => {
+    const packet = r13AgreementPacket();
+    const proposal = r13Proposal(
+      "You accept the sealed packet; the benefit, access, reward, payment, ownership, debt, delivery, and commitment are already fulfilled.",
+    );
+    const generateObject = reviewerAwareGenerateObject(
+      async () => ({ object: proposal, trace: trace() }),
+      {
+        verdict: "reject",
+        failedChecks: ["decision_outcome_exaggerated"],
+      },
+    );
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    await expect(narrator.narrate(
+      requestFor(packet, "narration-r13-null-effect-claim"),
+    )).rejects.toMatchObject({
+      code: "narration_invalid",
+      recoveryFeedback: {
+        diagnostic: "narrator_packet_validation_mismatch",
+        failedChecks: [{ check: "decision_outcome_exaggerated" }],
+      },
+    });
+    expect(generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects invented or relabelled controls and terms for a null-effect offer", async () => {
+    const packet = r13AgreementPacket();
+    const proposal = r13Proposal(
+      "You accept the new \"Carry the sealed ledger for two silver tomorrow\" choice; Mara Venn owes you the reward.",
+    );
+    const generateObject = reviewerAwareGenerateObject(
+      async () => ({ object: proposal, trace: trace() }),
+      {
+        verdict: "reject",
+        failedChecks: ["decision_outcome_exaggerated"],
+      },
+    );
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    await expect(narrator.narrate(
+      requestFor(packet, "narration-r13-relabelled-decision"),
+    )).rejects.toMatchObject({
+      code: "narration_invalid",
+      recoveryFeedback: {
+        diagnostic: "narrator_packet_validation_mismatch",
+        failedChecks: [{ check: "decision_outcome_exaggerated" }],
+      },
+    });
+    expect(generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it("approves a typed possession consequence when public possession authority exists", async () => {
+    const packet = r13TypedPossessionPacket();
+    const proposal = r13Proposal(
+      "Mara Venn places the sealed packet in your hands.",
+    );
+    const generateObject = reviewerAwareGenerateObject(
+      async () => ({ object: proposal, trace: trace() }),
+    );
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const result = await narrator.narrate(
+      requestFor(packet, "narration-r13-valid-possession"),
+    );
+    expect(result.narration.displayText).toContain("places the sealed packet in your hands");
+    expect(result.narration.suggestedActions.some((action) =>
+      action.label.includes("sealed packet"))).toBe(true);
+    expect(generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it("couples reviewer verdict and failed checks exactly", () => {
+    const supported = reviewerDimensions([]);
+    const unsupportedActionTarget = reviewerDimensions(["unsupported_action_target"]);
+    expect(campaignPlayNarratorMechanicalTruthReviewSchema.safeParse({
+      verdict: "approve",
+      failedChecks: ["unsupported_action_target"],
+      dimensions: unsupportedActionTarget,
+    }).success).toBe(false);
+    expect(campaignPlayNarratorMechanicalTruthReviewSchema.safeParse({
+      verdict: "reject",
+      failedChecks: [],
+      dimensions: supported,
+    }).success).toBe(false);
+    expect(campaignPlayNarratorMechanicalTruthReviewSchema.safeParse({
+      verdict: "approve",
+      failedChecks: [],
+      dimensions: supported,
+    }).success).toBe(true);
+    expect(campaignPlayNarratorMechanicalTruthReviewSchema.safeParse({
+      verdict: "reject",
+      failedChecks: ["unsupported_action_target"],
+      dimensions: unsupportedActionTarget,
+    }).success).toBe(true);
+    expect(campaignPlayNarratorMechanicalTruthReviewSchema.safeParse({
+      verdict: "reject",
+      failedChecks: ["unsupported_action_target", "unsupported_action_target"],
+      dimensions: unsupportedActionTarget,
+    }).success).toBe(false);
+    expect(campaignPlayNarratorMechanicalTruthReviewSchema.safeParse({
+      verdict: "approve",
+      failedChecks: [],
+      dimensions: {
+        ...supported,
+        unsupported_obligation_or_payment: "unsupported",
+      },
+    }).success).toBe(true);
+  });
+
+  it.each([
+    {
+      name: "schema coupling mismatch",
+      reviewer: {
+        object: { verdict: "approve", failedChecks: ["unsupported_action_target"] },
+        trace: trace(),
+      },
+      expectedCode: "model_contract_failed",
+    },
+    {
+      name: "transport interruption",
+      reviewer: new Error("private reviewer prose"),
+      expectedCode: "transport_interrupted",
+    },
+    {
+      name: "strategy mismatch",
+      reviewer: { object: { verdict: "approve", failedChecks: [] }, trace: trace("repair") },
+      expectedCode: "model_contract_failed",
+    },
+    {
+      name: "text fallback",
+      reviewer: { object: { verdict: "approve", failedChecks: [] }, trace: trace("text_fallback") },
+      expectedCode: "model_contract_failed",
+    },
+  ])("fails closed on reviewer $name without returning narration", async ({ reviewer, expectedCode }) => {
+    const packet = r13AgreementPacket();
+    const proposal = r13Proposal(
+      "You accept Mara Venn's offer; the agreement stands as she described it.",
+    );
+    const generateObject = vi.fn(async (options: NarratorGenerateObjectOptions) => {
+      if (options.prompt?.includes("NARRATOR_COMPILED_CANDIDATE")) {
+        if (reviewer instanceof Error) throw reviewer;
+        return reviewer;
+      }
+      return { object: proposal, trace: trace() };
+    });
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    await expect(narrator.narrate(
+      requestFor(packet, "narration-r13-reviewer-failure"),
+    )).rejects.toMatchObject({ code: expectedCode });
+    expect(generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it("sends only the public packet and compiled candidate with bounded mechanics criteria", async () => {
+    const packet = r13AgreementPacket();
+    const proposal = r13Proposal(
+      "You accept Mara Venn's offer; the agreement stands as she described it.",
+    );
+    const generateObject = reviewerAwareGenerateObject(
+      async () => ({ object: proposal, trace: trace() }),
+    );
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    await narrator.narrate(requestFor(packet, "narration-r13-reviewer-prompt"));
+    const reviewerOptions = generateObject.mock.calls[1]![0] as NarratorGenerateObjectOptions;
+    const prompt = reviewerOptions.prompt ?? "";
+    expect(prompt).toContain("NARRATOR_PUBLIC_PACKET");
+    expect(prompt).toContain("NARRATOR_COMPILED_CANDIDATE");
+    expect(prompt).toContain("MECHANICAL_TRUTH_CRITERIA");
+    expect(prompt).toContain("MECHANICAL_TRUTH_DIMENSION_CHECKLIST");
+    expect(prompt).toContain(
+      "Names, prices, purchases, offers, promises, and background bargains are not mechanical state by themselves.",
+    );
+    expect(prompt).toContain("actionable future reliance");
+    expect(prompt).toContain("A named one-off extra");
+    expect(prompt).toContain("The application derives rejection from any unsupported dimension");
+    for (const check of CAMPAIGN_PLAY_NARRATOR_MECHANICAL_TRUTH_FAILED_CHECKS) {
+      expect(prompt).toContain(check);
+    }
+    expect(prompt).toContain("agreement stands as she described it");
+    expect(prompt).toContain("Inspect the signal ledger");
+    expect(prompt).toContain("Salt Harbor");
+    expect(prompt).toContain("DECISION_AND_COMMITMENT_AUTHORITY");
+    expect(prompt).toContain("acceptEffect=null");
+    expect(prompt).toContain("generic decision_open offer (kind=offer)");
+    expect(prompt).toContain(
+      "not a benefit, access, reward, payment, ownership, debt, delivery, other-party commitment, or world change",
+    );
+    expect(prompt).toContain("Reject renamed or invented decision controls or terms");
+    expect(prompt).toContain("atmospheric offer or random trade without a typed decision remains prose-only");
+    expect(prompt).toContain("paid_delivery");
+    expect(prompt).toContain("unpaid_delivery");
+    expect(prompt).toContain("authorizes no fee, payment, debt, or compensation");
+    expect(prompt).toContain("Declined decisions authorize no assignment or commitment effect");
+    expect(prompt).toContain("active commitment is outstanding");
+    expect(prompt).not.toContain("private model output");
+    expect(prompt).not.toContain("hidden state supplied by the application");
+  });
+
+  it("rejects an unsupported pressure easing claim after a pure time-only wait", async () => {
+    const packet: CampaignPlayNarratorPacket = {
+      ...packetFixture(),
+      turnId: "turn-pure-wait-pressure-claim",
+      turnKind: "player_action",
+      openingContext: null,
+      sourceMoment: "The harbor mechanism pounds beneath a steady rain.",
+      actionContext: {
+        submittedText: "Wait ten minutes.",
+        intentKind: "wait",
+        disposition: "deterministic",
+        result: "success",
+        clarificationQuestion: null,
+      },
+      visiblePressures: [],
+      elapsedMinutes: 10,
+      availableIntents: [{
+        handle: "choice_public_wait",
+        label: "Wait 10 minutes",
+        kind: "wait",
+        targets: [],
+      }],
+    };
+    const proposal: CampaignPlayNarratorProposal = {
+      beats: [{
+        purpose: "consequence",
+        observationIndexes: [],
+        text: "When the peak finally eases, the mechanism settles to a lower thunder.",
+      }],
+      actionSelections: [{ intentIndex: 0, detail: null }],
+    };
+    const generateObject = reviewerAwareGenerateObject(
+      async () => ({ object: proposal, trace: trace() }),
+      {
+        verdict: "reject",
+        failedChecks: ["unsupported_actor_or_pressure_change"],
+      },
+    );
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    await expect(narrator.narrate(
+      requestFor(packet, "narration-pure-wait-pressure-claim"),
+    )).rejects.toMatchObject({
+      code: "narration_invalid",
+      recoveryFeedback: {
+        diagnostic: "narrator_packet_validation_mismatch",
+        failedChecks: [{ check: "unsupported_actor_or_pressure_change" }],
+      },
+    });
+    expect(generateObject).toHaveBeenCalledTimes(2);
+    const proposalPrompt = String(
+      (generateObject.mock.calls[0]![0] as NarratorGenerateObjectOptions).prompt ?? "",
+    );
+    const reviewerPrompt = String(
+      (generateObject.mock.calls[1]![0] as NarratorGenerateObjectOptions).prompt ?? "",
+    );
+    expect(proposalPrompt).toContain("WAIT_MECHANICAL_AUTHORITY");
+    expect(proposalPrompt).toContain("elapsedMinutes advances only the clock");
+    expect(reviewerPrompt).toContain("WAIT_MECHANICAL_AUTHORITY");
+    expect(reviewerPrompt).toContain("unsupported_actor_or_pressure_change");
+  });
+
+  it("accepts time passing without a typed mechanical transition", async () => {
+    const packet: CampaignPlayNarratorPacket = {
+      ...packetFixture(),
+      turnId: "turn-pure-wait-time-only",
+      turnKind: "player_action",
+      openingContext: null,
+      sourceMoment: "The harbor mechanism pounds beneath a steady rain.",
+      actionContext: {
+        submittedText: "Wait ten minutes.",
+        intentKind: "wait",
+        disposition: "deterministic",
+        result: "success",
+        clarificationQuestion: null,
+      },
+      visiblePressures: [],
+      elapsedMinutes: 10,
+      availableIntents: [{
+        handle: "choice_public_wait",
+        label: "Wait 10 minutes",
+        kind: "wait",
+        targets: [],
+      }],
+    };
+    const proposal: CampaignPlayNarratorProposal = {
+      beats: [{
+        purpose: "consequence",
+        observationIndexes: [],
+        text: "Ten minutes pass beneath the steady rain while the mechanism continues to pound.",
+      }],
+      actionSelections: [{ intentIndex: 0, detail: null }],
+    };
+    const generateObject = reviewerAwareGenerateObject(
+      async () => ({ object: proposal, trace: trace() }),
+    );
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const result = await narrator.narrate(
+      requestFor(packet, "narration-pure-wait-time-only"),
+    );
+    expect(result.narration.displayText).toBe(proposal.beats[0]!.text);
+    expect(generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it("accepts pressure easing when the exact transition is typed in the packet", async () => {
+    const pressureChange = {
+      observationHandle: "observation-peak-eased",
+      performingActorHandle: null,
+      performingActorName: null,
+      whatChanged: "The harbor peak eases and the mechanism settles to a lower thunder.",
+      whereOrRoute: "Salt Harbor",
+      worldTimeLabel: "Day 1, 00:20",
+      causalCue: "visible_aftermath" as const,
+    };
+    const packet: CampaignPlayNarratorPacket = {
+      ...packetFixture(),
+      turnId: "turn-typed-wait-pressure-transition",
+      turnKind: "player_action",
+      openingContext: null,
+      sourceMoment: "The harbor mechanism pounds beneath a steady rain.",
+      actionContext: {
+        submittedText: "Wait ten minutes.",
+        intentKind: "wait",
+        disposition: "deterministic",
+        result: "success",
+        clarificationQuestion: null,
+      },
+      visiblePressures: [{
+        handle: "pressure_public_peak",
+        label: "Easing harbor peak",
+        summary: pressureChange.whatChanged,
+      }],
+      newObservations: [{
+        observationHandle: pressureChange.observationHandle,
+        title: "Pressure change",
+        text: pressureChange.whatChanged,
+        whereOrRoute: pressureChange.whereOrRoute,
+        worldTimeLabel: pressureChange.worldTimeLabel,
+        consequence: pressureChange,
+      }],
+      consequences: [pressureChange],
+      elapsedMinutes: 10,
+      availableIntents: [{
+        handle: "choice_public_wait",
+        label: "Wait 10 minutes",
+        kind: "wait",
+        targets: [],
+      }],
+    };
+    const proposal: CampaignPlayNarratorProposal = {
+      beats: [{
+        purpose: "consequence",
+        observationIndexes: [0],
+        text: pressureChange.whatChanged,
+      }],
+      actionSelections: [{ intentIndex: 0, detail: null }],
+    };
+    const generateObject = reviewerAwareGenerateObject(
+      async () => ({ object: proposal, trace: trace() }),
+    );
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const result = await narrator.narrate(
+      requestFor(packet, "narration-typed-wait-pressure-transition"),
+    );
+    expect(result.narration.displayText).toBe(pressureChange.whatChanged);
+    expect(generateObject).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -768,6 +2393,236 @@ describe("Campaign Play narrator", () => {
       kind: "flash",
       beatId: first.narration.beats[1]!.beatId,
     }]);
+  });
+
+  it("copies an active commitment binding into the suggested action without inventing detail", () => {
+    const packet = activeCommitmentPacket();
+    const compiled = createCampaignPlayNarrator().compile({
+      narrationId: "narration-commitment-control",
+      packet,
+      proposal: {
+        beats: [{
+          purpose: "orientation",
+          observationIndexes: [],
+          text: "Mara Venn waits beside the rain-dark ferry steps.",
+        }],
+        actionSelections: [{ intentIndex: 0, detail: null }],
+      },
+      createdAt: 1_000,
+    });
+
+    expect(compiled.narration.suggestedActions).toEqual([{
+      choiceHandle: "choice_collect_dispatch",
+      label: "Ask Mara Venn for Sealed dispatch",
+      commitmentBinding: {
+        commitmentHandle: "commitment_harbor_delivery",
+        action: "collect",
+        counterpartyHandle: "actor_public_keeper",
+        subjectName: "Sealed dispatch",
+        destinationHandle: "location_public_market",
+      },
+    }]);
+  });
+
+  it.each(["collect", "deliver"] as const)(
+    "publishes the eligible %s commitment before generic controls",
+    (action) => {
+      const packet = activeCommitmentPacketWithGenericIntents(action);
+      const compiled = createCampaignPlayNarrator().compile({
+        narrationId: `narration-commitment-priority-${action}`,
+        packet,
+        proposal: {
+          beats: [{
+            purpose: "orientation",
+            observationIndexes: [],
+            text: action === "deliver"
+              ? "The Flood Market stones are slick beneath the waiting awnings."
+              : "Mara Venn waits beside the rain-dark ferry steps.",
+          }],
+          actionSelections: [4, 0, 1, 2].map((intentIndex) => ({
+            intentIndex,
+            detail: null,
+          })),
+        },
+        createdAt: 1_000,
+      });
+
+      expect(compiled.narration.suggestedActions[0]).toMatchObject({
+        choiceHandle: action === "deliver" ? "choice_deliver_dispatch" : "choice_collect_dispatch",
+        label: action === "deliver"
+          ? "Deliver Sealed dispatch at Flood Market"
+          : "Ask Mara Venn for Sealed dispatch",
+        commitmentBinding: {
+          commitmentHandle: "commitment_harbor_delivery",
+          action,
+          counterpartyHandle: "actor_public_keeper",
+          subjectName: "Sealed dispatch",
+          destinationHandle: "location_public_market",
+        },
+      });
+    },
+  );
+
+  it("rejects a native proposal that omits an eligible commitment control", () => {
+    const packet = activeCommitmentPacketWithGenericIntents("collect");
+    expect(() => createCampaignPlayNarrator().compile({
+      narrationId: "narration-commitment-omission",
+      packet,
+      proposal: {
+        beats: [{
+          purpose: "orientation",
+          observationIndexes: [],
+          text: "Mara Venn waits beside the rain-dark ferry steps.",
+        }],
+        actionSelections: [0, 1, 2, 3].map((intentIndex) => ({
+          intentIndex,
+          detail: null,
+        })),
+      },
+      createdAt: 1_000,
+    })).toThrowError(expect.objectContaining({
+      recoveryFeedback: expect.objectContaining({
+        diagnostic: "narrator_packet_validation_mismatch",
+        failedChecks: expect.arrayContaining([{
+          check: "commitment_intent_slots",
+          expectedIntentIndexes: [4],
+          actualIntentIndexes: [0],
+        }]),
+      }),
+    }));
+  });
+
+  it("keeps pending decision controls ahead of an eligible commitment", () => {
+    const basePacket = r13AgreementPacket();
+    const commitmentPacket = activeCommitmentPacket();
+    const packet: CampaignPlayNarratorPacket = {
+      ...basePacket,
+      commitments: commitmentPacket.commitments,
+      availableIntents: [
+        ...basePacket.availableIntents,
+        commitmentPacket.availableIntents[0]!,
+      ],
+    };
+    const compiled = createCampaignPlayNarrator().compile({
+      narrationId: "narration-decision-commitment-priority",
+      packet,
+      proposal: {
+        beats: [{
+          purpose: "consequence",
+          observationIndexes: [0],
+          text: "Mara Venn agrees to the exchange; the agreement stands as she described it.",
+        }],
+        actionSelections: [
+          { intentIndex: 0, detail: null },
+          { intentIndex: 1, detail: null },
+          { intentIndex: 4, detail: null },
+          { intentIndex: 2, detail: null, mode: null },
+        ],
+      },
+      createdAt: 1_000,
+    });
+
+    expect(compiled.narration.suggestedActions.slice(0, 3)).toMatchObject([
+      { choiceHandle: "choice-r13-accept" },
+      { choiceHandle: "choice-r13-decline" },
+      {
+        choiceHandle: "choice_collect_dispatch",
+        commitmentBinding: { commitmentHandle: "commitment_harbor_delivery", action: "collect" },
+      },
+    ]);
+  });
+
+  it("publishes the complete open-decision control set without model-authored targets", async () => {
+    const packet = decisionPacketWithManyIntents();
+    const beats = [{
+      purpose: "orientation" as const,
+      observationIndexes: [],
+      text: "The sealed ledger rests beside the rain-dark harbor steps.",
+    }];
+    const omittedProposal: CampaignPlayNarratorProposal = {
+      beats,
+      actionSelections: [2, 3, 4, 5].map((intentIndex) => ({
+        intentIndex,
+        detail: null,
+      })),
+    };
+    expect(() => createCampaignPlayNarrator().compile({
+      narrationId: "narration-decision-native-omission",
+      packet,
+      proposal: omittedProposal,
+      createdAt: 1_000,
+    })).toThrow();
+
+    const generateObject = vi.fn(async (
+      _options: Parameters<typeof safeGenerateObject>[0],
+    ) => ({
+      object: {
+        beats,
+        selectedIntents: [],
+      },
+      trace: trace("tool_mode"),
+    }));
+    const generated = await createCampaignPlayNarrator({
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
+    }).narrate({
+      narrationId: "narration-decision-tool-injection",
+      packetBytes: canonicalizeCampaignPlayProjection(packet),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+      structuredOutputMode: "tool",
+    });
+    expect(generated.narration.suggestedActions).toEqual([
+      {
+        choiceHandle: "choice_decision_accept",
+        label: "Accept — Carry the sealed ledger",
+        decisionBinding: {
+          decisionKey: "decision-harbor-share",
+          actorHandle: "actor_public_keeper",
+          kind: "offer",
+          disposition: "accept",
+        },
+      },
+      {
+        choiceHandle: "choice_decision_decline",
+        label: "Decline — Leave the sealed ledger",
+        decisionBinding: {
+          decisionKey: "decision-harbor-share",
+          actorHandle: "actor_public_keeper",
+          kind: "offer",
+          disposition: "decline",
+        },
+      },
+      {
+        choiceHandle: "choice_decision_observe_2",
+        label: "Examine the harbor steps",
+      },
+      {
+        choiceHandle: "choice_decision_wait",
+        label: "Wait 10 minutes",
+      },
+    ]);
+    expect(generated.narration.suggestedActions).toHaveLength(4);
+    const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    const providerSchema = z.toJSONSchema(options.schema) as unknown as {
+      properties: {
+        selectedIntents: { minItems?: number; maxItems?: number };
+      };
+    };
+    expect(providerSchema.properties.selectedIntents).toMatchObject({
+      minItems: 0,
+      maxItems: 0,
+    });
+    expect(options.schema.safeParse({
+      beats,
+      selectedIntents: [{ key: "intent2", detail: null, mode: null }],
+    }).success).toBe(false);
+    expect(String(options.prompt)).toContain(
+      "return selectedIntents=[] and do not author, rename, or retarget any action",
+    );
   });
 
   it("reports every packet validation coordinate without retaining model prose", () => {
@@ -911,8 +2766,8 @@ describe("Campaign Play narrator", () => {
       openingContext: null,
       sourceMoment: "secret-source-moment",
       actionContext: {
-        submittedText: "secret-prompt",
-        intentKind: "contact",
+        submittedText: "Wait for Mara to act.",
+        intentKind: "wait",
         disposition: "deterministic",
         result: "success",
         clarificationQuestion: null,
@@ -960,6 +2815,68 @@ describe("Campaign Play narrator", () => {
       createdAt: 1_000,
     })).not.toThrow();
     expect(narratorWarn).not.toHaveBeenCalled();
+  });
+
+  it("binds an opening decision to its structured observation index while allowing natural wording", () => {
+    const decision = {
+      decisionKey: "decision-opening-choice",
+      actorName: "Mara Venn",
+      actorHandle: "actor_public_keeper",
+      kind: "offer" as const,
+      summary: "The keeper offers a sealed route map for the next crossing.",
+      acceptLabel: "Take the map",
+      declineLabel: "Leave it sealed",
+    };
+    const consequence = {
+      observationHandle: "observation-opening-decision",
+      performingActorHandle: decision.actorHandle,
+      performingActorName: decision.actorName,
+      whatChanged: decision.summary,
+      whereOrRoute: "Salt Harbor",
+      worldTimeLabel: "Day 1, 00:10",
+      causalCue: "direct_perception" as const,
+    };
+    const packet: CampaignPlayNarratorPacket = {
+      ...packetFixture(),
+      campaignId: "campaign-opening-decision",
+      turnId: "turn-opening-decision",
+      openingContext: {
+        ...packetFixture().openingContext!,
+        decision,
+      },
+      newObservations: [{
+        observationHandle: consequence.observationHandle,
+        title: "A choice at hand",
+        text: "A waiting keeper places a choice before you.",
+        whereOrRoute: consequence.whereOrRoute,
+        worldTimeLabel: consequence.worldTimeLabel,
+        consequence,
+        decision,
+      }],
+      consequences: [consequence],
+    };
+    const proposal: CampaignPlayNarratorProposal = {
+      actionSelections: [{ intentIndex: 0, detail: null }],
+      beats: [
+        {
+          purpose: "orientation",
+          observationIndexes: [0],
+          text: "A waiting keeper sets a choice before you, and the crossing hangs on your answer.",
+        },
+        {
+          purpose: "action_handoff",
+          observationIndexes: [],
+          text: "The rain holds while the immediate choice remains open.",
+        },
+      ],
+    };
+
+    expect(() => createCampaignPlayNarrator().compile({
+      narrationId: "narration-opening-decision",
+      packet,
+      proposal,
+      createdAt: 1_000,
+    })).not.toThrow();
   });
 
   it("rejects model-authored wording for an application-owned optional action", () => {
@@ -1041,6 +2958,80 @@ describe("Campaign Play narrator", () => {
     expect(narratorWarn).not.toHaveBeenCalled();
   });
 
+  it("rejects renderer-owned leading verbs in contact follow-through details", () => {
+    const cases = [
+      { intentIndex: 0, intentKind: "observe", detail: "check the marked signal ledger", repeatedVerb: "check" },
+      { intentIndex: 1, intentKind: "move", detail: "go to the clerk before dusk", repeatedVerb: "go" },
+      { intentIndex: 2, intentKind: "attempt", detail: "try the jammed route", repeatedVerb: "try" },
+      { intentIndex: 3, intentKind: "contact", detail: "ask about the uncertain share", repeatedVerb: "ask" },
+    ] as const;
+    const narrator = createCampaignPlayNarrator();
+
+    for (const testCase of cases) {
+      narratorWarn.mockClear();
+      const proposal = contactFollowThroughDetailProposal();
+      proposal.actionSelections = proposal.actionSelections.map((selection) =>
+        selection.intentIndex === testCase.intentIndex
+          ? { ...selection, detail: testCase.detail }
+          : selection);
+
+      expect(() => narrator.compile({
+        narrationId: `narration-leading-${testCase.intentKind}`,
+        packet: contactFollowThroughDetailPacket(),
+        proposal,
+        createdAt: 1_000,
+      })).toThrowError(expect.objectContaining({
+        code: "narration_invalid",
+        modelEvidence: null,
+      }));
+      expect(narratorWarn).toHaveBeenCalledWith(
+        "narrator_packet_validation_mismatch",
+        expect.objectContaining({
+          failedChecks: expect.arrayContaining([
+            expect.objectContaining({
+              check: "action_selection_repeated_action_verb",
+              violations: expect.arrayContaining([
+                expect.objectContaining({
+                  intentIndex: testCase.intentIndex,
+                  intentKind: testCase.intentKind,
+                  repeatedVerb: testCase.repeatedVerb,
+                }),
+              ]),
+            }),
+          ]),
+        }),
+      );
+    }
+  });
+
+  it("publishes exact packet-owned labels for ordinary contact follow-through actions", () => {
+    const compiled = createCampaignPlayNarrator().compile({
+      narrationId: "narration-detail-contract-render",
+      packet: contactFollowThroughDetailPacket(),
+      proposal: contactFollowThroughDetailProposal(),
+      createdAt: 1_000,
+    });
+
+    expect(compiled.narration.suggestedActions).toEqual([
+      {
+        choiceHandle: "choice_detail_contact",
+        label: "Talk to Mara Venn",
+      },
+      {
+        choiceHandle: "choice_detail_move",
+        label: "Go to Flood Market",
+      },
+      {
+        choiceHandle: "choice_detail_observe",
+        label: "Examine the wet signal ledger",
+      },
+      {
+        choiceHandle: "choice_detail_attempt",
+        label: "Work the jammed route",
+      },
+    ]);
+  });
+
   it("selects a noncontiguous subset from the frozen intent catalog", () => {
     const packet = {
       ...packetFixture(),
@@ -1109,8 +3100,8 @@ describe("Campaign Play narrator", () => {
       openingContext: null,
       sourceMoment: "Mara studies the divided catch while you wait for an answer.",
       actionContext: {
-        submittedText: "Ask Mara for a share.",
-        intentKind: "contact",
+        submittedText: "Wait while Mara decides.",
+        intentKind: "wait",
         disposition: "deterministic",
         result: "success",
         clarificationQuestion: null,
@@ -1192,7 +3183,9 @@ describe("Campaign Play narrator", () => {
       _options: Parameters<typeof safeGenerateObject>[0],
     ) => ({ object: replyProposal, trace: trace() }));
     await createCampaignPlayNarrator({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
     }).narrate({
       narrationId: "narration-reply-schema",
       packetBytes: canonicalizeCampaignPlayProjection(packet),
@@ -1269,7 +3262,7 @@ describe("Campaign Play narrator", () => {
       "it contains only the player's exact spoken words and may not invent a missing value or outcome",
     );
     expect(String(options.prompt)).toContain(
-      "Set detail=null for every application-owned optional intent",
+      "Keep every ordinary actionSelection detail and mode as explicit null values.",
     );
     expect(String(options.prompt)).toContain(
       "The model selects which frozen intents to publish but never writes, revises, or completes their wording",
@@ -1284,6 +3277,1063 @@ describe("Campaign Play narrator", () => {
       "The application adds quotation marks and binds this utterance to the contact intent.",
     );
     expect(String(options.prompt)).not.toContain("Start with one allowed reply verb");
+  });
+
+  it("lets an NPC response offer a direct reply and other progressing actions", async () => {
+    const packet: CampaignPlayNarratorPacket = {
+      ...r216RequiredReplyToolPacket(),
+      turnKind: "player_action",
+      openingContext: null,
+      sourceMoment: "Mara Venn answers beside the rain-swept harbor steps.",
+      actionContext: {
+        submittedText: "Ask Mara Venn about the uncertain share.",
+        intentKind: "contact",
+        disposition: "deterministic",
+        result: "success",
+        clarificationQuestion: null,
+      },
+      availableIntents: [
+        {
+          handle: "choice_r216_0",
+          label: "Examine the wet signal ledger",
+          kind: "observe",
+          targets: [{ handle: "actor_public_keeper", kind: "actor" }],
+        },
+        {
+          handle: "choice_r216_1",
+          label: "Wait 10 minutes",
+          kind: "wait",
+          targets: [],
+        },
+        {
+          handle: "choice_r216_2",
+          label: "Go to Flood Market",
+          kind: "move",
+          targets: [{ handle: "route_public_gate", kind: "route" }],
+        },
+        {
+          handle: "choice_r216_3",
+          label: "Talk to Mara Venn",
+          kind: "contact",
+          targets: [{ handle: "actor_public_keeper", kind: "actor" }],
+        },
+        {
+          handle: "choice_r216_4",
+          label: "Examine the harbor queue",
+          kind: "observe",
+          targets: [{ handle: "actor_public_keeper", kind: "actor" }],
+        },
+      ],
+    };
+    const beats = [{
+      purpose: "consequence" as const,
+      observationIndexes: [0],
+      text: "Mara Venn names the share, then turns back to the divided catch.",
+    }];
+    const proposal: CampaignPlayNarratorProposal = {
+      beats,
+      actionSelections: [
+        { intentIndex: 3, detail: null, mode: null },
+        { intentIndex: 2, detail: null, mode: null },
+        { intentIndex: 0, detail: null, mode: null },
+        { intentIndex: 1, detail: null, mode: null },
+      ],
+    };
+    const narrator = createCampaignPlayNarrator();
+    const compiled = narrator.compile({
+      narrationId: "narration-contact-progress",
+      packet,
+      proposal,
+      createdAt: 1_000,
+    });
+    expect(compiled.narration.suggestedActions.map(({ choiceHandle }) => choiceHandle)).toEqual([
+      "choice_r216_3",
+      "choice_r216_2",
+      "choice_r216_0",
+      "choice_r216_1",
+    ]);
+    expect(compiled.narration.suggestedActions[0]).toEqual({
+      choiceHandle: "choice_r216_3",
+      label: "Talk to Mara Venn",
+    });
+    expect(compiled.narration.suggestedActions[1]).toEqual({
+      choiceHandle: "choice_r216_2",
+      label: "Go to Flood Market",
+    });
+    expect(compiled.narration.suggestedActions[2]).toEqual({
+      choiceHandle: "choice_r216_0",
+      label: "Examine the wet signal ledger",
+    });
+
+    const toolTrace = trace("tool_mode");
+    toolTrace.requestedMode = "tool";
+    toolTrace.primaryStrategy = "tool_mode";
+    toolTrace.capability = {
+      requestedMode: "tool",
+      primaryStrategy: "tool_mode",
+      fallbackStrategy: "text_fallback",
+      actualMode: "tool_mode",
+      reason: "test tool capability",
+      providerId: "test-provider",
+    };
+    const generateObject = vi.fn(async (
+      _options: Parameters<typeof safeGenerateObject>[0],
+    ) => ({
+      object: {
+        beats,
+        selectedIntents: [
+          { key: "intent3", detail: null, mode: null },
+          { key: "intent2", detail: null, mode: null },
+          { key: "intent0", detail: null, mode: null },
+          { key: "intent1", detail: null, mode: null },
+        ],
+      },
+      trace: toolTrace,
+    }));
+    const generated = await createCampaignPlayNarrator({
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
+    }).narrate({
+      narrationId: "narration-contact-progress-tool",
+      packetBytes: canonicalizeCampaignPlayProjection(packet),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+      structuredOutputMode: "tool",
+    });
+    expect(generated.narration.suggestedActions.map(({ choiceHandle }) => choiceHandle)).toEqual([
+      "choice_r216_3",
+      "choice_r216_2",
+      "choice_r216_0",
+      "choice_r216_1",
+    ]);
+    expect(generated.narration.suggestedActions[0]?.label).toBe(
+      "Talk to Mara Venn",
+    );
+    expect(generated.narration.suggestedActions[1]?.label).toBe(
+      "Go to Flood Market",
+    );
+    expect(generated.narration.suggestedActions[2]?.label).toBe(
+      "Examine the wet signal ledger",
+    );
+    const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    const contactProviderSchema = z.toJSONSchema(options.schema) as unknown as {
+      properties: {
+        beats?: { maxItems?: number };
+        selectedIntents: {
+          items?: {
+            required?: string[];
+            properties?: {
+              detail?: unknown;
+              mode?: unknown;
+            };
+          };
+        };
+      };
+    };
+    expect(contactProviderSchema.properties.beats?.maxItems).toBe(1);
+    expect(contactProviderSchema.properties.selectedIntents.items?.required).toEqual([
+      "key",
+      "detail",
+      "mode",
+    ]);
+    expect(contactProviderSchema.properties.selectedIntents.items?.properties?.detail)
+      .toEqual({ type: "null" });
+    expect(contactProviderSchema.properties.selectedIntents.items?.properties?.mode)
+      .toEqual({ type: "null" });
+    expect(String(options.prompt)).toContain("COMPACT_DETERMINISTIC_SCENE_CONTRACT");
+    expect(String(options.prompt)).toContain("the first selected entry must have mayLead=true");
+    expect(String(options.prompt)).toContain(
+      "After a contact action, selectedIntents is the ordered ranking of packet-owned actions.",
+    );
+    expect(String(options.prompt)).toContain(
+      "Each entry contains one exact application-owned key with detail:null and mode:null",
+    );
+    expect(String(options.prompt)).toContain(
+      "Each frame entry is a closed binding to its exact intentHandle, label, kind, and targets; choose only a key present in the frame.",
+    );
+    expect(String(options.prompt)).toContain(
+      "Every selectedIntents entry is an ordinary packet-owned action: return explicit JSON null for both detail and mode",
+    );
+    expect(String(options.prompt)).toContain(
+      "Each selected entry copies one exact key and uses detail:null and mode:null.",
+    );
+    expect(String(options.prompt)).toContain(
+      "The application publishes the packet's exact label, kind, targets, handle, and bindings; the model only ranks the frozen intents.",
+    );
+    expect(String(options.prompt)).toContain(
+      "The application publishes the entry's exact label, kind, targets, and bindings.",
+    );
+    expect(String(options.prompt)).toContain(
+      "a direct answer to the NPC may lead when the visible consequence asks a question, makes an offer, or demands a decision",
+    );
+    const contactPrioritySentence =
+      "After a contact action, a direct answer to the NPC may lead when the visible consequence asks a question, makes an offer, or demands a decision; otherwise prefer an option that advances the scene.";
+    const prompt = String(options.prompt);
+    expect(prompt.indexOf(contactPrioritySentence)).toBe(prompt.lastIndexOf(contactPrioritySentence));
+    expect(prompt).not.toContain("paid run up the rise");
+    expect(String(options.prompt)).not.toContain("REQUIRED_REPLY_INTENT_INDEX=application-owned");
+
+    const authoredUnselected = vi.fn(async () => ({
+      object: {
+        beats,
+        selectedIntentKeys: ["intent3", "intent2", "intent0", "intent1"],
+        intentSelections: {
+          intent0: { detail: "", mode: "" },
+          intent1: { detail: "", mode: "" },
+          intent2: { detail: "", mode: "" },
+          intent3: { detail: "you accept the share and will carry it straight to the clerk.", mode: "contact_tell" },
+          intent4: { detail: "the unselected harbor queue", mode: "observe_inspect" },
+        },
+      },
+      trace: toolTrace,
+    }));
+    await expect(createCampaignPlayNarrator({
+      generateObject: reviewerAwareGenerateObject(
+        () => authoredUnselected(),
+      ) as unknown as typeof safeGenerateObject,
+    }).narrate({
+      narrationId: "narration-contact-unselected-content",
+      packetBytes: canonicalizeCampaignPlayProjection(packet),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+      structuredOutputMode: "tool",
+    })).rejects.toMatchObject({
+      code: "model_contract_failed",
+      recoveryFeedback: {
+        diagnostic: "narrator_generation_schema_mismatch",
+        contractDiagnostic: { phase: "provider_extraction", coordinate: "selectedIntents" },
+      },
+    });
+
+    const blankSelectedMove = vi.fn(async () => ({
+      object: {
+        beats,
+        selectedIntents: [
+          { key: "intent3", detail: "I accept the share and will carry it straight to the clerk.", mode: "contact_tell" },
+          { key: "intent2", detail: "the clerk before dusk", mode: "observe_inspect" },
+          { key: "intent0", detail: "the wet signal ledger's marked shares", mode: "observe_read" },
+          { key: "intent1", detail: null, mode: null },
+        ],
+      },
+      trace: toolTrace,
+    }));
+    await expect(createCampaignPlayNarrator({
+      generateObject: reviewerAwareGenerateObject(
+        () => blankSelectedMove(),
+      ) as unknown as typeof safeGenerateObject,
+    }).narrate({
+      narrationId: "narration-contact-blank-selected-move",
+      packetBytes: canonicalizeCampaignPlayProjection(packet),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+      structuredOutputMode: "tool",
+    })).rejects.toMatchObject({
+      code: "model_contract_failed",
+      recoveryFeedback: {
+        diagnostic: "narrator_generation_schema_mismatch",
+        contractDiagnostic: { phase: "provider_extraction", coordinate: "selectedIntents" },
+      },
+    });
+  });
+
+  it("exposes and enforces a forbidden wait detail policy after contact", async () => {
+    const packet = contactFollowThroughWaitPacket();
+    const beats = [{
+      purpose: "consequence" as const,
+      observationIndexes: [0],
+      text: "Mara Venn offers an uncertain share.",
+    }];
+    const validTransport = {
+      beats,
+      selectedIntents: [
+        { key: "intent3", detail: null, mode: null },
+        { key: "intent4", detail: null, mode: null },
+        { key: "intent0", detail: null, mode: null },
+        { key: "intent2", detail: null, mode: null },
+      ],
+    };
+    const generateObject = vi.fn(async (
+      _options: Parameters<typeof safeGenerateObject>[0],
+    ) => ({
+      object: validTransport,
+      trace: trace("tool_mode"),
+    }));
+    const generated = await createCampaignPlayNarrator({
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
+    }).narrate({
+      narrationId: "narration-contact-wait-detail-policy",
+      packetBytes: canonicalizeCampaignPlayProjection(packet),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+      structuredOutputMode: "tool",
+    });
+    expect(generated.narration.suggestedActions).toContainEqual({
+      choiceHandle: "choice_detail_wait",
+      label: "Wait 10 minutes",
+    });
+    const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    const prompt = String(options.prompt);
+    expect(prompt).toContain(
+      "For each selected key, copy the exact code-owned entry from TOOL_INTENT_SELECTION_FRAME.",
+    );
+    expect(prompt).toContain(
+      "Each frame entry is a closed binding to its exact intentHandle, label, kind, and targets; choose only a key present in the frame.",
+    );
+    expect(prompt).toContain(
+      "Every selectedIntents entry is an ordinary packet-owned action: return explicit JSON null for both detail and mode",
+    );
+    const frameMatch = prompt.match(
+      /TOOL_INTENT_SELECTION_FRAME\n([\s\S]*?)\nEND_TOOL_INTENT_SELECTION_FRAME/,
+    );
+    expect(frameMatch).not.toBeNull();
+    const frame = JSON.parse(frameMatch?.[1] ?? "null") as {
+      entries: Array<{
+        key: string;
+        kind: string;
+        detailPolicy: string;
+        allowedModes: string[];
+      }>;
+    };
+    expect(frame.entries.find((entry) => entry.key === "intent4")).toMatchObject({
+      intentHandle: "choice_detail_wait",
+      label: "Wait 10 minutes",
+      kind: "wait",
+      targets: [],
+      detailPolicy: "forbidden",
+      allowedModes: [],
+    });
+    expect(frame.entries.find((entry) => entry.key === "intent1")).toMatchObject({
+      intentHandle: "choice_detail_move",
+      label: "Go to Flood Market",
+      targets: [{ handle: "route_public_gate", kind: "route" }],
+      detailPolicy: "forbidden",
+      allowedModes: [],
+    });
+
+    const invalidGenerateObject = reviewerAwareGenerateObject(() => ({
+      object: {
+        ...validTransport,
+        selectedIntents: validTransport.selectedIntents.map((entry) =>
+          entry.key === "intent4" ? { ...entry, detail: "ten minutes" } : entry),
+      },
+      trace: trace("tool_mode"),
+    }));
+    await expect(createCampaignPlayNarrator({
+      generateObject: invalidGenerateObject as unknown as typeof safeGenerateObject,
+    }).narrate({
+      narrationId: "narration-contact-wait-detail-invalid",
+      packetBytes: canonicalizeCampaignPlayProjection(packet),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+      structuredOutputMode: "tool",
+    })).rejects.toMatchObject({
+      code: "model_contract_failed",
+      recoveryFeedback: {
+        diagnostic: "narrator_generation_schema_mismatch",
+        contractDiagnostic: { phase: "provider_extraction", coordinate: "selectedIntents" },
+      },
+    });
+  });
+
+  it("keeps an unbound move as pure travel beside an active delivery commitment", async () => {
+    const packet = r32GenericMoveWithActiveDeliveryPacket();
+    expect(packet.commitments).toMatchObject([{
+      kind: "paid_delivery",
+      status: "active",
+      destinationName: "Quayside Customs Lane",
+    }]);
+    expect(packet.possessions).toEqual([]);
+    const beats = [{
+      purpose: "consequence" as const,
+      observationIndexes: [],
+      text: "Mara Venn waits beside the rain-dark ferry steps.",
+    }];
+    const validTransport = {
+      beats,
+      selectedIntents: [
+        { key: "intent4", detail: null, mode: null },
+        { key: "intent1", detail: null, mode: null },
+        { key: "intent0", detail: null, mode: null },
+        { key: "intent2", detail: null, mode: null },
+      ],
+    };
+    const generateObject = vi.fn(async (
+      options: Parameters<typeof safeGenerateObject>[0],
+    ) => ({
+      object: validTransport,
+      trace: trace("tool_mode"),
+    }));
+    const generated = await createCampaignPlayNarrator({
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
+    }).narrate({
+      narrationId: "narration-r32-generic-move",
+      packetBytes: canonicalizeCampaignPlayProjection(packet),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+      structuredOutputMode: "tool",
+    });
+
+    expect(generated.narration.suggestedActions.slice(0, 2)).toMatchObject([
+      {
+        choiceHandle: "choice_collect_dispatch",
+        label: "Ask Mara Venn for Sealed dispatch",
+      },
+      {
+        choiceHandle: "choice_generic_route",
+        label: "Go to Quayside Customs Lane",
+      },
+    ]);
+    const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    const prompt = String(options.prompt);
+    const frameStart = prompt.indexOf("TOOL_INTENT_SELECTION_FRAME\n") +
+      "TOOL_INTENT_SELECTION_FRAME\n".length;
+    const frameEnd = prompt.indexOf("\nEND_TOOL_INTENT_SELECTION_FRAME", frameStart);
+    const frame = JSON.parse(prompt.slice(frameStart, frameEnd)) as {
+      entries: Array<{
+        key: string;
+        kind: string;
+        label: string;
+        detailPolicy: string;
+        allowedModes: string[];
+      }>;
+    };
+    expect(frame.entries.find((entry) => entry.key === "intent1")).toMatchObject({
+      kind: "move",
+      label: "Go to Quayside Customs Lane",
+      detailPolicy: "forbidden",
+      allowedModes: [],
+    });
+  });
+
+  it("recovers duplicate selected-intent keys after provider parsing with the same packet", async () => {
+    const packet = contactFollowThroughDetailPacket();
+    const beats = contactFollowThroughDetailProposal().beats;
+    const validTransport = {
+      beats,
+      selectedIntents: [
+        { key: "intent3", detail: null, mode: null },
+        { key: "intent1", detail: null, mode: null },
+        { key: "intent0", detail: null, mode: null },
+        { key: "intent2", detail: null, mode: null },
+      ],
+    };
+    const duplicateTransport = {
+      ...validTransport,
+      selectedIntents: validTransport.selectedIntents.map((entry, selectedPosition) =>
+        selectedPosition === 2 ? { ...entry, key: "intent1" } : entry),
+    };
+    expect(duplicateTransport.selectedIntents).toHaveLength(4);
+    expect(new Set(duplicateTransport.selectedIntents.map(({ key }) => key)).size).toBe(3);
+    const toolTrace = trace("tool_mode");
+    toolTrace.requestedMode = "tool";
+    toolTrace.primaryStrategy = "tool_mode";
+    toolTrace.capability = {
+      requestedMode: "tool",
+      primaryStrategy: "tool_mode",
+      fallbackStrategy: "text_fallback",
+      actualMode: "tool_mode",
+      reason: "test tool capability",
+      providerId: "test-provider",
+    };
+    let generationCount = 0;
+    const generateObject = vi.fn(async (options: NarratorGenerateObjectOptions) => {
+      if (generationCount++ === 0) {
+        const providerParse = (options.schema as { safeParse(value: unknown): { success: boolean } })
+          .safeParse(duplicateTransport);
+        expect(providerParse.success).toBe(true);
+        return { object: duplicateTransport, trace: toolTrace };
+      }
+      return { object: validTransport, trace: toolTrace };
+    });
+    const narrator = createCampaignPlayNarrator({
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
+    });
+    const request = {
+      narrationId: "narration-duplicate-selected-key-recovery",
+      packetBytes: canonicalizeCampaignPlayProjection(packet),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+      structuredOutputMode: "tool" as const,
+    };
+
+    let firstError: CampaignPlayNarratorError | undefined;
+    try {
+      await narrator.narrate(request);
+    } catch (cause) {
+      firstError = cause as CampaignPlayNarratorError;
+    }
+    expect(firstError).toMatchObject({
+      code: "model_contract_failed",
+      recoveryFeedback: {
+        diagnostic: "narrator_generation_schema_mismatch",
+        contractDiagnostic: { phase: "private_decode", coordinate: "selectedIntents" },
+        contractFailure: {
+          phase: "private_decode",
+          check: "duplicate_selected_intent_keys",
+          selectedPositions: [1, 2],
+          selectedCount: 4,
+        },
+        recoveryInstruction: "structured_output_tool_call",
+      },
+    });
+    expect(firstError?.recoveryFeedback).toBeDefined();
+
+    const firstOptions = generateObject.mock.calls[0]![0];
+    const recovered = await narrator.narrate({
+      ...request,
+      recoveryFeedback: firstError?.recoveryFeedback ?? undefined,
+    });
+    const recoveryOptions = generateObject.mock.calls[1]![0];
+    expect(recoveryOptions.model).toBe(firstOptions.model);
+    expect(recoveryOptions.temperature).toBe(firstOptions.temperature);
+    expect(recoveryOptions.maxOutputTokens).toBe(firstOptions.maxOutputTokens);
+    expect(recoveryOptions.mode).toBe(firstOptions.mode);
+    const recoveryPrompt = String(recoveryOptions.prompt);
+    expect(recoveryPrompt).toContain(
+      "The previous Narrator tool call failed duplicate_selected_intent_keys at selected positions 1, 2.",
+    );
+    expect(recoveryPrompt).toContain(
+      "Return exactly one structured_output tool call with one distinct exact key per selectedIntents entry.",
+    );
+    expect(recoveryPrompt.match(/Return exactly one structured_output tool call/g)).toHaveLength(1);
+    expect(recovered.narration.suggestedActions.map(({ choiceHandle }) => choiceHandle)).toEqual([
+      "choice_detail_contact",
+      "choice_detail_move",
+      "choice_detail_observe",
+      "choice_detail_attempt",
+    ]);
+    expect(new Set(recovered.narration.suggestedActions.map(({ choiceHandle }) => choiceHandle)).size)
+      .toBe(4);
+    expect(generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects model-authored ordinary selected-intent details before decode and recovers with the same packet", async () => {
+    const packet = contactFollowThroughDetailPacket();
+    const proposal = contactFollowThroughDetailProposal();
+    const beats = proposal.beats;
+    const validTransport = {
+      beats,
+      selectedIntents: [
+        { key: "intent3", detail: null, mode: null },
+        { key: "intent1", detail: null, mode: null },
+        { key: "intent0", detail: null, mode: null },
+        { key: "intent2", detail: null, mode: null },
+      ],
+    };
+    const invalidTransport = {
+      ...validTransport,
+      selectedIntents: validTransport.selectedIntents.map((entry) =>
+        entry.key === "intent0" ? { ...entry, detail: "the marked signal ledger", mode: "observe_check" } : entry),
+    };
+    const toolTrace = trace("tool_mode");
+    toolTrace.requestedMode = "tool";
+    toolTrace.primaryStrategy = "tool_mode";
+    toolTrace.capability = {
+      requestedMode: "tool",
+      primaryStrategy: "tool_mode",
+      fallbackStrategy: "text_fallback",
+      actualMode: "tool_mode",
+      reason: "test tool capability",
+      providerId: "test-provider",
+    };
+    let callCount = 0;
+    const generateObject = vi.fn(async (
+      _options: Parameters<typeof safeGenerateObject>[0],
+    ) => ({
+      object: callCount++ === 0 ? invalidTransport : validTransport,
+      trace: toolTrace,
+    }));
+    const narrator = createCampaignPlayNarrator({
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
+    });
+    const request = {
+      narrationId: "narration-private-detail-recovery",
+      packetBytes: canonicalizeCampaignPlayProjection(packet),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+      structuredOutputMode: "tool" as const,
+    };
+
+    let firstError: CampaignPlayNarratorError | undefined;
+    try {
+      await narrator.narrate(request);
+    } catch (cause) {
+      firstError = cause as CampaignPlayNarratorError;
+    }
+    expect(firstError).toMatchObject({
+      code: "model_contract_failed",
+      recoveryFeedback: {
+        diagnostic: "narrator_generation_schema_mismatch",
+        contractDiagnostic: { phase: "provider_extraction", coordinate: "selectedIntents" },
+      },
+    });
+    const recoveryFeedback = firstError?.recoveryFeedback;
+    expect(recoveryFeedback).toBeDefined();
+    expect(campaignPlayNarratorRecoveryFeedbackSchema.parse(recoveryFeedback))
+      .toEqual(recoveryFeedback);
+    const serializedFeedback = JSON.stringify(recoveryFeedback);
+    expect(serializedFeedback).not.toContain('"key":"intent0"');
+    expect(serializedFeedback).not.toContain('"detail":""');
+    expect(serializedFeedback).not.toContain('"mode":""');
+    expect(serializedFeedback).not.toContain("message");
+
+    const recovered = await narrator.narrate({
+      ...request,
+      recoveryFeedback: recoveryFeedback ?? undefined,
+    });
+    expect(recovered.narration.suggestedActions).toEqual([
+      {
+        choiceHandle: "choice_detail_contact",
+        label: "Talk to Mara Venn",
+      },
+      {
+        choiceHandle: "choice_detail_move",
+        label: "Go to Flood Market",
+      },
+      {
+        choiceHandle: "choice_detail_observe",
+        label: "Examine the wet signal ledger",
+      },
+      {
+        choiceHandle: "choice_detail_attempt",
+        label: "Work the jammed route",
+      },
+    ]);
+    expect(generateObject).toHaveBeenCalledTimes(2);
+
+    const firstOptions = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    const recoveryOptions = generateObject.mock.calls[1]![0] as Parameters<typeof safeGenerateObject>[0];
+    expect(recoveryOptions.model).toBe(firstOptions.model);
+    expect(recoveryOptions.temperature).toBe(firstOptions.temperature);
+    expect(recoveryOptions.maxOutputTokens).toBe(firstOptions.maxOutputTokens);
+    expect(recoveryOptions.mode).toBe(firstOptions.mode);
+    expect(recoveryOptions.strictSchema).toBe(true);
+    expect(recoveryOptions.allowRepair).toBe(false);
+    expect(recoveryOptions.allowTextFallback).toBe(false);
+    expect(recoveryOptions.retries).toBe(1);
+    expect(String(recoveryOptions.prompt)).toContain(
+      "The previous Narrator response failed the provider_extraction contract at selectedIntents.",
+    );
+    expect(String(recoveryOptions.prompt)).toContain(
+      "For each selected key, copy the exact code-owned entry from TOOL_INTENT_SELECTION_FRAME.",
+    );
+    expect(String(recoveryOptions.prompt)).toContain(
+      "Every selectedIntents entry is an ordinary packet-owned action: return explicit JSON null for both detail and mode",
+    );
+    expect(String(recoveryOptions.prompt)).toContain(
+      "The application publishes the entry's exact label, kind, targets, and bindings.",
+    );
+    expect(String(recoveryOptions.prompt)).not.toContain(
+      "wait, application-owned commitment, and non-contact entries need empty detail and mode.",
+    );
+    expect(String(recoveryOptions.prompt)).not.toContain(
+      "every non-contact entry must have empty detail and empty mode",
+    );
+    expect(String(recoveryOptions.prompt)).not.toContain("private model output");
+  });
+
+  it("recovers an unsupported target and forbidden wait detail on the same tool packet", async () => {
+    const packet = contactFollowThroughWaitPacket();
+    const beats = [{
+      purpose: "consequence" as const,
+      observationIndexes: [0],
+      text: "Mara Venn offers an uncertain share.",
+    }];
+    const validTransport = {
+      beats,
+      selectedIntents: [
+        { key: "intent3", detail: null, mode: null },
+        { key: "intent4", detail: null, mode: null },
+        { key: "intent0", detail: null, mode: null },
+        { key: "intent2", detail: null, mode: null },
+      ],
+    };
+    const unsupportedTargetTransport = {
+      ...validTransport,
+      selectedIntents: [...validTransport.selectedIntents],
+    };
+    const invalidWaitTransport = {
+      ...validTransport,
+      selectedIntents: validTransport.selectedIntents.map((entry) =>
+        entry.key === "intent4" ? { ...entry, detail: "ten minutes" } : entry),
+    };
+    const toolTrace = trace("tool_mode");
+    toolTrace.requestedMode = "tool";
+    toolTrace.primaryStrategy = "tool_mode";
+    toolTrace.capability = {
+      requestedMode: "tool",
+      primaryStrategy: "tool_mode",
+      fallbackStrategy: "text_fallback",
+      actualMode: "tool_mode",
+      reason: "test tool capability",
+      providerId: "test-provider",
+    };
+    const proposals = [
+      unsupportedTargetTransport,
+      invalidWaitTransport,
+      validTransport,
+    ];
+    let proposalIndex = 0;
+    let reviewerIndex = 0;
+    const generateObject = vi.fn(async (options: NarratorGenerateObjectOptions) => {
+      if (String(options.prompt ?? "").includes("NARRATOR_COMPILED_CANDIDATE")) {
+        const rejected = reviewerIndex++ === 0;
+        const failedChecks = rejected
+          ? ["unsupported_action_target" as const]
+          : [] as const;
+        return {
+          object: {
+            verdict: rejected ? "reject" as const : "approve" as const,
+            failedChecks,
+            dimensions: reviewerDimensions(failedChecks),
+          },
+          trace: toolTrace,
+        };
+      }
+      const object = proposals[proposalIndex++];
+      if (object === undefined) throw new Error("unexpected extra proposer call");
+      return { object, trace: toolTrace };
+    });
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    const request = {
+      narrationId: "narration-r4-tool-recovery-sequence",
+      packetBytes: canonicalizeCampaignPlayProjection(packet),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+      structuredOutputMode: "tool" as const,
+    };
+
+    let firstError: CampaignPlayNarratorError | undefined;
+    try {
+      await narrator.narrate(request);
+    } catch (cause) {
+      firstError = cause as CampaignPlayNarratorError;
+    }
+    expect(firstError).toMatchObject({
+      code: "narration_invalid",
+      recoveryFeedback: {
+        diagnostic: "narrator_packet_validation_mismatch",
+        failedChecks: [{ check: "unsupported_action_target" }],
+      },
+    });
+    const firstRecoveryFeedback = firstError?.recoveryFeedback ?? undefined;
+    expect(firstRecoveryFeedback).toBeDefined();
+
+    let secondError: CampaignPlayNarratorError | undefined;
+    try {
+      await narrator.narrate({
+        ...request,
+        recoveryFeedback: firstRecoveryFeedback,
+      });
+    } catch (cause) {
+      secondError = cause as CampaignPlayNarratorError;
+    }
+    expect(secondError).toMatchObject({
+      code: "model_contract_failed",
+      recoveryFeedback: {
+        diagnostic: "narrator_generation_schema_mismatch",
+        contractDiagnostic: { phase: "provider_extraction", coordinate: "selectedIntents" },
+      },
+    });
+    const secondRecoveryFeedback = secondError?.recoveryFeedback ?? undefined;
+    expect(secondRecoveryFeedback).toBeDefined();
+
+    const recovered = await narrator.narrate({
+      ...request,
+      recoveryFeedback: secondRecoveryFeedback,
+    });
+    expect(recovered.narration.suggestedActions).toContainEqual({
+      choiceHandle: "choice_detail_wait",
+      label: "Wait 10 minutes",
+    });
+    expect(proposalIndex).toBe(3);
+    expect(reviewerIndex).toBe(2);
+    expect(generateObject).toHaveBeenCalledTimes(5);
+
+    const proposerCalls = [0, 2, 3].map((callIndex) =>
+      generateObject.mock.calls[callIndex]![0] as NarratorGenerateObjectOptions);
+    for (const options of proposerCalls) {
+      expect(options.model).toBe(proposerCalls[0]!.model);
+      expect(options.temperature).toBe(proposerCalls[0]!.temperature);
+      expect(options.maxOutputTokens).toBe(proposerCalls[0]!.maxOutputTokens);
+      expect(options.mode).toBe("tool");
+      expect(options.strictSchema).toBe(true);
+      expect(options.allowRepair).toBe(false);
+      expect(options.allowTextFallback).toBe(false);
+      expect(options.retries).toBe(1);
+      expect(String(options.prompt)).toContain('"turnId":"turn-contact-wait-detail-contract"');
+      expect(String(options.prompt)).toContain('"key":"intent4"');
+      expect(String(options.prompt)).toContain('"intentHandle":"choice_detail_wait"');
+      expect(String(options.prompt)).toContain('"targets":[]');
+    }
+    const recoveryPrompt = String(proposerCalls[2]!.prompt);
+    expect(recoveryPrompt).toContain(
+      "The previous Narrator response failed the provider_extraction contract at selectedIntents.",
+    );
+    expect(recoveryPrompt).toContain(
+      "return explicit JSON null for both detail and mode",
+    );
+    expect(recoveryPrompt).toContain(
+      "Each frame entry is a closed binding to its exact intentHandle, label, kind, and targets",
+    );
+  });
+
+  it("keeps legacy recovery feedback valid without a contract failure", () => {
+    const legacyGenerationFeedback: CampaignPlayNarratorRecoveryFeedback = {
+      diagnostic: "narrator_generation_schema_mismatch",
+      failedChecks: [{ check: "generation_schema_invalid" }],
+      contractDiagnostic: {
+        phase: "private_decode",
+        coordinate: "selectedIntents",
+      },
+      recoveryInstruction: "structured_output_tool_call",
+    };
+    const legacyPacketFeedback: CampaignPlayNarratorRecoveryFeedback = {
+      diagnostic: "narrator_packet_validation_mismatch",
+      failedChecks: [{
+        check: "selected_action_count",
+        actual: 1,
+        expected: 2,
+      }],
+      contractDiagnostic: {
+        phase: "packet_validation",
+        coordinate: "actionSelections",
+      },
+    };
+
+    expect(campaignPlayNarratorRecoveryFeedbackSchema.parse(legacyGenerationFeedback))
+      .toEqual(legacyGenerationFeedback);
+    expect(campaignPlayNarratorRecoveryFeedbackSchema.parse(legacyPacketFeedback))
+      .toEqual(legacyPacketFeedback);
+  });
+
+  it("keeps legacy selectedIntents recovery wording aligned with contact follow-through rules", async () => {
+    const packet = contactFollowThroughDetailPacket();
+    const proposal = contactFollowThroughDetailProposal();
+    let recoveryPrompt = "";
+    const generateObject = reviewerAwareGenerateObject((options) => {
+      recoveryPrompt = String(options.prompt);
+      return {
+        object: {
+          beats: proposal.beats,
+          selectedIntents: [
+            { key: "intent3", detail: null, mode: null },
+            { key: "intent1", detail: null, mode: null },
+            { key: "intent0", detail: null, mode: null },
+            { key: "intent2", detail: null, mode: null },
+          ],
+        },
+        trace: trace("tool_mode"),
+      };
+    });
+    const generated = await createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).narrate({
+      narrationId: "narration-legacy-detail-recovery",
+      packetBytes: canonicalizeCampaignPlayProjection(packet),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+      structuredOutputMode: "tool",
+      recoveryFeedback: {
+        diagnostic: "narrator_generation_schema_mismatch",
+        failedChecks: [{ check: "generation_schema_invalid" }],
+        contractDiagnostic: { phase: "private_decode", coordinate: "selectedIntents" },
+        recoveryInstruction: "structured_output_tool_call",
+      },
+    });
+
+    expect(generated.narration.suggestedActions).toHaveLength(4);
+    expect(recoveryPrompt).toContain(
+      "The previous Narrator tool call violated the selectedIntents contract.",
+    );
+    expect(recoveryPrompt).toContain(
+      "For each selected key, copy the exact code-owned entry from TOOL_INTENT_SELECTION_FRAME.",
+    );
+    expect(recoveryPrompt).toContain(
+      "Every selectedIntents entry is an ordinary packet-owned action: return explicit JSON null for both detail and mode",
+    );
+    expect(recoveryPrompt).toContain(
+      "The application publishes the entry's exact label, kind, targets, and bindings.",
+    );
+    expect(recoveryPrompt).not.toContain(
+      "every non-contact entry must have empty detail and empty mode",
+    );
+    expect(recoveryPrompt).not.toContain(
+      "wait, application-owned commitment, and non-contact entries need empty detail and mode.",
+    );
+    expect(recoveryPrompt).not.toContain("private model output");
+  });
+
+  it("fails closed on selected intent commitment, mayLead, detail, and mode violations", async () => {
+    const activePacket = activeCommitmentPacketWithGenericIntents("collect");
+    const activeBeats = [{
+      purpose: "orientation" as const,
+      observationIndexes: [],
+      text: "Mara Venn waits beside the rain-dark ferry steps.",
+    }];
+    const activeValidTransport = {
+      beats: activeBeats,
+      selectedIntents: [
+        { key: "intent4", detail: null, mode: null },
+        { key: "intent0", detail: null, mode: null },
+        { key: "intent1", detail: null, mode: null },
+        { key: "intent2", detail: null, mode: null },
+      ],
+    };
+    const runPrivateDecodeCase = async (
+      packet: CampaignPlayNarratorPacket,
+      transport: unknown,
+      narrationId: string,
+      contractFailure?: Record<string, unknown>,
+      expectedPhase: "private_decode" | "provider_extraction" = "private_decode",
+    ) => {
+      const generateObject = vi.fn(async () => ({
+        object: transport,
+        trace: trace("tool_mode"),
+      }));
+      const narrator = createCampaignPlayNarrator({
+        generateObject: reviewerAwareGenerateObject(
+          () => generateObject(),
+        ) as unknown as typeof safeGenerateObject,
+      });
+      await expect(narrator.narrate({
+        narrationId,
+        packetBytes: canonicalizeCampaignPlayProjection(packet),
+        createdAt: 1_000,
+        model: structuredModel(),
+        temperature: 0.5,
+        budget,
+        structuredOutputMode: "tool",
+      })).rejects.toMatchObject({
+        code: "model_contract_failed",
+        recoveryFeedback: {
+          diagnostic: "narrator_generation_schema_mismatch",
+          contractDiagnostic: { phase: expectedPhase, coordinate: "selectedIntents" },
+          ...(contractFailure === undefined ? {} : { contractFailure }),
+        },
+      });
+    };
+
+    const activeValidNarrator = createCampaignPlayNarrator({
+      generateObject: reviewerAwareGenerateObject(
+        () => ({ object: activeValidTransport, trace: trace("tool_mode") }),
+      ) as unknown as typeof safeGenerateObject,
+    });
+    await expect(activeValidNarrator.narrate({
+      narrationId: "narration-selected-intents-valid-commitment",
+      packetBytes: canonicalizeCampaignPlayProjection(activePacket),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+      structuredOutputMode: "tool",
+    })).resolves.toBeDefined();
+
+    await runPrivateDecodeCase(
+      activePacket,
+      {
+        ...activeValidTransport,
+        selectedIntents: [
+          { key: "intent3", detail: null, mode: null },
+          activeValidTransport.selectedIntents[1]!,
+          activeValidTransport.selectedIntents[2]!,
+          activeValidTransport.selectedIntents[3]!,
+        ],
+      },
+      "narration-selected-intents-missing-commitment",
+      {
+        phase: "private_decode",
+        check: "missing_required_commitment_intents",
+        missingIntentIndexes: [4],
+        requiredCount: 1,
+        selectedCount: 4,
+      },
+    );
+    await runPrivateDecodeCase(
+      activePacket,
+      {
+        ...activeValidTransport,
+        selectedIntents: [
+          activeValidTransport.selectedIntents[1]!,
+          activeValidTransport.selectedIntents[2]!,
+          activeValidTransport.selectedIntents[3]!,
+          activeValidTransport.selectedIntents[0]!,
+        ],
+      },
+      "narration-selected-intents-maylead",
+      {
+        phase: "private_decode",
+        check: "first_selected_intent_not_may_lead",
+        selectedPosition: 0,
+        intentIndex: 0,
+        intentKind: "observe",
+      },
+    );
+
+    const contactPacket = contactFollowThroughDetailPacket();
+    const contactBeats = contactFollowThroughDetailProposal().beats;
+    const contactValidTransport = {
+      beats: contactBeats,
+      selectedIntents: [
+        { key: "intent3", detail: null, mode: null },
+        { key: "intent1", detail: null, mode: null },
+        { key: "intent0", detail: null, mode: null },
+        { key: "intent2", detail: null, mode: null },
+      ],
+    };
+    await runPrivateDecodeCase(
+      contactPacket,
+      {
+        ...contactValidTransport,
+        selectedIntents: contactValidTransport.selectedIntents.map((entry) =>
+          entry.key === "intent0" ? { ...entry, detail: "the marked signal ledger" } : entry),
+      },
+      "narration-selected-intents-detail",
+      undefined,
+      "provider_extraction",
+    );
+    await runPrivateDecodeCase(
+      contactPacket,
+      {
+        ...contactValidTransport,
+        selectedIntents: contactValidTransport.selectedIntents.map((entry) =>
+          entry.key === "intent0" ? { ...entry, mode: "observe_check" } : entry),
+      },
+      "narration-selected-intents-mode",
+      undefined,
+      "provider_extraction",
+    );
   });
 
   it("excludes the required reply index from every r125-shaped trailing selection", async () => {
@@ -1303,8 +4353,8 @@ describe("Campaign Play narrator", () => {
       openingContext: null,
       sourceMoment: "Mara studies the divided catch while you wait for an answer.",
       actionContext: {
-        submittedText: "Ask Mara for a share.",
-        intentKind: "contact",
+        submittedText: "Wait while Mara decides.",
+        intentKind: "wait",
         disposition: "deterministic",
         result: "success",
         clarificationQuestion: null,
@@ -1344,7 +4394,9 @@ describe("Campaign Play narrator", () => {
       _options: Parameters<typeof safeGenerateObject>[0],
     ) => ({ object: proposal, trace: trace() }));
     const result = await createCampaignPlayNarrator({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
     }).narrate({
       narrationId: "narration-required-index-five",
       packetBytes: canonicalizeCampaignPlayProjection(packet),
@@ -1392,6 +4444,102 @@ describe("Campaign Play narrator", () => {
     }
   });
 
+  it("accepts decision controls, a required reply, and a trailing intent in publication order", async () => {
+    const packet = decisionAndRequiredReplyPacket();
+    const beats = [{
+      purpose: "consequence" as const,
+      observationIndexes: [0],
+      text: "Mara Venn waits for your answer.",
+    }];
+    const proposal: CampaignPlayNarratorProposal = {
+      beats,
+      actionSelections: [
+        { intentIndex: 0, detail: null, mode: null },
+        { intentIndex: 1, detail: null, mode: null },
+        { intentIndex: 7, detail: "I'll carry the sealed ledger.", mode: null },
+        { intentIndex: 2, detail: null, mode: null },
+      ],
+    };
+    const compiled = createCampaignPlayNarrator().compile({
+      narrationId: "narration-decision-required-reply-order",
+      packet,
+      proposal,
+      createdAt: 1_000,
+    });
+    expect(compiled.narration.suggestedActions.map(({ choiceHandle }) => choiceHandle))
+      .toEqual([
+        "choice_decision_accept",
+        "choice_decision_decline",
+        "choice_decision_reply",
+        "choice_decision_observe_2",
+      ]);
+
+    const generateObject = vi.fn(async (
+      _options: Parameters<typeof safeGenerateObject>[0],
+    ) => ({ object: proposal, trace: trace() }));
+    await createCampaignPlayNarrator({
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
+    }).narrate({
+      narrationId: "narration-decision-required-reply-schema",
+      packetBytes: canonicalizeCampaignPlayProjection(packet),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+    });
+
+    const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    expect(String(options.prompt)).toContain(
+      "Put that exact index only in actionSelections[2], after the fixed decision controls",
+    );
+    expect(options.schema.safeParse(proposal).success).toBe(true);
+    const wrongOrder: CampaignPlayNarratorProposal = {
+      ...proposal,
+      actionSelections: [
+        proposal.actionSelections[0]!,
+        proposal.actionSelections[2]!,
+        proposal.actionSelections[1]!,
+        proposal.actionSelections[3]!,
+      ],
+    };
+    expect(options.schema.safeParse(wrongOrder).success).toBe(false);
+    expect(options.schema.safeParse({
+      ...proposal,
+      actionSelections: [
+        proposal.actionSelections[0]!,
+        proposal.actionSelections[1]!,
+        proposal.actionSelections[2]!,
+        { ...proposal.actionSelections[3]!, intentIndex: 0 },
+      ],
+    }).success).toBe(false);
+
+    const schema = z.toJSONSchema(options.schema) as unknown as {
+      properties: {
+        actionSelections: {
+          prefixItems: Array<{
+            properties: {
+              intentIndex: {
+                const?: number;
+                anyOf?: Array<{ const?: number }>;
+              };
+            };
+          }>;
+        };
+      };
+    };
+    expect(schema.properties.actionSelections.prefixItems).toHaveLength(4);
+    expect(schema.properties.actionSelections.prefixItems[0]?.properties.intentIndex)
+      .toEqual({ type: "number", const: 0 });
+    expect(schema.properties.actionSelections.prefixItems[1]?.properties.intentIndex)
+      .toEqual({ type: "number", const: 1 });
+    expect(schema.properties.actionSelections.prefixItems[2]?.properties.intentIndex)
+      .toEqual({ type: "number", const: 7 });
+    expect(schema.properties.actionSelections.prefixItems[3]?.properties.intentIndex.anyOf
+      ?.map((entry) => entry.const)).toEqual([2, 3, 4, 5, 6]);
+  });
+
   it("keeps the required-reply one-intent and no-required paths representable", async () => {
     const basePacket = packetFixture();
     const consequence = {
@@ -1409,8 +4557,8 @@ describe("Campaign Play narrator", () => {
       openingContext: null,
       sourceMoment: "Mara studies the divided catch while you wait for an answer.",
       actionContext: {
-        submittedText: "Ask Mara for a share.",
-        intentKind: "contact",
+        submittedText: "Wait while Mara decides.",
+        intentKind: "wait",
         disposition: "deterministic",
         result: "success",
         clarificationQuestion: null,
@@ -1444,7 +4592,9 @@ describe("Campaign Play narrator", () => {
       _options: Parameters<typeof safeGenerateObject>[0],
     ) => ({ object: requiredProposal, trace: trace() }));
     await createCampaignPlayNarrator({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
     }).narrate({
       narrationId: "narration-required-one-intent",
       packetBytes: canonicalizeCampaignPlayProjection(requiredPacket),
@@ -1473,7 +4623,9 @@ describe("Campaign Play narrator", () => {
       _options: Parameters<typeof safeGenerateObject>[0],
     ) => ({ object: noReplyProposal, trace: trace() }));
     await createCampaignPlayNarrator({
-      generateObject: noReplyGenerateObject as unknown as typeof safeGenerateObject,
+      generateObject: reviewerAwareGenerateObject(
+        (options) => noReplyGenerateObject(options),
+      ) as unknown as typeof safeGenerateObject,
     }).narrate({
       narrationId: "narration-no-required-reply",
       packetBytes: canonicalizeCampaignPlayProjection(noReplyPacket),
@@ -1512,7 +4664,7 @@ describe("Campaign Play narrator", () => {
     const requiredProposal = {
       actionSelections: [5, 6, 0, 1].map((intentIndex) => ({
         intentIndex,
-        detail: intentIndex === 5 ? "ask about the remaining supplies" : null,
+        detail: intentIndex === 5 ? "What supplies remain?" : null,
       })),
       beats: [{
         purpose: "consequence" as const,
@@ -1524,7 +4676,9 @@ describe("Campaign Play narrator", () => {
       _options: Parameters<typeof safeGenerateObject>[0],
     ) => ({ object: requiredProposal, trace: trace() }));
     const narrator = createCampaignPlayNarrator({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
     });
     const recoveryFeedback: CampaignPlayNarratorRecoveryFeedback = {
       diagnostic: "narrator_generation_schema_mismatch" as const,
@@ -1588,7 +4742,9 @@ describe("Campaign Play narrator", () => {
       _options: Parameters<typeof safeGenerateObject>[0],
     ) => ({ object: proposalFixture(), trace: trace() }));
     const zeroNarrator = createCampaignPlayNarrator({
-      generateObject: zeroGenerateObject as unknown as typeof safeGenerateObject,
+      generateObject: reviewerAwareGenerateObject(
+        (options) => zeroGenerateObject(options),
+      ) as unknown as typeof safeGenerateObject,
     });
     await zeroNarrator.narrate({
       ...request,
@@ -1619,7 +4775,9 @@ describe("Campaign Play narrator", () => {
       trace: trace(),
     }));
     const multiNarrator = createCampaignPlayNarrator({
-      generateObject: multiGenerateObject as unknown as typeof safeGenerateObject,
+      generateObject: reviewerAwareGenerateObject(
+        (options) => multiGenerateObject(options),
+      ) as unknown as typeof safeGenerateObject,
     });
     await multiNarrator.narrate({
       ...request,
@@ -1650,7 +4808,9 @@ describe("Campaign Play narrator", () => {
       trace: trace(),
     }));
     const oneIntentNarrator = createCampaignPlayNarrator({
-      generateObject: oneIntentGenerateObject as unknown as typeof safeGenerateObject,
+      generateObject: reviewerAwareGenerateObject(
+        (options) => oneIntentGenerateObject(options),
+      ) as unknown as typeof safeGenerateObject,
     });
     const oneIntentPacket = r45SingleObservationPacket();
     await oneIntentNarrator.narrate({
@@ -2118,7 +5278,9 @@ describe("Campaign Play narrator", () => {
       trace: trace(),
     }));
     const narrator = createCampaignPlayNarrator({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
     });
 
     await narrator.narrate({
@@ -2163,7 +5325,9 @@ describe("Campaign Play narrator", () => {
       trace: trace(),
     }));
     const narrator = createCampaignPlayNarrator({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
     });
     const request = {
       narrationId: "narration-r161-source-reference-recovery",
@@ -2492,7 +5656,9 @@ describe("Campaign Play narrator", () => {
       trace: trace(),
     }));
     const narrator = createCampaignPlayNarrator({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
     });
 
     await narrator.narrate({
@@ -2530,7 +5696,9 @@ describe("Campaign Play narrator", () => {
       trace: trace(),
     }));
     const narrator = createCampaignPlayNarrator({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
     });
 
     await narrator.narrate({
@@ -2708,7 +5876,9 @@ describe("Campaign Play narrator", () => {
       trace: trace(),
     }));
     const narrator = createCampaignPlayNarrator({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
     });
     const result = await narrator.narrate({
       narrationId: "narration-opening",
@@ -2757,7 +5927,7 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Optional available intents are complete application-owned player actions");
     expect(prompt).toContain("never writes, revises, or completes their wording");
     expect(prompt).toContain("Do not select an intent merely to imply a future action, a completed result, a promise, or a state change that has not occurred");
-    expect(prompt).toContain("Only the application-owned required reply uses a non-null detail");
+    expect(prompt).toContain("The only model-authored action wording is the application-owned required reply");
     expect(prompt).toContain("Purposes label a beat's work. Do not emit one beat for every purpose");
     expect(prompt).toContain("Prefer one beat");
     expect(prompt).toContain("combine the action result and its immediately visible aftermath in one beat");
@@ -2786,7 +5956,9 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Remove any unmatched actor reference");
     expect(prompt).toContain("If removing a beat loses no supported information, omit it");
     expect(prompt).toContain("Never add a moment beat to repeat sourceMoment");
-    expect(prompt).toContain("Each actionSelection contains exactly intentIndex and detail");
+    expect(prompt).toContain(
+      "Every ordinary selection must copy one exact, unique intentIndex from availableIntents with detail:null and mode:null; only an explicitly required reply selection may carry detail.",
+    );
     expect(prompt).toContain("includesTravel belongs only to the input catalog");
     expect(prompt).toContain('Address the player as "you"');
     expect(prompt).toContain("never switch to the player character's name");
@@ -2848,7 +6020,9 @@ describe("Campaign Play narrator", () => {
       trace: trace(),
     }));
     const narrator = createCampaignPlayNarrator({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
     });
     const request = {
       narrationId: "narration-recovery-prompt",
@@ -2896,7 +6070,9 @@ END_RECOVERY_DIAGNOSTIC`);
       trace: trace(),
     }));
     const narrator = createCampaignPlayNarrator({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
     });
     const request = {
       narrationId: "narration-visible-actor-recovery-prompt",
@@ -2971,7 +6147,9 @@ END_RECOVERY_DIAGNOSTIC`);
       trace: trace(),
     }));
     const narrator = createCampaignPlayNarrator({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
     });
     const request = {
       narrationId: "narration-actor-scope-frame",
@@ -3111,7 +6289,9 @@ END_RECOVERY_DIAGNOSTIC`);
       return { object: compactProposal, trace: trace() };
     });
     const narrator = createCampaignPlayNarrator({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
     });
 
     const result = await narrator.narrate({
@@ -3127,6 +6307,153 @@ END_RECOVERY_DIAGNOSTIC`);
     expect(generateObject).toHaveBeenCalledOnce();
   });
 
+  it("presents the packet-specific beat ceiling before generation", async () => {
+    const packet = packetFixture();
+    const compactProposal = {
+      ...proposalFixture(),
+      beats: [proposalFixture().beats[0]!, proposalFixture().beats[2]!],
+    };
+    const generateObject = vi.fn(async (
+      options: Parameters<typeof safeGenerateObject>[0],
+    ) => {
+      const schema = options.schema as {
+        safeParse(value: unknown): { success: boolean };
+      };
+      expect(schema.safeParse(proposalFixture()).success).toBe(false);
+      expect(schema.safeParse(compactProposal).success).toBe(true);
+      return { object: compactProposal, trace: trace() };
+    });
+    const narrator = createCampaignPlayNarrator({
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
+    });
+
+    await narrator.narrate({
+      narrationId: "narration-beat-contract-frame",
+      packetBytes: canonicalizeCampaignPlayProjection(packet),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+    });
+
+    const prompt = String(
+      (generateObject.mock.calls[0]![0] as NarratorGenerateObjectOptions).prompt ?? "",
+    );
+    const frameStart = prompt.indexOf("NARRATOR_BEAT_CONTRACT\n") +
+      "NARRATOR_BEAT_CONTRACT\n".length;
+    const frameEnd = prompt.indexOf("\nEND_NARRATOR_BEAT_CONTRACT", frameStart);
+    expect(frameStart).toBeGreaterThan("NARRATOR_BEAT_CONTRACT\n".length - 1);
+    expect(frameEnd).toBeGreaterThan(frameStart);
+    expect(JSON.parse(prompt.slice(frameStart, frameEnd))).toEqual({
+      allowedPurposes: ["orientation", "moment", "consequence", "action_handoff"],
+      maximumBeatCount: CAMPAIGN_PLAY_OPENING_NARRATOR_MAX_BEATS,
+      minimumBeatCount: 1,
+      requiredObservationCount: 0,
+    });
+    expect(prompt).toContain(
+      "When maximumBeatCount is 1, return exactly one beat.",
+    );
+    expect(prompt).toContain(
+      "do not add a beat merely to repeat a purpose or an available intent.",
+    );
+  });
+
+  it("keeps unsupported action targets rejected and gives same-identity recovery the exact target frame", async () => {
+    const packet = livePaidDeliveryPacket();
+    const request = {
+      narrationId: "narration-target-frame-recovery",
+      packetBytes: canonicalizeCampaignPlayProjection(packet),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+    };
+    let proposalCalls = 0;
+    const generateObject = vi.fn(async (
+      options: Parameters<typeof safeGenerateObject>[0],
+    ) => {
+      if (String(options.prompt ?? "").includes("NARRATOR_COMPILED_CANDIDATE")) {
+        const failedChecks: ReviewerCheck[] = proposalCalls === 1
+          ? ["unsupported_action_target"]
+          : [];
+        const review: ReviewerReviewFixture = {
+          verdict: failedChecks.length === 0 ? "approve" : "reject",
+          failedChecks,
+        };
+        return {
+          object: {
+            ...review,
+            dimensions: reviewerDimensions(failedChecks),
+          },
+          trace: trace(),
+        };
+      }
+      proposalCalls += 1;
+      return {
+        object: proposalCalls === 1
+          ? livePaidDeliveryProposal()
+          : groundedCertifiedContactProposal(),
+        trace: trace(),
+      };
+    });
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const firstError = await narrator.narrate(request).then(
+      () => undefined,
+      (cause: unknown) => cause,
+    );
+    expect(firstError).toBeInstanceOf(CampaignPlayNarratorError);
+    if (!(firstError instanceof CampaignPlayNarratorError)) {
+      throw new Error("Expected the unsupported action target to be rejected.");
+    }
+    const recoveryFeedback = firstError.recoveryFeedback;
+    expect(recoveryFeedback).toEqual({
+      diagnostic: "narrator_packet_validation_mismatch",
+      failedChecks: [{ check: "unsupported_action_target" }],
+      contractDiagnostic: {
+        phase: "packet_validation",
+        coordinate: "proposal.packet",
+      },
+    });
+    if (!recoveryFeedback) {
+      throw new Error("Expected bounded recovery feedback for the unsupported target.");
+    }
+
+    const recovered = await narrator.narrate({ ...request, recoveryFeedback });
+    expect(recovered.narration.narrationId).toBe(request.narrationId);
+    expect(recovered.narration.suggestedActions[0]?.label).toBe(
+      "Talk to Sister Ashiya Voln",
+    );
+
+    expect(generateObject).toHaveBeenCalledTimes(4);
+    const firstPrompt = String(
+      (generateObject.mock.calls[0]![0] as NarratorGenerateObjectOptions).prompt ?? "",
+    );
+    const recoveryPrompt = String(
+      (generateObject.mock.calls[2]![0] as NarratorGenerateObjectOptions).prompt ?? "",
+    );
+    for (const prompt of [firstPrompt, recoveryPrompt]) {
+      expect(prompt).toContain("NARRATOR_INTENT_TARGET_FRAME");
+      expect(prompt).toContain('"intentIndex":0');
+      expect(prompt).toContain('"targetHandle":"actor_sister_ashiya_voln"');
+      expect(prompt).toContain('"targetKind":"actor"');
+      expect(prompt).toContain('"targetName":"Sister Ashiya Voln"');
+      expect(prompt).toContain("targetHandle values are reference-only");
+    }
+    expect(firstPrompt).toContain(
+      "Talk-to-actor intent cannot become an Inspect-object action",
+    );
+    expect(recoveryPrompt).toContain("NARRATOR_RECOVERY");
+    expect(recoveryPrompt).toContain('"check":"unsupported_action_target"');
+    expect(recoveryPrompt).toContain(
+      "The previous Narrator response failed the packet_validation contract at proposal.packet.",
+    );
+  });
+
   it("uses explicit tool transport without changing the narration contract", async () => {
     const toolProposal = {
       ...proposalFixture(),
@@ -3134,7 +6461,7 @@ END_RECOVERY_DIAGNOSTIC`);
     };
     const toolTransport = {
       beats: toolProposal.beats,
-      selectedIntentKeys: ["intent0"],
+      selectedIntents: [{ key: "intent0", detail: null, mode: null }],
     };
     const toolTrace = trace("tool_mode");
     toolTrace.requestedMode = "tool";
@@ -3145,6 +6472,7 @@ END_RECOVERY_DIAGNOSTIC`);
       fallbackStrategy: "text_fallback",
       actualMode: "tool_mode",
       reason: "test tool capability",
+      providerId: "test-provider",
     };
     const generateObject = vi.fn(async (
       options: Parameters<typeof safeGenerateObject>[0],
@@ -3153,7 +6481,9 @@ END_RECOVERY_DIAGNOSTIC`);
       return { object: toolTransport, trace: toolTrace };
     });
     const narrator = createCampaignPlayNarrator({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
     });
 
     await expect(narrator.narrate({
@@ -3185,7 +6515,7 @@ END_RECOVERY_DIAGNOSTIC`);
           text: "Mara Venn offers an uncertain share and waits for your answer.",
         },
       ],
-      actionSelections: [3, 0, 1, 2].map((intentIndex) => ({
+      actionSelections: [3, 2, 0, 1].map((intentIndex) => ({
         intentIndex,
         detail: intentIndex === 3 ? "I'll carry it straight to the clerk." : null,
       })),
@@ -3193,7 +6523,11 @@ END_RECOVERY_DIAGNOSTIC`);
     const validTransport = {
       beats: validProposal.beats,
       requiredReplyDetail: validProposal.actionSelections[0]!.detail,
-      selectedIntentKeys: ["intent2", "intent0", "intent1"],
+      selectedIntents: [
+        { key: "intent2", detail: null, mode: null },
+        { key: "intent0", detail: null, mode: null },
+        { key: "intent1", detail: null, mode: null },
+      ],
     };
     const toolTrace = trace("tool_mode");
     toolTrace.requestedMode = "tool";
@@ -3204,13 +6538,16 @@ END_RECOVERY_DIAGNOSTIC`);
       fallbackStrategy: "text_fallback",
       actualMode: "tool_mode",
       reason: "test tool capability",
+      providerId: "test-provider",
     };
     let generatedProposal: unknown = validTransport;
     const generateObject = vi.fn(async (
       _options: Parameters<typeof safeGenerateObject>[0],
     ) => ({ object: generatedProposal, trace: toolTrace }));
     const narrator = createCampaignPlayNarrator({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
     });
     const request = (narrationId: string) => ({
       narrationId,
@@ -3225,9 +6562,9 @@ END_RECOVERY_DIAGNOSTIC`);
     const validResult = await narrator.narrate(request("narration-r216-tool-valid"));
     expect(validResult.narration.suggestedActions.map(({ choiceHandle }) => choiceHandle)).toEqual([
       "choice_r216_3",
+      "choice_r216_2",
       "choice_r216_0",
       "choice_r216_1",
-      "choice_r216_2",
     ]);
     expect(validResult.narration.suggestedActions[0]).toEqual({
       choiceHandle: "choice_r216_3",
@@ -3237,10 +6574,17 @@ END_RECOVERY_DIAGNOSTIC`);
     const providerSchema = z.toJSONSchema(options.schema) as unknown as {
       properties: {
         requiredReplyDetail: unknown;
-        selectedIntentKeys: {
-          items?: { enum?: string[] };
+        selectedIntents: {
           minItems?: number;
           maxItems?: number;
+          items?: {
+            required?: string[];
+            properties?: {
+              key?: { enum?: string[] };
+              detail?: unknown;
+              mode?: unknown;
+            };
+          };
         };
       };
     };
@@ -3248,22 +6592,46 @@ END_RECOVERY_DIAGNOSTIC`);
     expect(providerSchemaText).not.toContain("prefixItems");
     expect(providerSchemaText).not.toContain("\"const\"");
     expect(providerSchemaText).not.toContain("oneOf");
-    expect(providerSchemaText).not.toContain("anyOf");
-    expect(providerSchemaText).not.toContain("nullable");
     expect(providerSchemaText).not.toContain("intentIndex");
     expect(providerSchema.properties.requiredReplyDetail).toBeDefined();
-    expect(providerSchema.properties.selectedIntentKeys).toMatchObject({
-      minItems: 3,
-      maxItems: 3,
-    });
-    expect(providerSchema.properties.selectedIntentKeys.items?.enum).toEqual([
+    expect(providerSchema.properties.selectedIntents.minItems).toBe(3);
+    expect(providerSchema.properties.selectedIntents.maxItems).toBe(3);
+    expect(providerSchema.properties.selectedIntents.items?.required).toEqual(["key", "detail", "mode"]);
+    expect(isNullableJsonSchema(
+      providerSchema.properties.selectedIntents.items?.properties?.detail,
+    )).toBe(false);
+    expect(providerSchema.properties.selectedIntents.items?.properties?.detail)
+      .toEqual({ type: "null" });
+    expect(isNullableJsonSchema(
+      providerSchema.properties.selectedIntents.items?.properties?.mode,
+    )).toBe(false);
+    expect(providerSchema.properties.selectedIntents.items?.properties?.mode)
+      .toEqual({ type: "null" });
+    expect(providerSchema.properties.selectedIntents.items?.properties?.key?.enum).toEqual([
       "intent0",
       "intent1",
       "intent2",
       "intent4",
       "intent5",
     ]);
+    expect(jsonSchemaEnum(
+      providerSchema.properties.selectedIntents.items?.properties?.mode,
+    )).toBeUndefined();
     expect(options.schema.safeParse(validTransport).success).toBe(true);
+    expect(options.schema.safeParse({
+      ...validTransport,
+      selectedIntents: validTransport.selectedIntents.map(({ detail: _detail, ...entry }) => entry),
+    }).success).toBe(false);
+    expect(options.schema.safeParse({
+      ...validTransport,
+      selectedIntents: validTransport.selectedIntents.map((entry, selectedPosition) =>
+        selectedPosition === 0 ? { ...entry, detail: "" } : entry),
+    }).success).toBe(false);
+    expect(options.schema.safeParse({
+      ...validTransport,
+      selectedIntents: validTransport.selectedIntents.map((entry, selectedPosition) =>
+        selectedPosition === 0 ? { ...entry, mode: "" } : entry),
+    }).success).toBe(false);
     const requiredReplyPrefix = "Talk to Mara Venn: ";
     const maximumRequiredReplyDetail = `accept ${"a".repeat(
       CAMPAIGN_PLAY_LIMITS.label - requiredReplyPrefix.length - 2 - "accept ".length,
@@ -3333,12 +6701,9 @@ END_RECOVERY_DIAGNOSTIC`);
     );
     expect(initialPrompt).not.toContain("Start with one allowed reply verb");
     expect(initialPrompt).toContain(
-      "selectedIntentKeys is a fixed-length array of application-owned keys from TOOL_INTENT_SELECTION_FRAME",
+      "selectedIntents is an ordered array of exactly expectedSelectedCount distinct entries from TOOL_INTENT_SELECTION_FRAME",
     );
-    expect(initialPrompt).toContain(
-      "Return exactly expectedSelectedCount distinct keys. Copy each key exactly and do not emit intentIndex or action wording.",
-    );
-    expect(initialPrompt).not.toContain("intentSelections");
+    expect(initialPrompt).toContain("Select exactly 3 entries through selectedIntents in publication order");
     expect(initialPrompt).not.toContain("Put that exact index only in actionSelections[0]");
 
     const recoveryFeedback: CampaignPlayNarratorRecoveryFeedback = {
@@ -3354,13 +6719,13 @@ END_RECOVERY_DIAGNOSTIC`);
       "REQUIRED_REPLY_INTENT_INDEX=application-owned (absent from model output)",
     );
     expect(recoveryPrompt).toContain(
-      "The required reply key is application-owned and absent from selectedIntentKeys.",
+      "The required reply key is application-owned and absent from selectedIntents.",
     );
     expect(recoveryPrompt).toContain(
       "When requiredReplyDetail is present, it contains only the player's exact spoken words addressed to the required actor, preferably a concise first-person utterance.",
     );
     expect(recoveryPrompt).toContain(
-      "Rebuild selectedIntentKeys from TOOL_INTENT_SELECTION_FRAME. Return exactly expectedSelectedCount distinct listed keys. Do not reuse a key.",
+      "Rebuild selectedIntents from TOOL_INTENT_SELECTION_FRAME. Return exactly expectedSelectedCount distinct entries in publication order;",
     );
     expect(recoveryPrompt).toContain(
       "RECOVERY_DIAGNOSTIC",
@@ -3373,7 +6738,7 @@ END_RECOVERY_DIAGNOSTIC`);
     generatedProposal = {
       beats: validTransport.beats,
       requiredReplyDetail: "accept the uncertain share",
-      selectedIntentKeys: [],
+      selectedIntents: [],
     };
     await expect(narrator.narrate({
       ...request("narration-r216-tool-one-required-reply"),
@@ -3381,60 +6746,81 @@ END_RECOVERY_DIAGNOSTIC`);
     })).resolves.toBeDefined();
     const oneIntentOptions = generateObject.mock.calls[3]![0] as Parameters<typeof safeGenerateObject>[0];
     const oneIntentProviderSchema = z.toJSONSchema(oneIntentOptions.schema) as unknown as {
-      properties: { selectedIntentKeys: { items?: unknown; minItems?: number; maxItems?: number } };
+      properties: {
+        selectedIntents: { minItems?: number; maxItems?: number; items?: unknown };
+      };
     };
-    expect(oneIntentProviderSchema.properties.selectedIntentKeys).toMatchObject({
-      minItems: 0,
-      maxItems: 0,
-    });
+    expect(oneIntentProviderSchema.properties.selectedIntents.minItems).toBe(0);
+    expect(oneIntentProviderSchema.properties.selectedIntents.maxItems).toBe(0);
     expect(oneIntentOptions.schema.safeParse(generatedProposal).success).toBe(true);
 
     const invalidCases: Array<{
       name: string;
       transport: unknown;
       diagnostic: "narrator_generation_schema_mismatch" | "narrator_packet_validation_mismatch";
-      phase: "provider_extraction" | "packet_validation";
-      coordinate: "selectedIntentKeys" | "requiredReplyDetail" | "beats" | "observationIndexes";
+      phase: "provider_extraction" | "private_decode" | "packet_validation";
+      coordinate: "selectedIntents" |
+        "requiredReplyDetail" | "beats" | "observationIndexes";
     }> = [
+      {
+        name: "mixed-redundant-shape",
+        transport: {
+          beats: validTransport.beats,
+          requiredReplyDetail: validTransport.requiredReplyDetail,
+          selectedIntentKeys: ["intent2", "intent0", "intent1"],
+          intentSelections: {
+            intent0: { detail: "" },
+            intent1: { detail: "" },
+            intent2: { detail: "" },
+            intent4: { detail: "" },
+            intent5: { detail: "" },
+          },
+        },
+        diagnostic: "narrator_generation_schema_mismatch",
+        phase: "provider_extraction",
+        coordinate: "selectedIntents",
+      },
       {
         name: "unknown-key",
         transport: {
           ...validTransport,
-          selectedIntentKeys: ["intent0", "intent1", "intent3"],
+          selectedIntents: validTransport.selectedIntents.map((entry) =>
+            entry.key === "intent2" ? { ...entry, key: "intent3" } : entry),
         },
         diagnostic: "narrator_generation_schema_mismatch",
         phase: "provider_extraction",
-        coordinate: "selectedIntentKeys",
+        coordinate: "selectedIntents",
       },
       {
-        name: "duplicate-key",
+        name: "duplicate-selected-key",
         transport: {
           ...validTransport,
-          selectedIntentKeys: ["intent0", "intent0", "intent1"],
+          selectedIntents: validTransport.selectedIntents.map((entry, index) =>
+            index === 1 ? { ...entry, key: "intent2" } : entry),
         },
         diagnostic: "narrator_generation_schema_mismatch",
-        phase: "provider_extraction",
-        coordinate: "selectedIntentKeys",
+        phase: "private_decode",
+        coordinate: "selectedIntents",
       },
       {
-        name: "missing-key",
+        name: "missing-selected-entry",
         transport: {
           ...validTransport,
-          selectedIntentKeys: ["intent0", "intent1"],
+          selectedIntents: validTransport.selectedIntents.slice(0, 2),
         },
         diagnostic: "narrator_generation_schema_mismatch",
         phase: "provider_extraction",
-        coordinate: "selectedIntentKeys",
+        coordinate: "selectedIntents",
       },
       {
-        name: "extra-key",
+        name: "wrong-selected-count",
         transport: {
           ...validTransport,
-          selectedIntentKeys: ["intent0", "intent1", "intent2", "intent4"],
+          selectedIntents: [],
         },
         diagnostic: "narrator_generation_schema_mismatch",
         phase: "provider_extraction",
-        coordinate: "selectedIntentKeys",
+        coordinate: "selectedIntents",
       },
       {
         name: "excess-opening-beats",
@@ -3538,7 +6924,7 @@ END_RECOVERY_DIAGNOSTIC`);
     };
     const toolTransport = {
       beats: toolProposal.beats,
-      selectedIntentKeys: ["intent0"],
+      selectedIntents: [{ key: "intent0", detail: null, mode: null }],
     };
     const toolTrace = trace("tool_mode");
     toolTrace.requestedMode = "tool";
@@ -3549,12 +6935,15 @@ END_RECOVERY_DIAGNOSTIC`);
       fallbackStrategy: "text_fallback",
       actualMode: "tool_mode",
       reason: "test tool capability",
+      providerId: "test-provider",
     };
     const generateObject = vi.fn(async (
       _options: Parameters<typeof safeGenerateObject>[0],
     ) => ({ object: toolTransport, trace: toolTrace }));
     const narrator = createCampaignPlayNarrator({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
+      generateObject: reviewerAwareGenerateObject(
+        (options) => generateObject(options),
+      ) as unknown as typeof safeGenerateObject,
     });
 
     await expect(narrator.narrate({
@@ -3570,13 +6959,22 @@ END_RECOVERY_DIAGNOSTIC`);
     const options = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
     const providerSchema = z.toJSONSchema(options.schema) as unknown as {
       properties: {
-        selectedIntentKeys: { items?: { enum?: string[] }; minItems?: number; maxItems?: number };
+        selectedIntents: {
+          minItems?: number;
+          maxItems?: number;
+          items?: {
+            required?: string[];
+            properties?: { key?: { enum?: string[] }; mode?: { enum?: string[] } };
+          };
+        };
         requiredReplyDetail?: unknown;
       };
     };
     expect(providerSchema.properties.requiredReplyDetail).toBeUndefined();
-    expect(providerSchema.properties.selectedIntentKeys.items?.enum).toEqual(["intent0"]);
-    expect(providerSchema.properties.selectedIntentKeys).toMatchObject({ minItems: 1, maxItems: 1 });
+    expect(providerSchema.properties.selectedIntents.minItems).toBe(1);
+    expect(providerSchema.properties.selectedIntents.maxItems).toBe(1);
+    expect(providerSchema.properties.selectedIntents.items?.required).toEqual(["key", "detail", "mode"]);
+    expect(providerSchema.properties.selectedIntents.items?.properties?.key?.enum).toEqual(["intent0"]);
     expect(options.schema.safeParse(toolTransport).success).toBe(true);
     expect(options.schema.safeParse(toolProposal).success).toBe(false);
     expect(options.schema.safeParse({
@@ -3603,17 +7001,16 @@ END_RECOVERY_DIAGNOSTIC`);
       elapsedMinutes: 5,
     };
     const invalid: CampaignPlayNarratorProposal = {
-      actionSelections: [{ intentIndex: 0, detail: null }],
+      actionSelections: [{
+        intentIndex: 0,
+        detail: null,
+        mode: null,
+      }],
       beats: [
         {
           purpose: "consequence",
           observationIndexes: [],
-          text: "Mara Venn pulls away and keeps walking toward the shuttered gate.",
-        },
-        {
-          purpose: "action_handoff",
-          observationIndexes: [],
-          text: "You are left standing alone at the empty bend.",
+          text: "Mara Venn pulls away and keeps walking toward the shuttered gate, leaving you alone at the empty bend.",
         },
       ],
     };
@@ -3633,11 +7030,14 @@ END_RECOVERY_DIAGNOSTIC`);
       totalTokens: 3_400,
       reasoningTokens: 600,
     };
+    const proposerGenerateObject = vi.fn(async () => ({
+      object: proposalFixture(),
+      trace: reasoningTrace,
+    }));
     const narrator = createCampaignPlayNarrator({
-      generateObject: vi.fn(async () => ({
-        object: proposalFixture(),
-        trace: reasoningTrace,
-      })) as unknown as typeof safeGenerateObject,
+      generateObject: reviewerAwareGenerateObject(
+        () => proposerGenerateObject(),
+      ) as unknown as typeof safeGenerateObject,
     });
 
     await expect(narrator.narrate({
@@ -3648,7 +7048,7 @@ END_RECOVERY_DIAGNOSTIC`);
       temperature: 0.5,
       budget,
     })).resolves.toMatchObject({
-      modelEvidence: { outputTokens: 2_500, totalTokens: 3_400 },
+      modelEvidence: { outputTokens: 2_570, totalTokens: 3_560 },
     });
 
     reasoningTrace.usage.reasoningTokens = 400;
@@ -3672,7 +7072,9 @@ END_RECOVERY_DIAGNOSTIC`);
         trace: trace(strategy),
       }));
       const narrator = createCampaignPlayNarrator({
-        generateObject: generateObject as unknown as typeof safeGenerateObject,
+        generateObject: reviewerAwareGenerateObject(
+          (options) => generateObject(options),
+        ) as unknown as typeof safeGenerateObject,
       });
       await expect(narrator.narrate({
         narrationId: "narration-opening",

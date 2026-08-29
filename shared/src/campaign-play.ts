@@ -36,6 +36,7 @@ export const CAMPAIGN_PLAY_LIMITS = {
   visiblePressures: 4,
   visiblePossessions: 32,
   visibleObligations: 32,
+  visibleCommitments: 32,
   possessionQuantity: 1_000_000,
   openingLocations: 12,
   openingDetails: 8,
@@ -270,6 +271,201 @@ export interface CampaignPlayConsequence {
   causalCue: CampaignPlayConsequenceCue;
 }
 
+export const CAMPAIGN_PLAY_DECISION_KIND_VALUES = [
+  "yes_no",
+  "offer",
+  "demand",
+] as const;
+
+export type CampaignPlayDecisionKind =
+  (typeof CAMPAIGN_PLAY_DECISION_KIND_VALUES)[number];
+
+export const CAMPAIGN_PLAY_DECISION_STATUS_VALUES = [
+  "open",
+  "accepted",
+  "declined",
+] as const;
+
+export type CampaignPlayDecisionStatus =
+  (typeof CAMPAIGN_PLAY_DECISION_STATUS_VALUES)[number];
+
+export const CAMPAIGN_PLAY_DECISION_DISPOSITION_VALUES = [
+  "accept",
+  "decline",
+] as const;
+
+export type CampaignPlayDecisionDisposition =
+  (typeof CAMPAIGN_PLAY_DECISION_DISPOSITION_VALUES)[number];
+
+/**
+ * Code-owned binding for an unresolved NPC decision.  Labels remain a
+ * rendering concern; mechanics are keyed by this stable binding.
+ */
+export interface CampaignPlayDecisionBinding {
+  decisionKey: string;
+  actorHandle: string;
+  kind: CampaignPlayDecisionKind;
+  disposition: CampaignPlayDecisionDisposition;
+}
+
+export const CAMPAIGN_PLAY_COMMITMENT_ACTION_VALUES = [
+  "collect",
+  "deliver",
+] as const;
+
+export type CampaignPlayCommitmentAction =
+  (typeof CAMPAIGN_PLAY_COMMITMENT_ACTION_VALUES)[number];
+
+/** Public-safe binding for a code-owned action against an active commitment. */
+export interface CampaignPlayCommitmentBinding {
+  commitmentHandle: string;
+  action: CampaignPlayCommitmentAction;
+  counterpartyHandle: string;
+  subjectName: string;
+  destinationHandle: string;
+}
+
+/** Public-safe binding for collecting one exact player receivable. */
+export interface CampaignPlayObligationBinding {
+  obligationHandle: string;
+  debtorHandle: string;
+  creditorHandle: string;
+  unitKey: "copper";
+  amount: number;
+}
+
+/**
+ * Code-owned fact for one exact receivable settled by the current player turn.
+ * The binding identifies the obligation and stable parties; the remaining
+ * fields describe only the settled outcome that the Rulebook already applied.
+ */
+export interface CampaignPlayObligationSettlement extends CampaignPlayObligationBinding {
+  status: "settled";
+  sourceTurnId: string;
+  summary: string;
+}
+
+export interface CampaignPlayDecisionOutcome {
+  decisionKey: string;
+  actorHandle: string;
+  kind: CampaignPlayDecisionKind;
+  disposition: CampaignPlayDecisionDisposition;
+  status: Extract<CampaignPlayDecisionStatus, "accepted" | "declined">;
+  sourceTurnId: string;
+  summary: string;
+  acceptEffect: CampaignPlayDecisionAcceptEffect | null;
+}
+
+export type CampaignPlayDecisionAcceptEffect =
+  | {
+      kind: "grant_player_possession";
+      name: string;
+    }
+  | CampaignPlayDeliveryAcceptEffect;
+
+export interface CampaignPlayDeliveryAcceptEffectBase {
+  title: string;
+  subjectName: string;
+  destinationHandle: string;
+  dueInMinutes?: number;
+}
+
+export interface CampaignPlayPaidDeliveryAcceptEffect
+  extends CampaignPlayDeliveryAcceptEffectBase {
+  kind: "paid_delivery";
+  feeUnit: "copper";
+  feeAmount: number;
+  paymentTiming: "on_completion";
+}
+
+export interface CampaignPlayUnpaidDeliveryAcceptEffect
+  extends CampaignPlayDeliveryAcceptEffectBase {
+  kind: "unpaid_delivery";
+}
+
+export type CampaignPlayDeliveryAcceptEffect =
+  | CampaignPlayPaidDeliveryAcceptEffect
+  | CampaignPlayUnpaidDeliveryAcceptEffect;
+
+export interface CampaignPlayPlayerCommitmentBase {
+  commitmentId: string;
+  campaignId: string;
+  performerActorId: string;
+  counterpartyActorId: string;
+  status: "active" | "completed";
+  title: string;
+  subjectName: string;
+  destinationHandle: string;
+  acceptedWorldTimeMinutes: number;
+  dueWorldTimeMinutes: number | null;
+  sourceDecisionKey: string;
+  sourceTurnId: string;
+  sourceReceiptId: string;
+  completionTurnId: string | null;
+  completionReceiptId: string | null;
+  worldVersion: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Durable mechanics-side commitment created by an accepted delivery offer. */
+export type CampaignPlayPlayerCommitment =
+  | (CampaignPlayPlayerCommitmentBase & {
+      kind: "paid_delivery";
+      feeUnit: "copper";
+      feeAmount: number;
+      paymentTiming: "on_completion";
+    })
+  | (CampaignPlayPlayerCommitmentBase & { kind: "unpaid_delivery" });
+
+/** Public-safe commitment terms for later visibility/projection surfaces. */
+export interface CampaignPlayVisibleCommitmentBase {
+  handle: string;
+  status: "active" | "completed";
+  counterpartyHandle: string;
+  counterpartyName: string;
+  title: string;
+  subjectName: string;
+  destinationHandle: string;
+  destinationName: string;
+  dueWorldTimeLabel: string | null;
+}
+
+export type CampaignPlayVisibleCommitment =
+  | (CampaignPlayVisibleCommitmentBase & {
+      kind: "paid_delivery";
+      feeUnit: "copper";
+      feeAmount: number;
+      paymentTiming: "on_completion";
+    })
+  | (CampaignPlayVisibleCommitmentBase & { kind: "unpaid_delivery" });
+
+export interface CampaignPlayOpeningDecision {
+  decisionKey: string;
+  actorName: string;
+  actorHandle: string;
+  kind: CampaignPlayDecisionKind;
+  summary: string;
+  acceptLabel: string;
+  declineLabel: string;
+  acceptEffect?: CampaignPlayDecisionAcceptEffect | null;
+}
+
+/**
+ * Structured public fact for a durable decision outcome.  Narration covers
+ * this fact through its observation index; the text remains free to paraphrase
+ * the code-owned values naturally.
+ */
+export interface CampaignPlayDecisionObservation {
+  decisionKey: string;
+  actorName: string;
+  actorHandle: string;
+  kind: CampaignPlayDecisionKind;
+  disposition: CampaignPlayDecisionDisposition;
+  summary: string;
+  selectedLabel: string;
+}
+
 export interface CampaignPlayObservationActor {
   handle: string;
   name: string;
@@ -287,6 +483,8 @@ export interface CampaignPlayJournalEntry {
   whereOrRoute: string | null;
   worldTimeLabel: string;
   consequence: CampaignPlayConsequence | null;
+  decision?: CampaignPlayOpeningDecision;
+  decisionOutcome?: CampaignPlayDecisionObservation;
 }
 
 export interface CampaignPlayAvailableIntent {
@@ -294,12 +492,16 @@ export interface CampaignPlayAvailableIntent {
   label: string;
   kind: WorldIntentKind;
   targets: CampaignPlayVisibleTarget[];
+  decisionBinding?: CampaignPlayDecisionBinding;
+  commitmentBinding?: CampaignPlayCommitmentBinding;
+  obligationBinding?: CampaignPlayObligationBinding;
 }
 
 export interface CampaignPlayOpeningContext {
   role: string;
   arrivalMode: string;
   immediateSituation: string;
+  decision?: CampaignPlayOpeningDecision | null;
 }
 
 export interface CampaignPlayActionContext {
@@ -317,6 +519,9 @@ export interface CampaignPlayActionContext {
     | "success"
     | "strong_success";
   clarificationQuestion: string | null;
+  decisionBinding?: CampaignPlayDecisionBinding;
+  decisionOutcome?: CampaignPlayDecisionOutcome;
+  obligationSettlement?: CampaignPlayObligationSettlement;
 }
 
 export interface CampaignPlayNarratorPacket extends CampaignPlayPublicVersions {
@@ -333,12 +538,14 @@ export interface CampaignPlayNarratorPacket extends CampaignPlayPublicVersions {
   visiblePressures: CampaignPlayVisiblePressure[];
   possessions: CampaignPlayVisiblePossession[];
   obligations: CampaignPlayVisibleObligation[];
+  commitments: CampaignPlayVisibleCommitment[];
   newObservations: CampaignPlayJournalEntry[];
   consequences: CampaignPlayConsequence[];
   observationSubjects?: CampaignPlayObservationSubjects[];
   continuity: CampaignPlayJournalEntry[];
   elapsedMinutes: number;
   availableIntents: CampaignPlayAvailableIntent[];
+  decisionOutcomes?: CampaignPlayDecisionOutcome[];
 }
 
 export interface CampaignPlayNarrationBeat {
@@ -349,6 +556,9 @@ export interface CampaignPlayNarrationBeat {
 export interface CampaignPlaySuggestedAction {
   choiceHandle: string;
   label: string;
+  decisionBinding?: CampaignPlayDecisionBinding;
+  commitmentBinding?: CampaignPlayCommitmentBinding;
+  obligationBinding?: CampaignPlayObligationBinding;
 }
 
 export interface CampaignPlayStageEffect {
@@ -441,10 +651,12 @@ export interface CampaignPlayState extends CampaignPlayPublicVersions {
   visiblePressures: CampaignPlayVisiblePressure[];
   possessions: CampaignPlayVisiblePossession[];
   obligations: CampaignPlayVisibleObligation[];
+  commitments: CampaignPlayVisibleCommitment[];
   narration: CampaignPlayNarration | null;
   narrationOperation: CampaignPlayNarrationOperation | null;
   utilityActions: CampaignPlaySuggestedAction[];
   consequences: CampaignPlayConsequence[];
+  decisionOutcomes: CampaignPlayDecisionOutcome[];
   activeTurn: CampaignPlayPublicTurn | null;
   journalCursor: number;
   projectionHash: string;
@@ -486,6 +698,9 @@ export type CampaignPlayTurnAdmissionRequest =
       source: "suggested";
       idempotencyKey: string;
       choiceHandle: string;
+      decisionBinding?: CampaignPlayDecisionBinding;
+      commitmentBinding?: CampaignPlayCommitmentBinding;
+      obligationBinding?: CampaignPlayObligationBinding;
     };
 
 export type CampaignPlayStartingConditions =

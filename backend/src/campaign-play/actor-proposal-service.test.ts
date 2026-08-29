@@ -22,9 +22,13 @@ import { createCampaignPlayActorScheduler } from "./actor-scheduler.js";
 import { openCampaignPlayDatabase, type CampaignPlayDatabaseHandle } from "./campaign-play-database.js";
 import { canonicalizeCampaignPlayProjection, hashCampaignPlayProjection,
   deriveCampaignPlayPossessionId, deriveCampaignPlayPossessionKey,
+  deriveCampaignPlayPublicHandle,
   type CampaignPlayProjectionRecord } from "./campaign-play-projection.js";
 import type { CampaignPlayOpeningExposureSeed } from "./opening-planner.js";
-import { createCampaignPlayStateRepository } from "./campaign-play-state-repository.js";
+import {
+  createCampaignPlayStateRepository,
+  loadCampaignPlayRulebookFrame,
+} from "./campaign-play-state-repository.js";
 import { createCampaignPlayTurnRepository } from "./campaign-play-turn-repository.js";
 
 const CAMPAIGN_ID = "11111111-1111-4111-8111-111111111111";
@@ -185,12 +189,246 @@ function planJson(
   };
 }
 
+function seedResolvedDecision(
+  handle: CampaignPlayDatabaseHandle,
+  states: ReturnType<typeof createCampaignPlayStateRepository>,
+  turnId: string,
+): void {
+  const actorId = "actor-b";
+  const decisionKind = "offer" as const;
+  const actorHandle = deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, actorId);
+  const decisionKey = `decision:${hashCampaignPlayProjection({
+    campaignId: CAMPAIGN_ID,
+    sourceOpeningTurnId: turnId,
+    actorId,
+    kind: decisionKind,
+  }).slice(0, 32)}`;
+  const frame = loadCampaignPlayRulebookFrame(handle);
+  const pressureIds = frame.acceptedWorld.pressures.map((pressure) => pressure.id).sort();
+  const summary = "The harbor clerk offers a sealed route ledger.";
+  const acceptLabel = "Take the ledger";
+  const declineLabel = "Leave it sealed";
+  const causalParentJson = canonicalizeCampaignPlayProjection({ kind: "turn", turnId });
+  const sourceJson = canonicalizeCampaignPlayProjection({ kind: "system", system: "opening_bootstrap" });
+  const resolveSourceJson = canonicalizeCampaignPlayProjection({ kind: "system", system: "game_master" });
+  const fixtureBatchId = "fixture-resolved-decision-batch";
+
+  states.commitMechanical({
+    worldVersionAdvance: pressureIds.length + 2,
+    updatedAt: 1_560,
+    mutate(context) {
+      let priorWorldVersion = context.priorWorldVersion;
+      let commandOrder = 0;
+      const insertCommand = (input: {
+        commandId: string;
+        batchId: string;
+        commandOrder: number;
+        kind: "initialize_pressure_state" | "decision_open" | "decision_resolve";
+        sourceJson: string;
+        expectedWorldVersion: number;
+        readScope: unknown[];
+        writeScope: unknown[];
+        arguments: Record<string, unknown>;
+      }) => {
+        const argumentsJson = canonicalizeCampaignPlayProjection(input.arguments);
+        const argumentsHash = hashCampaignPlayProjection(input.arguments);
+        context.sqlite.prepare(`INSERT INTO campaign_play_commands (
+          command_id, campaign_id, turn_id, batch_id, command_order, command_kind,
+          causal_parent_json, source_json, expected_world_version, read_scope_json,
+          write_scope_json, exposure_policy_json, arguments_hash, protected_payload_json,
+          protected_payload_hash, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(
+            input.commandId, context.campaignId, turnId, input.batchId, input.commandOrder, input.kind,
+            causalParentJson, input.sourceJson, input.expectedWorldVersion,
+            canonicalizeCampaignPlayProjection(input.readScope),
+            canonicalizeCampaignPlayProjection(input.writeScope),
+            canonicalizeCampaignPlayProjection({ mode: "protected" }),
+            argumentsHash, argumentsJson, argumentsHash, 1_550,
+          );
+      };
+      const insertReceiptAndEvent = (input: {
+        commandId: string;
+        receiptId: string;
+        eventId: string;
+        kind: "pressure_initialized" | "decision_opened" | "decision_accepted";
+        affectedRefs: unknown[];
+        createdAt: number;
+        beforeEvent?: () => void;
+        afterEvent?: () => void;
+      }, resultWorldVersion: number, source: string) => {
+        const priorHash = resultWorldVersion % 2 === 0 ? HASH_B : HASH_A;
+        const resultHash = resultWorldVersion % 2 === 0 ? HASH_A : HASH_B;
+        const beforePayloadJson = canonicalizeCampaignPlayProjection({ worldVersion: resultWorldVersion - 1 });
+        const afterPayloadJson = canonicalizeCampaignPlayProjection({ worldVersion: resultWorldVersion });
+        const commandPayload = context.sqlite.prepare(`SELECT protected_payload_json AS payload,
+            protected_payload_hash AS hash FROM campaign_play_commands WHERE command_id = ?`)
+          .get(input.commandId) as { payload: string; hash: string };
+        context.sqlite.prepare(`INSERT INTO campaign_play_receipts (
+          receipt_id, campaign_id, turn_id, command_id, command_kind, outcome,
+          applied_world_mutation, prior_world_version, result_world_version,
+          prior_world_hash, result_world_hash, causal_event_ids_json,
+          protected_payload_json, protected_payload_hash, created_at
+        ) SELECT ?, ?, ?, command_id, command_kind, 'applied', 1, ?, ?, ?, ?, ?, ?, ?, ?
+          FROM campaign_play_commands WHERE command_id = ?`).run(
+            input.receiptId, context.campaignId, turnId, resultWorldVersion - 1,
+            resultWorldVersion, priorHash, resultHash,
+            canonicalizeCampaignPlayProjection([input.eventId]),
+            commandPayload.payload, commandPayload.hash, input.createdAt, input.commandId,
+          );
+        input.beforeEvent?.();
+        context.sqlite.prepare(`INSERT INTO campaign_play_events (
+          event_id, campaign_id, turn_id, command_id, receipt_id, parent_event_id,
+          event_kind, source_json, world_time_minutes, world_version, affected_refs_json,
+          before_payload_json, after_payload_json, payload_hash, created_at
+        ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?)`)
+          .run(
+            input.eventId, context.campaignId, turnId, input.commandId, input.receiptId,
+            input.kind, source, resultWorldVersion,
+            canonicalizeCampaignPlayProjection(input.affectedRefs),
+            beforePayloadJson, afterPayloadJson, HASH_A, input.createdAt,
+          );
+        input.afterEvent?.();
+        priorWorldVersion = resultWorldVersion;
+      };
+
+      for (const [index, pressureId] of pressureIds.entries()) {
+        const commandId = `fixture-pressure-command-${index}`;
+        const receiptId = `fixture-pressure-receipt-${index}`;
+        const eventId = `fixture-pressure-event-${index}`;
+        const resultWorldVersion = priorWorldVersion + 1;
+        insertCommand({
+          commandId,
+          batchId: fixtureBatchId,
+          commandOrder: commandOrder++,
+          kind: "initialize_pressure_state",
+          sourceJson,
+          expectedWorldVersion: priorWorldVersion,
+          readScope: [{ kind: "pressure", id: pressureId }],
+          writeScope: [{ kind: "pressure", id: pressureId }],
+          arguments: { pressureId, progress: 0, status: "active" },
+        });
+        insertReceiptAndEvent({
+          commandId,
+          receiptId,
+          eventId,
+          kind: "pressure_initialized",
+          affectedRefs: [{ kind: "pressure", id: pressureId }],
+          createdAt: 1_550,
+        }, resultWorldVersion, sourceJson);
+        context.sqlite.prepare(`INSERT INTO campaign_play_pressure_states (
+          pressure_id, campaign_id, progress, status, last_advanced_world_time_minutes,
+          causal_receipt_id, world_version, updated_at
+        ) VALUES (?, ?, 0, 'active', 0, ?, ?, 1550)`).run(
+          pressureId, context.campaignId, receiptId, resultWorldVersion,
+        );
+      }
+
+      const openCommandId = "fixture-decision-open-command";
+      const openReceiptId = "fixture-decision-open-receipt";
+      const openEventId = "fixture-decision-open-event";
+      const openWorldVersion = priorWorldVersion + 1;
+      insertCommand({
+        commandId: openCommandId,
+        batchId: fixtureBatchId,
+        commandOrder: commandOrder++,
+        kind: "decision_open",
+        sourceJson,
+        expectedWorldVersion: priorWorldVersion,
+        readScope: [{ kind: "actor", id: actorId }],
+        writeScope: [{ kind: "decision", id: decisionKey }],
+        arguments: {
+          decisionKey,
+          actorId,
+          actorHandle,
+          decisionKind,
+          sourceTurnId: turnId,
+          summary,
+          acceptLabel,
+          declineLabel,
+        },
+      });
+      insertReceiptAndEvent({
+        commandId: openCommandId,
+        receiptId: openReceiptId,
+        eventId: openEventId,
+        kind: "decision_opened",
+        affectedRefs: [
+          { kind: "actor", id: actorId },
+          { kind: "decision", id: decisionKey },
+        ],
+        createdAt: 1_550,
+        beforeEvent: () => {
+          context.sqlite.prepare(`INSERT INTO campaign_play_decisions (
+            decision_key, campaign_id, actor_id, actor_handle, decision_kind,
+            source_turn_id, status, summary, accept_label, decline_label,
+            opened_at, resolved_at, resolution_turn_id, resolution_event_id,
+            world_version, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, 1550, NULL, NULL, NULL, ?, 1550, 1550)`).run(
+            decisionKey, context.campaignId, actorId, actorHandle, decisionKind, turnId,
+            summary, acceptLabel, declineLabel, openWorldVersion,
+          );
+        },
+      }, openWorldVersion, sourceJson);
+
+      const resolveCommandId = "fixture-decision-resolve-command";
+      const resolveReceiptId = "fixture-decision-resolve-receipt";
+      const resolveEventId = "fixture-decision-resolve-event";
+      const resolveWorldVersion = openWorldVersion + 1;
+      insertCommand({
+        commandId: resolveCommandId,
+        batchId: fixtureBatchId,
+        commandOrder: commandOrder++,
+        kind: "decision_resolve",
+        sourceJson: resolveSourceJson,
+        expectedWorldVersion: openWorldVersion,
+        readScope: [
+          { kind: "actor", id: actorId },
+          { kind: "decision", id: decisionKey },
+        ],
+        writeScope: [{ kind: "decision", id: decisionKey }],
+        arguments: {
+          decisionKey,
+          actorId,
+          actorHandle,
+          decisionKind,
+          sourceTurnId: turnId,
+          summary,
+          selectedLabel: acceptLabel,
+          disposition: "accept",
+        },
+      });
+      insertReceiptAndEvent({
+        commandId: resolveCommandId,
+        receiptId: resolveReceiptId,
+        eventId: resolveEventId,
+        kind: "decision_accepted",
+        affectedRefs: [
+          { kind: "actor", id: actorId },
+          { kind: "decision", id: decisionKey },
+        ],
+        createdAt: 1_560,
+        afterEvent: () => {
+          const result = context.sqlite.prepare(`UPDATE campaign_play_decisions
+            SET status = 'accepted', resolved_at = 1560, resolution_turn_id = ?,
+              resolution_event_id = ?, world_version = ?, updated_at = 1560
+            WHERE campaign_id = ? AND decision_key = ? AND status = 'open'`).run(
+            turnId, resolveEventId, resolveWorldVersion, context.campaignId, decisionKey,
+          );
+          if (result.changes !== 1) throw new Error("Resolved decision fixture did not update exactly one row.");
+        },
+      }, resolveWorldVersion, resolveSourceJson);
+    },
+  });
+}
+
 function createReadyFixture(
   playerLocationId = "location-c",
   actorBRouteId = "route-office-a",
   actorBPlanVersion = 1,
   actorBIntent: "move" | "wait" | "remote_wait" = "move",
   actorAAcquire = false,
+  resolvedDecision = false,
 ) {
   buildAcceptedCampaign();
   const handle = track(openCampaignPlayDatabase(CAMPAIGN_ID));
@@ -306,6 +544,7 @@ function createReadyFixture(
       narrator: { providerId: "test-provider", model: "narrator", strategy: "strict_object", pricing: TEST_MODEL_PRICING },
     },
   });
+  if (resolvedDecision) seedResolvedDecision(handle, states, "turn-player");
   const judge = turns.claimStage({
     turnId: "turn-player", expectedStage: "admitted", observedEpoch: 0,
     owner: "proposal-worker", claimedAt: 1_510, leaseExpiresAt: 2_000,
@@ -450,6 +689,98 @@ describe("Campaign Play actor proposal service", () => {
     });
     expect(unrelatedActorSummary).not.toBe(TEST_EXPOSURE_SEED.summary);
     expect(unrelatedActorSummary).toContain("Advance the active goal");
+  });
+
+  it("settles an actor proposal against a resolved decision frame exactly once", () => {
+    const { handle, token, states, baseWorldVersion } = createReadyFixture(
+      "location-a-office",
+      "route-office-a",
+      2,
+      "wait",
+      false,
+      true,
+    );
+    const before = {
+      commands: countForCampaign(handle, "campaign_play_commands"),
+      receipts: countForCampaign(handle, "campaign_play_receipts"),
+      events: countForCampaign(handle, "campaign_play_events"),
+      runtimeEvents: countForCampaign(handle, "campaign_play_runtime_events"),
+    };
+    const canonicalFrame = loadCampaignPlayRulebookFrame(handle);
+    expect(canonicalFrame.pendingDecisions).toMatchObject([{
+      status: "accepted",
+      resolutionTurnId: "turn-player",
+      resolutionDisposition: "accept",
+    }]);
+    const actorBJob = handle.sqlite.prepare(`SELECT job_id AS jobId
+      FROM campaign_play_actor_jobs WHERE campaign_id = ? AND actor_id = 'actor-b'`)
+      .get(CAMPAIGN_ID) as { jobId: string };
+
+    const outcomes = processDueActors(createCampaignPlayActorProposalService(handle, {
+      now: () => 1_700,
+    }), {
+      turnId: token.turnId,
+      token,
+      createdAt: 1_700,
+      openingExposureSeed: TEST_EXPOSURE_SEED,
+    });
+    const actorBOutcome = outcomes.find((outcome) => outcome.jobId === actorBJob.jobId);
+    expect(actorBOutcome).toMatchObject({ kind: "settled" });
+
+    expect(handle.sqlite.prepare(`SELECT status, result_json AS resultJson
+      FROM campaign_play_actor_proposals
+      WHERE campaign_id = ? AND actor_id = 'actor-b'`).get(CAMPAIGN_ID)).toMatchObject({
+      status: "accepted",
+      resultJson: expect.stringContaining("accepted"),
+    });
+    expect(handle.sqlite.prepare(`SELECT stage, proposal_id AS proposalId
+      FROM campaign_play_actor_jobs
+      WHERE campaign_id = ? AND actor_id = 'actor-b'`).get(CAMPAIGN_ID)).toMatchObject({
+      stage: "settled",
+      proposalId: expect.any(String),
+    });
+    expect(handle.sqlite.prepare(`SELECT status, resolution_turn_id AS resolutionTurnId,
+        resolution_event_id AS resolutionEventId
+      FROM campaign_play_decisions WHERE campaign_id = ?`).get(CAMPAIGN_ID)).toEqual({
+      status: "accepted",
+      resolutionTurnId: "turn-player",
+      resolutionEventId: "fixture-decision-resolve-event",
+    });
+
+    const after = {
+      commands: countForCampaign(handle, "campaign_play_commands"),
+      receipts: countForCampaign(handle, "campaign_play_receipts"),
+      events: countForCampaign(handle, "campaign_play_events"),
+      runtimeEvents: countForCampaign(handle, "campaign_play_runtime_events"),
+      authority: states.loadState()!.authority,
+    };
+    expect(after.commands).toBeGreaterThan(before.commands);
+    expect(after.receipts).toBeGreaterThan(before.receipts);
+    expect(after.events).toBeGreaterThan(before.events);
+    expect(after.runtimeEvents).toBeGreaterThan(before.runtimeEvents);
+    expect(after.authority.worldVersion).toBe(baseWorldVersion);
+    expect(after.authority.runtimeRevision).toBeGreaterThan(0);
+
+    const secondPass = processDueActors(createCampaignPlayActorProposalService(handle, {
+      now: () => 1_701,
+    }), {
+      turnId: token.turnId,
+      token,
+      createdAt: 1_701,
+      openingExposureSeed: TEST_EXPOSURE_SEED,
+    });
+    expect(secondPass).toEqual([]);
+    expect({
+      commands: countForCampaign(handle, "campaign_play_commands"),
+      receipts: countForCampaign(handle, "campaign_play_receipts"),
+      events: countForCampaign(handle, "campaign_play_events"),
+      runtimeEvents: countForCampaign(handle, "campaign_play_runtime_events"),
+    }).toEqual({
+      commands: after.commands,
+      receipts: after.receipts,
+      events: after.events,
+      runtimeEvents: after.runtimeEvents,
+    });
   });
 
   it("does not reuse the opening consequence after an actor replan", () => {

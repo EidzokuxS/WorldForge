@@ -309,6 +309,10 @@ const premiseDivergenceSchema = z.object({
 
 const worldgenResearchArtifactPayloadSchema = worldgenResearchArtifactSchema.nullable().optional();
 
+const playerIdentitySchema = z.object({
+  displayName: z.string().trim().min(1).max(200),
+}).strict();
+
 export const createCampaignSchema = createCampaignBaseSchema.extend({
   ipContext: ipContextSchema,
   premiseDivergence: premiseDivergenceSchema,
@@ -320,6 +324,7 @@ export const createCampaignSchema = createCampaignBaseSchema.extend({
     .optional(),
   worldgenResearchEnabled: z.boolean().optional(),
   worldbookSelection: z.array(worldbookSelectionSchema).optional(),
+  playerIdentity: playerIdentitySchema.optional(),
 });
 
 export const suggestSeedSchema = z.object({

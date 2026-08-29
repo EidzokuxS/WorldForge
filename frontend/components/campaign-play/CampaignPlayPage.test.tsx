@@ -87,6 +87,7 @@ function state(
     visiblePressures: [],
     possessions: [],
     obligations: [],
+    commitments: [],
     narration: hasSettledScene ? {
       narrationId: "narration-0",
       turnId: "opening-1",
@@ -99,6 +100,7 @@ function state(
     narrationOperation: null,
     utilityActions: [],
     consequences: [],
+    decisionOutcomes: [],
     activeTurn,
     journalCursor: 0,
     projectionHash: "a".repeat(64),
@@ -258,10 +260,10 @@ afterEach(() => {
 });
 
 describe("CampaignPlayPage durable state", () => {
-  it("keeps actions usable after narration failure and recovers the exact visible result", async () => {
+  it("keeps failed narration recover-only until a proper scene exists", async () => {
     const fallback = state("ready");
     fallback.narration = null;
-    fallback.narrationOperation = {
+    const failedOperation: NonNullable<CampaignPlayState["narrationOperation"]> = {
       operationId: "narration-operation-1",
       resultId: "result-1",
       turnId: "turn-1",
@@ -278,14 +280,56 @@ describe("CampaignPlayPage durable state", () => {
       createdAt: 200,
       completedAt: null,
     };
-    api.loadState.mockResolvedValue(fallback);
-    api.loadTurn.mockResolvedValue(turnRead("completed"));
-    render(<CampaignPlayPage campaignId="campaign-1" />);
+    fallback.narrationOperation = failedOperation;
+    const running = state("ready");
+    running.narration = null;
+    running.narrationOperation = {
+      ...failedOperation,
+      status: "running",
+      attemptId: "narration-attempt-2",
+      attempt: 2,
+    };
+    const complete = state("ready");
+    complete.narration = {
+      narrationId: "narration-1",
+      turnId: "turn-1",
+      beats: [{ beatId: "beat-recovered", text: "The recovered signal answers." }],
+      displayText: "The recovered signal answers.",
+      suggestedActions: [{ choiceHandle: "choice-recovered", label: "Follow the recovered signal" }],
+      effects: [],
+      createdAt: 300,
+    };
+    complete.narrationOperation = {
+      ...failedOperation,
+      status: "complete",
+      attemptId: "narration-attempt-2",
+      attempt: 2,
+      conciseResult: {
+        displayText: complete.narration.displayText,
+        suggestedActions: complete.narration.suggestedActions,
+      },
+      completedAt: 300,
+    };
+    const completeTurn = completedTurnReadWithOperation(complete.narrationOperation, 3);
+    if (completeTurn.result.status === "completed") {
+      completeTurn.result.narration = complete.narration;
+    }
+    let releaseComplete!: (nextState: CampaignPlayState) => void;
+    const completeState = new Promise<CampaignPlayState>((resolve) => {
+      releaseComplete = resolve;
+    });
+    api.loadState
+      .mockResolvedValueOnce(fallback)
+      .mockResolvedValueOnce(running)
+      .mockReturnValueOnce(completeState);
+    api.loadTurn.mockResolvedValue(completeTurn);
+    render(<CampaignPlayPage campaignId="campaign-1" reconnectDelayMilliseconds={0} />);
 
     expect(await screen.findByText(fallback.narrationOperation.conciseResult.displayText))
       .toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Your action" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: /Follow the north signal/ })).toBeEnabled();
+    expect(screen.getByRole("textbox", { name: "Your action" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /Follow the north signal/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Restore the telling" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Restore the telling" }));
 
     await waitFor(() => expect(api.recoverNarration).toHaveBeenCalledWith(
@@ -299,7 +343,16 @@ describe("CampaignPlayPage durable state", () => {
         receiptIds: ["receipt-1"],
       },
     ));
+    expect(api.recoverNarration).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Restoring" }))
+      .toBeDisabled());
+    expect(screen.queryByRole("button", { name: "Restore the telling" })).not.toBeInTheDocument();
+    await act(async () => {
+      releaseComplete(complete);
+    });
+    expect(await screen.findByText(complete.narration.displayText)).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Your action" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Follow the recovered signal" })).toBeEnabled();
   });
 
   it("offers a working retry when the initial state load fails", async () => {
@@ -412,6 +465,41 @@ describe("CampaignPlayPage durable state", () => {
       expectedRuntimeRevision: 4,
     }, { signal: expect.any(AbortSignal) }));
     expect(document.body).not.toHaveTextContent("choice-hidden");
+  });
+
+  it("admits a receivable collection control with its exact obligation binding", async () => {
+    const ready = state("ready");
+    ready.narration!.suggestedActions = [{
+      choiceHandle: "choice-collect",
+      label: "Collect 12 copper from Aldous Crane",
+      obligationBinding: {
+        obligationHandle: "obligation-visible",
+        debtorHandle: "actor-aldous",
+        creditorHandle: "actor-player",
+        unitKey: "copper",
+        amount: 12,
+      },
+    }];
+    api.loadState.mockResolvedValue(ready);
+    api.admitTurn.mockResolvedValue({ turnId: "turn-collect", sequence: 1 });
+    render(<CampaignPlayPage campaignId="campaign-1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Collect 12 copper from Aldous Crane" }));
+
+    await waitFor(() => expect(api.admitTurn).toHaveBeenCalledWith("campaign-1", {
+      source: "suggested",
+      idempotencyKey: "request-1",
+      choiceHandle: "choice-collect",
+      obligationBinding: {
+        obligationHandle: "obligation-visible",
+        debtorHandle: "actor-aldous",
+        creditorHandle: "actor-player",
+        unitKey: "copper",
+        amount: 12,
+      },
+      expectedWorldVersion: 3,
+      expectedRuntimeRevision: 4,
+    }, { signal: expect.any(AbortSignal) }));
   });
 
   it("opens earned journal entries through the campaign loader", async () => {

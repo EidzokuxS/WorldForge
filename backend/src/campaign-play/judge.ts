@@ -4,6 +4,7 @@ import { z, type ZodType } from "zod";
 import {
   CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES,
   CAMPAIGN_PLAY_LIMITS,
+  type CampaignPlayCommitmentBinding,
   type PlayerIntent,
 } from "@worldforge/shared";
 import {
@@ -23,6 +24,7 @@ import {
 import { createLogger } from "../lib/index.js";
 import {
   CAMPAIGN_PLAY_RESULT_TIER_VALUES,
+  campaignPlayCommitmentBindingSchema,
   campaignPlayElapsedBoundsSchema,
   campaignPlayJudgmentDispositionSchema,
   campaignPlayResultBoundsSchema,
@@ -100,12 +102,36 @@ const JUDGE_SCHEMA_OWNED_MESSAGES = new Set([
   "Required possession effect must be reachable inside the result bounds.",
   "Required obligation effect must be reachable inside the result bounds.",
 ]);
+const JUDGE_SEMANTIC_CHECK_PATHS = {
+  visible_actor_reactions: ["visibleActorReactions"],
+  duplicate_targets: ["targets"],
+  normalized_limits: ["targets"],
+  visible_authority: ["targets"],
+  possession_authority: ["possessionEffectAuthority"],
+  obligation_authority: ["requiredObligationEffect"],
+  contact_target_authority: ["targets"],
+  movement_route_visibility: ["movementRouteHandle"],
+  move_route_authority: ["movementRouteHandle"],
+  restricted_route_authority: ["movementRouteHandle"],
+  suggested_choice_authority: ["targets"],
+  suggested_route_authority: ["movementRouteHandle"],
+  suggested_wait_authority: ["elapsedBounds"],
+  deterministic_bounds: ["resultBounds"],
+  uncertain_bounds: ["resultBounds"],
+  no_effect_bounds: ["resultBounds"],
+  commitment_target_authority: ["targets"],
+  commitment_effect_authority: ["possessionEffectAuthority"],
+  commitment_obligation_authority: ["requiredObligationEffect"],
+} as const;
+type CampaignPlayJudgeSemanticCheck = keyof typeof JUDGE_SEMANTIC_CHECK_PATHS;
+const JUDGE_SEMANTIC_CHECKS = new Set<string>(Object.keys(JUDGE_SEMANTIC_CHECK_PATHS));
 
 type CampaignPlayJudgeContractIssue = {
   readonly issueIndex?: number;
   readonly code: string;
   readonly path: readonly unknown[];
   readonly message?: string;
+  readonly check?: string;
 };
 
 type CampaignPlayJudgeContractDiagnosticEmitter = (
@@ -141,6 +167,7 @@ function sanitizeJudgeContractIssues(
       code: string;
       path?: readonly (string | number)[];
       message?: string;
+      check?: string;
     } = {
       issueIndex: issue.issueIndex ?? issueIndex,
       code: issue.code,
@@ -149,6 +176,9 @@ function sanitizeJudgeContractIssues(
     if (path !== undefined) sanitized.path = path;
     if (issue.message !== undefined && JUDGE_SCHEMA_OWNED_MESSAGES.has(issue.message)) {
       sanitized.message = issue.message;
+    }
+    if (issue.check !== undefined && JUDGE_SEMANTIC_CHECKS.has(issue.check)) {
+      sanitized.check = issue.check;
     }
     return sanitized;
   });
@@ -176,10 +206,49 @@ export interface CampaignPlayJudgeRecoveryIssue {
   readonly code: string;
   readonly path?: readonly (string | number)[];
   readonly message?: string;
+  readonly check?: string;
 }
 
 export interface CampaignPlayJudgeRecoveryFeedback {
   readonly issues: readonly CampaignPlayJudgeRecoveryIssue[];
+}
+
+type CampaignPlayJudgeRecoveryInstructionClass =
+  | "copy_exact_reaction_catalog"
+  | "copy_exact_citation_catalog"
+  | "non_empty_reaction_line";
+
+function recoveryInstructionClassesFromIssues(
+  issues: readonly CampaignPlayJudgeRecoveryIssue[],
+): readonly CampaignPlayJudgeRecoveryInstructionClass[] {
+  const classes = new Set<CampaignPlayJudgeRecoveryInstructionClass>();
+  for (const issue of issues) {
+    const path = issue.path;
+    if (
+      path?.length === 3
+      && path[0] === "visibleActorReactions"
+      && typeof path[1] === "number"
+      && path[2] === "actorHandle"
+    ) {
+      classes.add("copy_exact_reaction_catalog");
+    }
+    if (
+      path?.length === 3
+      && path[0] === "visibleActorReactions"
+      && typeof path[1] === "number"
+      && path[2] === "reason"
+    ) {
+      classes.add("non_empty_reaction_line");
+    }
+    if (
+      path?.length === 2
+      && path[0] === "citedVisibleFactHandles"
+      && typeof path[1] === "number"
+    ) {
+      classes.add("copy_exact_citation_catalog");
+    }
+  }
+  return [...classes];
 }
 
 const line = (maximum: number) => z.string().min(1).max(maximum)
@@ -792,6 +861,9 @@ export interface CampaignPlayJudgeInput {
     kind: PlayerIntent["kind"];
     targets: PlayerIntent["targets"];
   } | null;
+  commitmentBinding?: CampaignPlayCommitmentBinding;
+  commitmentFeeAmount?: number;
+  commitmentPossessionHandle?: string | null;
 }
 
 export interface CampaignPlayModelBudget {
@@ -878,6 +950,22 @@ export function getCampaignPlayJudgeRecoveryFeedback(
   return error instanceof CampaignPlayJudgeError
     ? judgeRecoveryFeedbackByError.get(error)
     : undefined;
+}
+
+function rejectJudgeSemanticContract(
+  check: CampaignPlayJudgeSemanticCheck,
+  emitContractDiagnostic?: CampaignPlayJudgeContractDiagnosticEmitter,
+): never {
+  const issue: CampaignPlayJudgeContractIssue = {
+    issueIndex: 0,
+    code: "custom",
+    path: JUDGE_SEMANTIC_CHECK_PATHS[check],
+    check,
+  };
+  emitContractDiagnostic?.([issue]);
+  const error = new CampaignPlayJudgeError("model_contract_failed", null);
+  rememberJudgeRecoveryFeedback(error, recoveryFeedbackFromIssues([issue]));
+  throw error;
 }
 
 interface CampaignPlayJudgeDependencies { generateObject: typeof safeGenerateObject }
@@ -1002,6 +1090,12 @@ function prompt(
   const visibleActorReactionHandles = frame.visibleFacts
     .filter((fact) => fact.kind === "actor" && fact.handle !== frame.playerActorHandle)
     .map((fact) => fact.handle);
+  const citationHandleCatalog = citationHandles.map((handle, index) => ({ index, handle }));
+  const visibleActorReactionHandleCatalog = visibleActorReactionHandles
+    .map((actorHandle, index) => ({ index, actorHandle }));
+  const recoveryInstructionClasses = recoveryFeedback === undefined
+    ? []
+    : recoveryInstructionClassesFromIssues(recoveryFeedback.issues);
   const visibleFrame = {
     playerActorHandle: frame.playerActorHandle,
     locationHandle: frame.locationHandle,
@@ -1014,10 +1108,12 @@ function prompt(
     "SOURCE_MOMENT is continuity context, not new mechanical authority. Use VISIBLE_FRAME for player-accessible mechanical facts and ACTOR_CONTINUITY for protected truth about a visible actor's own completed actions. ACTOR_CONTINUITY outranks dialogue about that actor's authorship or knowledge, but it never overrides the current visible placement or condition of an object in SOURCE_MOMENT. Only a later supplied visible fact may change that physical state. Extracted from silt does not mean removed from the current location; never make a visible object vanish or move without explicit evidence.",
     "PLAYER_PROFILE is protected authority for the player's durable identity, history, and capabilities. Use it when relevant to feasibility or uncertainty. Do not contradict it or treat omission from VISIBLE_FRAME as evidence that the player lacks the supplied history or capability. It does not establish current possession, condition, access, relationship, world state, or what any nonplayer actor knows.",
     "Any nonplayer actor listed in TARGET_CATALOG is currently visible and reachable in VISIBLE_FRAME. Treat that as placement authority. SOURCE_MOMENT may show an intention or gesture, but it cannot establish that this actor departed. A contact action targeting that actor without travel cannot be impossible because older prose says the actor left.",
-    "Every targets entry must copy one exact {handle, kind} pair from TARGET_CATALOG. When a visible nonplayer actor explicitly participates in PLAYER_INPUT as an addressee, companion, or performer, copy that actor's exact pair into targets. For freeform movement with a named willing companion, include the movement destination and the companion actor in targets. For suggested movement, the frozen route already carries the destination: copy it and never add the destination location as another target. Citing the actor does not make the actor a target and cannot replace this entry. Observation and choice handles are not world targets: cite a relevant observation in citedVisibleFactHandles and target its visible location, actor, route, pressure, or possession instead. A detail described only in SOURCE_MOMENT or an observation has no separate object handle; never invent one. Every citation must be copied from CITATION_HANDLES.",
+    "Every targets entry must copy one exact {handle, kind} pair from TARGET_CATALOG. When a visible nonplayer actor explicitly participates in PLAYER_INPUT as an addressee, companion, or performer, copy that actor's exact pair into targets. For freeform movement with a named willing companion, include the movement destination and the companion actor in targets. For suggested movement, the frozen route already carries the destination: copy it and never add the destination location as another target. Citing the actor does not make the actor a target and cannot replace this entry. Observation and choice handles are not world targets: cite a relevant observation in citedVisibleFactHandles and target its visible location, actor, route, pressure, or possession instead. A detail described only in SOURCE_MOMENT or an observation has no separate object handle; never invent one. Every citation must be copied from CITATION_HANDLES and CITATION_HANDLE_CATALOG.",
     "When a no-travel PLAYER_INPUT asks about the topology, direction, openness, restriction, toll, checkpoint, permission, credential, or access requirement of one visible route, copy that route's exact TARGET_CATALOG pair into targets. Keep a visible actor addressee as a separate actor target. Citing the route does not replace the route target.",
     "When a no-travel contact asks generally about passage, clearance, stamping, permits, tolls, or fees without identifying one visible route, keep only the spoken addressee or addressees in targets and copy every handle in VISIBLE_ROUTES to citedVisibleFactHandles. This supplies the complete local route authority for the answer; it does not authorize movement or establish any requirement.",
-    `visibleActorReactions length must be exactly ${visibleActorReactionHandles.length}. Keep the same order as VISIBLE_ACTOR_REACTION_HANDLES and copy each listed handle once. Every entry requires a non-empty reason string, including reaction none; reason is never null or empty.`,
+    "COPY_EXACT=Copy every visibleActorReactions[].actorHandle exactly from VISIBLE_ACTOR_REACTION_HANDLE_CATALOG at the same array index. Copy every selected citedVisibleFactHandles token exactly from CITATION_HANDLE_CATALOG; preserve the catalog's canonical handle spelling and the selected citation order.",
+    "REACTION_REASON_NON_EMPTY=Every visibleActorReactions entry requires a non-empty single-line reason, including reaction none; reason is never null or empty.",
+    `visibleActorReactions length must be exactly ${visibleActorReactionHandles.length}. Keep the same order as VISIBLE_ACTOR_REACTION_HANDLES and VISIBLE_ACTOR_REACTION_HANDLE_CATALOG and copy each listed handle once. Every entry requires a non-empty reason string, including reaction none; reason is never null or empty.`,
     `Evaluate every visible nonplayer actor exactly once in visibleActorReactions. Use reaction immediate when the actor is an addressee, companion, performer, or when VISIBLE_FRAME, SOURCE_MOMENT, or ACTOR_CONTINUITY concretely establishes that the current action interferes with that actor's stated leverage, work, possession, safety, or immediate objective. This applies to the attempted interference itself even when its mechanical disposition is impossible or its result is no_effect. Copy the strongest supporting visible fact handle when one exists; otherwise use ${transportNull}. Use none with a ${transportNull} supporting handle for a mere witness or actor with no established stake, and explain that absence briefly in reason. Never infer a hidden stake or include a remote actor. Code will add every immediate actor to normalized targets without changing the player's action or deciding the actor's response.`,
     "Classify the action as deterministic, uncertain, impossible, or clarification_required.",
     "PLAYER_INPUT does not authorize the Judge or Game Master to choose for the player. When accepting, signing up, selecting, ordering, taking, or committing requires a choice between two or more visible mutually exclusive alternatives and PLAYER_INPUT does not name one, use clarification_required and ask which alternative. Never infer the choice from list order, convenience, equipment, goals, or likely benefit.",
@@ -1058,6 +1154,11 @@ function prompt(
     `possessionEffectAuthority is Judge-owned mechanical authority, not prose. Use kind adjust_actor_possession when an actionable result at or above minimumResult must or may acquire a countable possession, spend one, or durably transform an existing retained possession. enforcement is required when the accepted outcome itself entails the transition; it is permitted only when a targeted present actor may choose whether to transfer an item while responding. A plain request for an item uses permitted acquire so the Game Master can grant or refuse it without inventing inventory authority. Writing measurements or other usable records into a visible notebook, form, chart, ledger, or similar retained object is required transform with that exact possession handle and quantity 1. The exact notebook shape is {\"kind\":\"adjust_actor_possession\",\"enforcement\":\"required\",\"operation\":\"transform\",\"possessionHandle\":\"copied visible handle\",\"quantity\":1,\"minimumResult\":\"lowest applicable tier\"}. operation accepts only acquire, spend, or transform; there is no adjustment field. Set minimumResult to the lowest result tier that authorizes the retained change. Use acquire with ${transportNull} possessionHandle for a new item; spend or transform with an exact visible possession handle for an existing item. Cite every ${transportNonNull} possessionHandle in citedVisibleFactHandles. Use kind none when no durable possession change is inside the action's authority. Impossible and clarification rulings always use none.`,
     "A positive possession entry in VISIBLE_FRAME is the only authority that the player currently controls a tool or material. DEPLETED_PLAYER_POSSESSIONS names player-owned stacks whose exact quantity is zero; they are unavailable and have no usable handle. A general tool possession authorizes only the tools it names, never raw material, fasteners, ammunition, medicine, food, fuel, currency, or another consumable. A work assignment, posted supply list, visible stock, offer, request, dialogue, handling, transport, or narration does not issue supplies to the player. If PLAYER_INPUT directly uses a tool or consumable that is depleted or has no visible possession handle, classify it as impossible and identify the missing material basis in reason; do not add that material to method or stakes. A request to a targeted present actor for that item is contact, not direct use: authorize a permitted acquire instead of assuming either transfer or refusal. When a visible possession is consumed or materially changed, possessionEffectAuthority must use required spend or transform with that exact cited handle. Putting newly collected contents into a visible container possession, filling it, or sealing it materially changes that retained possession: require transform of the exact container handle, never acquire the contents as a separate possession while leaving the container stack unchanged. Quantity counts indivisible Rulebook stack units. A plural or kit-like possession at quantity 1 cannot become one used container, unspecified remaining containers, and a separate new possession. Transform the complete quantity-1 stack; the resulting possession may describe both the retained set and its contained sample.",
     "requiredObligationEffect is Judge-owned mechanical intent, not prose. Use incur_actor_obligation when an actionable result at or above minimumResult creates a definite copper debt between the player and one targeted visible nonplayer actor. Copy both exact actor handles into debtorHandle and creditorHandle, cite both, and preserve the direction: the actor who must pay is the debtor. Completed player work with a definite unpaid fee creates nonplayer-to-player debt; a definite charge accepted by the player creates player-to-nonplayer debt. Its exact shape is {\"kind\":\"incur_actor_obligation\",\"debtorHandle\":\"copied actor handle\",\"creditorHandle\":\"copied actor handle\",\"unitKey\":\"copper\",\"amount\":2,\"minimumResult\":\"success\"}. amount is the newly incurred amount, not the running total. Use pay_actor_obligation only when the player is the debtor and the resolved action physically transfers a positive amount from one cited visible player copper possession against one cited payable obligation. Copy debtorHandle, creditorHandle, obligationHandle, and paymentPossessionHandle exactly and cite all four. Its exact shape is {\"kind\":\"pay_actor_obligation\",\"debtorHandle\":\"copied player actor handle\",\"creditorHandle\":\"copied visible actor handle\",\"obligationHandle\":\"copied payable obligation handle\",\"paymentPossessionHandle\":\"copied visible possession handle\",\"unitKey\":\"copper\",\"amount\":2,\"minimumResult\":\"success\"}. A nonplayer cannot pay from an undisclosed or nonexistent possession during a player action; record the definite unpaid amount as debt and leave later payment to that actor's own sourced action. Accepting offered work, including work that quotes an upfront or completion fee, is not completed work and does not itself transfer money or create a debt; use kind none. A request, offer, promise, quote, cargo movement, or narration without an authoritative transfer neither incurs nor pays debt. Use none when no binding debt changes. Impossible and clarification rulings always use none.",
+    ...(input.commitmentBinding === undefined
+      ? []
+      : [input.commitmentBinding.action === "collect"
+        ? `COMMITMENT_BINDING=This frozen paid-delivery collection is for commitment ${input.commitmentBinding.commitmentHandle}; target the exact counterparty ${input.commitmentBinding.counterpartyHandle}, preserve the exact subject name ${JSON.stringify(input.commitmentBinding.subjectName)}, and cite the counterparty. At a result reaching success, use permitted acquire of exactly quantity 1 with a null possessionHandle; this is the only possible cargo transfer and the Game Master may refuse it. requiredObligationEffect is exactly none. Do not invent custody, completion, payment, or debt.`
+        : `COMMITMENT_BINDING=This frozen paid-delivery delivery is at exact destination ${input.commitmentBinding.destinationHandle} for exact subject ${JSON.stringify(input.commitmentBinding.subjectName)}. At a result reaching success, use required spend of exactly quantity 1 from the code-supplied possession handle ${JSON.stringify(input.commitmentPossessionHandle)} and incur exactly ${input.commitmentFeeAmount ?? "the code-supplied"} copper from counterparty ${input.commitmentBinding.counterpartyHandle} to player ${frame.playerActorHandle}, with minimumResult success. Cite the exact destination, possession, and both actor handles. The compiler appends completion after these two effects; never select a commitment, party, amount, or completion field. Below success use none for both effects and create no cargo, debt, or completion.`]),
     "PLAYER_INPUT stakes ask what the player hopes to learn or accomplish; they are not evidence and do not authorize an answer. For observation, authorize only conclusions supported by SOURCE_MOMENT, VISIBLE_FRAME, or ACTOR_CONTINUITY. Preserve unknown authorship, motive, provenance, prior contents, and hidden causes. A clean, empty, missing, or disturbed surface proves only its currently observable state; it does not prove that something existed, was found, removed, stolen, concealed, or carried away.",
     "The reason field explains feasibility and result bounds. It must not add world facts beyond the supplied frames or resolve an uncertainty that the visible evidence leaves open.",
     "ACTOR_CONTINUITY outranks any conflicting earlier dialogue in VISIBLE_FRAME for authorship and actor knowledge of its own actions. Never cite a prior denial to erase an own action; Judge the current request from the accepted action truth and preserve any separate uncertainty, privacy, or willingness to disclose.",
@@ -1076,6 +1177,8 @@ function prompt(
     `VISIBLE_ROUTES=${JSON.stringify(frame.visibleRoutes)}`,
     `CITATION_HANDLES=${JSON.stringify(citationHandles)}`,
     `VISIBLE_ACTOR_REACTION_HANDLES=${JSON.stringify(visibleActorReactionHandles)}`,
+    `CITATION_HANDLE_CATALOG=${JSON.stringify(citationHandleCatalog)}`,
+    `VISIBLE_ACTOR_REACTION_HANDLE_CATALOG=${JSON.stringify(visibleActorReactionHandleCatalog)}`,
     `ACTOR_CONTINUITY=${JSON.stringify(frame.actorContinuity)}`,
     `INPUT_SOURCE=${input.source}`,
     `CHOICE_HANDLE=${JSON.stringify(input.choiceHandle)}`,
@@ -1094,6 +1197,20 @@ function prompt(
     );
   }
   if (recoveryFeedback !== undefined) {
+    if (recoveryInstructionClasses.length > 0) {
+      sections.push(
+        `RECOVERY_SCHEMA_INSTRUCTION_CLASSES=${JSON.stringify(recoveryInstructionClasses)}`,
+        ...(recoveryInstructionClasses.includes("copy_exact_reaction_catalog")
+          ? ["RECOVERY_COPY_EXACT_REACTION_CATALOG=COPY_EXACT each visibleActorReactions[i].actorHandle from VISIBLE_ACTOR_REACTION_HANDLE_CATALOG[i], preserving the indexed order."]
+          : []),
+        ...(recoveryInstructionClasses.includes("copy_exact_citation_catalog")
+          ? ["RECOVERY_COPY_EXACT_CITATION_CATALOG=COPY_EXACT each citedVisibleFactHandles entry from CITATION_HANDLE_CATALOG and preserve the selected citation order."]
+          : []),
+        ...(recoveryInstructionClasses.includes("non_empty_reaction_line")
+          ? ["RECOVERY_NON_EMPTY_REACTION_LINE=Provide a non-empty single-line reason for every visibleActorReactions entry, including reaction none."]
+          : []),
+      );
+    }
     sections.push(
       `RECOVERY_FINAL_VALIDATION_ISSUES=${JSON.stringify(recoveryFeedback.issues)}`,
       "RECOVERY_FINAL_VALIDATION_INSTRUCTION=These issues describe the prior rejected object and are not exhaustive or permission to retain any unverified field. Rebuild the complete ruling from the current frame; validate every required key, every disposition rule, and every supplied authority rule before returning one strict object.",
@@ -1124,6 +1241,97 @@ export function campaignPlaySuggestedTargetsAreAuthorized(input: {
     || (target.kind === "actor" && visibleNonplayerActors.has(target.handle)));
 }
 
+function validateCommitmentRuling(
+  frame: CampaignPlayJudgeFrame,
+  input: CampaignPlayJudgeInput,
+  proposal: z.infer<typeof judgeProposalSchema>,
+  emitContractDiagnostic?: CampaignPlayJudgeContractDiagnosticEmitter,
+): void {
+  const binding = input.commitmentBinding;
+  if (binding === undefined) {
+    if (input.commitmentFeeAmount !== undefined || input.commitmentPossessionHandle !== undefined) {
+      throw new CampaignPlayJudgeError("judge_input_invalid", null);
+    }
+    return;
+  }
+  const playerHandle = frame.playerActorHandle;
+  const resultRank = (result: CampaignPlayResultTier): number =>
+    CAMPAIGN_PLAY_RESULT_TIER_VALUES.indexOf(result);
+  const canReachSuccess = resultRank(proposal.resultBounds.maximum) >=
+    resultRank("success");
+  const targetMatches = binding.action === "collect"
+    ? proposal.targets.some((target) =>
+      target.kind === "actor" && target.handle === binding.counterpartyHandle)
+    : proposal.targets.some((target) =>
+      target.kind === "location" && target.handle === binding.destinationHandle);
+  if (
+    (binding.action === "collect" && proposal.kind !== "contact") ||
+    (binding.action === "deliver" && proposal.kind !== "attempt") ||
+    proposal.movementRouteHandle !== null ||
+    !targetMatches ||
+    !proposal.citedVisibleFactHandles.includes(
+      binding.action === "collect" ? binding.counterpartyHandle : binding.destinationHandle,
+    )
+  ) {
+    rejectJudgeSemanticContract("commitment_target_authority", emitContractDiagnostic);
+  }
+  if (binding.action === "collect") {
+    if (proposal.requiredObligationEffect.kind !== "none") {
+      rejectJudgeSemanticContract("commitment_obligation_authority", emitContractDiagnostic);
+    }
+    if (!canReachSuccess) {
+      if (proposal.possessionEffectAuthority.kind !== "none") {
+        rejectJudgeSemanticContract("commitment_effect_authority", emitContractDiagnostic);
+      }
+      return;
+    }
+    const possession = proposal.possessionEffectAuthority;
+    if (
+      possession.kind !== "adjust_actor_possession" ||
+      possession.enforcement !== "permitted" ||
+      possession.operation !== "acquire" ||
+      possession.possessionHandle !== null ||
+      possession.quantity !== 1 ||
+      possession.minimumResult !== "success"
+    ) {
+      rejectJudgeSemanticContract("commitment_effect_authority", emitContractDiagnostic);
+    }
+    return;
+  }
+  const feeAmount = input.commitmentFeeAmount;
+  const possessionHandle = input.commitmentPossessionHandle;
+  if (!isSafePositiveInteger(feeAmount) || possessionHandle === null || possessionHandle === undefined) {
+    throw new CampaignPlayJudgeError("judge_input_invalid", null);
+  }
+  if (!canReachSuccess) {
+    if (
+      proposal.possessionEffectAuthority.kind !== "none" ||
+      proposal.requiredObligationEffect.kind !== "none"
+    ) {
+      rejectJudgeSemanticContract("commitment_effect_authority", emitContractDiagnostic);
+    }
+    return;
+  }
+  const possession = proposal.possessionEffectAuthority;
+  const obligation = proposal.requiredObligationEffect;
+  if (
+    possession.kind !== "adjust_actor_possession" ||
+    possession.enforcement !== "required" ||
+    possession.operation !== "spend" ||
+    possession.possessionHandle !== possessionHandle ||
+    possession.quantity !== 1 ||
+    possession.minimumResult !== "success" ||
+    obligation.kind !== "incur_actor_obligation" ||
+    obligation.debtorHandle !== binding.counterpartyHandle ||
+    obligation.creditorHandle !== playerHandle ||
+    obligation.unitKey !== "copper" ||
+    obligation.amount !== feeAmount ||
+    obligation.minimumResult !== "success"
+  ) {
+    rejectJudgeSemanticContract("commitment_effect_authority", emitContractDiagnostic);
+  }
+}
+
 function compile(
   frame: CampaignPlayJudgeFrame,
   input: CampaignPlayJudgeInput,
@@ -1151,7 +1359,10 @@ function compile(
           message: "Frozen choice route authority must match its move or route-bound attempt.",
         });
       }
-    }).nullable().optional(),
+      }).nullable().optional(),
+    commitmentBinding: campaignPlayCommitmentBindingSchema.optional(),
+    commitmentFeeAmount: z.number().int().positive().max(CAMPAIGN_PLAY_LIMITS.possessionQuantity).optional(),
+    commitmentPossessionHandle: line(CAMPAIGN_PLAY_LIMITS.handle).nullable().optional(),
   }).strict().superRefine((value, context) => {
     if ((value.source === "suggested") !== (value.choiceHandle !== null)) {
       context.addIssue({ code: "custom", path: ["choiceHandle"], message: "Choice handle must match source." });
@@ -1181,11 +1392,11 @@ function compile(
       (entry.reaction === "none" && entry.supportingVisibleFactHandle !== null)
       || (entry.supportingVisibleFactHandle !== null && !visible.has(entry.supportingVisibleFactHandle)))
   ) {
-    throw new CampaignPlayJudgeError("model_contract_failed", null);
+    rejectJudgeSemanticContract("visible_actor_reactions", emitContractDiagnostic);
   }
   const targetKeys = proposal.targets.map((target) => `${target.kind}:${target.handle}`);
   if (new Set(targetKeys).size !== targetKeys.length) {
-    throw new CampaignPlayJudgeError("model_contract_failed", null);
+    rejectJudgeSemanticContract("duplicate_targets", emitContractDiagnostic);
   }
   const normalizedTargets = [...proposal.targets];
   const normalizedCitations = [...proposal.citedVisibleFactHandles];
@@ -1206,7 +1417,7 @@ function compile(
     normalizedTargets.length > CAMPAIGN_PLAY_LIMITS.targets
     || normalizedCitations.length > CAMPAIGN_PLAY_LIMITS.citedFacts
   ) {
-    throw new CampaignPlayJudgeError("model_contract_failed", null);
+    rejectJudgeSemanticContract("normalized_limits", emitContractDiagnostic);
   }
   proposal = {
     ...proposal,
@@ -1215,19 +1426,26 @@ function compile(
   };
   const targetsAreVisible = proposal.targets.every((target) => visible.get(target.handle) === target.kind);
   const citationsAreVisible = proposal.citedVisibleFactHandles.every((handle) => visible.has(handle));
-  if (!targetsAreVisible || !citationsAreVisible) throw new CampaignPlayJudgeError("model_contract_failed", null);
+  if (!targetsAreVisible || !citationsAreVisible) {
+    rejectJudgeSemanticContract("visible_authority", emitContractDiagnostic);
+  }
   if (proposal.possessionEffectAuthority.kind === "adjust_actor_possession") {
     const possessionHandle = proposal.possessionEffectAuthority.possessionHandle;
     if (
       (possessionHandle !== null && visible.get(possessionHandle) !== "possession")
       || (possessionHandle !== null && !proposal.citedVisibleFactHandles.includes(possessionHandle))
     ) {
-      throw new CampaignPlayJudgeError("model_contract_failed", null);
+      rejectJudgeSemanticContract("possession_authority", emitContractDiagnostic);
     }
   }
   if (proposal.requiredObligationEffect.kind === "incur_actor_obligation") {
     const debtorHandle = proposal.requiredObligationEffect.debtorHandle;
     const creditorHandle = proposal.requiredObligationEffect.creditorHandle;
+    const commitmentObligationBound = inputResult.data.commitmentBinding?.action === "deliver"
+      && debtorHandle === inputResult.data.commitmentBinding.counterpartyHandle
+      && creditorHandle === frameResult.data.playerActorHandle
+      && proposal.requiredObligationEffect.unitKey === "copper"
+      && proposal.requiredObligationEffect.amount === inputResult.data.commitmentFeeAmount;
     const nonplayerHandle = debtorHandle === frameResult.data.playerActorHandle
       ? creditorHandle
       : creditorHandle === frameResult.data.playerActorHandle
@@ -1240,10 +1458,11 @@ function compile(
       || visible.get(creditorHandle) !== "actor"
       || !proposal.citedVisibleFactHandles.includes(debtorHandle)
       || !proposal.citedVisibleFactHandles.includes(creditorHandle)
-      || !proposal.targets.some((target) =>
+      || (!commitmentObligationBound && !proposal.targets.some((target) =>
         target.kind === "actor" && target.handle === nonplayerHandle)
+      )
     ) {
-      throw new CampaignPlayJudgeError("model_contract_failed", null);
+      rejectJudgeSemanticContract("obligation_authority", emitContractDiagnostic);
     }
   }
   if (proposal.requiredObligationEffect.kind === "pay_actor_obligation") {
@@ -1265,7 +1484,7 @@ function compile(
       || !proposal.targets.some((target) =>
         target.kind === "actor" && target.handle === creditorHandle)
     ) {
-      throw new CampaignPlayJudgeError("model_contract_failed", null);
+      rejectJudgeSemanticContract("obligation_authority", emitContractDiagnostic);
     }
   }
   const actionableContact = proposal.kind === "contact"
@@ -1290,19 +1509,19 @@ function compile(
     && !hasVisibleNonplayerActorTarget
     && !hasAuthorizedAmbientContactTarget
   ) {
-    throw new CampaignPlayJudgeError("model_contract_failed", null);
+    rejectJudgeSemanticContract("contact_target_authority", emitContractDiagnostic);
   }
   const movementRouteIsVisible = proposal.movementRouteHandle === null
     || visible.get(proposal.movementRouteHandle) === "route";
   if (!movementRouteIsVisible) {
-    throw new CampaignPlayJudgeError("model_contract_failed", null);
+    rejectJudgeSemanticContract("movement_route_visibility", emitContractDiagnostic);
   }
   if (
     proposal.kind === "move" &&
     proposal.movementRouteHandle === null &&
     proposal.disposition !== "clarification_required"
   ) {
-    throw new CampaignPlayJudgeError("model_contract_failed", null);
+    rejectJudgeSemanticContract("move_route_authority", emitContractDiagnostic);
   }
   const movementRoute = proposal.movementRouteHandle === null
     ? null
@@ -1316,7 +1535,7 @@ function compile(
       proposal.kind !== "attempt"
       || (proposal.disposition === "deterministic" && !citedAccessBasis)
     ) {
-      throw new CampaignPlayJudgeError("model_contract_failed", null);
+      rejectJudgeSemanticContract("restricted_route_authority", emitContractDiagnostic);
     }
   }
   const actionElapsedBounds = proposal.disposition === "deterministic"
@@ -1357,9 +1576,9 @@ function compile(
         proposedTargets: proposal.targets,
         visibleFacts: frameResult.data.visibleFacts,
         playerActorHandle: frameResult.data.playerActorHandle,
-      });
+    });
     if (!proposalMatchesFrozenChoice) {
-      throw new CampaignPlayJudgeError("model_contract_failed", null);
+      rejectJudgeSemanticContract("suggested_choice_authority", emitContractDiagnostic);
     }
     const frozenRouteHandles = frozenChoice.targets
       .filter((target) => target.kind === "route")
@@ -1370,7 +1589,7 @@ function compile(
       ? frozenRouteHandles[0]!
       : null;
     if (proposal.movementRouteHandle !== expectedMovementRouteHandle) {
-      throw new CampaignPlayJudgeError("model_contract_failed", null);
+      rejectJudgeSemanticContract("suggested_route_authority", emitContractDiagnostic);
     }
     if (
       frozenChoice.kind === "wait" &&
@@ -1380,21 +1599,22 @@ function compile(
         proposal.elapsedBounds.maximumMinutes !== CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES
       )
     ) {
-      throw new CampaignPlayJudgeError("model_contract_failed", null);
+      rejectJudgeSemanticContract("suggested_wait_authority", emitContractDiagnostic);
     }
   }
   if (proposal.disposition === "deterministic"
     && proposal.resultBounds.minimum !== proposal.resultBounds.maximum) {
-    throw new CampaignPlayJudgeError("model_contract_failed", null);
+    rejectJudgeSemanticContract("deterministic_bounds", emitContractDiagnostic);
   }
   if (proposal.disposition === "uncertain"
     && proposal.resultBounds.minimum === proposal.resultBounds.maximum) {
-    throw new CampaignPlayJudgeError("model_contract_failed", null);
+    rejectJudgeSemanticContract("uncertain_bounds", emitContractDiagnostic);
   }
   if ((proposal.disposition === "impossible" || proposal.disposition === "clarification_required")
     && (proposal.resultBounds.minimum !== "no_effect" || proposal.resultBounds.maximum !== "no_effect")) {
-    throw new CampaignPlayJudgeError("model_contract_failed", null);
+    rejectJudgeSemanticContract("no_effect_bounds", emitContractDiagnostic);
   }
+  validateCommitmentRuling(frameResult.data, inputResult.data, proposal, emitContractDiagnostic);
   const normalizedIntent: PlayerIntent = {
     originalText: inputResult.data.originalText,
     source: inputResult.data.source,
@@ -1455,7 +1675,9 @@ export function createCampaignPlayJudge(
           prompt: prompt(
             parsedFrame.data,
             request.input,
-            request.attempt === 2 ? request.recoveryFeedback : undefined,
+            request.attempt !== undefined && request.attempt > 1
+              ? request.recoveryFeedback
+              : undefined,
             capability.primaryStrategy === "tool_mode" ? "tool_mode" : "native",
           ),
           temperature: request.temperature,

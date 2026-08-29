@@ -81,6 +81,7 @@ vi.mock("../../lib/index.js", () => {
 
 import {
   createCampaign,
+  parseCampaignPlayerIdentityClaim,
   loadCampaign,
   deleteCampaign,
   listCampaigns,
@@ -148,6 +149,39 @@ describe("readCampaignConfig", () => {
     expect(config.createdAt).toBe(1000);
   });
 
+  it("round-trips a structured player identity claim", () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "readFileSync").mockReturnValue(
+      JSON.stringify({
+        name: "Test",
+        premise: "A quest",
+        playerIdentity: { displayName: "  Brina Hael  " },
+        createdAt: 1000,
+      }),
+    );
+
+    expect(readCampaignConfig("test-id").playerIdentity).toEqual({
+      displayName: "Brina Hael",
+    });
+  });
+
+  it("rejects an invalid structured player identity claim", () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "readFileSync").mockReturnValue(
+      JSON.stringify({
+        name: "Test",
+        premise: "A quest",
+        playerIdentity: { displayName: "Brina Hael", extra: true },
+        createdAt: 1000,
+      }),
+    );
+
+    expect(() => readCampaignConfig("test-id")).toThrow("playerIdentity is invalid");
+    expect(() => parseCampaignPlayerIdentityClaim({ displayName: "   " })).toThrow(
+      "playerIdentity is invalid",
+    );
+  });
+
   it("throws 500 for config missing required fields", () => {
     vi.spyOn(fs, "existsSync").mockReturnValue(true);
     vi.spyOn(fs, "readFileSync").mockReturnValue(
@@ -206,6 +240,36 @@ describe("createCampaign", () => {
     expect(configCall).toBeDefined();
     const configData = JSON.parse(configCall![1] as string);
     expect(configData.worldbookSelection).toEqual(worldbookSelection);
+  });
+
+  it("writes the optional player identity claim into config.json", async () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "mkdirSync").mockImplementation(() => "");
+    const writeSpy = vi.spyOn(fs, "writeFileSync").mockImplementation(() => {});
+
+    await createCampaign("Name", "A quest", undefined, {
+      playerIdentity: { displayName: "  Brina Hael  " },
+    });
+
+    const configCall = writeSpy.mock.calls.find(
+      (c) => typeof c[0] === "string" && c[0].includes("config.json"),
+    );
+    expect(configCall).toBeDefined();
+    expect(JSON.parse(configCall![1] as string).playerIdentity).toEqual({
+      displayName: "Brina Hael",
+    });
+  });
+
+  it("rejects an invalid direct player identity before creating campaign files", async () => {
+    const mkdirSpy = vi.spyOn(fs, "mkdirSync").mockImplementation(() => "");
+
+    await expect(
+      createCampaign("Name", "A quest", undefined, {
+        playerIdentity: { displayName: "Brina Hael", extra: true } as never,
+      }),
+    ).rejects.toThrow("playerIdentity is invalid");
+
+    expect(mkdirSpy).not.toHaveBeenCalled();
   });
 
   it("creates campaign directory and vectors dir", async () => {

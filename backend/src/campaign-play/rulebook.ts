@@ -3,6 +3,12 @@ import {
   type CampaignPlaySetupPhase,
   type CampaignWorldReview,
 } from "@worldforge/shared";
+import type {
+  CampaignPlayDecisionDisposition,
+  CampaignPlayDecisionKind,
+  CampaignPlayDecisionStatus,
+  CampaignPlayPlayerCommitment,
+} from "@worldforge/shared";
 import {
   CAMPAIGN_PLAY_COMMAND_METADATA,
   rulebookCommandBatchSchema,
@@ -18,6 +24,7 @@ import {
   deriveCampaignPlayPossessionId,
   deriveCampaignPlayPossessionKey,
   deriveCampaignPlaySupportActorIds,
+  deriveCampaignPlayPublicHandle,
   hashCampaignPlayProjection,
   projectCampaignPlayMechanicalTruth,
 } from "./campaign-play-projection.js";
@@ -32,16 +39,46 @@ import type {
   CampaignPlayLivePressureState,
   CampaignPlayLiveRelation,
   CampaignPlayLiveRouteState,
+  CampaignPlayLivePendingDecision,
   CampaignPlayRuntimeLocation,
   CampaignPlayRuntimeRoute,
   CampaignPlayRuntimeActor,
 } from "./campaign-play-projection.js";
 
+export type CampaignPlayPendingDecision = CampaignPlayLivePendingDecision;
+
 export type CampaignPlayRulebookPurpose =
   | "character_bootstrap"
   | "opening"
   | "player_action"
-  | "actor_job";
+  | "actor_job"
+  | "commitment_execution";
+
+interface CampaignPlayRulebookCommitmentExecutionContextBase {
+  action: "collect" | "deliver";
+  commitmentKind: "paid_delivery" | "unpaid_delivery";
+  commitmentId: string;
+  performerActorId: string;
+  counterpartyActorId: string;
+  subjectName: string;
+  destinationLocationId: string;
+  destinationHandle: string;
+  possessionId: string | null;
+  sourceDecisionKey: string;
+  sourceTurnId: string;
+  sourceReceiptId: string;
+  commitmentWorldVersion: number;
+}
+
+export type CampaignPlayRulebookCommitmentExecutionContext =
+  | (CampaignPlayRulebookCommitmentExecutionContextBase & {
+      commitmentKind: "paid_delivery";
+      feeUnit: "copper";
+      feeAmount: number;
+    })
+  | (CampaignPlayRulebookCommitmentExecutionContextBase & {
+      commitmentKind: "unpaid_delivery";
+    });
 
 export interface CampaignPlayRulebookFrame {
   campaignId: string;
@@ -63,6 +100,8 @@ export interface CampaignPlayRulebookFrame {
   placements: CampaignPlayLivePlacement[];
   relations: CampaignPlayLiveRelation[];
   goals: CampaignPlayLiveGoal[];
+  pendingDecisions?: CampaignPlayPendingDecision[];
+  commitments: CampaignPlayPlayerCommitment[];
 }
 
 export interface CampaignPlayRulebookAuthority {
@@ -73,6 +112,7 @@ export interface CampaignPlayRulebookAuthority {
   authorizedRefs: CampaignPlayEntityRef[];
   witnessActorIds: string[];
   knownWorldEventIds: string[];
+  commitmentExecution?: CampaignPlayRulebookCommitmentExecutionContext;
 }
 
 export interface CampaignPlayRulebookPreflightInput {
@@ -119,6 +159,8 @@ export interface CampaignPlayRulebookSimulation {
   placements: CampaignPlayLivePlacement[];
   relations: CampaignPlayLiveRelation[];
   goals: CampaignPlayLiveGoal[];
+  pendingDecisions: CampaignPlayPendingDecision[];
+  commitments: CampaignPlayPlayerCommitment[];
 }
 
 export type CampaignPlayRulebookPreflightResult =
@@ -252,6 +294,9 @@ function validFrame(frame: CampaignPlayRulebookFrame): boolean {
     frame.placements.map((row) => row.placementId),
     frame.relations.map((row) => row.relationId),
     frame.goals.map((row) => row.goalId),
+    frame.pendingDecisions?.map((row) => row.decisionKey) ?? [],
+    frame.commitments.map((row) => row.commitmentId),
+    frame.commitments.map((row) => row.sourceDecisionKey),
   ].every(unique);
   const runtimeActorIds = new Set(frame.runtimeActors.map((actor) => actor.id));
   const allActorIdentityIds = [
@@ -282,18 +327,23 @@ function validFrame(frame: CampaignPlayRulebookFrame): boolean {
     : frame.placements.filter((placement) => placement.actorId === frame.human!.actorId);
   const openingPossessionsValid = frame.human !== null && frame.possessions.every((possession) =>
     possession.actorId === frame.human!.actorId && possession.quantity > 0);
+  const pendingDecisions = frame.pendingDecisions ?? [];
+  const decisionKeys = new Set(pendingDecisions.map((decision) => decision.decisionKey));
+  const commitments = frame.commitments;
+  const commitmentIds = new Set(commitments.map((commitment) => commitment.commitmentId));
   const expectedOpeningBaseVersion = frame.acceptedWorldVersion + 1 + frame.possessions.length;
   const expectedReadyMinimumVersion = frame.acceptedWorldVersion + 3 + world.pressures.length;
   const setupShapeValid = frame.setupPhase === "character_required"
     ? frame.human === null && frame.worldVersion === frame.acceptedWorldVersion
       && frame.worldTimeMinutes === null
       && frame.pressureStates.length === 0 && frame.possessions.length === 0
-      && frame.obligations.length === 0 && frame.runtimeActors.length === 0 && !playerPresent
+      && frame.obligations.length === 0 && frame.runtimeActors.length === 0
+      && commitments.length === 0 && !playerPresent
     : frame.setupPhase === "opening_required"
       ? frame.human !== null && frame.worldVersion === expectedOpeningBaseVersion
         && frame.worldTimeMinutes === null && playerPlacements.length === 0
         && frame.pressureStates.length === 0 && frame.runtimeActors.length === 0
-        && openingPossessionsValid
+        && commitments.length === 0 && openingPossessionsValid
       : frame.human !== null && frame.worldVersion >= expectedReadyMinimumVersion
         && frame.worldTimeMinutes !== null && playerPlacements.length === 1 && playerPresent
         && JSON.stringify(currentPressureIds) === JSON.stringify(pressureIds);
@@ -453,6 +503,114 @@ function validFrame(frame: CampaignPlayRulebookFrame): boolean {
     })
     && frame.runtimeActors.every((runtimeActor) =>
       frame.goals.filter((goal) => goal.actorId === runtimeActor.id).length === 1)
+    && pendingDecisions.every((decision) => {
+      const decisionActor = actorIds.has(decision.actorId)
+        && world.actors.some((candidate) => candidate.id === decision.actorId
+          && candidate.kind === "person" && candidate.controller === "agent")
+        || frame.runtimeActors.some((candidate) => candidate.id === decision.actorId);
+      const resolved = decision.status === "accepted" || decision.status === "declined";
+      return decisionKeys.has(decision.decisionKey)
+        && decisionActor
+        && (decision.kind === "offer" || decision.kind === "yes_no" || decision.kind === "demand")
+        && (decision.status === "open" || decision.status === "accepted" || decision.status === "declined")
+        && decision.actorHandle === deriveCampaignPlayPublicHandle(
+          "actor",
+          frame.campaignId,
+          decision.actorId,
+        )
+        && decision.actorHandle.length > 0
+        && decision.actorHandle === decision.actorHandle.trim()
+        && decision.actorHandle.length <= CAMPAIGN_PLAY_LIMITS.handle
+        && decision.sourceTurnId.length > 0
+        && decision.summary.length > 0
+        && decision.summary.length <= CAMPAIGN_PLAY_LIMITS.text
+        && decision.summary === decision.summary.trim()
+        && decision.acceptLabel.length > 0
+        && decision.acceptLabel.length <= CAMPAIGN_PLAY_LIMITS.label
+        && decision.acceptLabel === decision.acceptLabel.trim()
+        && decision.declineLabel.length > 0
+        && decision.declineLabel.length <= CAMPAIGN_PLAY_LIMITS.label
+        && decision.declineLabel === decision.declineLabel.trim()
+        && (resolved
+          ? decision.resolutionEventId !== null
+            && decision.resolutionDisposition === (decision.status === "accepted" ? "accept" : "decline")
+          : decision.resolutionEventId === null && decision.resolutionDisposition === null)
+        && (decision.resolutionEventId === null || decision.resolutionEventId.length > 0)
+        && Number.isInteger(decision.worldVersion)
+        && decision.worldVersion >= frame.acceptedWorldVersion
+        && decision.worldVersion <= frame.worldVersion;
+    })
+    && commitments.every((commitment) => {
+      const performer = commitment.performerActorId === frame.human?.actorId
+        ? { kind: "person" as const, controller: "human" as const }
+        : world.actors.find((candidate) => candidate.id === commitment.performerActorId)
+          ?? frame.runtimeActors.find((candidate) => candidate.id === commitment.performerActorId)
+          ?? null;
+      const counterparty = world.actors.find((candidate) => candidate.id === commitment.counterpartyActorId)
+        ?? frame.runtimeActors.find((candidate) => candidate.id === commitment.counterpartyActorId)
+        ?? null;
+      const sourceDecision = pendingDecisions.find((decision) =>
+        decision.decisionKey === commitment.sourceDecisionKey);
+      const destination = [...world.locations, ...frame.runtimeLocations].find((location) =>
+        deriveCampaignPlayPublicHandle("location", frame.campaignId, location.id)
+          === commitment.destinationHandle);
+      const deliveryEffect = sourceDecision?.acceptEffect?.kind === "paid_delivery" ||
+        sourceDecision?.acceptEffect?.kind === "unpaid_delivery"
+        ? sourceDecision.acceptEffect
+        : null;
+      const expectedDue = deliveryEffect?.dueInMinutes !== undefined
+        ? commitment.acceptedWorldTimeMinutes + deliveryEffect.dueInMinutes
+        : null;
+      const completionConsistent = commitment.status === "active"
+        ? commitment.completionTurnId === null && commitment.completionReceiptId === null
+        : commitment.completionTurnId !== null && commitment.completionReceiptId !== null;
+      const termsValid = commitment.kind === "paid_delivery"
+        ? deliveryEffect?.kind === "paid_delivery"
+          && commitment.feeUnit === deliveryEffect.feeUnit
+          && commitment.feeAmount === deliveryEffect.feeAmount
+          && commitment.paymentTiming === deliveryEffect.paymentTiming
+        : deliveryEffect?.kind === "unpaid_delivery";
+      return commitmentIds.has(commitment.commitmentId)
+        && performer?.kind === "person" && performer.controller === "human"
+        && counterparty?.kind === "person" && counterparty.controller === "agent"
+        && commitment.performerActorId === frame.human?.actorId
+        && commitment.counterpartyActorId !== commitment.performerActorId
+        && (commitment.kind === "paid_delivery" || commitment.kind === "unpaid_delivery")
+        && (commitment.status === "active" || commitment.status === "completed")
+        && commitment.title === commitment.title.trim()
+        && commitment.title.length > 0
+        && commitment.title.length <= CAMPAIGN_PLAY_LIMITS.label
+        && commitment.subjectName === commitment.subjectName.trim()
+        && commitment.subjectName.length > 0
+        && commitment.subjectName.length <= CAMPAIGN_PLAY_LIMITS.name
+        && destination !== undefined
+        && commitment.destinationHandle === deriveCampaignPlayPublicHandle(
+          "location", frame.campaignId, destination.id,
+        )
+        && Number.isInteger(commitment.acceptedWorldTimeMinutes)
+        && commitment.acceptedWorldTimeMinutes >= 0
+        && (commitment.dueWorldTimeMinutes === null
+          ? expectedDue === null
+          : commitment.dueWorldTimeMinutes === expectedDue
+            && commitment.dueWorldTimeMinutes >= commitment.acceptedWorldTimeMinutes)
+        && sourceDecision?.status === "accepted"
+        && sourceDecision.sourceTurnId === commitment.sourceTurnId
+        && sourceDecision.actorId === commitment.counterpartyActorId
+        && deliveryEffect?.title === commitment.title
+        && deliveryEffect.subjectName === commitment.subjectName
+        && deliveryEffect.destinationHandle === commitment.destinationHandle
+        && termsValid
+        && commitment.sourceReceiptId.length > 0
+        && Number.isInteger(commitment.worldVersion)
+        && commitment.worldVersion >= frame.acceptedWorldVersion
+        && commitment.worldVersion <= frame.worldVersion
+        && Number.isInteger(commitment.acceptedWorldTimeMinutes)
+        && Number.isInteger(commitment.createdAt)
+        && commitment.createdAt >= 0
+        && Number.isInteger(commitment.updatedAt)
+        && commitment.updatedAt >= commitment.createdAt
+        && completionConsistent;
+    })
     && world.pressures.every((pressure) =>
       pressure.actorIds.length + pressure.locationIds.length > 0
       && pressure.actorIds.every((actorId) => actorIds.has(actorId))
@@ -471,6 +629,7 @@ function expectedRoot(frame: CampaignPlayRulebookFrame, authority: CampaignPlayR
         && authority.rootParent.acceptedContentHash === frame.acceptedContentHash;
     case "opening":
     case "player_action":
+    case "commitment_execution":
       return authority.turnId !== null
         && authority.actorId === frame.human?.actorId
         && authority.rootParent.kind === "turn"
@@ -519,6 +678,35 @@ function validateAuthority(
       deny("invalid_authority", "Actor jobs require one schedulable agent actor.");
     }
   }
+  if (authority.purpose === "commitment_execution") {
+    const context = authority.commitmentExecution;
+    const paymentBindingValid = context?.commitmentKind === "unpaid_delivery"
+      || (context?.commitmentKind === "paid_delivery"
+        && context.feeUnit === "copper"
+        && Number.isInteger(context.feeAmount)
+        && context.feeAmount > 0);
+    if (
+      frame.setupPhase !== "ready"
+      || frame.worldTimeMinutes === null
+      || context === undefined
+      || ![context.commitmentId, context.performerActorId, context.counterpartyActorId,
+        context.subjectName, context.destinationLocationId, context.destinationHandle,
+        context.sourceDecisionKey, context.sourceTurnId,
+        context.sourceReceiptId].every((value) => typeof value === "string" && value.length > 0)
+      || !paymentBindingValid
+      || !Number.isInteger(context.commitmentWorldVersion)
+      || context.commitmentWorldVersion < frame.acceptedWorldVersion
+      || context.commitmentWorldVersion > frame.worldVersion
+      || (context.action !== "collect" && context.action !== "deliver")
+      || (context.action === "collect" && context.possessionId !== null)
+      || (context.action === "deliver"
+        && (typeof context.possessionId !== "string" || context.possessionId.length === 0))
+    ) {
+      deny("invalid_authority", "Commitment execution requires one complete code-owned commitment binding.");
+    }
+  } else if (authority.commitmentExecution !== undefined) {
+    deny("invalid_authority", "Commitment execution context is not valid for this authority purpose.");
+  }
   return new Set(authority.authorizedRefs.map(refKey));
 }
 
@@ -538,6 +726,8 @@ function cloneSimulation(frame: CampaignPlayRulebookFrame): CampaignPlayRulebook
     placements: structuredClone(frame.placements),
     relations: structuredClone(frame.relations),
     goals: structuredClone(frame.goals),
+    pendingDecisions: structuredClone(frame.pendingDecisions ?? []),
+    commitments: structuredClone(frame.commitments),
   };
 }
 
@@ -577,6 +767,8 @@ function entityExists(
     case "possession": return state.possessions.some((row) => row.possessionId === reference.id);
     case "obligation": return state.obligations.some((row) => row.obligationId === reference.id);
     case "world_event": return knownWorldEventIds.has(reference.id);
+    case "decision": return state.pendingDecisions.some((row) => row.decisionKey === reference.id);
+    case "commitment": return state.commitments.some((row) => row.commitmentId === reference.id);
   }
 }
 
@@ -670,6 +862,22 @@ function commandEntityRefs(
       ].filter((reference, index, values) =>
         values.findIndex((candidate) => refKey(candidate) === refKey(reference)) === index);
     }
+    case "settle_player_receivable": return [
+      ref("actor", command.debtorActorId),
+      ref("actor", command.creditorActorId),
+      ref("possession", command.creditorPossessionId),
+      ref("obligation", command.obligationId),
+      ...command.affectedRefs.filter((reference) =>
+        !(
+          (reference.kind === "actor" && (
+            reference.id === command.debtorActorId
+            || reference.id === command.creditorActorId
+          ))
+          || (reference.kind === "possession" && reference.id === command.creditorPossessionId)
+          || (reference.kind === "obligation" && reference.id === command.obligationId)
+        )),
+    ].filter((reference, index, values) =>
+      values.findIndex((candidate) => refKey(candidate) === refKey(reference)) === index);
     case "materialize_support_actor": return [
       ref("actor", command.actorId),
       ref("location", command.locationId),
@@ -683,6 +891,57 @@ function commandEntityRefs(
     ];
     case "initialize_world_time": return [];
     case "initialize_pressure_state": return [ref("pressure", command.pressureId)];
+    case "decision_open":
+    case "decision_resolve": return [
+      ref("actor", command.actorId),
+      ref("decision", command.decisionKey),
+    ];
+    case "create_player_commitment": {
+      const destination = [...frame.acceptedWorld.locations, ...state.runtimeLocations].find((location) =>
+        deriveCampaignPlayPublicHandle("location", frame.campaignId, location.id)
+          === command.destinationHandle);
+      return [
+        ref("commitment", command.commitmentId),
+        ref("actor", command.performerActorId),
+        ref("actor", command.counterpartyActorId),
+        ref("decision", command.sourceDecisionKey),
+        ...(destination ? [ref("location", destination.id)] : []),
+      ];
+    }
+    case "complete_player_commitment": {
+      const commitment = state.commitments.find((row) =>
+        row.commitmentId === command.commitmentId);
+      const performerActorId = commitment?.performerActorId ?? command.performerActorId;
+      const counterpartyActorId = commitment?.counterpartyActorId ?? command.counterpartyActorId;
+      const possessionId = commitment === undefined
+        ? command.deliveryPossessionId
+        : deriveCampaignPlayPossessionId(
+          frame.campaignId,
+          performerActorId,
+          deriveCampaignPlayPossessionKey(commitment.subjectName),
+        );
+      const destination = commitment === undefined
+        ? undefined
+        : [...frame.acceptedWorld.locations, ...state.runtimeLocations].find((location) =>
+          deriveCampaignPlayPublicHandle("location", frame.campaignId, location.id)
+            === commitment.destinationHandle);
+      const obligationId = commitment?.kind === "paid_delivery"
+        ? deriveCampaignPlayObligationId(
+            frame.campaignId,
+            commitment.counterpartyActorId,
+            commitment.performerActorId,
+            "copper",
+          )
+        : null;
+      return [
+        ref("commitment", command.commitmentId),
+        ref("actor", performerActorId),
+        ref("actor", counterpartyActorId),
+        ref("possession", possessionId),
+        ...(destination === undefined ? [] : [ref("location", destination.id)]),
+        ...(obligationId === null ? [] : [ref("obligation", obligationId)]),
+      ];
+    }
   }
 }
 
@@ -710,9 +969,27 @@ function expectedScopes(
     case "pay_actor_obligation": return refs.length >= 5
       ? { read: refs.slice(0, 5), write: [refs[2]!, refs[3]!, refs[4]!] }
       : { read: refs, write: [] };
+    case "settle_player_receivable": return {
+      read: refs.slice(0, 4),
+      write: [refs[2]!, refs[3]!],
+    };
     case "materialize_support_actor": return { read: [refs[1]!], write: refs };
     case "record_world_event": return { read: refs, write: [] };
     case "initialize_player_placement": return { read: refs, write: refs };
+    case "decision_open": return { read: [refs[0]!], write: [refs[1]!] };
+    case "decision_resolve": return { read: refs, write: [refs[1]!] };
+    case "create_player_commitment": return {
+      read: refs.slice(1),
+      write: [refs[0]!],
+    };
+    case "complete_player_commitment": return {
+      read: refs,
+      write: refs.length >= 6
+        ? [refs[3]!, refs[5]!, refs[0]!]
+        : refs.length >= 5
+          ? [refs[3]!, refs[0]!]
+          : [],
+    };
   }
 }
 
@@ -737,6 +1014,363 @@ function operativeActorLocations(
     .filter((placement) =>
       placement.actorId === actorId && placement.placementKind === "present")
     .map((placement) => placement.locationId);
+}
+
+function validatePaidDeliverySettlementInvariants(
+  frame: CampaignPlayRulebookFrame,
+  state: CampaignPlayRulebookSimulation,
+  commands: readonly RulebookBatchCommand[],
+): void {
+  const completionEntries = commands
+    .map((command, index) => ({ command, index }))
+    .filter((entry): entry is {
+      command: Extract<RulebookBatchCommand, { kind: "complete_player_commitment" }>;
+      index: number;
+    } => entry.command.kind === "complete_player_commitment");
+  if (completionEntries.length === 0) return;
+
+  const completion = completionEntries[0]!;
+  if (
+    completionEntries.length !== 1
+    || commands.length !== 3
+    || completion.index !== commands.length - 1
+    || commands.some((command, index) =>
+      index === completion.index
+        ? command.kind !== "complete_player_commitment"
+        : command.kind !== "adjust_actor_possession" && command.kind !== "incur_actor_obligation")
+  ) {
+    deny(
+      "invalid_batch",
+      "Paid-delivery completion requires exactly one cargo spend and one employer obligation in the same batch, followed by completion.",
+      completion.command,
+      completion.index,
+    );
+  }
+
+  const commitment = state.commitments.find((row) =>
+    row.commitmentId === completion.command.commitmentId);
+  if (
+    commitment === undefined
+    || commitment.status !== "active"
+    || commitment.kind !== "paid_delivery"
+  ) {
+    deny(
+      "precondition_failed",
+      "Only an active paid-delivery commitment can be settled.",
+      completion.command,
+      completion.index,
+    );
+  }
+  const destination = [...frame.acceptedWorld.locations, ...state.runtimeLocations].find((location) =>
+    deriveCampaignPlayPublicHandle("location", frame.campaignId, location.id)
+      === commitment.destinationHandle);
+  const expectedPossessionKey = deriveCampaignPlayPossessionKey(commitment.subjectName);
+  const expectedPossessionId = deriveCampaignPlayPossessionId(
+    frame.campaignId,
+    commitment.performerActorId,
+    expectedPossessionKey,
+  );
+  const expectedObligationId = deriveCampaignPlayObligationId(
+    frame.campaignId,
+    commitment.counterpartyActorId,
+    commitment.performerActorId,
+    "copper",
+  );
+  const possession = state.possessions.find((row) => row.possessionId === expectedPossessionId);
+  const existingObligation = state.obligations.find((row) => row.obligationId === expectedObligationId);
+  const spendEntries = commands
+    .map((command, index) => ({ command, index }))
+    .filter((entry): entry is {
+      command: Extract<RulebookBatchCommand, { kind: "adjust_actor_possession" }>;
+      index: number;
+    } => entry.command.kind === "adjust_actor_possession");
+  const obligationEntries = commands
+    .map((command, index) => ({ command, index }))
+    .filter((entry): entry is {
+      command: Extract<RulebookBatchCommand, { kind: "incur_actor_obligation" }>;
+      index: number;
+    } => entry.command.kind === "incur_actor_obligation");
+  const spend = spendEntries[0]?.command;
+  const obligation = obligationEntries[0]?.command;
+  if (
+    destination === undefined
+    || commitment.performerActorId !== frame.human?.actorId
+    || commitment.performerActorId !== completion.command.performerActorId
+    || commitment.counterpartyActorId !== completion.command.counterpartyActorId
+    || completion.command.deliveryPossessionId !== expectedPossessionId
+    || !operativeActorLocations(frame, state, commitment.performerActorId).includes(destination.id)
+    || possession === undefined
+    || possession.actorId !== commitment.performerActorId
+    || possession.possessionKey !== expectedPossessionKey
+    || possession.name !== commitment.subjectName
+    || possession.quantity < 1
+    || spendEntries.length !== 1
+    || spend === undefined
+    || spend.actorId !== commitment.performerActorId
+    || spend.possessionId !== expectedPossessionId
+    || spend.possessionKey !== expectedPossessionKey
+    || spend.name !== commitment.subjectName
+    || spend.quantityDelta !== -1
+    || obligationEntries.length !== 1
+    || obligation === undefined
+    || obligation.debtorActorId !== commitment.counterpartyActorId
+    || obligation.creditorActorId !== commitment.performerActorId
+    || obligation.obligationId !== expectedObligationId
+    || obligation.unitKey !== "copper"
+    || obligation.amount !== commitment.feeAmount
+    || existingObligation !== undefined
+  ) {
+    deny(
+      "precondition_failed",
+      "Paid-delivery settlement must deliver the stored cargo at its stored destination and incur the exact stored employer obligation.",
+      completion.command,
+      completion.index,
+    );
+  }
+}
+
+function validatePaidDeliverySettlementBatch(
+  frame: CampaignPlayRulebookFrame,
+  authority: CampaignPlayRulebookAuthority,
+  state: CampaignPlayRulebookSimulation,
+  commands: readonly RulebookBatchCommand[],
+): void {
+  const completionIndex = commands.findIndex((command) =>
+    command.kind === "complete_player_commitment");
+  if (completionIndex < 0) return;
+  const commitmentId = commands[completionIndex]?.kind === "complete_player_commitment"
+    ? commands[completionIndex].commitmentId
+    : null;
+  const commitment = commitmentId === null
+    ? undefined
+    : state.commitments.find((row) => row.commitmentId === commitmentId);
+  if (commitment?.kind === "unpaid_delivery") {
+    validateUnpaidDeliverySettlementInvariants(frame, state, commands);
+    return;
+  }
+  if (authority.purpose !== "player_action" || authority.turnId === null) {
+    deny(
+      "precondition_failed",
+      "Paid-delivery settlement requires a player-action turn authority.",
+      commands[completionIndex],
+      completionIndex,
+    );
+  }
+  validatePaidDeliverySettlementInvariants(frame, state, commands);
+}
+
+function validateUnpaidDeliverySettlementInvariants(
+  frame: CampaignPlayRulebookFrame,
+  state: CampaignPlayRulebookSimulation,
+  commands: readonly RulebookBatchCommand[],
+): void {
+  const completionEntries = commands
+    .map((command, index) => ({ command, index }))
+    .filter((entry): entry is {
+      command: Extract<RulebookBatchCommand, { kind: "complete_player_commitment" }>;
+      index: number;
+    } => entry.command.kind === "complete_player_commitment");
+  if (completionEntries.length === 0) return;
+
+  const completion = completionEntries[0]!;
+  if (
+    completionEntries.length !== 1
+    || commands.length !== 2
+    || completion.index !== commands.length - 1
+    || commands.some((command, index) =>
+      index === completion.index
+        ? command.kind !== "complete_player_commitment"
+        : command.kind !== "adjust_actor_possession")
+  ) {
+    deny(
+      "invalid_batch",
+      "Unpaid-delivery completion requires exactly one cargo spend followed by completion.",
+      completion.command,
+      completion.index,
+    );
+  }
+
+  const commitment = state.commitments.find((row) =>
+    row.commitmentId === completion.command.commitmentId);
+  if (commitment === undefined || commitment.status !== "active" || commitment.kind !== "unpaid_delivery") {
+    deny(
+      "precondition_failed",
+      "Only an active unpaid-delivery commitment can be settled.",
+      completion.command,
+      completion.index,
+    );
+  }
+  const destination = [...frame.acceptedWorld.locations, ...state.runtimeLocations].find((location) =>
+    deriveCampaignPlayPublicHandle("location", frame.campaignId, location.id)
+      === commitment.destinationHandle);
+  const expectedPossessionKey = deriveCampaignPlayPossessionKey(commitment.subjectName);
+  const expectedPossessionId = deriveCampaignPlayPossessionId(
+    frame.campaignId,
+    commitment.performerActorId,
+    expectedPossessionKey,
+  );
+  const possession = state.possessions.find((row) => row.possessionId === expectedPossessionId);
+  const spend = commands[0];
+  if (
+    destination === undefined
+    || commitment.performerActorId !== frame.human?.actorId
+    || commitment.performerActorId !== completion.command.performerActorId
+    || commitment.counterpartyActorId !== completion.command.counterpartyActorId
+    || completion.command.deliveryPossessionId !== expectedPossessionId
+    || !operativeActorLocations(frame, state, commitment.performerActorId).includes(destination.id)
+    || possession === undefined
+    || possession.actorId !== commitment.performerActorId
+    || possession.possessionKey !== expectedPossessionKey
+    || possession.name !== commitment.subjectName
+    || possession.quantity < 1
+    || spend?.kind !== "adjust_actor_possession"
+    || spend.actorId !== commitment.performerActorId
+    || spend.possessionId !== expectedPossessionId
+    || spend.possessionKey !== expectedPossessionKey
+    || spend.name !== commitment.subjectName
+    || spend.quantityDelta !== -1
+  ) {
+    deny(
+      "precondition_failed",
+      "Unpaid-delivery settlement must deliver the stored cargo at its stored destination without an employer obligation.",
+      completion.command,
+      completion.index,
+    );
+  }
+}
+
+function validateCommitmentExecutionBatch(
+  frame: CampaignPlayRulebookFrame,
+  authority: CampaignPlayRulebookAuthority,
+  state: CampaignPlayRulebookSimulation,
+  authorized: ReadonlySet<string>,
+  commands: readonly RulebookBatchCommand[],
+): void {
+  const context = authority.commitmentExecution;
+  if (context === undefined) {
+    deny("invalid_authority", "Commitment execution requires a scoped commitment context.");
+  }
+  const commitment = state.commitments.find((row) => row.commitmentId === context.commitmentId);
+  const destination = liveLocation(frame, state, context.destinationLocationId);
+  const expectedPossessionKey = deriveCampaignPlayPossessionKey(context.subjectName);
+  const expectedPossessionId = deriveCampaignPlayPossessionId(
+    frame.campaignId,
+    context.performerActorId,
+    expectedPossessionKey,
+  );
+  const expectedObligationId = context.commitmentKind === "paid_delivery"
+    ? deriveCampaignPlayObligationId(
+        frame.campaignId,
+        context.counterpartyActorId,
+        context.performerActorId,
+        context.feeUnit,
+      )
+    : null;
+  const possession = state.possessions.find((row) => row.possessionId === expectedPossessionId);
+  const requiredRefs = [
+    ref("commitment", context.commitmentId),
+    ref("actor", context.performerActorId),
+    ref("actor", context.counterpartyActorId),
+    ref("location", context.destinationLocationId),
+    ...(context.possessionId === null ? [] : [ref("possession", context.possessionId)]),
+    ...(context.action === "deliver" && expectedObligationId !== null
+      ? [ref("obligation", expectedObligationId)]
+      : []),
+  ];
+  const commitmentTermsMatch = commitment?.kind === context.commitmentKind &&
+    (context.commitmentKind === "unpaid_delivery"
+      || (context.commitmentKind === "paid_delivery"
+        && commitment.kind === "paid_delivery"
+        && commitment.feeUnit === context.feeUnit
+        && commitment.feeAmount === context.feeAmount));
+  if (
+    commitment === undefined
+    || commitment.status !== "active"
+    || commitment.campaignId !== frame.campaignId
+    || !commitmentTermsMatch
+    || commitment.performerActorId !== context.performerActorId
+    || commitment.counterpartyActorId !== context.counterpartyActorId
+    || commitment.subjectName !== context.subjectName
+    || commitment.destinationHandle !== context.destinationHandle
+    || commitment.sourceDecisionKey !== context.sourceDecisionKey
+    || commitment.sourceTurnId !== context.sourceTurnId
+    || commitment.sourceReceiptId !== context.sourceReceiptId
+    || commitment.worldVersion !== context.commitmentWorldVersion
+    || destination === undefined
+    || deriveCampaignPlayPublicHandle("location", frame.campaignId, destination.id)
+      !== context.destinationHandle
+    || (context.possessionId !== null && context.possessionId !== expectedPossessionId)
+    || !requiredRefs.every((reference) => authorized.has(refKey(reference)))
+    || frame.human?.actorId !== context.performerActorId
+  ) {
+    deny("precondition_failed", "Commitment execution binding does not match the active durable commitment.");
+  }
+
+  if (context.action === "collect") {
+    const command = commands[0];
+    if (
+      commands.length !== 1
+      || command?.kind !== "adjust_actor_possession"
+      || command.actorId !== context.performerActorId
+      || command.possessionId !== expectedPossessionId
+      || command.possessionKey !== expectedPossessionKey
+      || command.name !== context.subjectName
+      || command.quantityDelta !== 1
+      || command.source.kind !== "system"
+      || command.source.system !== "commitment_executor"
+      || (possession !== undefined && possession.quantity !== 0)
+    ) {
+      deny("precondition_failed", "Collect requires one exact positive cargo adjustment from the commitment executor.", command);
+    }
+    return;
+  }
+
+  const spend = commands[0];
+  const completion = commands[context.commitmentKind === "paid_delivery" ? 2 : 1];
+  const obligation = context.commitmentKind === "paid_delivery" ? commands[1] : undefined;
+  const paidDeliveryInvalid = context.commitmentKind === "paid_delivery" && (
+    commands.length !== 3
+    || obligation?.kind !== "incur_actor_obligation"
+    || obligation.debtorActorId !== context.counterpartyActorId
+    || obligation.creditorActorId !== context.performerActorId
+    || obligation.obligationId !== expectedObligationId
+    || obligation.unitKey !== context.feeUnit
+    || obligation.amount !== context.feeAmount
+  );
+  const unpaidDeliveryInvalid = context.commitmentKind === "unpaid_delivery" && commands.length !== 2;
+  if (
+    paidDeliveryInvalid
+    || unpaidDeliveryInvalid
+    || spend?.kind !== "adjust_actor_possession"
+    || completion?.kind !== "complete_player_commitment"
+    || spend.actorId !== context.performerActorId
+    || spend.possessionId !== expectedPossessionId
+    || spend.possessionKey !== expectedPossessionKey
+    || spend.name !== context.subjectName
+    || spend.quantityDelta !== -1
+    || completion.commitmentId !== context.commitmentId
+    || completion.performerActorId !== context.performerActorId
+    || completion.counterpartyActorId !== context.counterpartyActorId
+    || completion.deliveryPossessionId !== expectedPossessionId
+    || !possession
+    || possession.quantity < 1
+    || !operativeActorLocations(frame, state, context.performerActorId).includes(destination.id)
+  ) {
+    deny(
+      "precondition_failed",
+      context.commitmentKind === "paid_delivery"
+        ? "Deliver requires cargo spend, exact employer obligation, then completion."
+        : "Deliver requires cargo spend followed by completion without an employer obligation.",
+      completion,
+    );
+  }
+
+  // Keep the independent settlement invariant as the final route-independent check.
+  if (context.commitmentKind === "paid_delivery") {
+    validatePaidDeliverySettlementInvariants(frame, state, commands);
+  } else {
+    validateUnpaidDeliverySettlementInvariants(frame, state, commands);
+  }
 }
 
 function exposureGrounding(
@@ -800,6 +1434,25 @@ function exposureGrounding(
         break;
       }
       case "world_event": break;
+      case "decision": {
+        const decision = state.pendingDecisions.find((candidate) =>
+          candidate.decisionKey === reference.id);
+        if (decision) addActor(decision.actorId);
+        break;
+      }
+      case "commitment": {
+        const commitment = state.commitments.find((candidate) =>
+          candidate.commitmentId === reference.id);
+        if (commitment) {
+          addActor(commitment.performerActorId);
+          addActor(commitment.counterpartyActorId);
+          const destination = [...frame.acceptedWorld.locations, ...state.runtimeLocations].find((location) =>
+            deriveCampaignPlayPublicHandle("location", frame.campaignId, location.id)
+              === commitment.destinationHandle);
+          if (destination) locationIds.add(destination.id);
+        }
+        break;
+      }
     }
   };
   switch (command.kind) {
@@ -831,6 +1484,10 @@ function exposureGrounding(
       addActor(command.debtorActorId);
       addActor(command.creditorActorId);
       break;
+    case "settle_player_receivable":
+      addActor(command.debtorActorId);
+      addActor(command.creditorActorId);
+      break;
     case "materialize_support_actor":
       addActor(command.actorId);
       locationIds.add(command.locationId);
@@ -841,6 +1498,18 @@ function exposureGrounding(
     case "initialize_player_placement": locationIds.add(command.locationId); addActor(command.actorId); break;
     case "initialize_world_time": break;
     case "initialize_pressure_state": addPressure(command.pressureId); break;
+    case "decision_open":
+    case "decision_resolve": addActor(command.actorId); break;
+    case "create_player_commitment":
+      addActor(command.performerActorId);
+      addActor(command.counterpartyActorId);
+      addReference(ref("decision", command.sourceDecisionKey));
+      break;
+    case "complete_player_commitment":
+      addReference(ref("commitment", command.commitmentId));
+      addActor(command.performerActorId);
+      addActor(command.counterpartyActorId);
+      break;
   }
   return { locationIds, routeIds, actorIds };
 }
@@ -853,13 +1522,17 @@ function validateSource(
   index: number,
 ): void {
   const source = command.source;
+  const commitmentCommand = command.kind === "create_player_commitment"
+    || command.kind === "complete_player_commitment";
   const valid = authority.purpose === "character_bootstrap"
     ? source.kind === "system" && source.system === "character_bootstrap"
     : authority.purpose === "opening"
       ? source.kind === "system" && source.system === "opening_bootstrap"
       : authority.purpose === "player_action"
-        ? (source.kind === "system" && source.system === "game_master")
-          || (source.kind === "actor" && source.actorId === state.human?.actorId)
+      ? (source.kind === "system" && source.system === "game_master")
+          || (!commitmentCommand && source.kind === "actor" && source.actorId === state.human?.actorId)
+        : authority.purpose === "commitment_execution"
+          ? source.kind === "system" && source.system === "commitment_executor"
         : source.kind === "actor" && source.actorId === authority.actorId;
   if (!valid) deny("invalid_source", "Command source exceeds its admitted authority.", command, index);
   if (source.kind === "actor") {
@@ -1023,8 +1696,17 @@ function validateRefsAndScopes(
   const existingObligation = command.kind === "incur_actor_obligation"
     ? state.obligations.find((row) => row.obligationId === command.obligationId)
     : undefined;
+  const existingDecision = command.kind === "decision_resolve"
+    ? state.pendingDecisions.find((row) => row.decisionKey === command.decisionKey)
+    : undefined;
+  const existingCommitment = command.kind === "complete_player_commitment"
+    ? state.commitments.find((row) => row.commitmentId === command.commitmentId)
+    : undefined;
   const paymentPossession = command.kind === "pay_actor_obligation"
     ? state.possessions.find((row) => row.possessionId === command.paymentPossessionId)
+    : undefined;
+  const settlementPossession = command.kind === "settle_player_receivable"
+    ? state.possessions.find((row) => row.possessionId === command.creditorPossessionId)
     : undefined;
   const localSceneGrant = materializedLocalSceneGrant(
     frame,
@@ -1062,6 +1744,36 @@ function validateRefsAndScopes(
       paymentPossession.possessionKey,
     )))
     : null;
+  const grantedSettlementPossessionRef = command.kind === "settle_player_receivable"
+    && command.creditorPossessionKey === deriveCampaignPlayPossessionKey(command.creditorPossessionName)
+    && command.creditorPossessionKey === "copper"
+    && command.creditorPossessionName === "Copper"
+    && command.creditorPossessionId === deriveCampaignPlayPossessionId(
+      frame.campaignId,
+      command.creditorActorId,
+      command.creditorPossessionKey,
+    )
+    && settlementPossession === undefined
+    ? refKey(ref("possession", command.creditorPossessionId))
+    : null;
+  const grantedDecisionRef = command.kind === "decision_open"
+    && command.decisionKey === deriveCampaignPlayDecisionKey(
+      frame.campaignId,
+      command.sourceTurnId,
+      command.actorId,
+      command.decisionKind,
+    )
+    && !state.pendingDecisions.some((row) => row.decisionKey === command.decisionKey)
+    ? refKey(ref("decision", command.decisionKey))
+    : null;
+  const grantedCommitmentRef = command.kind === "create_player_commitment"
+    && command.commitmentId === deriveCampaignPlayCommitmentId(
+      frame.campaignId,
+      command.sourceDecisionKey,
+    )
+    && !state.commitments.some((row) => row.commitmentId === command.commitmentId)
+    ? refKey(ref("commitment", command.commitmentId))
+    : null;
   const supportIds = command.kind === "materialize_support_actor" && authority.turnId !== null
     ? deriveCampaignPlaySupportActorIds({
         campaignId: frame.campaignId,
@@ -1095,11 +1807,20 @@ function validateRefsAndScopes(
       && state.runtimeActors.some((row) => row.id === reference.id))
     || (reference.kind === "goal"
       && !frame.goals.some((row) => row.goalId === reference.id)
-      && state.goals.some((row) => row.goalId === reference.id));
+      && state.goals.some((row) => row.goalId === reference.id))
+    || (reference.kind === "decision"
+      && !(frame.pendingDecisions ?? []).some((row) => row.decisionKey === reference.id)
+      && state.pendingDecisions.some((row) => row.decisionKey === reference.id))
+    || (reference.kind === "commitment"
+      && !frame.commitments.some((row) => row.commitmentId === reference.id)
+      && state.commitments.some((row) => row.commitmentId === reference.id));
   if (!allRefs.every((reference) =>
     refKey(reference) === grantedPossessionRef
     || refKey(reference) === grantedObligationRef
     || refKey(reference) === grantedCreditorPossessionRef
+    || refKey(reference) === grantedSettlementPossessionRef
+    || refKey(reference) === grantedDecisionRef
+    || refKey(reference) === grantedCommitmentRef
     || grantedSupportRefs.has(refKey(reference))
     || localSceneGrant.has(refKey(reference))
     || materializedEarlierInBatch(reference)
@@ -1113,6 +1834,13 @@ function validateRefsAndScopes(
     || (existingPossession === undefined && refKey(reference) === grantedPossessionRef)
     || (existingObligation === undefined && refKey(reference) === grantedObligationRef)
     || refKey(reference) === grantedCreditorPossessionRef
+    || (settlementPossession === undefined && refKey(reference) === grantedSettlementPossessionRef)
+    || refKey(reference) === grantedDecisionRef
+    || refKey(reference) === grantedCommitmentRef
+    || (command.kind === "decision_resolve" && existingDecision !== undefined
+      && refKey(reference) === refKey(ref("decision", existingDecision.decisionKey)))
+    || (command.kind === "complete_player_commitment" && existingCommitment !== undefined
+      && refKey(reference) === refKey(ref("commitment", existingCommitment.commitmentId)))
     || localSceneGrant.has(refKey(reference))
     || entityExists(frame, state, knownEvents, reference))) {
     deny("invalid_reference", "Command references an entity that does not exist.", command, index);
@@ -1123,6 +1851,12 @@ function validateRefsAndScopes(
   }
   if (!refsEqual(command.writeScope, scopes.write)) {
     deny("invalid_write_scope", "Command write scope differs from its exact contract.", command, index);
+  }
+  if (
+    (command.kind === "create_player_commitment" || command.kind === "complete_player_commitment")
+    && !refsEqual(command.affectedRefs, entityRefs)
+  ) {
+    deny("invalid_reference", "Commitment affected references must match the exact party, source, and commitment identity.", command, index);
   }
   if (authority.purpose === "character_bootstrap" || authority.purpose === "opening") {
     if (
@@ -1218,13 +1952,18 @@ function actorJobOwns(
       && sharesActorLocation(command.creditorActorId);
     case "pay_actor_obligation": return command.debtorActorId === actorId
       && sharesActorLocation(command.creditorActorId);
+    case "settle_player_receivable": return false;
     case "materialize_support_actor": return false;
     case "record_world_event": return command.affectedRefs.some((reference) =>
       reference.kind === "actor" && reference.id === actorId);
     case "create_player_actor":
     case "initialize_player_placement":
     case "initialize_world_time":
-    case "initialize_pressure_state": return false;
+    case "initialize_pressure_state":
+    case "decision_open":
+    case "decision_resolve":
+    case "create_player_commitment":
+    case "complete_player_commitment": return false;
   }
 }
 
@@ -1244,24 +1983,43 @@ function validateAvailability(
           || state.human.actorId === command.creditorActorId))
       || (authority.purpose === "actor_job"
         && authority.actorId === command.debtorActorId)
+      || authority.purpose === "commitment_execution"
     );
   const paymentAvailable = command.kind !== "pay_actor_obligation"
     || (
       (authority.purpose === "player_action" || authority.purpose === "actor_job")
       && authority.actorId === command.debtorActorId
     );
+  const receivableAvailable = command.kind !== "settle_player_receivable"
+    || (
+      authority.purpose === "player_action"
+      && authority.actorId === command.creditorActorId
+      && state.human?.actorId === command.creditorActorId
+    );
   const available = authority.purpose === "character_bootstrap"
     ? command.kind === "create_player_actor"
       || (command.kind === "adjust_actor_possession" && command.quantityDelta > 0)
     : authority.purpose === "opening"
-      ? !modelVisible
+      ? (!modelVisible && command.kind !== "decision_resolve")
         || isOpeningPremiseCommand(frame, state, command)
         || isOpeningRouteRestrictionCommand(frame, state, command)
-      : modelVisible;
+      : authority.purpose === "player_action"
+        ? command.kind === "decision_open"
+          || command.kind === "decision_resolve"
+          || command.kind === "create_player_commitment"
+          || command.kind === "complete_player_commitment"
+          || command.kind === "settle_player_receivable"
+          || modelVisible
+        : authority.purpose === "commitment_execution"
+          ? command.kind === "adjust_actor_possession"
+            || command.kind === "incur_actor_obligation"
+            || command.kind === "complete_player_commitment"
+        : modelVisible;
   if (
     !available
     || !obligationAvailable
     || !paymentAvailable
+    || !receivableAvailable
     || !actorJobOwns(frame, state, authority, command)
   ) {
     deny("command_unavailable", "Command kind is unavailable to this authority.", command, index);
@@ -1572,6 +2330,81 @@ function applyCommand(
       }
       break;
     }
+    case "settle_player_receivable": {
+      const debtor = actor(frame, state, command.debtorActorId);
+      const creditor = actor(frame, state, command.creditorActorId);
+      const obligation = state.obligations.find((candidate) =>
+        candidate.obligationId === command.obligationId);
+      const expectedObligationId = deriveCampaignPlayObligationId(
+        frame.campaignId,
+        command.debtorActorId,
+        command.creditorActorId,
+        command.unitKey,
+      );
+      const expectedPossessionKey = deriveCampaignPlayPossessionKey(command.creditorPossessionName);
+      const expectedPossessionId = deriveCampaignPlayPossessionId(
+        frame.campaignId,
+        command.creditorActorId,
+        expectedPossessionKey,
+      );
+      const creditorPossession = state.possessions.find((candidate) =>
+        candidate.possessionId === command.creditorPossessionId);
+      const playerLocations = state.human?.actorId === command.creditorActorId
+        ? operativeActorLocations(frame, state, command.creditorActorId)
+        : [];
+      const debtorLocations = operativeActorLocations(frame, state, command.debtorActorId);
+      const debtorVisible = playerLocations.some((locationId) =>
+        debtorLocations.includes(locationId));
+      if (
+        authority.purpose !== "player_action"
+        || authority.actorId !== command.creditorActorId
+        || state.human?.actorId !== command.creditorActorId
+        || debtor?.kind !== "person"
+        || debtor.controller !== "agent"
+        || creditor?.kind !== "person"
+        || creditor.controller !== "human"
+        || command.debtorActorId === command.creditorActorId
+        || command.unitKey !== "copper"
+        || command.obligationId !== expectedObligationId
+        || obligation === undefined
+        || obligation.debtorActorId !== command.debtorActorId
+        || obligation.creditorActorId !== command.creditorActorId
+        || obligation.unitKey !== command.unitKey
+        || obligation.outstandingAmount !== command.amount
+        || !debtorVisible
+        || command.creditorPossessionKey !== expectedPossessionKey
+        || command.creditorPossessionKey !== "copper"
+        || command.creditorPossessionName !== "Copper"
+        || command.creditorPossessionId !== expectedPossessionId
+        || (creditorPossession !== undefined && (
+          creditorPossession.actorId !== command.creditorActorId
+          || creditorPossession.possessionKey !== command.creditorPossessionKey
+          || creditorPossession.name !== command.creditorPossessionName
+        ))
+        || (creditorPossession?.quantity ?? 0) + command.amount >
+          CAMPAIGN_PLAY_LIMITS.possessionQuantity
+      ) {
+        deny(
+          "precondition_failed",
+          "Receivable collection requires the exact visible debtor, copper obligation, and amount.",
+          command,
+          index,
+        );
+      }
+      obligation.outstandingAmount -= command.amount;
+      if (creditorPossession) {
+        creditorPossession.quantity += command.amount;
+      } else {
+        state.possessions.push({
+          possessionId: command.creditorPossessionId,
+          actorId: command.creditorActorId,
+          possessionKey: command.creditorPossessionKey,
+          name: command.creditorPossessionName,
+          quantity: command.amount,
+        });
+      }
+      break;
+    }
     case "materialize_support_actor": {
       const turnId = authority.turnId;
       const playerActorId = state.human?.actorId;
@@ -1691,6 +2524,343 @@ function applyCommand(
       }
       break;
     }
+    case "decision_open": {
+      const selectedActor = actor(frame, state, command.actorId);
+      const playerLocations = state.human === null
+        ? []
+        : operativeActorLocations(frame, state, state.human.actorId);
+      const actorLocations = operativeActorLocations(frame, state, command.actorId);
+      const stableDecisionKey = authority.turnId !== null
+        && command.sourceTurnId === authority.turnId
+        && command.decisionKey === deriveCampaignPlayDecisionKey(
+          frame.campaignId,
+          command.sourceTurnId,
+          command.actorId,
+          command.decisionKind,
+        );
+      const visibleAgentActor = selectedActor?.kind === "person"
+        && selectedActor.controller === "agent"
+        && playerLocations.length === 1
+        && actorLocations.includes(playerLocations[0]!)
+        && command.actorHandle === deriveCampaignPlayPublicHandle(
+          "actor",
+          frame.campaignId,
+          command.actorId,
+        );
+      const openingDecision = authority.purpose === "opening"
+        && stableDecisionKey
+        && !state.pendingDecisions.some((row) => row.decisionKey === command.decisionKey)
+        && visibleAgentActor;
+      const deliveryEffect = command.acceptEffect?.kind === "paid_delivery"
+        || command.acceptEffect?.kind === "unpaid_delivery"
+        ? command.acceptEffect
+        : null;
+      const destination = deliveryEffect === null
+        ? undefined
+        : [...frame.acceptedWorld.locations, ...state.runtimeLocations].find((location) =>
+          deriveCampaignPlayPublicHandle("location", frame.campaignId, location.id)
+            === deliveryEffect.destinationHandle);
+      const destinationAuthorized = destination !== undefined
+        && authority.authorizedRefs.some((reference) =>
+          reference.kind === "location" && reference.id === destination.id);
+      const playerActionEffectAllowed = command.acceptEffect === null
+        || (deliveryEffect !== null && destinationAuthorized);
+      const playerActionDecision = authority.purpose === "player_action"
+        && command.source.kind === "system"
+        && command.source.system === "game_master"
+        && stableDecisionKey
+        && command.decisionKind === "offer"
+        && playerActionEffectAllowed
+        && !state.pendingDecisions.some((row) =>
+          row.status === "open" && row.actorId === command.actorId)
+        && visibleAgentActor
+        && state.human?.actorId === authority.actorId
+        && authority.actorId !== null;
+      if (!openingDecision && !playerActionDecision) {
+        deny(
+          "precondition_failed",
+          authority.purpose === "opening"
+            ? "Opening decision must target one visible agent actor with a stable code-owned identity."
+            : "Offer decision must target one visible agent actor with a null effect or an authorized delivery destination.",
+          command,
+          index,
+        );
+      }
+      state.pendingDecisions.push({
+        decisionKey: command.decisionKey,
+        actorId: command.actorId,
+        actorHandle: command.actorHandle,
+        kind: command.decisionKind,
+        status: "open",
+        sourceTurnId: command.sourceTurnId,
+        summary: command.summary,
+        acceptLabel: command.acceptLabel,
+        declineLabel: command.declineLabel,
+        acceptEffect: command.acceptEffect ?? null,
+        resolutionEventId: null,
+        resolutionTurnId: null,
+        resolutionDisposition: null,
+        worldVersion: state.worldVersion + 1,
+      });
+      break;
+    }
+    case "decision_resolve": {
+      const existing = state.pendingDecisions.find((row) => row.decisionKey === command.decisionKey);
+      const selectedActor = actor(frame, state, command.actorId);
+      if (
+        authority.purpose !== "player_action"
+        || authority.turnId === null
+        || command.sourceTurnId !== existing?.sourceTurnId
+        || existing === undefined
+        || existing.status !== "open"
+        || existing.actorId !== command.actorId
+        || existing.actorHandle !== command.actorHandle
+        || existing.kind !== command.decisionKind
+        || command.selectedLabel !== (
+          command.disposition === "accept" ? existing?.acceptLabel : existing?.declineLabel)
+        || selectedActor?.kind !== "person"
+        || selectedActor.controller !== "agent"
+      ) {
+        deny(
+          "precondition_failed",
+          existing === undefined
+            ? "Decision does not exist in the current mechanical frame."
+            : existing.status !== "open"
+              ? "Decision has already been resolved."
+              : "Decision resolution does not match the current code-owned decision.",
+          command,
+          index,
+        );
+      }
+      existing.status = command.disposition === "accept" ? "accepted" : "declined";
+      existing.resolutionEventId = deriveCampaignPlayEventId(
+        frame.campaignId,
+        authority.turnId,
+        command.batchId,
+        command.order,
+      );
+      existing.resolutionTurnId = authority.turnId;
+      existing.resolutionDisposition = command.disposition;
+      existing.worldVersion = state.worldVersion + 1;
+      break;
+    }
+    case "create_player_commitment": {
+      const activeCommitmentCount = state.commitments.filter((row) =>
+        row.status === "active").length;
+      if (activeCommitmentCount >= CAMPAIGN_PLAY_LIMITS.visibleCommitments) {
+        deny(
+          "precondition_failed",
+          "Complete an active commitment before accepting more work.",
+          command,
+          index,
+        );
+      }
+      const sourceDecision = state.pendingDecisions.find((row) =>
+        row.decisionKey === command.sourceDecisionKey);
+      const performer = actor(frame, state, command.performerActorId);
+      const counterparty = actor(frame, state, command.counterpartyActorId);
+      const destination = [...frame.acceptedWorld.locations, ...state.runtimeLocations].find((location) =>
+        deriveCampaignPlayPublicHandle("location", frame.campaignId, location.id)
+          === command.destinationHandle);
+      const acceptedWorldTimeMinutes = state.worldTimeMinutes;
+      const deliveryEffect = sourceDecision?.acceptEffect?.kind === "paid_delivery" ||
+        sourceDecision?.acceptEffect?.kind === "unpaid_delivery"
+        ? sourceDecision.acceptEffect
+        : null;
+      const expectedDue = deliveryEffect?.dueInMinutes !== undefined
+        && acceptedWorldTimeMinutes !== null
+        ? acceptedWorldTimeMinutes + deliveryEffect.dueInMinutes
+        : null;
+      const expectedCommitmentId = deriveCampaignPlayCommitmentId(
+        frame.campaignId,
+        command.sourceDecisionKey,
+      );
+      const expectedReceiptId = deriveCampaignPlayReceiptId(
+        frame.campaignId,
+        authority.turnId,
+        command.batchId,
+        command.order,
+      );
+      const baseInvalid =
+        authority.purpose !== "player_action"
+        || authority.turnId === null
+        || sourceDecision?.status !== "accepted"
+        || sourceDecision.actorId !== command.counterpartyActorId
+        || sourceDecision.sourceTurnId !== command.sourceTurnId
+        || (sourceDecision.acceptEffect?.kind !== "paid_delivery"
+          && sourceDecision.acceptEffect?.kind !== "unpaid_delivery")
+        || performer?.kind !== "person"
+        || performer.controller !== "human"
+        || state.human?.actorId !== command.performerActorId
+        || counterparty?.kind !== "person"
+        || counterparty.controller !== "agent"
+        || command.performerActorId === command.counterpartyActorId
+        || destination === undefined
+        || acceptedWorldTimeMinutes === null
+        || command.acceptedWorldTimeMinutes !== acceptedWorldTimeMinutes
+        || command.commitmentId !== expectedCommitmentId
+        || state.commitments.some((row) => row.commitmentId === command.commitmentId)
+        || command.dueWorldTimeMinutes !== expectedDue;
+      if (baseInvalid) {
+        deny(
+          "precondition_failed",
+          "Delivery commitment must match one accepted decision and its exact public terms.",
+          command,
+          index,
+        );
+      }
+      const commonCommitment = {
+        commitmentId: command.commitmentId,
+        campaignId: frame.campaignId,
+        performerActorId: command.performerActorId,
+        counterpartyActorId: command.counterpartyActorId,
+        status: "active" as const,
+        title: command.title,
+        subjectName: command.subjectName,
+        destinationHandle: command.destinationHandle,
+        acceptedWorldTimeMinutes,
+        dueWorldTimeMinutes: command.dueWorldTimeMinutes,
+        sourceDecisionKey: command.sourceDecisionKey,
+        sourceTurnId: command.sourceTurnId,
+        sourceReceiptId: expectedReceiptId,
+        completionTurnId: null,
+        completionReceiptId: null,
+        worldVersion: state.worldVersion + 1,
+        createdAt: 0,
+        updatedAt: 0,
+      };
+      if (command.commitmentKind === "paid_delivery") {
+        const effect = sourceDecision?.acceptEffect;
+        if (
+          effect?.kind !== "paid_delivery"
+          || effect.title !== command.title
+          || effect.subjectName !== command.subjectName
+          || effect.destinationHandle !== command.destinationHandle
+          || effect.feeUnit !== command.feeUnit
+          || effect.feeAmount !== command.feeAmount
+          || effect.paymentTiming !== command.paymentTiming
+        ) {
+          deny(
+            "precondition_failed",
+            "Paid-delivery commitment must match one accepted decision and its exact payment terms.",
+            command,
+            index,
+          );
+        }
+        state.commitments.push({
+          ...commonCommitment,
+          kind: "paid_delivery",
+          feeUnit: command.feeUnit,
+          feeAmount: command.feeAmount,
+          paymentTiming: command.paymentTiming,
+        });
+      } else {
+        const effect = sourceDecision?.acceptEffect;
+        if (
+          effect?.kind !== "unpaid_delivery"
+          || effect.title !== command.title
+          || effect.subjectName !== command.subjectName
+          || effect.destinationHandle !== command.destinationHandle
+        ) {
+          deny(
+            "precondition_failed",
+            "Unpaid-delivery commitment must match one accepted decision and its exact delivery terms.",
+            command,
+            index,
+          );
+        }
+        state.commitments.push({
+          ...commonCommitment,
+          kind: "unpaid_delivery",
+        });
+      }
+      break;
+    }
+    case "complete_player_commitment": {
+      const existing = state.commitments.find((row) => row.commitmentId === command.commitmentId);
+      const performer = actor(frame, state, command.performerActorId);
+      const counterparty = actor(frame, state, command.counterpartyActorId);
+      const expectedPossessionKey = existing === undefined
+        ? null
+        : deriveCampaignPlayPossessionKey(existing.subjectName);
+      const expectedPossessionId = existing === undefined || expectedPossessionKey === null
+        ? null
+        : deriveCampaignPlayPossessionId(
+          frame.campaignId,
+          existing.performerActorId,
+          expectedPossessionKey,
+        );
+      const expectedObligationId = existing?.kind === "paid_delivery"
+        ? deriveCampaignPlayObligationId(
+            frame.campaignId,
+            existing.counterpartyActorId,
+            existing.performerActorId,
+            "copper",
+          )
+        : null;
+      const destination = existing === undefined
+        ? undefined
+        : [...frame.acceptedWorld.locations, ...state.runtimeLocations].find((location) =>
+          deriveCampaignPlayPublicHandle("location", frame.campaignId, location.id)
+            === existing.destinationHandle);
+      const possession = expectedPossessionId === null
+        ? undefined
+        : state.possessions.find((row) => row.possessionId === expectedPossessionId);
+      const obligation = expectedObligationId === null
+        ? undefined
+        : state.obligations.find((row) => row.obligationId === expectedObligationId);
+      const completionReceiptId = deriveCampaignPlayReceiptId(
+        frame.campaignId,
+        authority.turnId,
+        command.batchId,
+        command.order,
+      );
+      const baseInvalid =
+        authority.purpose !== "player_action"
+        && authority.purpose !== "commitment_execution"
+        || authority.turnId === null
+        || existing === undefined
+        || existing.status !== "active"
+        || existing.performerActorId !== command.performerActorId
+        || existing.counterpartyActorId !== command.counterpartyActorId
+        || performer?.kind !== "person"
+        || performer.controller !== "human"
+        || state.human?.actorId !== command.performerActorId
+        || counterparty?.kind !== "person"
+        || counterparty.controller !== "agent"
+        || expectedPossessionId === null
+        || command.deliveryPossessionId !== expectedPossessionId
+        || destination === undefined
+        || !operativeActorLocations(frame, state, existing?.performerActorId ?? command.performerActorId)
+          .includes(destination.id)
+        || possession === undefined
+        || possession.actorId !== existing?.performerActorId
+        || possession.possessionKey !== expectedPossessionKey
+        || possession.name !== existing?.subjectName
+        || (existing?.kind !== "paid_delivery" && existing?.kind !== "unpaid_delivery");
+      const paymentInvalid = existing?.kind === "paid_delivery" && (
+        obligation === undefined
+        || obligation.debtorActorId !== existing.counterpartyActorId
+        || obligation.creditorActorId !== existing.performerActorId
+        || obligation.unitKey !== "copper"
+        || obligation.principalAmount !== existing.feeAmount
+        || obligation.outstandingAmount !== existing.feeAmount
+      );
+      if (baseInvalid || paymentInvalid) {
+        deny(
+          "precondition_failed",
+          "Only an active delivery commitment can be completed by its player performer.",
+          command,
+          index,
+        );
+      }
+      existing.status = "completed";
+      existing.completionTurnId = authority.turnId;
+      existing.completionReceiptId = completionReceiptId;
+      existing.worldVersion = state.worldVersion + 1;
+      existing.updatedAt = 0;
+      break;
+    }
     case "create_player_actor": {
       if (
         frame.setupPhase !== "character_required"
@@ -1780,6 +2950,7 @@ function validateBootstrapCoverage(
   const pressures = commands.filter((command) => command.kind === "initialize_pressure_state");
   const routeRestrictions = commands.filter((command) => command.kind === "set_route_state");
   const premises = commands.filter((command) => command.kind === "record_world_event");
+  const decisionOpens = commands.filter((command) => command.kind === "decision_open");
   const expectedPressureIds = [...frame.acceptedWorld.pressures].map((pressure) => pressure.id).sort(compareText);
   const actualPressureIds = pressures.map((command) => command.pressureId).sort(compareText);
   if (
@@ -1787,13 +2958,17 @@ function validateBootstrapCoverage(
     || clocks.length !== 1
     || routeRestrictions.length > 1
     || premises.length > 1
+    || decisionOpens.length > 1
     || (routeRestrictions.length === 1 && premises.length !== 1)
-    || (routeRestrictions.length === 1 && commands.at(-2) !== routeRestrictions[0])
-    || (premises.length === 1 && commands.at(-1) !== premises[0])
-    || commands.length !== 2 + expectedPressureIds.length + routeRestrictions.length + premises.length
+    || (decisionOpens.length === 1 && commands.at(-1) !== decisionOpens[0])
+    || (premises.length === 1 && commands.at(-(decisionOpens.length + 1)) !== premises[0])
+    || (routeRestrictions.length === 1
+      && commands.at(-(decisionOpens.length + premises.length + 1)) !== routeRestrictions[0])
+    || commands.length !== 2 + expectedPressureIds.length
+      + routeRestrictions.length + premises.length + decisionOpens.length
     || JSON.stringify(actualPressureIds) !== JSON.stringify(expectedPressureIds)
   ) {
-    deny("invalid_bootstrap_coverage", "Opening must initialize placement, clock, and every pressure exactly once, followed by an optional route restriction and at most one player-premise event.");
+    deny("invalid_bootstrap_coverage", "Opening must initialize placement, clock, and every pressure exactly once, followed by optional route restriction, player-premise, and one structured decision.");
   }
 }
 
@@ -1810,6 +2985,8 @@ function sortSimulation(state: CampaignPlayRulebookSimulation): void {
   state.placements.sort((left, right) => compareText(left.placementId, right.placementId));
   state.relations.sort((left, right) => compareText(left.relationId, right.relationId));
   state.goals.sort((left, right) => compareText(left.goalId, right.goalId));
+  state.pendingDecisions.sort((left, right) => compareText(left.decisionKey, right.decisionKey));
+  state.commitments.sort((left, right) => compareText(left.commitmentId, right.commitmentId));
 }
 
 function snapshotSimulation(
@@ -1834,6 +3011,8 @@ function snapshotSimulation(
     placements: state.placements.map((row) => ({ ...row })),
     relations: state.relations.map((row) => ({ ...row })),
     goals: state.goals.map((row) => ({ ...row })),
+    pendingDecisions: state.pendingDecisions.map((row) => ({ ...row })),
+    commitments: state.commitments.map((row) => ({ ...row })),
   };
 }
 
@@ -1857,6 +3036,17 @@ export function preflightCampaignPlayRulebook(
     }
     validateBootstrapCoverage(input.frame, input.authority, batch.commands);
     const state = cloneSimulation(input.frame);
+    if (input.authority.purpose === "commitment_execution") {
+      validateCommitmentExecutionBatch(
+        input.frame,
+        input.authority,
+        state,
+        authorized,
+        batch.commands,
+      );
+    } else {
+      validatePaidDeliverySettlementBatch(input.frame, input.authority, state, batch.commands);
+    }
     const checkpoints: CampaignPlayRulebookSimulation[] = [snapshotSimulation(state)];
     const knownEvents = new Set(input.authority.knownWorldEventIds);
     for (const [index, command] of batch.commands.entries()) {
@@ -1937,6 +3127,27 @@ function stableRulebookId(prefix: string, value: unknown): string {
   return `${prefix}:${hashCampaignPlayProjection(value).slice(0, 32)}`;
 }
 
+export function deriveCampaignPlayDecisionKey(
+  campaignId: string,
+  sourceTurnId: string,
+  actorId: string,
+  decisionKind: CampaignPlayDecisionKind,
+): string {
+  return stableRulebookId("decision", {
+    campaignId,
+    sourceOpeningTurnId: sourceTurnId,
+    actorId,
+    kind: decisionKind,
+  });
+}
+
+export function deriveCampaignPlayCommitmentId(
+  campaignId: string,
+  sourceDecisionKey: string,
+): string {
+  return stableRulebookId("commitment", { campaignId, sourceDecisionKey });
+}
+
 export function deriveCampaignPlayReceiptId(
   campaignId: string,
   turnId: string | null,
@@ -2005,7 +3216,7 @@ function mechanicalHash(
     unchanged(state.placements, acceptedPlacements)
     && unchanged(state.relations, acceptedRelations)
     && unchanged(state.goals, acceptedGoals);
-  return projectCampaignPlayMechanicalTruth({
+  const base = projectCampaignPlayMechanicalTruth({
     acceptedReview: frame.acceptedWorld,
     worldTimeMinutes: state.worldTimeMinutes,
     human: state.human,
@@ -2020,7 +3231,17 @@ function mechanicalHash(
     placements: acceptedBaseRowsUnchanged ? [] : state.placements,
     relations: acceptedBaseRowsUnchanged ? [] : state.relations,
     goals: acceptedBaseRowsUnchanged ? [] : state.goals,
-  }).hash;
+    pendingDecisions: state.pendingDecisions,
+  });
+  if (state.commitments.length === 0) return base.hash;
+  const commitments = state.commitments
+    .map(({ createdAt, updatedAt, ...row }) => row)
+    .sort((left, right) => compareText(left.commitmentId, right.commitmentId));
+  const projection = {
+    ...(base.projection as Record<string, unknown>),
+    commitments,
+  };
+  return hashCampaignPlayProjection(projection);
 }
 
 function eventKind(command: RulebookBatchCommand): string {
@@ -2035,12 +3256,18 @@ function eventKind(command: RulebookBatchCommand): string {
     case "adjust_actor_possession": return "actor_possession_adjusted";
     case "incur_actor_obligation": return "actor_obligation_incurred";
     case "pay_actor_obligation": return "actor_obligation_payment_applied";
+    case "settle_player_receivable": return "player_receivable_settled";
     case "materialize_support_actor": return "support_actor_materialized";
     case "record_world_event": return "scene_recorded";
     case "create_player_actor": return "player_actor_created";
     case "initialize_player_placement": return "player_placement_initialized";
     case "initialize_world_time": return "world_time_initialized";
     case "initialize_pressure_state": return "pressure_initialized";
+    case "decision_open": return "decision_opened";
+    case "decision_resolve":
+      return command.disposition === "accept" ? "decision_accepted" : "decision_declined";
+    case "create_player_commitment": return "player_commitment_created";
+    case "complete_player_commitment": return "player_commitment_completed";
   }
 }
 
@@ -2054,6 +3281,13 @@ function eventAffectedRefs(
   if (command.kind === "adjust_actor_possession") return commandEntityRefs(frame, after, command);
   if (command.kind === "incur_actor_obligation") return commandEntityRefs(frame, after, command);
   if (command.kind === "pay_actor_obligation") return commandEntityRefs(frame, after, command);
+  if (command.kind === "settle_player_receivable") return commandEntityRefs(frame, after, command);
+  if (command.kind === "decision_open" || command.kind === "decision_resolve") {
+    return commandEntityRefs(frame, after, command);
+  }
+  if (command.kind === "create_player_commitment" || command.kind === "complete_player_commitment") {
+    return commandEntityRefs(frame, after, command);
+  }
   const refs = command.writeScope.length > 0 ? command.writeScope : command.readScope;
   if (refs.length > 0) return refs;
   if (command.source.kind === "actor") return [ref("actor", command.source.actorId)];
@@ -2070,6 +3304,7 @@ function applyStoredMutation(
   command: RulebookBatchCommand,
   receiptId: string,
   resultWorldVersion: number,
+  causalEventId: string | null = null,
 ): void {
   const { sqlite, campaignId } = input.context;
   switch (command.kind) {
@@ -2232,6 +3467,95 @@ function applyStoredMutation(
           command.obligationId, campaignId);
       return;
     }
+    case "settle_player_receivable": {
+      const obligation = sqlite.prepare(`SELECT debtor_actor_id AS debtorActorId,
+          creditor_actor_id AS creditorActorId, unit_key AS unitKey,
+          outstanding_amount AS outstandingAmount
+        FROM campaign_play_actor_obligations
+        WHERE obligation_id = ? AND campaign_id = ?`).get(
+          command.obligationId,
+          campaignId,
+        ) as {
+          debtorActorId: string;
+          creditorActorId: string;
+          unitKey: string;
+          outstandingAmount: number;
+        } | undefined;
+      if (
+        obligation === undefined
+        || obligation.debtorActorId !== command.debtorActorId
+        || obligation.creditorActorId !== command.creditorActorId
+        || obligation.unitKey !== "copper"
+        || obligation.outstandingAmount !== command.amount
+      ) {
+        throw new CampaignPlayRulebookExecutionError(
+          "execution_contract_invalid",
+          "Receivable settlement lost its exact outstanding obligation.",
+        );
+      }
+      const possessionId = deriveCampaignPlayPossessionId(
+        campaignId,
+        command.creditorActorId,
+        command.creditorPossessionKey,
+      );
+      if (possessionId !== command.creditorPossessionId) {
+        throw new CampaignPlayRulebookExecutionError(
+          "execution_contract_invalid",
+          "Receivable settlement lost its canonical creditor possession.",
+        );
+      }
+      const result = sqlite.prepare(`UPDATE campaign_play_actor_obligations SET
+        outstanding_amount = outstanding_amount - ?, causal_receipt_id = ?,
+        world_version = ?, updated_at = ?
+        WHERE obligation_id = ? AND campaign_id = ? AND outstanding_amount = ?`)
+        .run(command.amount, receiptId, resultWorldVersion, input.createdAt,
+          command.obligationId, campaignId, command.amount);
+      if (result.changes !== 1) {
+        throw new CampaignPlayRulebookExecutionError(
+          "execution_contract_invalid",
+          "Receivable settlement did not update exactly one obligation.",
+        );
+      }
+      const possession = sqlite.prepare(`SELECT actor_id AS actorId,
+          possession_key AS possessionKey, name, quantity
+        FROM campaign_play_actor_possessions
+        WHERE possession_id = ? AND campaign_id = ?`).get(
+          command.creditorPossessionId,
+          campaignId,
+        ) as {
+          actorId: string;
+          possessionKey: string;
+          name: string;
+          quantity: number;
+        } | undefined;
+      if (possession !== undefined) {
+        if (
+          possession.actorId !== command.creditorActorId
+          || possession.possessionKey !== "copper"
+          || possession.name !== "Copper"
+          || possession.quantity > CAMPAIGN_PLAY_LIMITS.possessionQuantity - command.amount
+        ) {
+          throw new CampaignPlayRulebookExecutionError(
+            "execution_contract_invalid",
+            "Receivable settlement lost its canonical copper possession.",
+          );
+        }
+        sqlite.prepare(`UPDATE campaign_play_actor_possessions SET
+          quantity = quantity + ?, causal_receipt_id = ?, world_version = ?, updated_at = ?
+          WHERE possession_id = ? AND campaign_id = ?`)
+          .run(command.amount, receiptId, resultWorldVersion, input.createdAt,
+            command.creditorPossessionId, campaignId);
+      } else {
+        sqlite.prepare(`INSERT INTO campaign_play_actor_possessions
+          (possession_id, campaign_id, actor_id, possession_key, name, quantity,
+            causal_receipt_id, world_version, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(command.creditorPossessionId, campaignId, command.creditorActorId,
+            "copper", "Copper", command.amount, receiptId, resultWorldVersion,
+            input.createdAt);
+      }
+      return;
+    }
     case "materialize_support_actor": {
       const after = input.accepted.checkpoints[command.order + 1]!;
       if (after.worldTimeMinutes === null) {
@@ -2373,6 +3697,144 @@ function applyStoredMutation(
           input.accepted.checkpoints[command.order + 1]!.worldTimeMinutes,
           receiptId, resultWorldVersion, input.createdAt);
       return;
+    case "decision_open":
+      sqlite.prepare(`INSERT INTO campaign_play_decisions (
+        decision_key, campaign_id, actor_id, actor_handle, decision_kind,
+        source_turn_id, status, summary, accept_label, decline_label, accept_effect_json,
+        opened_at, resolved_at, resolution_turn_id, resolution_event_id,
+        world_version, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?)`)
+        .run(
+          command.decisionKey,
+          campaignId,
+          command.actorId,
+          command.actorHandle,
+          command.decisionKind,
+          command.sourceTurnId,
+          command.summary,
+          command.acceptLabel,
+          command.declineLabel,
+          command.acceptEffect === undefined || command.acceptEffect === null
+            ? null
+            : canonicalizeCampaignPlayProjection(command.acceptEffect),
+          input.createdAt,
+          resultWorldVersion,
+          input.createdAt,
+          input.createdAt,
+        );
+      return;
+    case "create_player_commitment": {
+      const after = input.accepted.checkpoints[command.order + 1]!;
+      const commitment = after.commitments.find((row) => row.commitmentId === command.commitmentId);
+      if (commitment === undefined || commitment.sourceReceiptId !== receiptId) {
+        throw new CampaignPlayRulebookExecutionError(
+          "execution_contract_invalid",
+          "Accepted commitment creation is missing its deterministic receipt binding.",
+        );
+      }
+      const paidCommitment = commitment.kind === "paid_delivery" ? commitment : null;
+      sqlite.prepare(`INSERT INTO campaign_play_commitments (
+        commitment_id, campaign_id, performer_actor_id, counterparty_actor_id,
+        kind, status, title, subject_name, destination_handle, fee_unit,
+        fee_amount, payment_timing, accepted_world_time_minutes,
+        due_world_time_minutes, source_decision_key, source_turn_id,
+        source_receipt_id, completion_turn_id, completion_receipt_id,
+        world_version, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)`)
+        .run(
+          commitment.commitmentId,
+          campaignId,
+          commitment.performerActorId,
+          commitment.counterpartyActorId,
+          commitment.kind,
+          commitment.status,
+          commitment.title,
+          commitment.subjectName,
+          commitment.destinationHandle,
+          paidCommitment?.feeUnit ?? null,
+          paidCommitment?.feeAmount ?? null,
+          paidCommitment?.paymentTiming ?? null,
+          commitment.acceptedWorldTimeMinutes,
+          commitment.dueWorldTimeMinutes,
+          commitment.sourceDecisionKey,
+          commitment.sourceTurnId,
+          receiptId,
+          commitment.worldVersion,
+          input.createdAt,
+          input.createdAt,
+        );
+      return;
+    }
+    case "complete_player_commitment": {
+      if (causalEventId === null || input.turnId === null) {
+        throw new CampaignPlayRulebookExecutionError(
+          "execution_contract_invalid",
+          "Commitment completion requires its deterministic event and turn identity.",
+        );
+      }
+      const after = input.accepted.checkpoints[command.order + 1]!;
+      const commitment = after.commitments.find((row) => row.commitmentId === command.commitmentId);
+      if (
+        commitment === undefined
+        || commitment.status !== "completed"
+        || commitment.completionReceiptId !== receiptId
+        || commitment.completionTurnId !== input.turnId
+      ) {
+        throw new CampaignPlayRulebookExecutionError(
+          "execution_contract_invalid",
+          "Accepted commitment completion is missing its deterministic receipt binding.",
+        );
+      }
+      const result = sqlite.prepare(`UPDATE campaign_play_commitments SET
+        status = 'completed', completion_turn_id = ?, completion_receipt_id = ?,
+        world_version = ?, updated_at = ?
+        WHERE campaign_id = ? AND commitment_id = ? AND status = 'active'`)
+        .run(
+          input.turnId,
+          receiptId,
+          commitment.worldVersion,
+          input.createdAt,
+          campaignId,
+          commitment.commitmentId,
+        );
+      if (result.changes !== 1) {
+        throw new CampaignPlayRulebookExecutionError(
+          "execution_contract_invalid",
+          "Commitment completion did not update exactly one active commitment.",
+        );
+      }
+      return;
+    }
+    case "decision_resolve":
+      if (causalEventId === null) {
+        throw new CampaignPlayRulebookExecutionError(
+          "execution_contract_invalid",
+          "Decision resolution requires its deterministic causal event identity.",
+        );
+      }
+      {
+        const result = sqlite.prepare(`UPDATE campaign_play_decisions
+          SET status = ?, resolved_at = ?, resolution_turn_id = ?,
+            resolution_event_id = ?, world_version = ?, updated_at = ?
+          WHERE campaign_id = ? AND decision_key = ? AND status = 'open'`)
+          .run(
+            command.disposition === "accept" ? "accepted" : "declined",
+            input.createdAt,
+            input.turnId,
+            causalEventId,
+            resultWorldVersion,
+            input.createdAt,
+            campaignId,
+            command.decisionKey,
+          );
+        if (result.changes !== 1) {
+          throw new CampaignPlayRulebookExecutionError(
+            "execution_contract_invalid",
+            "Decision resolution did not update exactly one open decision.",
+          );
+        }
+      }
+      return;
   }
 }
 
@@ -2478,11 +3940,14 @@ export function executeCampaignPlayRulebookBatch(
       command.kind === "adjust_actor_possession"
       || command.kind === "incur_actor_obligation"
       || command.kind === "pay_actor_obligation"
+      || command.kind === "settle_player_receivable"
       || command.kind === "materialize_support_actor"
+      || command.kind === "decision_open"
+      || command.kind === "create_player_commitment"
       || (command.kind === "move_actor" && command.materializedLocalScene !== undefined)
     );
     if (appliesBeforeEvent) {
-      applyStoredMutation(input, command, receiptId, after.worldVersion);
+      applyStoredMutation(input, command, receiptId, after.worldVersion, causalEventId);
     }
 
     const affectedRefs = eventAffectedRefs(input.frame, command, before, after);
@@ -2525,10 +3990,21 @@ export function executeCampaignPlayRulebookBatch(
       && command.kind !== "adjust_actor_possession"
       && command.kind !== "incur_actor_obligation"
       && command.kind !== "pay_actor_obligation"
+      && command.kind !== "settle_player_receivable"
       && command.kind !== "materialize_support_actor"
+      && command.kind !== "decision_open"
+      && command.kind !== "create_player_commitment"
       && !(command.kind === "move_actor" && command.materializedLocalScene !== undefined)
     ) {
-      applyStoredMutation(input, command, receiptId, after.worldVersion);
+      applyStoredMutation(
+        input,
+        command,
+        receiptId,
+        after.worldVersion,
+        command.kind === "decision_resolve" || command.kind === "complete_player_commitment"
+          ? causalEventId
+          : null,
+      );
     }
     const observedHash = context.mechanicalHash();
     if (observedHash !== resultHash) {

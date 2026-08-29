@@ -513,6 +513,7 @@ app.post("/", async (c) => {
       worldbookSelection,
       worldgenSourceHint,
       worldgenResearchEnabled,
+      playerIdentity,
     } = result.data;
     const campaign = await createCampaign(name, premise, seeds, {
       ipContext,
@@ -521,6 +522,7 @@ app.post("/", async (c) => {
       ...(worldgenSourceHint ? { worldgenSourceHint } : {}),
       ...(typeof worldgenResearchEnabled === "boolean" ? { worldgenResearchEnabled } : {}),
       ...(Array.isArray(worldbookSelection) ? { worldbookSelection } : {}),
+      ...(playerIdentity !== undefined ? { playerIdentity } : {}),
     });
     return c.json(campaign, 201);
   } catch (error) {

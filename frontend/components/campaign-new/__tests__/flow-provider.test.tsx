@@ -47,6 +47,7 @@ vi.mock("@/components/title/use-new-campaign-wizard", async () => {
         initialSession?: {
           campaignName?: string;
           campaignPremise?: string;
+          playerIdentityName?: string;
           campaignFranchise?: string;
           researchEnabled?: boolean;
           selectedWorldbooks?: Array<{ id: string; displayName: string }>;
@@ -59,6 +60,7 @@ vi.mock("@/components/title/use-new-campaign-wizard", async () => {
       const initial = options?.initialSession;
       const [campaignName, setCampaignName] = React.useState(initial?.campaignName ?? "");
       const [campaignPremise, setCampaignPremise] = React.useState(initial?.campaignPremise ?? "");
+      const [playerIdentityName, setPlayerIdentityName] = React.useState(initial?.playerIdentityName ?? "");
       const [campaignFranchise, setCampaignFranchise] = React.useState(initial?.campaignFranchise ?? "");
       const [researchEnabled, setResearchEnabled] = React.useState(initial?.researchEnabled ?? true);
       const [selectedWorldbooks] = React.useState(initial?.selectedWorldbooks ?? []);
@@ -70,6 +72,7 @@ vi.mock("@/components/title/use-new-campaign-wizard", async () => {
       function resetFlow() {
         setCampaignName("");
         setCampaignPremise("");
+        setPlayerIdentityName("");
         setCampaignFranchise("");
         setResearchEnabled(true);
         setStep(1);
@@ -86,6 +89,8 @@ vi.mock("@/components/title/use-new-campaign-wizard", async () => {
         setCampaignName,
         campaignPremise,
         setCampaignPremise,
+        playerIdentityName,
+        setPlayerIdentityName,
         campaignFranchise,
         setCampaignFranchise,
         researchEnabled,

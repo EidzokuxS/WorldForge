@@ -173,7 +173,19 @@ function conciseResult(packetJson: string): {
     displayText,
     suggestedActions: packet.availableIntents
       .slice(0, 4)
-      .map((intent) => ({ choiceHandle: intent.handle, label: intent.label })),
+      .map((intent) => ({
+        choiceHandle: intent.handle,
+        label: intent.label,
+        ...(intent.decisionBinding === undefined
+          ? {}
+          : { decisionBinding: intent.decisionBinding }),
+        ...(intent.commitmentBinding === undefined
+          ? {}
+          : { commitmentBinding: intent.commitmentBinding }),
+        ...(intent.obligationBinding === undefined
+          ? {}
+          : { obligationBinding: intent.obligationBinding }),
+      })),
   };
 }
 
@@ -648,6 +660,8 @@ export function createCampaignPlayNarrationOperationRepository(
     recoveryFeedback: CampaignPlayNarratorRecoveryFeedback | null;
   }): CampaignPlayNarrationOperation => handle.sqlite.transaction(() => {
     const { token, evidence } = input;
+    const effectiveRecoveryFeedback =
+      input.recoveryFeedback ?? token.recoveryFeedback ?? null;
     const attemptUpdate = handle.sqlite.prepare(`UPDATE campaign_play_narration_attempts
       SET status = 'failed', actual_provider_id = ?, actual_model = ?, actual_strategy = ?,
         input_tokens = ?, output_tokens = ?, duration_ms = ?, finish_reason = ?,
@@ -676,7 +690,7 @@ export function createCampaignPlayNarrationOperationRepository(
       WHERE operation_id = ? AND campaign_id = ? AND status = 'running'
         AND current_attempt_id = ? AND lease_owner = ? AND lease_epoch = ?`).run(
           evidence.errorCode,
-          serializeRecoveryFeedback(input.recoveryFeedback),
+          serializeRecoveryFeedback(effectiveRecoveryFeedback),
           input.failedAt,
           token.operationId,
           handle.campaignId,

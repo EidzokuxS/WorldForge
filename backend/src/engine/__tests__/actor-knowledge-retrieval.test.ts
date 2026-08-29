@@ -161,6 +161,11 @@ describe("actor knowledge retrieval", () => {
     expect(retrieval.trace.summarizedItemCount).toBeGreaterThan(0);
     expect(retrieval.trace.sourceLinkedSummaryCount).toBe(1);
     const summary = retrieval.memories.find((fact) => fact.id?.startsWith("knowledge-summary:"));
-    expect(summary?.sourceKnowledgeIds).toContain(records[0]?.id);
+    expect(summary).toBeDefined();
+    const surfacedSourceIds = new Set([
+      ...retrieval.sourceRecords.map((record) => record.id),
+      ...(summary?.sourceKnowledgeIds ?? []),
+    ]);
+    expect(records.every((record) => surfacedSourceIds.has(record.id))).toBe(true);
   });
 });

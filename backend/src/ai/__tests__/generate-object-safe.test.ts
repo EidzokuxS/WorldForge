@@ -1237,10 +1237,12 @@ describe("safeGenerateObject", () => {
       mode: "tool",
       retries: 1,
       allowTextFallback: false,
+      allowRepair: false,
     })).rejects.toSatisfy((error: unknown) =>
       getSafeGenerateObjectErrorCode(error) === "invalid_structured_tool_call"
       && isSafeGenerateObjectError(error)
     );
+    expect(mockGenerateText).toHaveBeenCalledTimes(1);
 
     const diagnostics = mockLogEvent.mock.calls
       .filter(([name]) => name === "llm.structured_output_invalid_tool_call")
@@ -1541,6 +1543,7 @@ describe("safeGenerateObject", () => {
       mode: "tool",
       retries: 1,
       allowTextFallback: false,
+      allowRepair: true,
     })).rejects.toSatisfy((error: unknown) =>
       getSafeGenerateObjectErrorCode(error) === "invalid_structured_tool_call"
       && isSafeGenerateObjectError(error)
@@ -1555,6 +1558,366 @@ describe("safeGenerateObject", () => {
       schemaIssuesTruncated: false,
       schemaIssues: [],
     });
+    expect(mockGenerateText).toHaveBeenCalledTimes(1);
+  });
+
+  it("repairs an SDK-invalid schema-invalid tool call only when explicitly enabled", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "openrouter",
+        providerName: "OpenRouter",
+        model: "tool-capable-model",
+        protocol: "openai-compatible",
+        baseUrl: "https://openrouter.ai/api/v1",
+        transport: "chat-completions",
+      }),
+    );
+    const controller = new AbortController();
+    mockGenerateText
+      .mockResolvedValueOnce({
+        text: "",
+        finishReason: "tool-calls",
+        toolCalls: [{
+          type: "tool-call",
+          toolName: "structured_output",
+          invalid: true,
+          input: {
+            culturalFlavor: ["one"],
+            unexpected: "raw-carrier-value",
+          },
+        }],
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({ culturalFlavor: ["one", "two"] }),
+        response: { modelId: "tool-capable-model" },
+      });
+
+    const result = await safeGenerateObject({
+      model: model as never,
+      schema: z.object({
+        culturalFlavor: z.array(z.string()).min(2),
+      }).strict(),
+      prompt: "repair world DNA",
+      mode: "tool",
+      retries: 1,
+      allowTextFallback: false,
+      allowRepair: true,
+      strictSchema: true,
+      abortSignal: controller.signal,
+    });
+
+    expect(result.object).toEqual({ culturalFlavor: ["one", "two"] });
+    expect(result.trace).toMatchObject({
+      strategy: "repair",
+      repairedFromStrategy: "tool_mode",
+      repair: {
+        strategy: "repair",
+      },
+    });
+    expect(result.trace.repair?.issues).toContain("[culturalFlavor]");
+    expect(mockGenerateText).toHaveBeenCalledTimes(2);
+    expect(mockGenerateText.mock.calls[0]?.[0]?.model).toBe(model);
+    expect(mockGenerateText.mock.calls[1]?.[0]?.model).toBe(model);
+    expect(mockGenerateText.mock.calls[1]?.[0]?.abortSignal).toBe(controller.signal);
+    const repairPrompt = String(mockGenerateText.mock.calls[1]?.[0]?.prompt ?? "");
+    expect(repairPrompt).toContain("Validation errors:");
+    expect(repairPrompt).toContain("culturalFlavor");
+    expect(repairPrompt).toContain("raw-carrier-value");
+
+    const [diagnostic] = mockLogEvent.mock.calls
+      .filter(([name]) => name === "llm.structured_output_invalid_tool_call")
+      .map(([, payload]) => payload) as Array<Record<string, unknown>>;
+    expect(diagnostic).toMatchObject({
+      schemaParseOutcome: "invalid",
+      schemaIssueCount: 2,
+    });
+  });
+
+  it("uses an opt-in second same-model repair pass for residual schema issues", async () => {
+    const model = {};
+    const controller = new AbortController();
+    mockGenerateText
+      .mockResolvedValueOnce({
+        text: JSON.stringify({ title: "x", tags: [], extra: "drop" }),
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({ title: "fixed", tags: [] }),
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({ title: "fixed", tags: ["kept"] }),
+      });
+
+    const result = await safeGenerateObject({
+      model: model as never,
+      schema: z.strictObject({
+        title: z.string().min(3),
+        tags: z.array(z.string()).min(1),
+      }),
+      prompt: "repair residual issues",
+      retries: 1,
+      allowRepair: true,
+      maxRepairAttempts: 2,
+      abortSignal: controller.signal,
+    });
+
+    expect(result.object).toEqual({ title: "fixed", tags: ["kept"] });
+    expect(result.trace.repair?.issues).toContain("[tags]");
+    expect(mockGenerateText).toHaveBeenCalledTimes(3);
+    expect(mockGenerateText.mock.calls[1]?.[0]?.model).toBe(model);
+    expect(mockGenerateText.mock.calls[2]?.[0]?.model).toBe(model);
+    expect(mockGenerateText.mock.calls[1]?.[0]?.abortSignal).toBe(controller.signal);
+    expect(mockGenerateText.mock.calls[2]?.[0]?.abortSignal).toBe(controller.signal);
+
+    const firstRepairPrompt = String(mockGenerateText.mock.calls[1]?.[0]?.prompt ?? "");
+    const secondRepairPrompt = String(mockGenerateText.mock.calls[2]?.[0]?.prompt ?? "");
+    expect(firstRepairPrompt).toContain('"issueCount": 3');
+    expect(secondRepairPrompt).toContain('"issueCount": 1');
+    expect(secondRepairPrompt).not.toContain("unrecognized_keys");
+    expect(firstRepairPrompt).toContain('"strict": true');
+    expect(firstRepairPrompt).toContain('"allowedKeys"');
+    expect(firstRepairPrompt).toContain('"minLength": 3');
+    expect(firstRepairPrompt).toContain('"minItems": 1');
+    expect(firstRepairPrompt).toContain('"<item>"');
+    expect(firstRepairPrompt).not.toContain("culturalFlavor");
+    expect(firstRepairPrompt).not.toContain("geography");
+  });
+
+  it("preserves the original invalid structured tool error after two repair failures", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "openrouter",
+        providerName: "OpenRouter",
+        model: "tool-capable-model",
+        protocol: "openai-compatible",
+        baseUrl: "https://openrouter.ai/api/v1",
+        transport: "chat-completions",
+      }),
+    );
+    mockGenerateText
+      .mockResolvedValueOnce({
+        text: "",
+        finishReason: "tool-calls",
+        toolCalls: [{
+          type: "tool-call",
+          toolName: "structured_output",
+          invalid: true,
+          input: { hp: "not-a-number" },
+        }],
+      })
+      .mockResolvedValueOnce({ text: "not-json-pass-1" })
+      .mockResolvedValueOnce({ text: "not-json-pass-2" });
+
+    await expect(safeGenerateObject({
+      model: model as never,
+      schema: z.object({ hp: z.number() }).strict(),
+      prompt: "repair exhaustion",
+      mode: "tool",
+      retries: 1,
+      allowTextFallback: false,
+      allowRepair: true,
+      maxRepairAttempts: 2,
+      strictSchema: true,
+    })).rejects.toSatisfy((error: unknown) =>
+      getSafeGenerateObjectErrorCode(error) === "invalid_structured_tool_call"
+      && isSafeGenerateObjectError(error),
+    );
+
+    expect(mockGenerateText).toHaveBeenCalledTimes(3);
+    expect(String(mockGenerateText.mock.calls[2]?.[0]?.prompt ?? "")).toContain("invalid_json");
+  });
+
+  it("fails closed without repair when the structured issue ledger is bounded out", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "openrouter",
+        providerName: "OpenRouter",
+        model: "tool-capable-model",
+        protocol: "openai-compatible",
+        baseUrl: "https://openrouter.ai/api/v1",
+        transport: "chat-completions",
+      }),
+    );
+    mockGenerateText.mockResolvedValueOnce({
+      text: "",
+      finishReason: "tool-calls",
+      toolCalls: [{
+        type: "tool-call",
+        toolName: "structured_output",
+        invalid: true,
+        input: {},
+      }],
+    });
+
+    await expect(safeGenerateObject({
+      model: model as never,
+      schema: z.strictObject({
+        a: z.string(),
+        b: z.string(),
+        c: z.string(),
+        d: z.string(),
+        e: z.string(),
+        f: z.string(),
+        g: z.string(),
+        h: z.string(),
+        i: z.string(),
+      }),
+      prompt: "bounded issue ledger",
+      mode: "tool",
+      retries: 1,
+      allowTextFallback: false,
+      allowRepair: true,
+      maxRepairAttempts: 2,
+      strictSchema: true,
+    })).rejects.toSatisfy((error: unknown) =>
+      getSafeGenerateObjectErrorCode(error) === "invalid_structured_tool_call"
+      && isSafeGenerateObjectError(error),
+    );
+
+    expect(mockGenerateText).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([undefined, 1] as const)(
+    "keeps the legacy one-pass repair when optional ledgers are unavailable (maxRepairAttempts=%s)",
+    async (maxRepairAttempts) => {
+      const model = {};
+      const schema = z.strictObject({
+        a: z.string(),
+        b: z.string(),
+        c: z.string(),
+        d: z.string(),
+        e: z.string(),
+        f: z.string(),
+        g: z.string(),
+        h: z.string(),
+        i: z.string(),
+      });
+      const repairedObject = {
+        a: "a",
+        b: "b",
+        c: "c",
+        d: "d",
+        e: "e",
+        f: "f",
+        g: "g",
+        h: "h",
+        i: "i",
+      };
+      mockGenerateText
+        .mockResolvedValueOnce({ text: JSON.stringify({}) })
+        .mockResolvedValueOnce({ text: JSON.stringify(repairedObject) });
+
+      const result = await safeGenerateObject({
+        model: model as never,
+        schema,
+        prompt: "legacy one-pass repair",
+        retries: 1,
+        allowRepair: true,
+        ...(maxRepairAttempts === undefined ? {} : { maxRepairAttempts }),
+      });
+
+      expect(result.object).toEqual(repairedObject);
+      expect(mockGenerateText).toHaveBeenCalledTimes(2);
+      expect(String(mockGenerateText.mock.calls[1]?.[0]?.prompt ?? "")).toContain("Validation errors:");
+    },
+  );
+
+  it("keeps an invalid structured tool call error when repair output is invalid", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "openrouter",
+        providerName: "OpenRouter",
+        model: "tool-capable-model",
+        protocol: "openai-compatible",
+        baseUrl: "https://openrouter.ai/api/v1",
+        transport: "chat-completions",
+      }),
+    );
+    mockGenerateText
+      .mockResolvedValueOnce({
+        text: "",
+        finishReason: "tool-calls",
+        toolCalls: [{
+          type: "tool-call",
+          toolName: "structured_output",
+          invalid: true,
+          input: { hp: "not-a-number" },
+        }],
+      })
+      .mockResolvedValueOnce({ text: "not-json" });
+
+    await expect(safeGenerateObject({
+      model: model as never,
+      schema: z.object({ hp: z.number() }).strict(),
+      prompt: "repair failure",
+      mode: "tool",
+      retries: 1,
+      allowTextFallback: false,
+      allowRepair: true,
+      strictSchema: true,
+    })).rejects.toSatisfy((error: unknown) =>
+      getSafeGenerateObjectErrorCode(error) === "invalid_structured_tool_call"
+      && isSafeGenerateObjectError(error)
+    );
+
+    expect(mockGenerateText).toHaveBeenCalledTimes(2);
+    const [diagnostic] = mockLogEvent.mock.calls
+      .filter(([name]) => name === "llm.structured_output_invalid_tool_call")
+      .map(([, payload]) => payload);
+    expect(diagnostic).toMatchObject({
+      schemaParseOutcome: "invalid",
+      schemaIssueCount: 1,
+    });
+  });
+
+  it("keeps an invalid structured tool call error when repair generation fails", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "openrouter",
+        providerName: "OpenRouter",
+        model: "tool-capable-model",
+        protocol: "openai-compatible",
+        baseUrl: "https://openrouter.ai/api/v1",
+        transport: "chat-completions",
+      }),
+    );
+    mockGenerateText
+      .mockResolvedValueOnce({
+        text: "",
+        finishReason: "tool-calls",
+        toolCalls: [{
+          type: "tool-call",
+          toolName: "structured_output",
+          invalid: true,
+          input: { hp: "not-a-number" },
+        }],
+      })
+      .mockRejectedValueOnce(new Error("repair provider failure"));
+
+    await expect(safeGenerateObject({
+      model: model as never,
+      schema: z.object({ hp: z.number() }).strict(),
+      prompt: "repair provider failure",
+      mode: "tool",
+      retries: 1,
+      allowTextFallback: false,
+      allowRepair: true,
+      strictSchema: true,
+    })).rejects.toSatisfy((error: unknown) =>
+      getSafeGenerateObjectErrorCode(error) === "invalid_structured_tool_call"
+      && isSafeGenerateObjectError(error)
+    );
+
+    expect(mockGenerateText).toHaveBeenCalledTimes(2);
   });
 
   it("classifies a missing discriminated-union value against reachable literals", async () => {

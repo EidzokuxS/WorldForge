@@ -1,9 +1,15 @@
 import crypto from "node:crypto";
 import type Database from "better-sqlite3";
-import type { CampaignWorldReview } from "@worldforge/shared";
 import {
+  CAMPAIGN_PLAY_LIMITS,
+  type CampaignPlayPlayerCommitment,
+  type CampaignWorldReview,
+} from "@worldforge/shared";
+import {
+  campaignPlayDecisionAcceptEffectSchema,
   campaignPlayJournalEntrySchema,
   campaignPlayNarratorPacketSchema,
+  campaignPlayPlayerCommitmentSchema,
 } from "./contracts.js";
 import {
   CampaignWorldRepositoryError,
@@ -27,6 +33,7 @@ import {
   type CampaignPlayLiveActorObligation,
   type CampaignPlayLiveActorPossession,
   type CampaignPlayLivePressureState,
+  type CampaignPlayLivePendingDecision,
   type CampaignPlayLiveRelation,
   type CampaignPlayLiveRouteState,
   type CampaignPlayRuntimeLocation,
@@ -54,6 +61,44 @@ export class CampaignPlayStateRepositoryError extends Error {
     super(message, options);
     this.name = "CampaignPlayStateRepositoryError";
   }
+}
+
+function parsePendingDecisionRows(
+  rows: Array<CampaignPlayLivePendingDecision & { acceptEffectJson: string | null }>,
+): CampaignPlayLivePendingDecision[] {
+  return rows.map((row) => ({
+    decisionKey: row.decisionKey,
+    actorId: row.actorId,
+    actorHandle: row.actorHandle,
+    kind: row.kind,
+    status: row.status,
+    sourceTurnId: row.sourceTurnId,
+    summary: row.summary,
+    acceptLabel: row.acceptLabel,
+    declineLabel: row.declineLabel,
+    acceptEffect: row.acceptEffectJson === null
+      ? null
+      : campaignPlayDecisionAcceptEffectSchema.parse(JSON.parse(row.acceptEffectJson)),
+    resolutionEventId: row.resolutionEventId,
+    resolutionTurnId: row.resolutionTurnId,
+    resolutionDisposition: row.resolutionDisposition,
+    worldVersion: row.worldVersion,
+  }));
+}
+
+function parseCommitmentRows(
+  rows: Array<Record<string, unknown>>,
+): CampaignPlayPlayerCommitment[] {
+  return rows.map((row) => {
+    if (row.kind === "unpaid_delivery") {
+      const unpaidRow = { ...row };
+      delete unpaidRow.feeUnit;
+      delete unpaidRow.feeAmount;
+      delete unpaidRow.paymentTiming;
+      return campaignPlayPlayerCommitmentSchema.parse(unpaidRow);
+    }
+    return campaignPlayPlayerCommitmentSchema.parse(row);
+  });
 }
 
 export interface CampaignPlayStateAuthority {
@@ -213,6 +258,14 @@ function parseRecordArray(value: string, label: string): CampaignPlayProjectionR
   const parsed = parseJson(value, label);
   if (!Array.isArray(parsed)) throw corrupt(`${label} must contain an array.`);
   return parsed;
+}
+
+function campaignPlayWorldTimeLabel(worldTimeMinutes: number): string {
+  const day = Math.floor(worldTimeMinutes / 1_440) + 1;
+  const minuteOfDay = worldTimeMinutes % 1_440;
+  const hours = Math.floor(minuteOfDay / 60).toString().padStart(2, "0");
+  const minutes = (minuteOfDay % 60).toString().padStart(2, "0");
+  return `Day ${day}, ${hours}:${minutes}`;
 }
 
 function loadAcceptedReview(handle: CampaignPlayDatabaseHandle): CampaignWorldReview {
@@ -582,6 +635,36 @@ function selectMechanicalProjection(
     WHERE campaign_id = ?
     ORDER BY debtor_actor_id, creditor_actor_id, unit_key, obligation_id
   `).all(campaignId) as CampaignPlayLiveActorObligation[];
+  const pendingDecisionRows = sqlite.prepare(`
+    SELECT decision_key AS decisionKey, actor_id AS actorId,
+      actor_handle AS actorHandle, decision_kind AS kind, status,
+      source_turn_id AS sourceTurnId, summary, accept_label AS acceptLabel,
+      decline_label AS declineLabel, resolution_event_id AS resolutionEventId,
+      resolution_turn_id AS resolutionTurnId,
+      accept_effect_json AS acceptEffectJson,
+      CASE WHEN status = 'accepted' THEN 'accept'
+        WHEN status = 'declined' THEN 'decline' ELSE NULL END AS resolutionDisposition,
+      world_version AS worldVersion
+    FROM campaign_play_decisions
+    WHERE campaign_id = ? ORDER BY decision_key
+  `).all(campaignId) as Array<CampaignPlayLivePendingDecision & { acceptEffectJson: string | null }>;
+  const parsedPendingDecisions = parsePendingDecisionRows(pendingDecisionRows);
+  const commitmentRows = sqlite.prepare(`
+    SELECT commitment_id AS commitmentId, campaign_id AS campaignId,
+      performer_actor_id AS performerActorId, counterparty_actor_id AS counterpartyActorId,
+      kind, status, title, subject_name AS subjectName,
+      destination_handle AS destinationHandle, fee_unit AS feeUnit,
+      fee_amount AS feeAmount, payment_timing AS paymentTiming,
+      accepted_world_time_minutes AS acceptedWorldTimeMinutes,
+      due_world_time_minutes AS dueWorldTimeMinutes,
+      source_decision_key AS sourceDecisionKey, source_turn_id AS sourceTurnId,
+      source_receipt_id AS sourceReceiptId, completion_turn_id AS completionTurnId,
+      completion_receipt_id AS completionReceiptId, world_version AS worldVersion,
+      created_at AS createdAt, updated_at AS updatedAt
+    FROM campaign_play_commitments
+    WHERE campaign_id = ? ORDER BY commitment_id
+  `).all(campaignId) as Array<Record<string, unknown>>;
+  const parsedCommitments = parseCommitmentRows(commitmentRows);
 
   const acceptedPlacements = review.placements.map((row) => ({
     placementId: row.id,
@@ -608,7 +691,7 @@ function selectMechanicalProjection(
   const baseRowsUnchanged = sameJson(placements, acceptedPlacements) &&
     sameJson(relations, acceptedRelations) && sameJson(goals, acceptedGoals);
 
-  return projectCampaignPlayMechanicalTruth({
+  const base = projectCampaignPlayMechanicalTruth({
     acceptedReview: review,
     worldTimeMinutes: state.worldTimeMinutes,
     human: humanRows.length === 0
@@ -625,7 +708,22 @@ function selectMechanicalProjection(
     goals: baseRowsUnchanged ? [] : goals,
     possessions,
     obligations,
+    pendingDecisions: parsedPendingDecisions,
   });
+  if (parsedCommitments.length === 0) return base;
+  const commitments = parsedCommitments
+    .map(({ createdAt, updatedAt, ...row }) => row)
+    .sort((left, right) => left.commitmentId < right.commitmentId ? -1
+      : left.commitmentId > right.commitmentId ? 1 : 0);
+  const projection = {
+    ...(base.projection as Record<string, unknown>),
+    commitments,
+  };
+  return {
+    projection,
+    canonicalBytes: canonicalizeCampaignPlayProjection(projection),
+    hash: hashCampaignPlayProjection(projection),
+  };
 }
 
 function activeTurn(sqlite: Database.Database, campaignId: string): CampaignPlayProjectionRecord | null {
@@ -842,6 +940,59 @@ function selectPublicState(
       JSON.parse(packetRow.packetJson) as unknown,
     )
     : null;
+  const decisionRows = sqlite.prepare(`
+    SELECT decision.decision_key AS decisionKey,
+      decision.actor_handle AS actorHandle, decision.decision_kind AS kind,
+      decision.status, decision.source_turn_id AS sourceTurnId,
+      decision.summary, decision.resolution_turn_id AS resolutionTurnId,
+      decision.resolution_event_id AS resolutionEventId,
+      decision.accept_effect_json AS acceptEffectJson,
+      event.event_kind AS eventKind
+    FROM campaign_play_decisions decision
+    LEFT JOIN campaign_play_events event
+      ON event.campaign_id = decision.campaign_id
+      AND event.event_id = decision.resolution_event_id
+    WHERE decision.campaign_id = ? AND decision.status <> 'open'
+    ORDER BY decision.world_version DESC, decision.decision_key DESC
+    LIMIT ?
+  `).all(campaignId, CAMPAIGN_PLAY_LIMITS.continuityEntries) as Array<{
+    decisionKey: string;
+    actorHandle: string;
+    kind: "yes_no" | "offer" | "demand";
+    status: "accepted" | "declined";
+    sourceTurnId: string;
+    summary: string;
+    resolutionTurnId: string | null;
+    resolutionEventId: string | null;
+    acceptEffectJson: string | null;
+    eventKind: string | null;
+  }>;
+  const decisionOutcomes = decisionRows.map((row) => {
+    const expectedEventKind = row.status === "accepted"
+      ? "decision_accepted"
+      : "decision_declined";
+    if (
+      row.resolutionTurnId === null ||
+      row.resolutionEventId === null ||
+      row.eventKind !== expectedEventKind
+    ) {
+      throw corrupt("Resolved decision is missing its matching durable outcome event.");
+    }
+    return {
+      decisionKey: row.decisionKey,
+      actorHandle: row.actorHandle,
+      kind: row.kind,
+      disposition: row.status === "accepted" ? "accept" as const : "decline" as const,
+      status: row.status,
+      sourceTurnId: row.sourceTurnId,
+      summary: row.summary,
+      acceptEffect: row.acceptEffectJson === null
+        ? null
+        : campaignPlayDecisionAcceptEffectSchema.parse(
+          JSON.parse(row.acceptEffectJson),
+        ),
+    };
+  });
   const utilityActions = deriveCampaignPlayUtilityActions(
     packet,
     state.setupPhase === "ready" && activeTurn(sqlite, campaignId) === null,
@@ -967,6 +1118,88 @@ function selectPublicState(
     unitKey: "copper";
     outstandingAmount: number;
   }>;
+  const publicActorRows = sqlite.prepare(`
+    SELECT id, kind, controller, name
+    FROM actors
+    WHERE campaign_id = ?
+    ORDER BY id
+  `).all(campaignId) as Array<{
+    id: string;
+    kind: string;
+    controller: string;
+    name: string;
+  }>;
+  const publicActors = new Map(publicActorRows.map((actor) => [actor.id, actor]));
+  const commitmentRows = sqlite.prepare(`
+    SELECT commitment_id AS commitmentId, campaign_id AS campaignId,
+      performer_actor_id AS performerActorId, counterparty_actor_id AS counterpartyActorId,
+      kind, status, title, subject_name AS subjectName,
+      destination_handle AS destinationHandle, fee_unit AS feeUnit,
+      fee_amount AS feeAmount, payment_timing AS paymentTiming,
+      accepted_world_time_minutes AS acceptedWorldTimeMinutes,
+      due_world_time_minutes AS dueWorldTimeMinutes,
+      source_decision_key AS sourceDecisionKey, source_turn_id AS sourceTurnId,
+      source_receipt_id AS sourceReceiptId, completion_turn_id AS completionTurnId,
+      completion_receipt_id AS completionReceiptId, world_version AS worldVersion,
+      created_at AS createdAt, updated_at AS updatedAt
+    FROM campaign_play_commitments
+    WHERE campaign_id = ?
+    ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END,
+      CASE WHEN status = 'active' THEN COALESCE(due_world_time_minutes, 2147483647) END,
+      CASE WHEN status = 'completed' THEN updated_at END DESC,
+      title, commitment_id
+    LIMIT ?
+  `).all(campaignId, CAMPAIGN_PLAY_LIMITS.visibleCommitments) as Array<Record<string, unknown>>;
+  const durableCommitments = parseCommitmentRows(commitmentRows);
+  const destinationRows = sqlite.prepare(`
+    SELECT id, name FROM locations WHERE campaign_id = ? ORDER BY id
+  `).all(campaignId) as Array<{ id: string; name: string }>;
+  const destinationNames = new Map(destinationRows.map((location) => [
+    deriveCampaignPlayPublicHandle("location", campaignId, location.id),
+    location.name,
+  ]));
+  const commitments = durableCommitments.map((commitment) => {
+    const performer = publicActors.get(commitment.performerActorId);
+    const counterparty = publicActors.get(commitment.counterpartyActorId);
+    const destinationName = destinationNames.get(commitment.destinationHandle);
+    if (
+      !performer || performer.kind !== "person" || performer.controller !== "human" ||
+      !counterparty || counterparty.kind !== "person" || counterparty.controller !== "agent" ||
+      destinationName === undefined
+    ) {
+      throw corrupt("Campaign Play commitment public projection is inconsistent.");
+    }
+    const common = {
+      handle: deriveCampaignPlayPublicHandle("commitment", campaignId, commitment.commitmentId),
+      kind: commitment.kind,
+      status: commitment.status,
+      counterpartyHandle: deriveCampaignPlayPublicHandle(
+        "actor",
+        campaignId,
+        commitment.counterpartyActorId,
+      ),
+      counterpartyName: counterparty.name,
+      title: commitment.title,
+      subjectName: commitment.subjectName,
+      destinationHandle: commitment.destinationHandle,
+      destinationName,
+      dueWorldTimeLabel: commitment.dueWorldTimeMinutes === null
+        ? null
+        : campaignPlayWorldTimeLabel(commitment.dueWorldTimeMinutes),
+    };
+    return commitment.kind === "paid_delivery"
+      ? {
+          ...common,
+          kind: "paid_delivery" as const,
+          feeUnit: commitment.feeUnit,
+          feeAmount: commitment.feeAmount,
+          paymentTiming: commitment.paymentTiming,
+        }
+      : {
+          ...common,
+          kind: "unpaid_delivery" as const,
+        };
+  });
   return projectCampaignPlayPublicState({
     campaignId,
     acceptedWorldVersion: state.acceptedWorldVersion,
@@ -999,7 +1232,9 @@ function selectPublicState(
       unitKey: obligation.unitKey,
       outstandingAmount: obligation.outstandingAmount,
     })),
+    commitments,
     consequences: packet?.consequences ?? [],
+    decisionOutcomes,
     journal: journalRows.map((row) => ({
       observationId: row.observationId,
       worldTimeMinutes: row.worldTimeMinutes,
@@ -1384,6 +1619,38 @@ export function loadCampaignPlayRulebookFrame(
     ORDER BY debtor_actor_id, creditor_actor_id, unit_key, obligation_id`).all(
       campaignId,
     ) as CampaignPlayLiveActorObligation[];
+  const pendingDecisionRows = sqlite.prepare(`SELECT decision_key AS decisionKey,
+      actor_id AS actorId, actor_handle AS actorHandle, decision_kind AS kind,
+      status, source_turn_id AS sourceTurnId, summary,
+      accept_label AS acceptLabel, decline_label AS declineLabel,
+      accept_effect_json AS acceptEffectJson,
+      resolution_event_id AS resolutionEventId,
+      resolution_turn_id AS resolutionTurnId,
+      CASE WHEN status = 'accepted' THEN 'accept'
+        WHEN status = 'declined' THEN 'decline' ELSE NULL END AS resolutionDisposition,
+      world_version AS worldVersion
+    FROM campaign_play_decisions
+    WHERE campaign_id = ? ORDER BY decision_key`).all(
+    campaignId,
+    ) as Array<CampaignPlayLivePendingDecision & { acceptEffectJson: string | null }>;
+  const pendingDecisions = parsePendingDecisionRows(pendingDecisionRows);
+  const commitmentRows = sqlite.prepare(`SELECT commitment_id AS commitmentId,
+      campaign_id AS campaignId, performer_actor_id AS performerActorId,
+      counterparty_actor_id AS counterpartyActorId, kind, status, title,
+      subject_name AS subjectName, destination_handle AS destinationHandle,
+      fee_unit AS feeUnit, fee_amount AS feeAmount,
+      payment_timing AS paymentTiming,
+      accepted_world_time_minutes AS acceptedWorldTimeMinutes,
+      due_world_time_minutes AS dueWorldTimeMinutes,
+      source_decision_key AS sourceDecisionKey, source_turn_id AS sourceTurnId,
+      source_receipt_id AS sourceReceiptId, completion_turn_id AS completionTurnId,
+      completion_receipt_id AS completionReceiptId, world_version AS worldVersion,
+      created_at AS createdAt, updated_at AS updatedAt
+    FROM campaign_play_commitments
+    WHERE campaign_id = ? ORDER BY commitment_id`).all(
+    campaignId,
+  ) as Array<Record<string, unknown>>;
+  const commitments = parseCommitmentRows(commitmentRows);
   const { runtimeLocations, runtimeRoutes } = selectRuntimeTopology(sqlite, campaignId);
   const runtimeActors = selectRuntimeActors(sqlite, campaignId);
   return {
@@ -1406,5 +1673,7 @@ export function loadCampaignPlayRulebookFrame(
     goals,
     possessions,
     obligations,
+    pendingDecisions,
+    commitments,
   };
 }

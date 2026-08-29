@@ -4,9 +4,14 @@ import {
   type CampaignPlayActionContext,
   type CampaignPlayAvailableIntent,
   type CampaignPlayConsequence,
+  type CampaignPlayDecisionAcceptEffect,
+  type CampaignPlayDecisionObservation,
+  type CampaignPlayDecisionOutcome,
   type CampaignPlayJournalEntry,
   type CampaignPlayNarratorPacket,
+  type CampaignPlayOpeningDecision,
   type CampaignPlayVisibleActor,
+  type CampaignPlayVisibleCommitment,
   type CampaignPlayVisibleLocation,
   type CampaignPlayVisibleObligation,
   type CampaignPlayVisiblePossession,
@@ -16,9 +21,12 @@ import {
 import {
   campaignPlayActionExecutionRouteSchema,
   campaignPlayActionContextSchema,
+  campaignPlayDecisionAcceptEffectSchema,
+  campaignPlayDecisionObservationSchema,
   campaignPlayJudgeArtifactSchema,
   campaignPlayJournalEntrySchema,
   campaignPlayNarratorPacketSchema,
+  campaignPlayOpeningDecisionSchema,
 } from "./contracts.js";
 import type { CampaignPlayDatabaseHandle } from "./campaign-play-database.js";
 import {
@@ -111,6 +119,39 @@ interface StoredPlayerTurnRow {
   turnId: string;
 }
 
+interface CampaignPlayDecisionRow {
+  decisionKey: string;
+  actorHandle: string;
+  actorName: string;
+  kind: "yes_no" | "offer" | "demand";
+  status: "open" | "accepted" | "declined";
+  sourceTurnId: string;
+  summary: string;
+  acceptLabel: string;
+  declineLabel: string;
+  acceptEffectJson: string | null;
+  resolutionTurnId: string | null;
+  resolutionEventId: string | null;
+  worldVersion: number;
+}
+
+interface CampaignPlayCommitmentRow {
+  commitmentId: string;
+  counterpartyActorId: string;
+  counterpartyName: string;
+  counterpartyKind: "person";
+  counterpartyController: "human" | "agent";
+  kind: "paid_delivery" | "unpaid_delivery";
+  status: "active" | "completed";
+  title: string;
+  subjectName: string;
+  destinationHandle: string;
+  feeUnit: "copper" | null;
+  feeAmount: number | null;
+  paymentTiming: "on_completion" | null;
+  dueWorldTimeMinutes: number | null;
+}
+
 export interface ProjectCampaignPlayVisibilityInput {
   token: CampaignPlayWorkerLeaseToken;
   actionContext: CampaignPlayActionContext | null;
@@ -173,6 +214,21 @@ function parseRecordArray(value: string, label: string): Record<string, unknown>
     );
   }
   return parsed as Record<string, unknown>[];
+}
+
+function parseDecisionAcceptEffect(
+  acceptEffectJson: string | null,
+): CampaignPlayDecisionAcceptEffect | null {
+  if (acceptEffectJson === null) return null;
+  try {
+    return campaignPlayDecisionAcceptEffectSchema.parse(JSON.parse(acceptEffectJson));
+  } catch (cause) {
+    throw new CampaignPlayVisibilityError(
+      "visibility_state_invalid",
+      "Decision accept effect is not a valid durable effect.",
+      { cause },
+    );
+  }
 }
 
 function openingPremiseParticipants(exposure: ExposureRow): Set<string> | null {
@@ -641,16 +697,24 @@ function publicEntry(
   );
   const label = location?.name ?? route?.destinationName ?? witness?.name ?? "Nearby";
   const affectedRefs = parseRecordArray(exposure.eventAffectedRefsJson, "Event affected references");
-  const playerParticipated = exposure.eventTurnId === currentTurnId && affectedRefs.some((reference) =>
-    reference.kind === "actor" && reference.id === humanActorId
-  );
   const eventSource = parseRecord(exposure.eventSourceJson, "Event source");
   const commandPayload = parseRecord(exposure.commandPayloadJson, "Command payload");
+  const playerParticipated = exposure.eventTurnId === currentTurnId && (
+    affectedRefs.some((reference) =>
+      reference.kind === "actor" && reference.id === humanActorId
+    ) || (
+      exposure.commandKind === "decision_resolve" &&
+      ((eventSource.kind === "system" && eventSource.system === "game_master") ||
+        (eventSource.kind === "actor" && eventSource.actorId === humanActorId))
+    )
+  );
   const performingActorId = exposure.commandKind === "record_world_event"
     ? commandPayload.performingActorId
     : exposure.commandKind === "adjust_actor_possession"
       ? commandPayload.actorId
-      : undefined;
+      : exposure.commandKind === "decision_resolve"
+        ? commandPayload.actorId
+        : undefined;
   const directlyPerceivedSourceActorId = eventSource.kind === "actor"
     && typeof eventSource.actorId === "string"
     && eventSource.actorId !== humanActorId
@@ -682,7 +746,39 @@ function publicEntry(
   let title = "Seen nearby";
   let text = "You witnessed a change nearby.";
   let cue: CampaignPlayConsequence["causalCue"] = "direct_perception";
+  let decisionOutcome: CampaignPlayDecisionObservation | undefined;
+  const playerResolvedDecision =
+    (eventSource.kind === "system" && eventSource.system === "game_master") ||
+    (eventSource.kind === "actor" && eventSource.actorId === humanActorId);
   if (
+    exposure.channel === "direct_perception" && playerParticipated &&
+    playerResolvedDecision &&
+    exposure.commandKind === "decision_resolve" &&
+    (commandPayload.disposition === "accept" || commandPayload.disposition === "decline") &&
+    typeof commandPayload.summary === "string" &&
+    typeof commandPayload.selectedLabel === "string"
+  ) {
+    const decisionDisposition = commandPayload.disposition === "accept" ? "accepted" : "declined";
+    if (!performingActor) {
+      throw new CampaignPlayVisibilityError(
+        "visibility_projection_invalid",
+        "A decision resolution observation requires its visible actor.",
+      );
+    }
+    decisionOutcome = campaignPlayDecisionObservationSchema.parse({
+      decisionKey: commandPayload.decisionKey,
+      actorName: performingActor.name,
+      actorHandle: typeof commandPayload.actorHandle === "string"
+        ? commandPayload.actorHandle
+        : publicHandle("actor", handle.campaignId, performingActor.id),
+      kind: commandPayload.decisionKind,
+      disposition: commandPayload.disposition,
+      summary: commandPayload.summary,
+      selectedLabel: commandPayload.selectedLabel,
+    });
+    title = `Decision ${decisionDisposition}`;
+    text = `You ${decisionDisposition} the choice presented by ${performingActor.name}: ${commandPayload.summary} Your response was “${commandPayload.selectedLabel}.”`;
+  } else if (
     exposure.channel === "direct_perception" && playerParticipated &&
     eventSource.kind === "system" && eventSource.system === "game_master" &&
     (exposure.commandKind === "record_world_event"
@@ -790,7 +886,124 @@ function publicEntry(
     whereOrRoute: label,
     worldTimeLabel: timeLabel(exposure.eventWorldTimeMinutes),
     consequence,
+    ...(decisionOutcome === undefined ? {} : { decisionOutcome }),
   });
+}
+
+/**
+ * The decision_open command is intentionally protected from generic exposure
+ * projection.  Opening narration still needs one durable, code-owned fact to
+ * cover, so derive a deterministic packet observation from the accepted
+ * opening artifact and its persisted decision row.  It is regenerated on
+ * reload rather than written into the ordinary observation table.
+ */
+function openingDecisionPublicObservation(
+  handle: CampaignPlayDatabaseHandle,
+  turnId: string,
+  worldTimeMinutes: number,
+  locationName: string,
+  decision: CampaignPlayOpeningDecision,
+  visibleActors: CampaignPlayVisibleActor[],
+): CampaignPlayJournalEntry | null {
+  const row = handle.sqlite.prepare(`SELECT
+      decision_key AS decisionKey, actor_handle AS actorHandle,
+      decision_kind AS kind, status, source_turn_id AS sourceTurnId,
+      summary, accept_label AS acceptLabel, decline_label AS declineLabel
+    FROM campaign_play_decisions
+    WHERE campaign_id = ? AND decision_key = ?`).get(
+      handle.campaignId,
+      decision.decisionKey,
+    ) as {
+      decisionKey: string;
+      actorHandle: string;
+      kind: CampaignPlayOpeningDecision["kind"];
+      status: "open" | "accepted" | "declined";
+      sourceTurnId: string;
+      summary: string;
+      acceptLabel: string;
+      declineLabel: string;
+    } | undefined;
+  if (
+    !row || row.status !== "open" || row.sourceTurnId !== turnId ||
+    row.actorHandle !== decision.actorHandle || row.kind !== decision.kind ||
+    row.summary !== decision.summary || row.acceptLabel !== decision.acceptLabel ||
+    row.declineLabel !== decision.declineLabel
+  ) {
+    throw new CampaignPlayVisibilityError(
+      "visibility_state_invalid",
+      "Opening decision observation requires its matching durable decision.",
+    );
+  }
+  if (!visibleActors.some((actor) => actor.handle === decision.actorHandle)) return null;
+  return decisionPublicObservation(
+    handle,
+    turnId,
+    worldTimeMinutes,
+    locationName,
+    decision,
+  );
+}
+
+function decisionPublicObservation(
+  handle: CampaignPlayDatabaseHandle,
+  turnId: string,
+  worldTimeMinutes: number,
+  locationName: string,
+  decision: CampaignPlayOpeningDecision,
+): CampaignPlayJournalEntry {
+  const observationHandle = publicHandle(
+    "observation",
+    handle.campaignId,
+    `${turnId}:decision-open:${decision.decisionKey}`,
+  );
+  const text = `${decision.actorName} puts a choice before you: ${decision.summary}`;
+  const consequence: CampaignPlayConsequence = {
+    observationHandle,
+    performingActorHandle: decision.actorHandle,
+    performingActorName: decision.actorName,
+    whatChanged: text,
+    whereOrRoute: locationName,
+    worldTimeLabel: timeLabel(worldTimeMinutes),
+    causalCue: "direct_perception",
+  };
+  return campaignPlayJournalEntrySchema.parse({
+    observationHandle,
+    title: "A choice at hand",
+    text,
+    whereOrRoute: locationName,
+    worldTimeLabel: timeLabel(worldTimeMinutes),
+    consequence,
+    decision,
+  });
+}
+
+export function currentTurnDecisionPublicObservations(
+  handle: CampaignPlayDatabaseHandle,
+  turnId: string,
+  worldTimeMinutes: number,
+  locationName: string,
+  visibleActors: CampaignPlayVisibleActor[],
+): CampaignPlayJournalEntry[] {
+  const visibleActorHandles = new Set(visibleActors.map((actor) => actor.handle));
+  return selectCampaignPlayDecisions(handle, "open")
+    .filter((decision) => decision.sourceTurnId === turnId &&
+      visibleActorHandles.has(decision.actorHandle))
+    .map((decision) => decisionPublicObservation(
+      handle,
+      turnId,
+      worldTimeMinutes,
+      locationName,
+      campaignPlayOpeningDecisionSchema.parse({
+        decisionKey: decision.decisionKey,
+        actorName: decision.actorName,
+        actorHandle: decision.actorHandle,
+        kind: decision.kind,
+        summary: decision.summary,
+        acceptLabel: decision.acceptLabel,
+        declineLabel: decision.declineLabel,
+        acceptEffect: parseDecisionAcceptEffect(decision.acceptEffectJson),
+      }),
+    ));
 }
 
 function directlyPerceivedObservationSubjects(
@@ -860,6 +1073,7 @@ function visibleScene(
   visiblePressures: CampaignPlayVisiblePressure[];
   possessions: CampaignPlayVisiblePossession[];
   obligations: CampaignPlayVisibleObligation[];
+  commitments?: CampaignPlayVisibleCommitment[];
 } {
   const location = handle.sqlite.prepare(`SELECT l.id, l.name, l.description
     FROM actor_placements placement JOIN locations l ON l.id = placement.location_id
@@ -970,6 +1184,98 @@ function visibleScene(
       unitKey: "copper";
       outstandingAmount: number;
     }>;
+  const commitmentRows = handle.sqlite.prepare(`SELECT
+      commitment.commitment_id AS commitmentId,
+      commitment.counterparty_actor_id AS counterpartyActorId,
+      counterparty.kind AS counterpartyKind,
+      counterparty.controller AS counterpartyController,
+      counterparty.name AS counterpartyName,
+      commitment.kind AS kind, commitment.status AS status,
+      commitment.title AS title, commitment.subject_name AS subjectName,
+      commitment.destination_handle AS destinationHandle,
+      commitment.fee_unit AS feeUnit, commitment.fee_amount AS feeAmount,
+      commitment.payment_timing AS paymentTiming,
+      commitment.due_world_time_minutes AS dueWorldTimeMinutes
+    FROM campaign_play_commitments commitment
+    JOIN actors counterparty ON counterparty.id = commitment.counterparty_actor_id
+      AND counterparty.campaign_id = commitment.campaign_id
+    WHERE commitment.campaign_id = ? AND commitment.performer_actor_id = ?
+    ORDER BY CASE commitment.status WHEN 'active' THEN 0 ELSE 1 END,
+      COALESCE(commitment.due_world_time_minutes, 2147483647),
+      commitment.title, commitment.commitment_id LIMIT ?`).all(
+      handle.campaignId,
+      humanActorId,
+      CAMPAIGN_PLAY_LIMITS.visibleCommitments,
+    ) as CampaignPlayCommitmentRow[];
+  const destinationRows = handle.sqlite.prepare(`SELECT id, name, description
+    FROM locations WHERE campaign_id = ?`).all(handle.campaignId) as LocationRow[];
+  const destinations = new Map(destinationRows.map((destination) => [
+    publicHandle("location", handle.campaignId, destination.id),
+    destination,
+  ]));
+  const commitments = commitmentRows.map((commitment) => {
+    if (
+      commitment.counterpartyKind !== "person" ||
+      commitment.counterpartyController !== "agent" ||
+      (commitment.kind !== "paid_delivery" && commitment.kind !== "unpaid_delivery") ||
+      (commitment.status !== "active" && commitment.status !== "completed") ||
+      (commitment.kind === "paid_delivery" && (
+        commitment.feeUnit !== "copper" ||
+        commitment.paymentTiming !== "on_completion" ||
+        !Number.isSafeInteger(commitment.feeAmount) ||
+        typeof commitment.feeAmount !== "number" || commitment.feeAmount < 1
+      )) ||
+      (commitment.kind === "unpaid_delivery" && (
+        commitment.feeUnit !== null ||
+        commitment.feeAmount !== null ||
+        commitment.paymentTiming !== null
+      )) ||
+      (commitment.dueWorldTimeMinutes !== null &&
+        (!Number.isSafeInteger(commitment.dueWorldTimeMinutes) ||
+          commitment.dueWorldTimeMinutes < 1))
+    ) {
+      throw new CampaignPlayVisibilityError(
+        "visibility_state_invalid",
+        "Player commitment does not match its public contract.",
+      );
+    }
+    const destination = destinations.get(commitment.destinationHandle);
+    if (!destination) {
+      throw new CampaignPlayVisibilityError(
+        "visibility_state_invalid",
+        "Player commitment destination is not a canonical location handle.",
+      );
+    }
+    const common = {
+      handle: publicHandle("commitment", handle.campaignId, commitment.commitmentId),
+      status: commitment.status,
+      counterpartyHandle: publicHandle(
+        "actor",
+        handle.campaignId,
+        commitment.counterpartyActorId,
+      ),
+      counterpartyName: commitment.counterpartyName,
+      title: commitment.title,
+      subjectName: commitment.subjectName,
+      destinationHandle: commitment.destinationHandle,
+      destinationName: destination.name,
+      dueWorldTimeLabel: commitment.dueWorldTimeMinutes === null
+        ? null
+        : timeLabel(commitment.dueWorldTimeMinutes),
+    };
+    return commitment.kind === "paid_delivery"
+      ? {
+          ...common,
+          kind: "paid_delivery" as const,
+          feeUnit: commitment.feeUnit!,
+          feeAmount: commitment.feeAmount!,
+          paymentTiming: commitment.paymentTiming!,
+        } satisfies CampaignPlayVisibleCommitment
+      : {
+          ...common,
+          kind: "unpaid_delivery" as const,
+        } satisfies CampaignPlayVisibleCommitment;
+  });
   return {
     currentLocation: {
       handle: publicHandle("location", handle.campaignId, location.id),
@@ -1016,6 +1322,7 @@ function visibleScene(
       unitKey: obligation.unitKey,
       outstandingAmount: obligation.outstandingAmount,
     })),
+    commitments,
   };
 }
 
@@ -1079,13 +1386,220 @@ export function availableIntents(
     kind: "contact",
     targets: [{ handle: actor.handle, kind: "actor" }],
   }));
+  const visibleActorHandles = new Set(scene.visibleActors.map((actor) => actor.handle));
+  const visibleAgentActorHandles = new Set(
+    (handle.sqlite.prepare(`SELECT id FROM actors
+      WHERE campaign_id = ? AND kind = 'person' AND controller = 'agent'`).all(
+        campaignId,
+      ) as Array<{ id: string }>).map((actor) => publicHandle("actor", campaignId, actor.id)),
+  );
+  const playerActorHandle = publicHandle("actor", campaignId, humanActorId);
+  scene.obligations
+    .filter((obligation) =>
+      obligation.direction === "receivable"
+      && obligation.unitKey === "copper"
+      && obligation.outstandingAmount > 0
+      && visibleAgentActorHandles.has(obligation.counterpartyHandle)
+      && visibleActorHandles.has(obligation.counterpartyHandle),
+    )
+    .forEach((obligation) => {
+      intents.push({
+        handle: publicHandle(
+          "choice",
+          campaignId,
+          `${turnId}:obligation:${obligation.handle}:collect`,
+        ),
+        label: `Collect ${obligation.outstandingAmount} copper from ${obligation.counterpartyName}`,
+        kind: "contact",
+        targets: [{ handle: obligation.counterpartyHandle, kind: "actor" }],
+        obligationBinding: {
+          obligationHandle: obligation.handle,
+          debtorHandle: obligation.counterpartyHandle,
+          creditorHandle: playerActorHandle,
+          unitKey: "copper",
+          amount: obligation.outstandingAmount,
+        },
+      });
+    });
+  const presentConditionActorHandles = new Set(
+    (handle.sqlite.prepare(`SELECT actor_id AS actorId
+      FROM campaign_play_actor_conditions
+      WHERE campaign_id = ? AND present = 1`).all(handle.campaignId) as Array<{ actorId: string }>)
+      .map((row) => publicHandle("actor", campaignId, row.actorId)),
+  );
+  const playerHasPresentCondition = presentConditionActorHandles.has(
+    publicHandle("actor", campaignId, humanActorId),
+  );
+  const openDecisions = selectCampaignPlayDecisions(handle, "open")
+    .filter((decision) => visibleActorHandles.has(decision.actorHandle));
+  if (openDecisions.length > 0) {
+    const maximumDecisionGroups = Math.floor(
+      CAMPAIGN_PLAY_LIMITS.suggestedActions / 2,
+    );
+    if (openDecisions.length > maximumDecisionGroups) {
+      throw new CampaignPlayVisibilityError(
+        "visibility_state_invalid",
+        "Open decision controls exceed the public suggested-action budget.",
+      );
+    }
+    const decisionActors = new Set(openDecisions.map((decision) => decision.actorHandle));
+    const contactStart = intents.findIndex((intent) => intent.kind === "contact");
+    if (contactStart >= 0) {
+      const contacts = intents.splice(contactStart).filter((intent) =>
+        intent.kind !== "contact" || !intent.targets.some((target) =>
+          target.kind === "actor" && decisionActors.has(target.handle)));
+      intents.push(...contacts);
+    }
+    openDecisions.forEach((decision) => {
+      (['accept', 'decline'] as const).forEach((disposition) => {
+        intents.push({
+          handle: publicHandle(
+            "choice",
+            campaignId,
+            `${turnId}:decision:${decision.decisionKey}:${disposition}`,
+          ),
+          label: decisionIntentLabel(
+            disposition,
+            disposition === "accept" ? decision.acceptLabel : decision.declineLabel,
+          ),
+          kind: "contact",
+          targets: [{ handle: decision.actorHandle, kind: "actor" }],
+          decisionBinding: {
+            decisionKey: decision.decisionKey,
+            actorHandle: decision.actorHandle,
+            kind: decision.kind,
+            disposition,
+          },
+        });
+      });
+    });
+  }
+  scene.commitments?.forEach((commitment) => {
+    if (commitment.status !== "active") return;
+    const counterparty = scene.visibleActors.find((actor) =>
+      actor.handle === commitment.counterpartyHandle);
+    const hasCargo = scene.possessions.some((possession) =>
+      possession.name === commitment.subjectName && possession.quantity > 0);
+    const counterpartyHasPresentCondition = presentConditionActorHandles.has(
+      commitment.counterpartyHandle,
+    );
+    if (counterparty !== undefined && !hasCargo &&
+      !playerHasPresentCondition && !counterpartyHasPresentCondition) {
+      intents.push({
+        handle: publicHandle(
+          "choice",
+          campaignId,
+          `${turnId}:commitment:${commitment.handle}:collect`,
+        ),
+        label: `Ask ${counterparty.name} for ${commitment.subjectName}`,
+        kind: "contact",
+        targets: [{ handle: commitment.counterpartyHandle, kind: "actor" }],
+        commitmentBinding: {
+          commitmentHandle: commitment.handle,
+          action: "collect",
+          counterpartyHandle: commitment.counterpartyHandle,
+          subjectName: commitment.subjectName,
+          destinationHandle: commitment.destinationHandle,
+        },
+      });
+    }
+    if (hasCargo && scene.currentLocation.handle === commitment.destinationHandle &&
+      !playerHasPresentCondition) {
+      intents.push({
+        handle: publicHandle(
+          "choice",
+          campaignId,
+          `${turnId}:commitment:${commitment.handle}:deliver`,
+        ),
+        label: `Deliver ${commitment.subjectName} at ${commitment.destinationName}`,
+        kind: "attempt",
+        targets: [{ handle: commitment.destinationHandle, kind: "location" }],
+        commitmentBinding: {
+          commitmentHandle: commitment.handle,
+          action: "deliver",
+          counterpartyHandle: commitment.counterpartyHandle,
+          subjectName: commitment.subjectName,
+          destinationHandle: commitment.destinationHandle,
+        },
+      });
+    }
+  });
   intents.push({
     handle: publicHandle("choice", campaignId, `${turnId}:wait`),
     label: `Wait ${CAMPAIGN_PLAY_DEFAULT_WAIT_MINUTES} minutes`,
     kind: "wait",
     targets: [],
   });
-  return intents;
+  const dueWorldTimeLabelByCommitmentHandle = new Map(
+    (scene.commitments ?? []).map((commitment) => [
+      commitment.handle,
+      commitment.dueWorldTimeLabel,
+    ]),
+  );
+  return intents
+    .map((intent, intentIndex) => ({ intent, intentIndex }))
+    .sort((left, right) => {
+      const leftDecision = left.intent.decisionBinding;
+      const rightDecision = right.intent.decisionBinding;
+      const leftCommitment = left.intent.commitmentBinding;
+      const rightCommitment = right.intent.commitmentBinding;
+      const leftObligation = left.intent.obligationBinding;
+      const rightObligation = right.intent.obligationBinding;
+      const leftRank = leftObligation !== undefined
+        ? 0
+        : leftDecision !== undefined
+          ? 1
+          : leftCommitment !== undefined ? 2 : 3;
+      const rightRank = rightObligation !== undefined
+        ? 0
+        : rightDecision !== undefined
+          ? 1
+          : rightCommitment !== undefined ? 2 : 3;
+      if (leftRank !== rightRank) return leftRank - rightRank;
+      if (leftObligation !== undefined && rightObligation !== undefined) {
+        return compareText(leftObligation.obligationHandle, rightObligation.obligationHandle) ||
+          compareText(left.intent.handle, right.intent.handle);
+      }
+      if (leftDecision !== undefined && rightDecision !== undefined) {
+        return compareText(leftDecision.decisionKey, rightDecision.decisionKey) ||
+          (leftDecision.disposition === rightDecision.disposition
+            ? 0
+            : leftDecision.disposition === "accept" ? -1 : 1) ||
+          compareText(left.intent.handle, right.intent.handle);
+      }
+      if (leftCommitment !== undefined && rightCommitment !== undefined) {
+        const actionOrder = (leftCommitment.action === "deliver" ? 0 : 1) -
+          (rightCommitment.action === "deliver" ? 0 : 1);
+        if (actionOrder !== 0) return actionOrder;
+        const leftDue = dueWorldTimeLabelByCommitmentHandle.get(leftCommitment.commitmentHandle);
+        const rightDue = dueWorldTimeLabelByCommitmentHandle.get(rightCommitment.commitmentHandle);
+        if (leftDue !== rightDue) {
+          if (leftDue === null || leftDue === undefined) return 1;
+          if (rightDue === null || rightDue === undefined) return -1;
+          const dueOrder = compareText(leftDue, rightDue);
+          if (dueOrder !== 0) return dueOrder;
+        }
+        return compareText(leftCommitment.commitmentHandle, rightCommitment.commitmentHandle) ||
+          compareText(left.intent.handle, right.intent.handle);
+      }
+      return left.intentIndex - right.intentIndex;
+    })
+    .map(({ intent }) => intent);
+}
+
+function decisionIntentLabel(
+  disposition: "accept" | "decline",
+  branchLabel: string,
+): string {
+  const prefix = disposition === "accept" ? "Accept" : "Decline";
+  const label = `${prefix} — ${branchLabel}`;
+  if (label.length > CAMPAIGN_PLAY_LIMITS.label) {
+    throw new CampaignPlayVisibilityError(
+      "visibility_state_invalid",
+      "Open decision branch label exceeds the public label limit.",
+    );
+  }
+  return label;
 }
 
 function preferredOpeningExposureRoute(
@@ -1250,23 +1764,79 @@ function actionContextForTurn(
           ? "campaign_play_certified_wait"
           : executionRoute.kind === "certified_contact"
             ? "campaign_play_certified_contact"
-            : "campaign_play_certified_observe";
+            : executionRoute.kind === "certified_decision"
+              ? "campaign_play_certified_decision"
+              : executionRoute.kind === "certified_observe"
+                ? "campaign_play_certified_observe"
+                : executionRoute.kind === "certified_obligation"
+                  ? "campaign_play_certified_obligation"
+                  : "campaign_play_certified_commitment";
+      const acceptedJudge = turnRepository.loadAcceptedModelArtifact(turn.turnId, "judge");
       if (
         executionRoute.certificateHash !== hashCampaignPlayProjection({
           domain,
           certificate: executionRoute.certificate,
         }) ||
-        turnRepository.loadAcceptedModelArtifact(turn.turnId, "judge") !== null
+        (executionRoute.kind !== "certified_observe" && acceptedJudge !== null)
       ) {
         throw new CampaignPlayVisibilityError(
           "visibility_turn_invalid",
           "Player-action visibility rejected invalid certified route authority.",
         );
       }
-      return campaignPlayActionContextSchema.parse({
-        submittedText,
-        ...executionRoute.certificate.publicResult,
-      });
+      if (executionRoute.kind !== "certified_observe") {
+        if (executionRoute.kind === "certified_decision") {
+          const certificate = executionRoute.certificate;
+          return campaignPlayActionContextSchema.parse({
+            submittedText,
+            ...certificate.publicResult,
+            decisionBinding: certificate.decisionBinding,
+            decisionOutcome: {
+              ...certificate.decisionBinding,
+              status: certificate.decisionBinding.disposition === "accept"
+                ? "accepted" as const
+                : "declined" as const,
+              sourceTurnId: certificate.decisionSourceTurnId,
+              summary: certificate.decisionSummary,
+              acceptEffect: certificate.acceptEffect ?? null,
+            },
+          });
+        }
+        if (executionRoute.kind === "certified_commitment") {
+          const certificate = executionRoute.certificate;
+          return campaignPlayActionContextSchema.parse({
+            submittedText,
+            intentKind: certificate.action === "collect" ? "contact" : "attempt",
+            disposition: "deterministic",
+            result: "success",
+            clarificationQuestion: null,
+          });
+        }
+        if (executionRoute.kind === "certified_obligation") {
+          const certificate = executionRoute.certificate;
+          return campaignPlayActionContextSchema.parse({
+            submittedText,
+            intentKind: "contact",
+            disposition: "deterministic",
+            result: "success",
+            clarificationQuestion: null,
+            obligationSettlement: {
+              obligationHandle: certificate.obligationHandle,
+              debtorHandle: certificate.debtorActorHandle,
+              creditorHandle: certificate.creditorActorHandle,
+              unitKey: certificate.unitKey,
+              amount: certificate.amount,
+              status: "settled",
+              sourceTurnId: certificate.turnId,
+              summary: certificate.label,
+            },
+          });
+        }
+        return campaignPlayActionContextSchema.parse({
+          submittedText,
+          ...executionRoute.certificate.publicResult,
+        });
+      }
     }
   }
   const acceptedJudge = turnRepository.loadAcceptedModelArtifact(turn.turnId, "judge");
@@ -1296,6 +1866,75 @@ function actionContextForTurn(
     submittedText,
     ...judgeArtifact.publicResult,
   });
+}
+
+function selectCampaignPlayDecisions(
+  handle: CampaignPlayDatabaseHandle,
+  status: "open" | "accepted" | "declined" | "all",
+): CampaignPlayDecisionRow[] {
+  const statusClause = status === "all" ? "" : " AND decision.status = ?";
+  const parameters = status === "all"
+    ? [handle.campaignId]
+    : [handle.campaignId, status];
+  return handle.sqlite.prepare(`SELECT decision.decision_key AS decisionKey,
+      decision.actor_handle AS actorHandle, actor.name AS actorName,
+      decision.decision_kind AS kind, decision.status,
+      decision.source_turn_id AS sourceTurnId, decision.summary,
+      decision.accept_label AS acceptLabel, decision.decline_label AS declineLabel,
+      decision.accept_effect_json AS acceptEffectJson,
+      decision.resolution_turn_id AS resolutionTurnId,
+      decision.resolution_event_id AS resolutionEventId,
+      decision.world_version AS worldVersion
+    FROM campaign_play_decisions decision
+    JOIN actors actor ON actor.id = decision.actor_id
+      AND actor.campaign_id = decision.campaign_id
+    WHERE decision.campaign_id = ?${statusClause}
+    ORDER BY decision.decision_key`).all(...parameters) as CampaignPlayDecisionRow[];
+}
+
+function resolvedDecisionOutcomes(
+  handle: CampaignPlayDatabaseHandle,
+): CampaignPlayDecisionOutcome[] {
+  return selectCampaignPlayDecisions(handle, "all")
+    .filter((decision): decision is CampaignPlayDecisionRow & {
+      status: "accepted" | "declined";
+    } => decision.status !== "open")
+    .sort((left, right) => right.worldVersion - left.worldVersion ||
+      right.decisionKey.localeCompare(left.decisionKey))
+    .slice(0, CAMPAIGN_PLAY_LIMITS.continuityEntries)
+    .map((decision) => {
+      if (decision.resolutionTurnId === null || decision.resolutionEventId === null) {
+        throw new CampaignPlayVisibilityError(
+          "visibility_state_invalid",
+          "Resolved decision is missing its durable resolution references.",
+        );
+      }
+      const event = handle.sqlite.prepare(`SELECT event_kind AS eventKind
+        FROM campaign_play_events
+        WHERE campaign_id = ? AND event_id = ?`).get(
+          handle.campaignId,
+          decision.resolutionEventId,
+        ) as { eventKind: string } | undefined;
+      const expectedEventKind = decision.status === "accepted"
+        ? "decision_accepted"
+        : "decision_declined";
+      if (!event || event.eventKind !== expectedEventKind) {
+        throw new CampaignPlayVisibilityError(
+          "visibility_state_invalid",
+          "Resolved decision does not have its matching durable outcome event.",
+        );
+      }
+      return {
+        decisionKey: decision.decisionKey,
+        actorHandle: decision.actorHandle,
+        kind: decision.kind,
+        disposition: decision.status === "accepted" ? "accept" : "decline",
+        status: decision.status,
+        sourceTurnId: decision.sourceTurnId,
+        summary: decision.summary,
+        acceptEffect: parseDecisionAcceptEffect(decision.acceptEffectJson),
+      };
+    });
 }
 
 function priorPlayerHistory(
@@ -1384,9 +2023,15 @@ export function createCampaignPlayVisibilityService(
           "Visibility projection requires the accepted opening exposure seed.",
         );
       }
-      const openingExposureSeed = campaignPlayOpeningArtifactSchema.parse(
+      const openingArtifactDocument = campaignPlayOpeningArtifactSchema.parse(
         openingArtifact.artifact,
-      ).exposureSeed;
+      );
+      const openingExposureSeed = openingArtifactDocument.exposureSeed;
+      const openingDecision = turn.turnKind === "opening" &&
+        openingArtifactDocument.narratorFacts.decision !== null &&
+        openingArtifactDocument.narratorFacts.decision !== undefined
+        ? openingArtifactDocument.narratorFacts.decision
+        : null;
       const exposures = handle.sqlite.prepare(`SELECT exposure.exposure_id AS exposureId,
           exposure.event_id AS eventId, exposure.channel,
           exposure.location_id AS locationId, exposure.route_id AS routeId,
@@ -1465,6 +2110,25 @@ export function createCampaignPlayVisibilityService(
           };
         });
       const scene = visibleScene(handle, human.id);
+      const openingDecisionObservation = openingDecision === null
+        ? null
+        : openingDecisionPublicObservation(
+            handle,
+            turn.turnId,
+            state.worldTimeMinutes,
+            openingArtifactDocument.narratorFacts.location.name,
+            openingDecision,
+            scene.visibleActors,
+          );
+      const currentTurnDecisionObservations = turn.turnKind === "opening"
+        ? (openingDecisionObservation === null ? [] : [openingDecisionObservation])
+        : currentTurnDecisionPublicObservations(
+            handle,
+            turn.turnId,
+            state.worldTimeMinutes,
+            scene.currentLocation.name,
+            scene.visibleActors,
+          );
       const actionContext = actionContextForTurn(turn, turnRepository);
       if (
         canonicalizeCampaignPlayProjection(input.actionContext) !==
@@ -1475,6 +2139,10 @@ export function createCampaignPlayVisibilityService(
           "Visibility action context disagrees with its frozen admission and accepted Judge result.",
         );
       }
+      const narratorSourceMoment =
+        actionContext?.intentKind === "move" && actionContext.result === "success"
+          ? null
+          : input.sourceMoment;
       const packet = campaignPlayNarratorPacketSchema.parse({
         campaignId: handle.campaignId,
         turnId: turn.turnId,
@@ -1501,28 +2169,47 @@ export function createCampaignPlayVisibilityService(
                   "Opening planner artifact belongs to a different turn authority.",
                 );
               }
-              return artifact.narratorFacts.player;
+              return {
+                ...artifact.narratorFacts.player,
+                decision: artifact.narratorFacts.decision ?? null,
+              };
             })()
           : null,
         actionContext,
         playerHistory: priorPlayerHistory(handle, turn, turnRepository),
-        sourceMoment: input.sourceMoment,
+        sourceMoment: narratorSourceMoment,
         acceptedWorldVersion: state.acceptedWorldVersion,
         worldVersion: state.worldVersion,
         runtimeRevision: state.runtimeRevision + 1,
         ...scene,
-        newObservations: observationPlans.map((plan) => plan.entry),
-        consequences: observationPlans.map((plan) => plan.entry.consequence!),
-        observationSubjects: observationPlans.map((plan) => ({
-          observationHandle: plan.entry.observationHandle,
-          actors: directlyPerceivedObservationSubjects(
-            handle,
-            plan.candidate,
-            human.id,
-            scene.visibleActors,
-            plan.entry.text,
-          ),
-        })),
+        commitments: scene.commitments ?? [],
+        newObservations: [
+          ...currentTurnDecisionObservations,
+          ...observationPlans.map((plan) => plan.entry),
+        ],
+        consequences: [
+          ...currentTurnDecisionObservations.map((observation) => observation.consequence!),
+          ...observationPlans.map((plan) => plan.entry.consequence!),
+        ],
+        observationSubjects: [
+          ...currentTurnDecisionObservations.map((observation) => ({
+            observationHandle: observation.observationHandle,
+            actors: [{
+              handle: observation.decision!.actorHandle,
+              name: observation.decision!.actorName,
+            }],
+          })),
+          ...observationPlans.map((plan) => ({
+            observationHandle: plan.entry.observationHandle,
+            actors: directlyPerceivedObservationSubjects(
+              handle,
+              plan.candidate,
+              human.id,
+              scene.visibleActors,
+              plan.entry.text,
+            ),
+          })),
+        ],
         continuity: priorContinuity(
           handle,
           new Set(observationPlans.map((plan) => plan.observationId)),
@@ -1540,6 +2227,7 @@ export function createCampaignPlayVisibilityService(
           openingExposureSeed,
           state.worldTimeMinutes,
         ),
+        decisionOutcomes: resolvedDecisionOutcomes(handle),
       });
       const packetJson = canonicalizeCampaignPlayProjection(packet);
       const packetHash = hashCampaignPlayNarratorPacket(

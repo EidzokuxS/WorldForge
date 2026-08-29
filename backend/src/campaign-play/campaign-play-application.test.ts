@@ -47,6 +47,7 @@ import type {
 import type { CampaignPlayNarratorRecoveryFeedback } from "./narrator.js";
 import type { CampaignPlayTurnRuntime } from "./turn-runtime.js";
 import type { CampaignPlayOpeningRuntime } from "./opening-runtime.js";
+import * as turnRuntimeModule from "./turn-runtime.js";
 
 const CAMPAIGN_ID = "99999999-9999-4999-8999-999999999999";
 const PRICING = { known: false, currency: "USD", tokenUnit: 1_000_000,
@@ -432,6 +433,7 @@ function markPlayerPhaseReady(): void {
       visiblePressures: [],
       possessions: [],
       obligations: [],
+      commitments: [],
       newObservations: [],
       consequences: [],
       continuity: [],
@@ -1242,6 +1244,12 @@ describe("CampaignPlayApplication", () => {
         errorCode: "model_contract_invalid",
       },
       {
+        turnKind: "opening" as const,
+        interruptedStage: "admitted" as const,
+        routeKind: undefined,
+        errorCode: "model_contract_invalid",
+      },
+      {
         turnKind: "player_action" as const,
         interruptedStage: "admitted" as const,
         routeKind: "full_authority" as const,
@@ -1251,6 +1259,12 @@ describe("CampaignPlayApplication", () => {
         turnKind: "player_action" as const,
         interruptedStage: "admitted" as const,
         routeKind: "certified_contact" as const,
+        errorCode: "model_contract_invalid",
+      },
+      {
+        turnKind: "player_action" as const,
+        interruptedStage: "admitted" as const,
+        routeKind: "certified_move" as const,
         errorCode: "model_contract_invalid",
       },
       {
@@ -1298,14 +1312,6 @@ describe("CampaignPlayApplication", () => {
       })).toBe(false);
     }
     expect(campaignPlayMayAutomaticallyResumeExternalStage({
-      turnKind: "opening",
-      interruptedStage: "admitted",
-      routeKind: undefined,
-      errorCode: "model_contract_invalid",
-      attempt: 1,
-      automaticRecoveryEnabled: true,
-    })).toBe(false);
-    expect(campaignPlayMayAutomaticallyResumeExternalStage({
       turnKind: "player_action",
       interruptedStage: null,
       routeKind: "full_authority",
@@ -1317,6 +1323,22 @@ describe("CampaignPlayApplication", () => {
       turnKind: "player_action",
       interruptedStage: "judged",
       routeKind: "certified_contact",
+      errorCode: "model_contract_invalid",
+      attempt: 1,
+      automaticRecoveryEnabled: true,
+    })).toBe(false);
+    expect(campaignPlayMayAutomaticallyResumeExternalStage({
+      turnKind: "player_action",
+      interruptedStage: "admitted",
+      routeKind: "certified_commitment",
+      errorCode: "model_contract_invalid",
+      attempt: 1,
+      automaticRecoveryEnabled: true,
+    })).toBe(false);
+    expect(campaignPlayMayAutomaticallyResumeExternalStage({
+      turnKind: "player_action",
+      interruptedStage: "admitted",
+      routeKind: "certified_obligation",
       errorCode: "model_contract_invalid",
       attempt: 1,
       automaticRecoveryEnabled: true,
@@ -1532,6 +1554,36 @@ describe("CampaignPlayApplication", () => {
     ]);
   });
 
+  it("leaves production player-action actor replanning at the turn runtime default", async () => {
+    createAcceptedCampaign();
+    let capturedInput: Parameters<typeof turnRuntimeModule.createCampaignPlayTurnRuntime>[0] | undefined;
+    const createTurnRuntime = vi.spyOn(turnRuntimeModule, "createCampaignPlayTurnRuntime")
+      .mockImplementation((input) => {
+        capturedInput = input;
+        return fakePlayerRuntime(input.handle, {});
+      });
+    const application = createCampaignPlayApplication({
+      now: () => 1_300,
+      loadSettings: () => applicationSettings() as never,
+      createModel: vi.fn(() => ({}) as never) as never,
+    });
+    bootstrapPlayer(application);
+    markPlayerPhaseReady();
+    const state = application.loadState(CAMPAIGN_ID);
+    application.admitTurn(CAMPAIGN_ID, {
+      idempotencyKey: "production-actor-replan-limit",
+      expectedWorldVersion: state.worldVersion,
+      expectedRuntimeRevision: state.runtimeRevision,
+      source: "freeform",
+      text: "I ask the keeper about the signal.",
+    });
+    await application.waitForIdle(CAMPAIGN_ID);
+
+    expect(createTurnRuntime).toHaveBeenCalledTimes(1);
+    expect(capturedInput?.actorCriticalPathReplanLimit).toBeUndefined();
+    createTurnRuntime.mockRestore();
+  });
+
   it("initializes once and deduplicates same-key opening admission and its driver", async () => {
     createAcceptedCampaign();
     const runNextStage = vi.fn();
@@ -1570,7 +1622,7 @@ describe("CampaignPlayApplication", () => {
     }));
   });
 
-  it("automatically resumes one provider interruption on a fresh epoch and preserves turn identity", async () => {
+  it("automatically resumes one opening planner contract interruption and preserves turn identity", async () => {
     createAcceptedCampaign();
     const runNextStage = vi.fn();
     const resumeStage = vi.fn();
@@ -1581,6 +1633,7 @@ describe("CampaignPlayApplication", () => {
           runNextStage,
           resumeStage,
           interruptOnRun: true,
+          initialErrorCode: "model_contract_invalid",
           resumeSucceeds: true,
         }),
         createTurn: () => { throw new Error("Player runtime is outside this test."); },
@@ -1612,14 +1665,24 @@ describe("CampaignPlayApplication", () => {
         resumeEligible: false,
       });
       const attempts = handle.sqlite.prepare(`SELECT attempt, status,
-          worker_epoch AS workerEpoch, turn_id AS turnId, error_code AS errorCode
+          worker_epoch AS workerEpoch, turn_id AS turnId,
+          requested_provider_id AS requestedProviderId,
+          requested_model AS requestedModel, requested_strategy AS requestedStrategy,
+          actual_provider_id AS actualProviderId, actual_model AS actualModel,
+          actual_strategy AS actualStrategy, error_code AS errorCode
         FROM campaign_play_model_stages WHERE turn_id = ? ORDER BY attempt`).all(
         admission.turnId,
       );
       expect(attempts).toEqual([
         { attempt: 1, status: "interrupted", workerEpoch: 1, turnId: admission.turnId,
-          errorCode: "provider_unavailable" },
+          requestedProviderId: "provider-frozen", requestedModel: "planner-frozen",
+          requestedStrategy: "strict_object", actualProviderId: "provider-frozen",
+          actualModel: "planner-frozen", actualStrategy: "strict_object",
+          errorCode: "model_contract_invalid" },
         { attempt: 2, status: "accepted", workerEpoch: 2, turnId: admission.turnId,
+          requestedProviderId: "provider-frozen", requestedModel: "planner-frozen",
+          requestedStrategy: "strict_object", actualProviderId: "provider-frozen",
+          actualModel: "planner-frozen", actualStrategy: "strict_object",
           errorCode: null },
       ]);
       expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
@@ -2330,7 +2393,6 @@ describe("CampaignPlayApplication", () => {
   });
 
   it.each([
-    "model_contract_invalid",
     "stage_budget_exceeded",
   ] as const)("does not automatically resume %s", async (errorCode) => {
     createAcceptedCampaign();
@@ -2385,7 +2447,7 @@ describe("CampaignPlayApplication", () => {
         createOpening: (handle) => fakeOpeningRuntime(handle, {
           runNextStage: firstRun,
           interruptOnRun: true,
-          initialErrorCode: "model_contract_invalid",
+          initialErrorCode: "stage_budget_exceeded",
         }),
         createTurn: () => { throw new Error("Player runtime is outside this test."); },
       },

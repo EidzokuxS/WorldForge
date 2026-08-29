@@ -33,12 +33,21 @@ export interface CampaignWorldSourceReference {
   sourceType: string;
 }
 
+export interface CampaignPlayerIdentityClaim {
+  displayName: string;
+}
+
+export function normalizeCampaignIdentityName(value: string): string {
+  return value.normalize("NFKC").trim().replace(/\s+/gu, " ").toLowerCase();
+}
+
 export interface CampaignWorldSource {
   campaignId: string;
   premise: string;
   dna: CampaignWorldDna | null;
   researchSummary: string | null;
   sourceReferences: CampaignWorldSourceReference[];
+  playerIdentity?: CampaignPlayerIdentityClaim;
   sourceDigest: string;
 }
 
@@ -179,7 +188,7 @@ export type CampaignWorldBuildEvent =
 export interface CampaignWorldReview extends CampaignWorld {
   source: Pick<
     CampaignWorldSource,
-    "premise" | "dna" | "researchSummary" | "sourceReferences"
+    "premise" | "dna" | "researchSummary" | "sourceReferences" | "playerIdentity"
   >;
 }
 

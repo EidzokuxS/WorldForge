@@ -3,6 +3,9 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
+  CampaignPlayCommitmentBinding,
+  CampaignPlayDecisionBinding,
+  CampaignPlayObligationBinding,
   CampaignPlayOpeningLocationOption,
   CampaignPlayPublicErrorCode,
   CampaignPlayPublicProgress,
@@ -331,6 +334,16 @@ function isStateProjectionReady(state: CampaignPlayState, turnId: string): boole
   }
   if (state.narration?.turnId === turnId) return true;
   return operation?.turnId === turnId && operation.status === "failed";
+}
+
+function hasCompleteProperScene(state: CampaignPlayState): boolean {
+  const narration = state.narration;
+  if (narration === null) return false;
+  const operation = state.narrationOperation;
+  if (operation === null) return true;
+  return operation.status === "complete" &&
+    operation.turnId === narration.turnId &&
+    operation.narrationId === narration.narrationId;
 }
 
 function authorityProjectionRank(
@@ -1047,11 +1060,26 @@ export function CampaignPlayPage({
     action: Pick<CampaignPlayTurnAdmissionRequest, "source"> & {
       text?: string;
       choiceHandle?: string;
+      decisionBinding?: CampaignPlayDecisionBinding;
+      commitmentBinding?: CampaignPlayCommitmentBinding;
+      obligationBinding?: CampaignPlayObligationBinding;
     },
   ) => {
     const request = action.source === "freeform"
       ? { source: "freeform" as const, text: action.text ?? "" }
-      : { source: "suggested" as const, choiceHandle: action.choiceHandle ?? "" };
+      : {
+          source: "suggested" as const,
+          choiceHandle: action.choiceHandle ?? "",
+          ...(action.decisionBinding === undefined
+            ? {}
+            : { decisionBinding: action.decisionBinding }),
+          ...(action.commitmentBinding === undefined
+            ? {}
+            : { commitmentBinding: action.commitmentBinding }),
+          ...(action.obligationBinding === undefined
+            ? {}
+            : { obligationBinding: action.obligationBinding }),
+        };
     if (
       operationRef.current?.campaignId === campaignId ||
       campaignState?.phase !== "ready" ||
@@ -1218,9 +1246,14 @@ export function CampaignPlayPage({
     }
   }, [beginFollowing, campaignId, campaignState, campaignTurnRead, reconcileRequestFailure]);
 
+  const followingFailedNarrationRecovery = followedTurn?.campaignId === campaignId &&
+    followedTurn.turnId === campaignState?.narrationOperation?.turnId &&
+    campaignState?.narrationOperation?.status === "failed";
+  const narrationRecoveryPending = recoveringNarrationId !== null || followingFailedNarrationRecovery;
+
   const recoverNarration = useCallback(async () => {
     const operation = campaignState?.narrationOperation;
-    if (!operation || operation.status !== "failed" || recoveringNarrationId !== null) return;
+    if (!operation || operation.status !== "failed" || narrationRecoveryPending) return;
     setRecoveringNarrationId(operation.operationId);
     setRequestError(null);
     try {
@@ -1231,7 +1264,8 @@ export function CampaignPlayPage({
         packetHash: operation.packetHash,
         receiptIds: operation.receiptIds,
       });
-      await refreshAuthority(operation.turnId, { clearRequestError: true });
+      if (!mountedRef.current || campaignIdRef.current !== campaignId) return;
+      beginFollowing(operation.turnId, readNavigationSequence(campaignId));
     } catch (error) {
       if (mountedRef.current && campaignIdRef.current === campaignId) {
         setRequestError({ campaignId, code: errorCode(error) });
@@ -1241,7 +1275,7 @@ export function CampaignPlayPage({
         setRecoveringNarrationId(null);
       }
     }
-  }, [campaignId, campaignState?.narrationOperation, recoveringNarrationId, refreshAuthority]);
+  }, [beginFollowing, campaignId, campaignState?.narrationOperation, narrationRecoveryPending]);
 
   const recoveringGuardedTurn = followedTurn?.campaignId === campaignId &&
     readAuthorityRecoveryReloadTurnId(campaignId) !== null;
@@ -1274,7 +1308,8 @@ export function CampaignPlayPage({
   const activeTurn = campaignState.activeTurn ?? campaignTurnRead?.turn ?? null;
   const progress = eventProgress ?? activeTurn?.progress ?? null;
   const followsCurrentCampaign = followedTurn?.campaignId === campaignId;
-  const inputLocked = campaignState.phase !== "ready" || followsCurrentCampaign ||
+  const actionControlsReady = campaignState.phase === "ready" && hasCompleteProperScene(campaignState);
+  const inputLocked = !actionControlsReady || followsCurrentCampaign ||
     campaignPendingOperation !== null;
   const failedCode = campaignTurnRead?.result.status === "failed"
     ? campaignTurnRead.result.errorCode
@@ -1342,7 +1377,7 @@ export function CampaignPlayPage({
       ) : null}
 
       <CampaignPlayStage
-        narrationRecoveryPending={recoveringNarrationId !== null}
+        narrationRecoveryPending={narrationRecoveryPending}
         narrationFocusRef={narrationFocusRef}
         onRecoverNarration={() => void recoverNarration()}
         state={campaignState}
@@ -1369,12 +1404,17 @@ export function CampaignPlayPage({
           onDraftChange={setDraft}
           onJournalOpen={() => setJournalOpenCampaignId(campaignId)}
           onSubmitFreeform={() => void submitAction({ source: "freeform", text: draft })}
-          onSubmitSuggested={(choiceHandle) => void submitAction({ source: "suggested", choiceHandle })}
+          onSubmitSuggested={(choiceHandle, decisionBinding, commitmentBinding, obligationBinding) => void submitAction({
+            source: "suggested",
+            choiceHandle,
+            decisionBinding,
+            commitmentBinding,
+            obligationBinding,
+          })}
           pendingAdmission={campaignPendingOperation?.kind === "admission"}
           statusSlot={activeTurn !== null || followsCurrentCampaign ? turnProgress : undefined}
-          suggestedActions={campaignState.narration?.suggestedActions ??
-            campaignState.narrationOperation?.conciseResult.suggestedActions ?? []}
-          utilityActions={campaignState.utilityActions}
+          suggestedActions={actionControlsReady ? campaignState.narration?.suggestedActions ?? [] : []}
+          utilityActions={actionControlsReady ? campaignState.utilityActions : []}
           suggestionsHeadingRef={suggestionsHeadingRef}
           textareaRef={actionTextareaRef}
         />

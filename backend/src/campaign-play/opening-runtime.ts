@@ -35,6 +35,8 @@ import {
   CAMPAIGN_PLAY_OPENING_NARRATOR_MAX_OUTPUT_TOKENS,
   CampaignPlayNarratorError,
   createCampaignPlayNarrator,
+  deriveCampaignPlayNarratorContractFailureDiagnostic,
+  type CampaignPlayNarratorContractFailureDiagnostic,
   type CampaignPlayNarrator,
   type CampaignPlayNarratorBudget,
   type CampaignPlayNarratorModelEvidence,
@@ -496,6 +498,7 @@ function interruptionEvidence(
   evidence: CampaignPlayOpeningModelEvidence | CampaignPlayNarratorModelEvidence | null,
   durationMs: number,
   errorCode: CampaignPlayExternalInterruptionEvidence["errorCode"],
+  contractFailureDiagnostic: CampaignPlayNarratorContractFailureDiagnostic | null = null,
 ): CampaignPlayExternalInterruptionEvidence {
   const narratorProvider = evidence !== null && "actualProviderId" in evidence
     ? evidence.actualProviderId
@@ -521,6 +524,9 @@ function interruptionEvidence(
           ? "invalid"
           : "transport_error",
         errorCode,
+        ...(errorCode === "model_contract_invalid" && contractFailureDiagnostic !== null
+          ? { contractFailureDiagnostic }
+          : {}),
       }
     : {
         actualProviderId: null,
@@ -534,6 +540,9 @@ function interruptionEvidence(
           ? "invalid"
           : "transport_error",
         errorCode,
+        ...(errorCode === "model_contract_invalid" && contractFailureDiagnostic !== null
+          ? { contractFailureDiagnostic }
+          : {}),
       };
 }
 
@@ -1089,6 +1098,9 @@ export function createCampaignPlayOpeningRuntime(
                   modelEvidence,
                   now() - startedAt,
                   errorCode,
+                  errorCode === "model_contract_invalid" && narratorError !== null
+                    ? deriveCampaignPlayNarratorContractFailureDiagnostic(narratorError)
+                    : null,
                 ),
                 "Campaign Play narrator requires explicit resume.",
                 { cause },

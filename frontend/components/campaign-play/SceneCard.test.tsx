@@ -47,6 +47,7 @@ describe("SceneCard", () => {
           unitKey: "copper",
           outstandingAmount: 4,
         }]}
+        commitments={[]}
         consequences={[{
           observationHandle: "observation-secret",
           performingActorHandle: null,
@@ -89,7 +90,94 @@ describe("SceneCard", () => {
         pressures={[]}
         possessions={[]}
         obligations={[]}
+        commitments={[]}
       />,
     )).toThrow("Unsupported Campaign Play actor accent");
+  });
+
+  it("shows active and completed work with exact terms without exposing handles", () => {
+    render(
+      <SceneCard
+        location={{ handle: "location-1", name: "Signal Yard", description: "Rain." }}
+        actors={[]}
+        routes={[]}
+        pressures={[]}
+        possessions={[]}
+        obligations={[]}
+        commitments={[{
+          handle: "commitment-public-active",
+          kind: "paid_delivery",
+          status: "active",
+          counterpartyHandle: "counterparty-public-active",
+          counterpartyName: "Orsa Pell",
+          title: "Carry the sealed dispatch",
+          subjectName: "Sealed dispatch",
+          destinationHandle: "destination-public-active",
+          destinationName: "North Cut",
+          feeUnit: "copper",
+          feeAmount: 16,
+          paymentTiming: "on_completion",
+          dueWorldTimeLabel: "Before dawn",
+        }, {
+          handle: "commitment-public-completed",
+          kind: "paid_delivery",
+          status: "completed",
+          counterpartyHandle: "counterparty-public-completed",
+          counterpartyName: "Ilya Venn",
+          title: "Return the signal key",
+          subjectName: "Brass signal key",
+          destinationHandle: "destination-public-completed",
+          destinationName: "Signal Yard",
+          feeUnit: "copper",
+          feeAmount: 8,
+          paymentTiming: "on_completion",
+          dueWorldTimeLabel: null,
+        }]}
+      />,
+    );
+
+    const work = screen.getByRole("region", { name: "Work" });
+    expect(work).toHaveTextContent("Carry the sealed dispatch");
+    expect(work).toHaveTextContent("Sealed dispatch · to North Cut");
+    expect(work).toHaveTextContent("For Orsa Pell");
+    expect(work).toHaveTextContent("16 copper · on completion");
+    expect(work).toHaveTextContent("Due Before dawn");
+    expect(within(work).getByLabelText("Work status: Active")).toBeInTheDocument();
+    expect(within(work).getByLabelText("Work status: Completed")).toBeInTheDocument();
+    expect(work).toHaveTextContent("Return the signal key");
+    expect(work).toHaveTextContent("8 copper · on completion");
+    expect(work.textContent).not.toContain("commitment-public");
+    expect(work.textContent).not.toContain("counterparty-public");
+    expect(work.textContent).not.toContain("destination-public");
+  });
+
+  it("shows unpaid work without fabricating a fee", () => {
+    render(
+      <SceneCard
+        location={{ handle: "location-1", name: "Signal Yard", description: "Rain." }}
+        actors={[]}
+        routes={[]}
+        pressures={[]}
+        possessions={[]}
+        obligations={[]}
+        commitments={[{
+          handle: "commitment-public-unpaid",
+          kind: "unpaid_delivery",
+          status: "active",
+          counterpartyHandle: "counterparty-public-joss",
+          counterpartyName: "Joss Pebbler",
+          title: "Carry the evacuation roll",
+          subjectName: "Evacuation signature roll",
+          destinationHandle: "destination-public-quayside",
+          destinationName: "Quayside Landing",
+          dueWorldTimeLabel: null,
+        }]}
+      />,
+    );
+
+    const work = screen.getByRole("region", { name: "Work" });
+    expect(work).toHaveTextContent("Carry the evacuation roll");
+    expect(work).toHaveTextContent("No payment offered");
+    expect(work.textContent).not.toContain("copper");
   });
 });

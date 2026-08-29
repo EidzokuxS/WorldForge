@@ -331,6 +331,28 @@ describe("useNewCampaignWizard", () => {
     expect(mockPush).toHaveBeenCalledWith("/campaign/campaign-1/forge");
   });
 
+  it("passes the optional player identity claim without inferring it from premise text", async () => {
+    const { result } = renderHook(() => useNewCampaignWizard(SETTINGS, vi.fn()));
+
+    act(() => {
+      result.current.setCampaignName("Brina's Crossing");
+      result.current.setCampaignPremise("Brina arrives at the stormbound registry.");
+      result.current.setPlayerIdentityName("  Brina Hael  ");
+    });
+
+    await act(async () => {
+      await result.current.handleCreateWithSeeds();
+    });
+
+    expect(mockApiPost).toHaveBeenCalledWith(
+      "/api/campaigns",
+      expect.objectContaining({
+        premise: "Brina arrives at the stormbound registry.",
+        playerIdentity: { displayName: "Brina Hael" },
+      }),
+    );
+  });
+
   it("creates a campaign kernel shell without running old worldgen", async () => {
     const onCreated = vi.fn();
     const { result } = renderHook(() => useNewCampaignWizard(SETTINGS, onCreated));
@@ -484,6 +506,7 @@ describe("useNewCampaignWizard", () => {
       version: 1 as const,
       campaignName: "Shibuya Nexus",
       campaignPremise: "Jujutsu Kaisen world with Naruto power system",
+      playerIdentityName: "",
       campaignFranchise: "Jujutsu Kaisen",
       researchEnabled: true,
       selectedWorldbooks: [],
