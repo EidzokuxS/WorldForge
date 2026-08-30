@@ -2109,7 +2109,7 @@ describe("Campaign Play core and Rulebook storage", () => {
       .get() as { sql: string };
     expect(after.sql).toContain("job.defer_reason = 'actor_capacity'");
     expect(opened.sqlite.prepare(`SELECT max(created_at) AS latest
-      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_787_701_900_000 });
+      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_787_702_000_000 });
     const terminalResultTriggerSql = opened.sqlite.prepare(`SELECT sql FROM sqlite_master
       WHERE type = 'trigger' AND name = 'campaign_play_turn_terminal_result'`)
       .get() as { sql: string };

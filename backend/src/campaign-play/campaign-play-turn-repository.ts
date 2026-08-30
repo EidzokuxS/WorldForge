@@ -159,6 +159,7 @@ export interface ClaimCampaignPlayStageInput {
   turnId: string;
   expectedStage: CampaignPlayClaimableTurnStage;
   observedEpoch: number;
+  consumeExplicitResume?: boolean;
   owner: string;
   claimedAt: number;
   leaseExpiresAt: number;
@@ -301,11 +302,14 @@ export interface ResumeCampaignPlayExternalInput {
   turnId: string;
   interruptedStage: CampaignPlayClaimableTurnStage;
   observedEpoch: number;
+  origin: CampaignPlayResumeOrigin;
   owner: string;
   resumedAt: number;
   leaseExpiresAt: number;
   mutationId: string;
 }
+
+export type CampaignPlayResumeOrigin = "automatic" | "explicit";
 
 export type CampaignPlayTurnModelStageKind =
   | "judge"
@@ -421,6 +425,7 @@ export interface LoadedCampaignPlayTurn {
   interruptedStage: Exclude<CampaignPlayTurnStage, "interrupted" | "completed" | "failed"> | null;
   errorCode: string | null;
   resumeEligible: boolean;
+  explicitResumeConsumed: boolean;
   mutationAudit: CampaignPlayProjectionRecord;
   submittedAt: number;
   updatedAt: number;
@@ -491,6 +496,7 @@ interface TurnRow {
   interruptedStage: LoadedCampaignPlayTurn["interruptedStage"];
   errorCode: string | null;
   resumeEligible: number;
+  explicitResumeConsumed: number;
   mutationAuditJson: string;
   submittedAt: number;
   updatedAt: number;
@@ -843,7 +849,10 @@ function validateClaimInput(input: ClaimCampaignPlayStageInput): void {
     !isNonnegativeInteger(input.observedEpoch) ||
     !isNonnegativeInteger(input.claimedAt) ||
     !isNonnegativeInteger(input.leaseExpiresAt) ||
-    input.leaseExpiresAt <= input.claimedAt
+    input.leaseExpiresAt <= input.claimedAt ||
+    (input.consumeExplicitResume !== undefined &&
+      typeof input.consumeExplicitResume !== "boolean") ||
+    (input.consumeExplicitResume === true && input.expectedStage !== "primary_settled")
   ) {
     throw stageInvalid("Campaign Play worker claim has invalid fencing fields.");
   }
@@ -873,6 +882,8 @@ function validateLeaseToken(token: CampaignPlayWorkerLeaseToken): void {
     throw stageInvalid("Campaign Play external transition has an invalid fencing token.");
   }
 }
+
+export const CAMPAIGN_PLAY_MAX_AUTOMATIC_STAGE_ATTEMPTS = 3;
 
 const CAMPAIGN_PLAY_CONTRACT_FAILURE_DIAGNOSTIC_MAX_BYTES = 4_096;
 const contractFailureDiagnosticCoordinateSchema = z.string()
@@ -918,6 +929,14 @@ const contractFailureDiagnosticFailedChecksSchema = z.discriminatedUnion("check"
     fieldPath: contractFailureDiagnosticFieldPathSchema,
     performingActorHandle: contractFailureDiagnosticHandleSchema,
     recentOwnActionIndex: z.number().int().nonnegative().max(CAMPAIGN_PLAY_LIMITS.commandsPerBatch),
+  }).strict(),
+  z.object({
+    check: z.literal("completed_paid_delivery_destination_reused"),
+    fieldPath: contractFailureDiagnosticFieldPathSchema,
+    proposedDestinationHandle: contractFailureDiagnosticHandleSchema,
+    completedDestinationHandle: contractFailureDiagnosticHandleSchema,
+    visibleOutboundDestinationHandles: z.array(contractFailureDiagnosticHandleSchema)
+      .max(CAMPAIGN_PLAY_LIMITS.visibleRoutes),
   }).strict(),
   z.object({
     check: z.literal("mechanical_authority_rejected"),
@@ -1403,10 +1422,11 @@ function createInterruptedEvent(input: {
   worldVersion: number;
   runtimeRevision: number;
   createdAt: number;
+  retryEligible: boolean;
 }): CampaignPlaySseEvent {
   return campaignPlaySseEventSchema.parse({
     type: "turn.interrupted",
-    retryEligible: true,
+    retryEligible: input.retryEligible,
     sequence: input.sequence,
     turnId: input.turnId,
     acceptedWorldVersion: input.acceptedWorldVersion,
@@ -2195,7 +2215,9 @@ function selectTurn(
       worker_lease_expires_at AS workerLeaseExpiresAt,
       model_selection_json AS modelSelectionJson, public_packet_hash AS publicPacketHash,
       interrupted_stage AS interruptedStage, error_code AS errorCode,
-      resume_eligible AS resumeEligible, mutation_audit_json AS mutationAuditJson,
+      resume_eligible AS resumeEligible,
+      explicit_resume_consumed AS explicitResumeConsumed,
+      mutation_audit_json AS mutationAuditJson,
       submitted_at AS submittedAt, updated_at AS updatedAt, completed_at AS completedAt
     FROM campaign_play_turns WHERE ${where}
     ORDER BY submitted_at DESC, id DESC LIMIT 1
@@ -2611,6 +2633,9 @@ function loadRow(handle: CampaignPlayDatabaseHandle, row: TurnRow): LoadedCampai
   if (hasControlBudgetContinuityMarker && row.turnKind !== "player_action") {
     throw corrupt("Campaign Play control-budget continuity marker belongs only to player actions.");
   }
+  if (row.explicitResumeConsumed !== 0 && row.explicitResumeConsumed !== 1) {
+    throw corrupt("Campaign Play explicit resume consumption marker is invalid.");
+  }
   const controlBudgetContinuity = hasControlBudgetContinuityMarker;
   const modelStages = validateModelStages(handle, row, modelSelection);
   validateAcceptedStageProgress(
@@ -2623,15 +2648,18 @@ function loadRow(handle: CampaignPlayDatabaseHandle, row: TurnRow): LoadedCampai
   );
   validateAcceptedStageEvents(handle, row, modelStages);
   const startedAttempts = modelStages.filter((attempt) => attempt.status === "started");
+  const rawExplicitResumeConsumed = row.explicitResumeConsumed === 1;
+  let interruptedAttempt: ModelStageRow | null = null;
   if (row.stage === "interrupted") {
     if (
-      row.interruptedStage === null || row.errorCode === null || row.resumeEligible !== 1 ||
+      row.interruptedStage === null || row.errorCode === null ||
+      row.resumeEligible !== 1 ||
       row.workerLeaseOwner !== null || row.workerLeaseExpiresAt !== null ||
       startedAttempts.length !== 0
     ) {
       throw corrupt("Campaign Play interrupted turn has inconsistent recovery authority.");
     }
-    selectExactInterruptedAttemptForStage(
+    interruptedAttempt = selectExactInterruptedAttemptForStage(
       handle,
       row,
       modelSelection,
@@ -2836,11 +2864,19 @@ function loadRow(handle: CampaignPlayDatabaseHandle, row: TurnRow): LoadedCampai
   ) {
     throw corrupt("Campaign Play turn events disagree with accepted-world provenance.");
   }
+  const explicitResumeConsumed = rawExplicitResumeConsumed ||
+    (interruptedAttempt?.attempt ?? 0) > CAMPAIGN_PLAY_MAX_AUTOMATIC_STAGE_ATTEMPTS;
   return {
     ...row,
     document,
     modelSelection,
-    resumeEligible: row.resumeEligible === 1,
+    resumeEligible: row.stage === "interrupted"
+      ? interruptedAttempt !== null &&
+        interruptedAttempt.attempt <= CAMPAIGN_PLAY_MAX_AUTOMATIC_STAGE_ATTEMPTS &&
+        !explicitResumeConsumed &&
+        row.resumeEligible === 1
+      : row.resumeEligible === 1,
+    explicitResumeConsumed,
     mutationAudit,
     terminalReason,
     events,
@@ -3056,7 +3092,14 @@ export function createCampaignPlayTurnRepository(
         ) {
           throw fenceLost("Campaign Play interruption no longer matches the observed lease lifetime.");
         }
-        selectExactStartedAttempt(handle, input.turnId, stageId, input.epoch);
+        const interruptedAttempt = selectExactStartedAttempt(
+          handle,
+          input.turnId,
+          stageId,
+          input.epoch,
+        );
+        const retryEligible = !loaded.explicitResumeConsumed && interruptedAttempt.attempt <=
+          CAMPAIGN_PLAY_MAX_AUTOMATIC_STAGE_ATTEMPTS;
         assertMutationIdUnused(handle, input.mutationId);
         const attemptUpdate = handle.sqlite.prepare(`
           UPDATE campaign_play_model_stages SET
@@ -3096,6 +3139,7 @@ export function createCampaignPlayTurnRepository(
           worldVersion: context.priorWorldVersion,
           runtimeRevision: context.targetRuntimeRevision,
           createdAt: input.occurredAt,
+          retryEligible,
         }));
       },
     });
@@ -3254,6 +3298,9 @@ export function createCampaignPlayTurnRepository(
       if (!preflight) {
         throw new CampaignPlayTurnRepositoryError("turn_not_found", "Campaign Play turn was not found.");
       }
+      if (input.consumeExplicitResume === true && preflight.explicitResumeConsumed) {
+        throw fenceLost("Campaign Play explicit resume has already been consumed for this turn.");
+      }
       assertChronologicalBoundary(preflight, input.claimedAt, "worker claim");
       const route = resolveStageClaimRoute(
         preflight.turnKind,
@@ -3272,6 +3319,7 @@ export function createCampaignPlayTurnRepository(
         claimedAt: input.claimedAt,
         leaseExpiresAt: input.leaseExpiresAt,
         mutationId: input.mutationId,
+        ...(input.consumeExplicitResume === true ? { consumeExplicitResume: true } : {}),
       });
       stateRepository.commitRuntime({
         event: {
@@ -3291,6 +3339,9 @@ export function createCampaignPlayTurnRepository(
             );
           }
           const loaded = loadRow(handle, current);
+          if (input.consumeExplicitResume === true && loaded.explicitResumeConsumed) {
+            throw fenceLost("Campaign Play explicit resume has already been consumed for this turn.");
+          }
           assertChronologicalBoundary(loaded, input.claimedAt, "worker claim");
           const currentRoute = resolveStageClaimRoute(
             loaded.turnKind,
@@ -3305,13 +3356,21 @@ export function createCampaignPlayTurnRepository(
           const leaseParameters = loaded.workerLeaseOwner === null
             ? []
             : [loaded.workerLeaseOwner, loaded.workerLeaseExpiresAt];
-          const updated = handle.sqlite.prepare(`
-            UPDATE campaign_play_turns
-            SET worker_lease_owner = ?, worker_epoch = ?, worker_lease_expires_at = ?,
-              next_event_sequence = ?, updated_at = ?
-            WHERE id = ? AND campaign_id = ? AND stage = ? AND worker_epoch = ?
-              ${leasePredicate}
-          `).run(
+          const updated = handle.sqlite.prepare(input.consumeExplicitResume === true
+            ? `
+              UPDATE campaign_play_turns
+              SET worker_lease_owner = ?, worker_epoch = ?, worker_lease_expires_at = ?,
+                explicit_resume_consumed = 1, next_event_sequence = ?, updated_at = ?
+              WHERE id = ? AND campaign_id = ? AND stage = ? AND worker_epoch = ?
+                AND explicit_resume_consumed = 0 ${leasePredicate}
+            `
+            : `
+              UPDATE campaign_play_turns
+              SET worker_lease_owner = ?, worker_epoch = ?, worker_lease_expires_at = ?,
+                next_event_sequence = ?, updated_at = ?
+              WHERE id = ? AND campaign_id = ? AND stage = ? AND worker_epoch = ?
+                ${leasePredicate}
+            `).run(
             input.owner,
             nextEpoch,
             input.leaseExpiresAt,
@@ -3806,6 +3865,7 @@ export function createCampaignPlayTurnRepository(
                 worldVersion: context.targetWorldVersion,
                 runtimeRevision: context.targetRuntimeRevision,
                 createdAt: input.committedAt,
+                retryEligible: !loaded.explicitResumeConsumed,
               })
             : createWorkerProgressEvent({
                 turnId: input.token.turnId,
@@ -3971,7 +4031,8 @@ export function createCampaignPlayTurnRepository(
         !isNonemptyText(input.turnId) || !isNonemptyText(input.owner) ||
         !isPositiveInteger(input.observedEpoch) || !isNonnegativeInteger(input.resumedAt) ||
         !isNonnegativeInteger(input.leaseExpiresAt) || input.leaseExpiresAt <= input.resumedAt ||
-        input.observedEpoch === Number.MAX_SAFE_INTEGER
+        input.observedEpoch === Number.MAX_SAFE_INTEGER ||
+        (input.origin !== "automatic" && input.origin !== "explicit")
       ) {
         throw stageInvalid("Campaign Play external resume has invalid fencing fields.");
       }
@@ -4011,6 +4072,7 @@ export function createCampaignPlayTurnRepository(
         stage: input.interruptedStage,
         stageId,
         workerEpoch: nextEpoch,
+        origin: input.origin,
         owner: input.owner,
         resumedAt: input.resumedAt,
         leaseExpiresAt: input.leaseExpiresAt,
@@ -4054,17 +4116,36 @@ export function createCampaignPlayTurnRepository(
           if (!latest || latest.status !== "interrupted" || latest.workerEpoch !== input.observedEpoch) {
             throw fenceLost("Campaign Play external resume lost its interrupted attempt.");
           }
-          const turnUpdate = handle.sqlite.prepare(`
-            UPDATE campaign_play_turns SET stage = ?, interrupted_stage = NULL,
-              error_code = NULL, resume_eligible = 0, worker_lease_owner = ?,
-              worker_epoch = ?, worker_lease_expires_at = ?, next_event_sequence = ?, updated_at = ?
-            WHERE id = ? AND campaign_id = ? AND stage = 'interrupted'
-              AND interrupted_stage = ? AND worker_epoch = ? AND resume_eligible = 1
-              AND worker_lease_owner IS NULL AND worker_lease_expires_at IS NULL
-          `).run(
+          const turnUpdate = handle.sqlite.prepare(input.origin === "explicit"
+            ? `
+              UPDATE campaign_play_turns SET stage = ?, interrupted_stage = NULL,
+                error_code = NULL, resume_eligible = 0, explicit_resume_consumed = 1,
+                worker_lease_owner = ?, worker_epoch = ?, worker_lease_expires_at = ?,
+                next_event_sequence = ?, updated_at = ?
+              WHERE id = ? AND campaign_id = ? AND stage = 'interrupted'
+                AND interrupted_stage = ? AND worker_epoch = ? AND resume_eligible = 1
+                AND explicit_resume_consumed = 0
+                AND NOT EXISTS (
+                  SELECT 1 FROM campaign_play_model_stages
+                  WHERE campaign_id = ? AND turn_id = ? AND attempt > ?
+                )
+                AND worker_lease_owner IS NULL AND worker_lease_expires_at IS NULL
+            `
+            : `
+              UPDATE campaign_play_turns SET stage = ?, interrupted_stage = NULL,
+                error_code = NULL, resume_eligible = 0,
+                worker_lease_owner = ?, worker_epoch = ?, worker_lease_expires_at = ?,
+                next_event_sequence = ?, updated_at = ?
+              WHERE id = ? AND campaign_id = ? AND stage = 'interrupted'
+                AND interrupted_stage = ? AND worker_epoch = ? AND resume_eligible = 1
+                AND worker_lease_owner IS NULL AND worker_lease_expires_at IS NULL
+            `).run(
             input.interruptedStage, input.owner, nextEpoch, input.leaseExpiresAt,
             loaded.nextEventSequence + 1, input.resumedAt, input.turnId, handle.campaignId,
             input.interruptedStage, input.observedEpoch,
+            ...(input.origin === "explicit"
+              ? [handle.campaignId, input.turnId, CAMPAIGN_PLAY_MAX_AUTOMATIC_STAGE_ATTEMPTS]
+              : []),
           );
           if (turnUpdate.changes !== 1) {
             throw fenceLost("Campaign Play external resume lost its turn compare-and-swap.");
@@ -4661,7 +4742,9 @@ export function createCampaignPlayTurnRepository(
           model_selection_json AS modelSelectionJson,
           public_packet_hash AS publicPacketHash,
           interrupted_stage AS interruptedStage, error_code AS errorCode,
-          resume_eligible AS resumeEligible, mutation_audit_json AS mutationAuditJson,
+      resume_eligible AS resumeEligible,
+      explicit_resume_consumed AS explicitResumeConsumed,
+      mutation_audit_json AS mutationAuditJson,
           submitted_at AS submittedAt, updated_at AS updatedAt,
           completed_at AS completedAt
         FROM campaign_play_turns failed

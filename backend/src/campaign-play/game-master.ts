@@ -125,6 +125,7 @@ function createEffectProposalSchema(
   handleSchema: z.ZodType<string>,
   exposureSchema: ReturnType<typeof createExposureProposalSchema>,
   permittedResourceEffectKinds: ReadonlySet<ResourceEffectKind> = ALL_RESOURCE_EFFECT_KINDS,
+  performerHandleSchema: z.ZodType<string> = handleSchema,
 ) {
   const effectBase = { exposure: exposureSchema };
   const effectSchemas = [
@@ -182,7 +183,7 @@ function createEffectProposalSchema(
       .refine((values) => new Set(values).size === values.length) }).strict() },
   { kind: "record_world_event", schema: z.object({ kind: z.literal("record_world_event"),
     eventClass: z.enum(["dialogue", "interaction", "discovery", "scene"]),
-    performingActorHandle: handleSchema.nullable(),
+    performingActorHandle: performerHandleSchema.nullable(),
     summary: text(CAMPAIGN_PLAY_LIMITS.text),
     affectedHandles: z.array(handleSchema).min(1).max(CAMPAIGN_PLAY_LIMITS.affectedRefs)
       .refine((values) => new Set(values).size === values.length) }).strict()
@@ -235,12 +236,14 @@ function createProposalSchema(
   permittedResourceEffectKinds: ReadonlySet<ResourceEffectKind> = ALL_RESOURCE_EFFECT_KINDS,
   contactDetail?: string,
   requireContactLifecycleAssertion = false,
+  performerHandleSchema: z.ZodType<string> = handleSchema,
 ) {
   const exposureSchema = createExposureProposalSchema(handleSchema);
   const effectSchema = createEffectProposalSchema(
     handleSchema,
     exposureSchema,
     permittedResourceEffectKinds,
+    performerHandleSchema,
   );
   const baseShape = {
     elapsedMinutes: z.number().int().min(0).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes),
@@ -1643,6 +1646,7 @@ export interface CampaignPlayGameMasterFrame {
   rulebookFrame: CampaignPlayRulebookFrame;
   authority: CampaignPlayRulebookAuthority;
   commitmentAuthority?: CampaignPlayCommitmentAuthority;
+  admittedIntentTargets?: CampaignPlayJudgeRuling["normalizedIntent"]["targets"];
 }
 
 export type CampaignPlayGameMasterContract = "certified_contact";
@@ -1910,7 +1914,8 @@ function genericContactContext(
 ): CertifiedContactContext | null {
   const intent = ruling.normalizedIntent;
   if (intent.kind !== "contact") return null;
-  const targetedActorHandles = intent.targets
+  const directTargets = frame.admittedIntentTargets ?? intent.targets;
+  const targetedActorHandles = directTargets
     .filter((target) => target.kind === "actor")
     .map((target) => target.handle);
   if (targetedActorHandles.length !== 1 || intent.method === null) return null;
@@ -2292,6 +2297,43 @@ function bindings(frame: CampaignPlayGameMasterFrame): Map<string, CampaignPlayE
   return map;
 }
 
+function validateAdmittedIntentTargets(
+  frame: CampaignPlayGameMasterFrame,
+  ruling: CampaignPlayJudgeRuling,
+): void {
+  const admittedTargets = frame.admittedIntentTargets;
+  if (admittedTargets === undefined) return;
+  const targetKey = (target: CampaignPlayJudgeRuling["normalizedIntent"]["targets"][number]) =>
+    `${target.kind}:${target.handle}`;
+  const rulingTargetKeys = new Set(ruling.normalizedIntent.targets.map(targetKey));
+  const admittedTargetKeys = admittedTargets.map(targetKey);
+  if (
+    new Set(admittedTargetKeys).size !== admittedTargetKeys.length
+    || admittedTargetKeys.some((key) => !rulingTargetKeys.has(key))
+  ) {
+    throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
+  }
+}
+
+function bindAdmittedIntentTargets(
+  frame: CampaignPlayGameMasterFrame,
+  ruling: CampaignPlayJudgeRuling,
+): CampaignPlayJudgeRuling {
+  if (
+    ruling.normalizedIntent.kind !== "contact" ||
+    frame.admittedIntentTargets === undefined
+  ) {
+    return ruling;
+  }
+  return {
+    ...ruling,
+    normalizedIntent: {
+      ...ruling.normalizedIntent,
+      targets: [...frame.admittedIntentTargets],
+    },
+  };
+}
+
 function requireRef(
   map: ReadonlyMap<string, CampaignPlayEntityRef>,
   value: string,
@@ -2314,6 +2356,7 @@ function constrainedProposalSchema(
   permittedResourceEffectKinds: ReadonlySet<ResourceEffectKind> = ALL_RESOURCE_EFFECT_KINDS,
   contactDetail?: string,
   requireContactLifecycleAssertion = false,
+  performerHandles?: readonly string[],
 ) {
   const allowedHandles = [...map.keys(), NEW_SUPPORT_ACTOR_HANDLE];
   if (allowedHandles.length === 0) {
@@ -2324,6 +2367,9 @@ function constrainedProposalSchema(
     permittedResourceEffectKinds,
     contactDetail,
     requireContactLifecycleAssertion,
+    performerHandles === undefined
+      ? undefined
+      : z.enum(performerHandles as [string, ...string[]]),
   );
 }
 
@@ -3205,9 +3251,11 @@ function compile(
   acceptedDeal: AcceptedBilateralDeal | null = null,
 ): Omit<CampaignPlayGameMasterCandidate, "modelEvidence" | "semanticReview"> {
   const map = bindings(frame);
+  const admittedRuling = campaignPlayJudgeRulingSchema.parse(rulingInput);
+  validateAdmittedIntentTargets(frame, admittedRuling);
   const ruling = normalizeReceivableCollectionAuthority(
     frame,
-    campaignPlayJudgeRulingSchema.parse(rulingInput),
+    bindAdmittedIntentTargets(frame, admittedRuling),
   );
   let resolution: CampaignPlayUncertaintyResolution;
   try {
@@ -3356,7 +3404,10 @@ function compile(
     });
     throw error;
   }
-  const targetedNonplayerActorHandles = ruling.normalizedIntent.targets.flatMap((target) => {
+  const directContactTargets = ruling.normalizedIntent.kind === "contact"
+    ? frame.admittedIntentTargets ?? ruling.normalizedIntent.targets
+    : ruling.normalizedIntent.targets;
+  const targetedNonplayerActorHandles = directContactTargets.flatMap((target) => {
     if (target.kind !== "actor") return [];
     const reference = map.get(target.handle);
     return reference?.kind === "actor" && reference.id !== frame.authority.actorId
@@ -4080,9 +4131,12 @@ function prompt(
   const movement = canonicalMovement(frame, ruling, resolution, map);
   const arrivalScene = destinationScene(frame, movement);
   const directives = actorDirectives(frame, ruling, map);
+  const directContactTargets = effectiveRuling.normalizedIntent.kind === "contact"
+    ? frame.admittedIntentTargets ?? effectiveRuling.normalizedIntent.targets
+    : effectiveRuling.normalizedIntent.targets;
   const requiredActorResponseHandles = (effectiveRuling.normalizedIntent.kind === "attempt"
     || effectiveRuling.normalizedIntent.kind === "contact")
-    ? effectiveRuling.normalizedIntent.targets.flatMap((target) => {
+    ? directContactTargets.flatMap((target) => {
         if (target.kind !== "actor") return [];
         const reference = map.get(target.handle);
         return reference?.kind === "actor" && reference.id !== frame.authority.actorId
@@ -4416,9 +4470,14 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
         )) {
         throw new CampaignPlayGameMasterError("ruling_invalid", null);
       }
+      validateAdmittedIntentTargets(request.frame, admittedRuling.data);
+      const authorityBoundRuling = bindAdmittedIntentTargets(
+        request.frame,
+        admittedRuling.data,
+      );
       try {
         validateCampaignPlayUncertaintyResolution(
-          admittedRuling.data,
+          authorityBoundRuling,
           admittedResolution.data,
           request.uncertaintyAuthority,
         );
@@ -4433,7 +4492,7 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
       const certifiedContact = request.contract === "certified_contact"
         ? requireCertifiedContactContext(
           request.frame,
-          admittedRuling.data,
+          authorityBoundRuling,
           admittedResolution.data,
         )
         : null;
@@ -4441,12 +4500,12 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
         ? null
         : genericContactContext(
           request.frame,
-          admittedRuling.data,
+          authorityBoundRuling,
           admittedResolution.data,
         );
       const effectiveRuling = normalizeReceivableCollectionAuthority(
         request.frame,
-        admittedRuling.data,
+        authorityBoundRuling,
       );
       const obligationAuthority = canonicalObligationAuthority(effectiveRuling);
       const capability = resolveStructuredOutputCapability({
@@ -4529,6 +4588,7 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
                 permittedEffects,
                 genericContact?.contactDetail,
                 genericContact?.lifecycleContext !== null,
+                worldEventPerformerHandles,
               )) as z.ZodType<unknown>,
           prompt: promptText,
           temperature: request.temperature,
@@ -4618,6 +4678,7 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
                   permittedEffects,
                   genericContact.contactDetail,
                   genericContact.lifecycleContext !== null,
+                  worldEventPerformerHandles,
                 ).safeParse(generated.object);
                 if (!parsed.success) {
                   throw new CampaignPlayGameMasterError(

@@ -405,6 +405,60 @@ function completedPaidDeliveryContactFrame(): CampaignPlayGameMasterFrame {
   return value;
 }
 
+function completedPaidDeliveryWithVisibleBramFrame(): CampaignPlayGameMasterFrame {
+  const value = completedPaidDeliveryContactFrame();
+  value.visibleFacts.push({
+    handle: "bram",
+    kind: "actor",
+    summary: "Bram watches from the edge of the gate.",
+  });
+  value.handleBindings.push({
+    handle: "bram",
+    reference: { kind: "actor", id: "actor-bram" },
+  });
+  value.authority.authorizedRefs.push({ kind: "actor", id: "actor-bram" });
+  value.rulebookFrame.acceptedWorld.actors.push({
+    id: "actor-bram",
+    kind: "person",
+    controller: "agent",
+    role: "support",
+    name: "Bram Vale",
+    summary: "A porter waiting near the gate.",
+    traits: [],
+    tags: [],
+  });
+  value.rulebookFrame.acceptedWorld.goals.push({
+    id: "goal-bram",
+    actorId: "actor-bram",
+    objective: "Watch the gate traffic.",
+    motivation: "Keep the port moving.",
+    horizon: "immediate",
+    priority: 2,
+    status: "active",
+  });
+  value.rulebookFrame.acceptedWorld.placements.push({
+    id: "placement-bram",
+    actorId: "actor-bram",
+    locationId: "location-a",
+    placementKind: "present",
+  });
+  value.rulebookFrame.placements.push({
+    placementId: "placement-bram",
+    actorId: "actor-bram",
+    locationId: "location-a",
+    placementKind: "present",
+  });
+  value.rulebookFrame.goals.push({
+    goalId: "goal-bram",
+    actorId: "actor-bram",
+    status: "active",
+    priority: 2,
+    objective: "Watch the gate traffic.",
+    motivation: "Keep the port moving.",
+  });
+  return value;
+}
+
 function completedPaidDeliveryWithAlternateDestinationFrame(): CampaignPlayGameMasterFrame {
   const value = completedPaidDeliveryContactFrame();
   const alternateLocationId = "location-c";
@@ -7174,6 +7228,120 @@ describe("Campaign Play Game Master generic contact proposer", () => {
     const reviewerPrompt = String(generateObject.mock.calls[1]![0].prompt);
     expect(reviewerPrompt).toContain('"lifecycleAssertion":"contact_response"');
     expect(reviewerPrompt).toContain("outstandingReceivable");
+  });
+
+  it("uses admitted direct targets for a completed delivery contact with an ambient actor", async () => {
+    const method = "Ask about the completed parcel delivery";
+    const baseRuling = genericActorContactRuling(method);
+    const contactRuling: CampaignPlayJudgeRuling = {
+      ...baseRuling,
+      normalizedIntent: {
+        ...baseRuling.normalizedIntent,
+        source: "suggested",
+        choiceHandle: "choice-contact",
+        targets: [
+          { handle: "guard", kind: "actor" },
+          { handle: "bram", kind: "actor" },
+        ],
+      },
+    };
+    const contactFrame = completedPaidDeliveryWithVisibleBramFrame();
+    contactFrame.admittedIntentTargets = [{ handle: "guard", kind: "actor" }];
+    const statusProposal = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        summary: "Oren acknowledges the completed sealed-parcel delivery and confirms that eight copper remains due.",
+      }],
+      decisionProposal: contactDecisionNone(method),
+      lifecycleAssertion: "contact_response" as const,
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: statusProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The direct response preserves the completed delivery and outstanding receivable.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: contactFrame,
+      ruling: contactRuling,
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+    });
+
+    expect(candidate.batch.commands.map((command) => command.kind)).toEqual([
+      "advance_world_time",
+      "record_world_event",
+    ]);
+    expect(candidate.batch.commands).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "complete_player_commitment" }),
+      expect.objectContaining({ kind: "create_player_commitment" }),
+      expect.objectContaining({ kind: "adjust_actor_possession" }),
+      expect.objectContaining({ kind: "pay_actor_obligation" }),
+      expect.objectContaining({ kind: "incur_actor_obligation" }),
+    ]));
+    expect(candidate.batch.commands).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "record_world_event",
+        performingActorId: "actor-bram",
+      }),
+    ]));
+    const proposerPrompt = String(generateObject.mock.calls[0]![0].prompt);
+    expect(proposerPrompt).toContain('"targetActorHandle":"guard"');
+    expect(proposerPrompt).toContain('REQUIRED_ACTOR_RESPONSES=["guard"]');
+    expect(proposerPrompt).toContain('"paymentState":"outstanding_receivable"');
+    expect(proposerPrompt).not.toContain('REQUIRED_ACTOR_RESPONSES=["guard","bram"]');
+    const proposerSchema = generateObject.mock.calls[0]![0].schema as z.ZodType<unknown>;
+    expect(proposerSchema.safeParse({
+      ...statusProposal,
+      effects: [{
+        ...statusProposal.effects[0],
+        performingActorHandle: "bram",
+        summary: "Bram answers for a conversation that did not address him.",
+      }],
+    }).success).toBe(false);
+    expect(() => createCampaignPlayGameMaster().compile(
+      contactFrame,
+      contactRuling,
+      resolution,
+      null,
+      {
+        ...statusProposal,
+        effects: [{
+          ...statusProposal.effects[0],
+          performingActorHandle: "bram",
+          summary: "Bram answers for a conversation that did not address him.",
+        }],
+      },
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+    expect(generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects admitted direct targets that are absent from the accepted ruling", () => {
+    const contactFrame = frame();
+    contactFrame.admittedIntentTargets = [{ handle: "guard", kind: "actor" }];
+    const rulingWithoutAdmittedTarget = ruling({
+      normalizedIntent: {
+        ...ruling().normalizedIntent,
+        targets: [{ handle: "here", kind: "location" }],
+      },
+    });
+    expect(() => createCampaignPlayGameMaster().compile(
+      contactFrame,
+      rulingWithoutAdmittedTarget,
+      resolution,
+      null,
+      proposal,
+    )).toThrow(expect.objectContaining({ code: "game_master_frame_invalid" }));
   });
 
   it("preserves typed paid delivery for a generic one-actor contact", async () => {

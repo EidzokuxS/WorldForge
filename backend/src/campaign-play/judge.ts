@@ -98,6 +98,7 @@ const JUDGE_SCHEMA_OWNED_MESSAGES = new Set([
   "Visible actor reaction handles must not contain duplicates.",
   "A none reaction must use a null supporting visible fact handle.",
   "An immediate reaction's supporting visible fact handle must be visible or null.",
+  "A suggested contact cannot mark a non-frozen actor reaction as immediate.",
   "Uncertain judgment requires a code-owned check.",
   "Only uncertain judgment may request a check.",
   "Clarification question must match the judgment disposition.",
@@ -116,6 +117,7 @@ const JUDGE_SEMANTIC_CHECK_PATHS = {
   visible_actor_reactions_duplicates: ["visibleActorReactions"],
   visible_actor_reactions_none_support: ["visibleActorReactions"],
   visible_actor_reactions_immediate_support: ["visibleActorReactions"],
+  suggested_contact_reaction_authority: ["visibleActorReactions"],
   duplicate_targets: ["targets"],
   normalized_limits: ["targets"],
   visible_authority: ["targets"],
@@ -231,6 +233,7 @@ type CampaignPlayJudgeRecoveryInstructionClass =
   | "copy_exact_citation_catalog"
   | "reaction_none_support_null"
   | "non_empty_reaction_line"
+  | "suggested_contact_reaction_none"
   | "none_unsupported_obligation";
 
 function recoveryInstructionClassesFromIssues(
@@ -269,6 +272,9 @@ function recoveryInstructionClassesFromIssues(
     }
     if (issue.check === "visible_actor_reactions_immediate_support") {
       classes.add("copy_exact_reaction_support_catalog");
+    }
+    if (issue.check === "suggested_contact_reaction_authority") {
+      classes.add("suggested_contact_reaction_none");
     }
     if (
       path?.length === 3
@@ -498,9 +504,11 @@ function judgeProposalSchemaForFrame(
     if (input?.source === "suggested" && input.frozenChoice) {
       const allowedSuggestedTargets = [
         ...input.frozenChoice.targets,
-        ...frame.visibleFacts
-          .filter((fact) => fact.kind === "actor" && fact.handle !== frame.playerActorHandle)
-          .map((fact) => ({ handle: fact.handle, kind: "actor" as const })),
+        ...(input.frozenChoice.kind === "contact"
+          ? []
+          : frame.visibleFacts
+            .filter((fact) => fact.kind === "actor" && fact.handle !== frame.playerActorHandle)
+            .map((fact) => ({ handle: fact.handle, kind: "actor" as const }))),
       ].filter((target, index, targets) => targets.findIndex((candidate) =>
         candidate.handle === target.handle && candidate.kind === target.kind) === index);
       const allowedSuggestedTargetSchemas = allowedSuggestedTargets.map((target) =>
@@ -601,9 +609,11 @@ function judgeToolSchemaForFrame(
   const allowedSuggestedTargets = input?.source === "suggested" && input.frozenChoice
     ? [
         ...input.frozenChoice.targets,
-        ...frame.visibleFacts
-          .filter((fact) => fact.kind === "actor" && fact.handle !== frame.playerActorHandle)
-          .map((fact) => ({ handle: fact.handle, kind: "actor" as const })),
+        ...(input.frozenChoice.kind === "contact"
+          ? []
+          : frame.visibleFacts
+            .filter((fact) => fact.kind === "actor" && fact.handle !== frame.playerActorHandle)
+            .map((fact) => ({ handle: fact.handle, kind: "actor" as const }))),
       ].filter((target, index, targets) => targets.findIndex((candidate) =>
         candidate.handle === target.handle && candidate.kind === target.kind) === index)
     : null;
@@ -1092,6 +1102,7 @@ function prompt(
     && input.source === "suggested"
     && input.frozenChoice !== null
     && input.frozenChoice !== undefined;
+  const suggestedContact = input.source === "suggested" && input.frozenChoice?.kind === "contact";
   const freeformToolMode = transportMode === "tool_mode" && input.source === "freeform";
   const kindField = freeformToolMode ? "intentKind" : "kind";
   const routeField = freeformToolMode ? "travelRouteHandle" : "movementRouteHandle";
@@ -1160,6 +1171,9 @@ function prompt(
     "PLAYER_PROFILE is protected authority for the player's durable identity, history, and capabilities. Use it when relevant to feasibility or uncertainty. Do not contradict it or treat omission from VISIBLE_FRAME as evidence that the player lacks the supplied history or capability. It does not establish current possession, condition, access, relationship, world state, or what any nonplayer actor knows.",
     "Any nonplayer actor listed in TARGET_CATALOG is currently visible and reachable in VISIBLE_FRAME. Treat that as placement authority. SOURCE_MOMENT may show an intention or gesture, but it cannot establish that this actor departed. A contact action targeting that actor without travel cannot be impossible because older prose says the actor left.",
     "Every targets entry must copy one exact {handle, kind} pair from TARGET_CATALOG. When a visible nonplayer actor explicitly participates in PLAYER_INPUT as an addressee, companion, or performer, copy that actor's exact pair into targets. For freeform movement with a named willing companion, include the movement destination and the companion actor in targets. For suggested movement, the frozen route already carries the destination: copy it and never add the destination location as another target. Citing the actor does not make the actor a target and cannot replace this entry. Observation and choice handles are not world targets: cite a relevant observation in citedVisibleFactHandles and target its visible location, actor, route, pressure, or possession instead. A detail described only in SOURCE_MOMENT or an observation has no separate object handle; never invent one. Every citation must be copied from CITATION_HANDLES and CITATION_HANDLE_CATALOG.",
+    ...(suggestedContact
+      ? ["For a suggested contact, FROZEN_CHOICE targets are the complete direct-participant authority. A visible actor absent from FROZEN_CHOICE may be evaluated in visibleActorReactions, but must use reaction none with a null supporting visible fact handle and must never be added to targets."]
+      : []),
     "When a no-travel PLAYER_INPUT asks about the topology, direction, openness, restriction, toll, checkpoint, permission, credential, or access requirement of one visible route, copy that route's exact TARGET_CATALOG pair into targets. Keep a visible actor addressee as a separate actor target. Citing the route does not replace the route target.",
     "When a no-travel contact asks generally about passage, clearance, stamping, permits, tolls, or fees without identifying one visible route, keep only the spoken addressee or addressees in targets and copy every handle in VISIBLE_ROUTES to citedVisibleFactHandles. This supplies the complete local route authority for the answer; it does not authorize movement or establish any requirement.",
     "COPY_EXACT=Copy every visibleActorReactions[].actorHandle exactly from VISIBLE_ACTOR_REACTION_HANDLE_CATALOG at the same array index. Copy every selected citedVisibleFactHandles token exactly from CITATION_HANDLE_CATALOG; preserve the catalog's canonical handle spelling and the selected citation order.",
@@ -1181,9 +1195,13 @@ function prompt(
     "Write clarificationQuestion as a concise in-world question the player character can understand. Refer only to perceivable details and in-world destination names. Never mention models, scenes, packets, handles, typed routes, schemas, code, or game mechanics.",
     "For uncertain rulings, uncertainty.kind must be check and must include dieSides=20, difficulty, modifierMinimum, and modifierMaximum. Every one of those four values must be an unquoted JSON integer. difficulty must be from 1 through 20; never return a difficulty word or quoted number. Example shape: {\"kind\":\"check\",\"dieSides\":20,\"difficulty\":12,\"modifierMinimum\":-2,\"modifierMaximum\":2}. The modifier range must contain zero. Code performs the roll; never claim a roll result.",
     suggestedToolMode
-      ? "For suggested input in tool mode, copy every frozen target. kind and movementRouteHandle are code-owned by FROZEN_CHOICE and must be omitted entirely; never echo, supply, or change either field. targets must always be a JSON array. You may add only visible nonplayer actors whose participation, consent, or reaction is material to the rendered action. Add each such actor from TARGET_CATALOG. Never add a destination location or another route, location, pressure, possession, or the player actor. Judge feasibility and outcome without changing the selected action."
+      ? suggestedContact
+        ? "For a suggested contact in tool mode, copy every frozen target exactly. kind and movementRouteHandle are code-owned by FROZEN_CHOICE and must be omitted entirely; never echo, supply, or change either field. targets must always be a JSON array. Do not add any visible actor outside FROZEN_CHOICE to targets. Evaluate that actor in visibleActorReactions with reaction none and a null supporting visible fact handle."
+        : "For suggested input in tool mode, copy every frozen target. kind and movementRouteHandle are code-owned by FROZEN_CHOICE and must be omitted entirely; never echo, supply, or change either field. targets must always be a JSON array. You may add only visible nonplayer actors whose participation, consent, or reaction is material to the rendered action. Add each such actor from TARGET_CATALOG. Never add a destination location or another route, location, pressure, possession, or the player actor. Judge feasibility and outcome without changing the selected action."
       : input.source === "suggested"
-        ? "For suggested input, copy FROZEN_CHOICE kind and every frozen target. targets must always be a JSON array. You may add only visible nonplayer actors whose participation, consent, or reaction is material to the rendered action. Add each such actor from TARGET_CATALOG. Never add a destination location or another route, location, pressure, possession, or the player actor. Judge feasibility and outcome without changing the selected action."
+        ? suggestedContact
+          ? "For a suggested contact, copy FROZEN_CHOICE kind and every frozen target exactly. targets must always be a JSON array. Do not add any visible actor outside FROZEN_CHOICE to targets. Evaluate that actor in visibleActorReactions with reaction none and a null supporting visible fact handle. Judge feasibility and outcome without changing the selected action."
+          : "For suggested input, copy FROZEN_CHOICE kind and every frozen target. targets must always be a JSON array. You may add only visible nonplayer actors whose participation, consent, or reaction is material to the rendered action. Add each such actor from TARGET_CATALOG. Never add a destination location or another route, location, pressure, possession, or the player actor. Judge feasibility and outcome without changing the selected action."
         : freeformToolMode
           ? "For freeform input in tool mode, classify the player's primary action in required intentKind. Classify any travel separately in required travelRouteHandle. Do not return the domain aliases kind or movementRouteHandle; code decodes the provider transport only after this complete object passes its strict schema. targets must always be a JSON array."
           : "For freeform input, classify the player's primary action in kind and any travel separately in movementRouteHandle. targets must always be a JSON array.",
@@ -1267,6 +1285,9 @@ function prompt(
         ...(recoveryInstructionClasses.includes("non_empty_reaction_line")
           ? ["RECOVERY_NON_EMPTY_REACTION_LINE=Provide a non-empty single-line reason for every visibleActorReactions entry, including reaction none."]
           : []),
+        ...(recoveryInstructionClasses.includes("suggested_contact_reaction_none")
+          ? [`RECOVERY_SUGGESTED_CONTACT_REACTION_NONE=For a suggested contact, preserve FROZEN_CHOICE targets as the complete direct-participant set. For every visible actor absent from FROZEN_CHOICE, set reaction to none and supportingVisibleFactHandle to ${transportNull}; do not add that actor to targets.`]
+          : []),
         ...(recoveryInstructionClasses.includes("none_unsupported_obligation")
           ? ["RECOVERY_NONE_UNSUPPORTED_OBLIGATION=For a standalone vouch, endorsement, privileged-access, better-paying-job, permission, referral, future-service, or relationship request without an exact typed copper-debt authority, use requiredObligationEffect kind none. The allowed kind domain is none, incur_actor_obligation, or pay_actor_obligation; in tool mode set debtorHandle=\"\", creditorHandle=\"\", obligationHandle=\"\", paymentPossessionHandle=\"\", unitKey=\"\", amount=0, and minimumResult=\"\". Rebuild the complete object and never create a new social-obligation kind."]
           : []),
@@ -1285,6 +1306,7 @@ export function campaignPlaySuggestedTargetsAreAuthorized(input: {
   proposedTargets: PlayerIntent["targets"];
   visibleFacts: CampaignPlayJudgeFrame["visibleFacts"];
   playerActorHandle: string;
+  frozenKind?: PlayerIntent["kind"];
 }): boolean {
   const key = (target: PlayerIntent["targets"][number]): string =>
     `${target.kind}:${target.handle}`;
@@ -1297,6 +1319,9 @@ export function campaignPlaySuggestedTargetsAreAuthorized(input: {
   const visibleNonplayerActors = new Set(input.visibleFacts
     .filter((fact) => fact.kind === "actor" && fact.handle !== input.playerActorHandle)
     .map((fact) => fact.handle));
+  if (input.frozenKind === "contact") {
+    return input.proposedTargets.every((target) => frozenKeys.has(key(target)));
+  }
   return input.proposedTargets.every((target) =>
     frozenKeys.has(key(target))
     || (target.kind === "actor" && visibleNonplayerActors.has(target.handle)));
@@ -1517,6 +1542,24 @@ function compile(
       check: "visible_actor_reactions_immediate_support",
     });
   }
+  const frozenSuggestedContactActorHandles = inputResult.data.source === "suggested"
+    && inputResult.data.frozenChoice?.kind === "contact"
+    ? new Set(inputResult.data.frozenChoice.targets
+      .filter((target) => target.kind === "actor")
+      .map((target) => target.handle))
+    : null;
+  if (frozenSuggestedContactActorHandles !== null) {
+    proposal.visibleActorReactions.forEach((entry, index) => {
+      if (entry.reaction === "immediate" && !frozenSuggestedContactActorHandles.has(entry.actorHandle)) {
+        reactionIssues.push({
+          code: "custom",
+          path: ["visibleActorReactions", index, "reaction"],
+          message: "A suggested contact cannot mark a non-frozen actor reaction as immediate.",
+          check: "suggested_contact_reaction_authority",
+        });
+      }
+    });
+  }
   if (reactionIssues.length > 0) {
     rejectJudgeSemanticContractIssues(reactionIssues, emitContractDiagnostic);
   }
@@ -1702,6 +1745,7 @@ function compile(
         proposedTargets: proposal.targets,
         visibleFacts: frameResult.data.visibleFacts,
         playerActorHandle: frameResult.data.playerActorHandle,
+        frozenKind: frozenChoice.kind,
     });
     if (!proposalMatchesFrozenChoice) {
       rejectJudgeSemanticContract("suggested_choice_authority", emitContractDiagnostic);

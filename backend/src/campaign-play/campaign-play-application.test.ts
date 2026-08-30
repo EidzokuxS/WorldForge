@@ -36,6 +36,7 @@ import {
   createCampaignPlayTurnRepository,
   type CampaignPlayClaimableTurnStage,
   type CampaignPlayExternalInterruptionEvidence,
+  type CampaignPlayResumeOrigin,
   type CampaignPlayTurnModelSelection,
 } from "./campaign-play-turn-repository.js";
 import {
@@ -358,6 +359,7 @@ function fakeOpeningRuntime(
         turnId: input.turnId,
         interruptedStage: input.interruptedStage,
         observedEpoch: input.observedEpoch,
+        origin: input.origin ?? "explicit",
         owner: "application-resume",
         resumedAt,
         leaseExpiresAt: resumedAt + 1_000,
@@ -598,6 +600,7 @@ function fakePlayerRuntime(
         turnId: input.turnId,
         interruptedStage: input.interruptedStage,
         observedEpoch: input.observedEpoch,
+        origin: input.origin ?? "explicit",
         owner: "application-gm-recovery-resume",
         resumedAt,
         leaseExpiresAt: resumedAt + 1_000,
@@ -762,6 +765,7 @@ function fakeStageLocalRecoveryRuntime(
     onResume?: (input: {
       interruptedStage: CampaignPlayClaimableTurnStage;
       observedEpoch: number;
+      origin: CampaignPlayResumeOrigin;
       gameMasterRecoveryFeedback?: CampaignPlayGameMasterRecoveryFeedback;
     }) => void;
   },
@@ -852,6 +856,7 @@ function fakeStageLocalRecoveryRuntime(
       options.onResume?.({
         interruptedStage: input.interruptedStage,
         observedEpoch: input.observedEpoch,
+        origin: input.origin ?? "explicit",
         gameMasterRecoveryFeedback: options.gameMasterRecoveryFeedback,
       });
       const turn = repository.loadTurn(input.turnId)!;
@@ -860,6 +865,7 @@ function fakeStageLocalRecoveryRuntime(
         turnId: input.turnId,
         interruptedStage: input.interruptedStage,
         observedEpoch: input.observedEpoch,
+        origin: input.origin ?? "explicit",
         owner: "application-stage-local-resume",
         resumedAt,
         leaseExpiresAt: resumedAt + 1_000,
@@ -1673,6 +1679,7 @@ describe("CampaignPlayApplication", () => {
       turnId: admission.turnId,
       interruptedStage: "admitted",
       observedEpoch: 1,
+      origin: "automatic",
     });
     expect(runNextStage).toHaveBeenCalledTimes(2);
 
@@ -1939,11 +1946,13 @@ describe("CampaignPlayApplication", () => {
       {
         interruptedStage: "admitted",
         observedEpoch: 1,
+        origin: "automatic",
         gameMasterRecoveryFeedback: undefined,
       },
       {
         interruptedStage: "judged",
         observedEpoch: 3,
+        origin: "automatic",
         gameMasterRecoveryFeedback: POSSESSION_TRANSFORM_RECOVERY_FEEDBACK,
       },
     ]);
@@ -2095,13 +2104,14 @@ describe("CampaignPlayApplication", () => {
     expect(result.resumeInputs.at(-1)).toEqual({
       interruptedStage: "judged",
       observedEpoch: 5,
+      origin: "explicit",
       gameMasterRecoveryFeedback: undefined,
     });
     expect(reopenedApplication.loadState(CAMPAIGN_ID)).toMatchObject({
-      activeTurn: { status: "interrupted", retryEligible: true },
+      activeTurn: { status: "interrupted", retryEligible: false },
     });
     expect(reopenedApplication.loadTurn(CAMPAIGN_ID, result.admission.turnId).turn)
-      .toMatchObject({ status: "interrupted", retryEligible: true });
+      .toMatchObject({ status: "interrupted", retryEligible: false });
 
     const handleAfter = openCampaignPlayDatabase(CAMPAIGN_ID);
     try {
@@ -2646,6 +2656,7 @@ describe("CampaignPlayApplication", () => {
             turnId: input.turnId,
             interruptedStage: input.interruptedStage,
             observedEpoch: input.observedEpoch,
+            origin: input.origin ?? "explicit",
             owner: "application-judge-durable-resume",
             resumedAt,
             leaseExpiresAt: resumedAt + 1_000,
@@ -2701,6 +2712,7 @@ describe("CampaignPlayApplication", () => {
       turnId,
       interruptedStage: "admitted",
       observedEpoch: 1,
+      origin: "explicit",
     }]);
     const resumedHandle = openCampaignPlayDatabase(CAMPAIGN_ID);
     try {
@@ -2915,6 +2927,7 @@ describe("CampaignPlayApplication", () => {
             turnId: input.turnId,
             interruptedStage: input.interruptedStage,
             observedEpoch: input.observedEpoch,
+            origin: input.origin ?? "explicit",
             owner: "application-game-master-durable-resume",
             resumedAt,
             leaseExpiresAt: resumedAt + 1_000,
@@ -2976,6 +2989,7 @@ describe("CampaignPlayApplication", () => {
       turnId,
       interruptedStage: "judged",
       observedEpoch: 2,
+      origin: "explicit",
       gameMasterRecoveryFeedback: feedback,
     }]);
     const resumedHandle = openCampaignPlayDatabase(CAMPAIGN_ID);

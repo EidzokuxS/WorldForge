@@ -4477,7 +4477,7 @@ describe("Campaign Play player-action turn runtime", () => {
     });
   });
 
-  it("settles the exact current suggested action without Judge reinterpretation", async () => {
+  it("settles the exact current suggested action and forwards its frozen targets to Game Master", async () => {
     const { handle, state } = await createReadyCampaignWithOpening();
     const time = fixedClock(2_300);
     const judge = judgeFixture("deterministic");
@@ -4501,6 +4501,7 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "primary_settled" });
     expect(judge.judge).toHaveBeenCalledTimes(0);
     expect(gameMaster.plan).toHaveBeenCalledTimes(1);
+    expect(gameMaster.plan.mock.calls[0]![0].frame.admittedIntentTargets).toEqual(binding.targets);
     expect(countForTurn(handle, "campaign_play_commands", admission.turnId)).toBeGreaterThan(0);
     expect(countForTurn(handle, "campaign_play_receipts", admission.turnId)).toBeGreaterThan(0);
     expect(handle.sqlite.prepare(`SELECT count(*) AS value FROM campaign_play_model_stages
@@ -5268,7 +5269,7 @@ describe("Campaign Play player-action turn runtime", () => {
       stage: "interrupted",
       interruptedStage: "judged",
       errorCode: "provider_unavailable",
-      resumeEligible: true,
+      resumeEligible: false,
     });
     expect(judge.judge).toHaveBeenCalledTimes(1);
     expect(gameMaster.plan).toHaveBeenCalledTimes(2);
@@ -9318,6 +9319,7 @@ describe("Campaign Play player-action turn runtime", () => {
 
   it("interrupts an expired claimed replanner before recovery and rejects its late result", async () => {
     const { handle, state } = await createReadyCampaignWithOpening();
+    const repository = createCampaignPlayTurnRepository(handle);
     const time = fixedClock(4_500);
     type Generated = {
       object: ReturnType<typeof actorReplanProposalFromPrompt>;
@@ -9392,14 +9394,76 @@ describe("Campaign Play player-action turn runtime", () => {
     const resumedJob = createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
       .find((job) => job.jobId === jobId);
     expect(resumedJob).toMatchObject({ stage: "claimed", workerEpoch: 2 });
+    expect(repository.loadTurn(admission.turnId)).toMatchObject({
+      explicitResumeConsumed: true,
+    });
+
+    const resumedTurn = repository.loadTurn(admission.turnId)!;
+    time.advance();
+    const reinterruptClaimedAt = time.clock.now();
+    const reinterruptToken = repository.claimStage({
+      turnId: admission.turnId,
+      expectedStage: "primary_settled",
+      observedEpoch: resumedTurn.workerEpoch,
+      owner: "reinterrupt-actor-worker",
+      claimedAt: reinterruptClaimedAt,
+      leaseExpiresAt: reinterruptClaimedAt + 1_000,
+      mutationId: "reinterrupt-actor-main-turn-claim",
+    });
+    time.advance();
+    repository.commitActorTransition({
+      token: reinterruptToken,
+      leaseMode: "live",
+      publicInterruption: true,
+      worldVersionAdvance: 0,
+      protectedPayloadHash: hashCampaignPlayProjection({
+        domain: "reinterrupted_actor_fixture",
+        turnId: admission.turnId,
+        jobId,
+      }),
+      committedAt: time.clock.now(),
+      mutationId: "reinterrupt-actor-job",
+      mutate(context) {
+        const reinterrupted = context.sqlite.prepare(`UPDATE campaign_play_actor_jobs
+          SET stage = 'interrupted'
+          WHERE campaign_id = ? AND job_id = ? AND stage = 'claimed'`).run(
+            context.campaignId,
+            jobId,
+          );
+        if (reinterrupted.changes !== 1) {
+          throw new Error("Actor reinterruption fixture lost its claimed job.");
+        }
+      },
+    });
+    expect(createCampaignPlayReadModel(handle).loadState()).toMatchObject({
+      activeTurn: { status: "interrupted", retryEligible: false },
+    });
+    expect(createCampaignPlayReadModel(handle).listTurnEvents(admission.turnId, 0).at(-1))
+      .toMatchObject({ type: "turn.interrupted", retryEligible: false });
+    const beforeSecondResume = {
+      turn: repository.loadTurn(admission.turnId),
+      jobs: createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId),
+    };
+    await expect(recoveryRuntime.resumeInterruptedStage({
+      turnId: admission.turnId,
+      interruptedStage: "primary_settled",
+      observedEpoch: beforeSecondResume.turn!.workerEpoch,
+      origin: "explicit",
+    })).rejects.toMatchObject({ code: "turn_fence_lost" });
+    expect({
+      turn: repository.loadTurn(admission.turnId),
+      jobs: createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId),
+    }).toEqual(beforeSecondResume);
 
     if (!resolveOld || !oldObject) throw new Error("Expired actor replanner never reached its provider call.");
     resolveOld({ object: oldObject, trace: actorReplanTrace() });
     await expect(lateRun).resolves.toMatchObject({
-      turn: { stage: "primary_settled", workerEpoch: expiredEpoch + 1 },
+      turn: { stage: "primary_settled", workerEpoch: reinterruptToken.epoch },
     });
     expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
-      .find((job) => job.jobId === jobId)).toEqual(resumedJob);
+      .find((job) => job.jobId === jobId)).toEqual(
+        beforeSecondResume.jobs.find((job) => job.jobId === jobId),
+      );
     expect(handle.sqlite.prepare(`SELECT attempt, status, worker_epoch AS workerEpoch
       FROM campaign_play_model_stages
       WHERE campaign_id = ? AND turn_id = ? AND kind = 'actor_replanner'

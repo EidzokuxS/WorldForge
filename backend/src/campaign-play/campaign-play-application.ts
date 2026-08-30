@@ -54,11 +54,13 @@ import {
   type LoadedCampaignPlayState,
 } from "./campaign-play-state-repository.js";
 import {
+  CAMPAIGN_PLAY_MAX_AUTOMATIC_STAGE_ATTEMPTS,
   createCampaignPlayTurnRepository,
   CampaignPlayTurnRepositoryError,
   type CampaignPlayModelPricing,
   type CampaignPlayRequestedModel,
   type CampaignPlayClaimableTurnStage,
+  type CampaignPlayResumeOrigin,
   type CampaignPlayTurnModelSelection,
   type LoadedCampaignPlayTurn,
 } from "./campaign-play-turn-repository.js";
@@ -125,8 +127,6 @@ export class CampaignPlayApplicationError extends Error {
     this.name = "CampaignPlayApplicationError";
   }
 }
-
-const CAMPAIGN_PLAY_MAX_AUTOMATIC_STAGE_ATTEMPTS = 3;
 
 export function accumulateCampaignPlayJudgeRecoveryFeedback(
   accumulated: CampaignPlayJudgeRecoveryFeedback | undefined,
@@ -826,7 +826,11 @@ export function createCampaignPlayApplication(
   const drive = async (
     campaignId: string,
     turnId: string,
-    resume: { interruptedStage: LoadedCampaignPlayTurn["interruptedStage"]; observedEpoch: number } | null,
+    resume: {
+      interruptedStage: LoadedCampaignPlayTurn["interruptedStage"];
+      observedEpoch: number;
+      origin: CampaignPlayResumeOrigin;
+    } | null,
   ): Promise<void> => {
     let pendingResume = resume;
     const explicitResumeRequested = resume !== null;
@@ -877,6 +881,7 @@ export function createCampaignPlayApplication(
               turnId,
               interruptedStage: pendingResume.interruptedStage!,
               observedEpoch: pendingResume.observedEpoch,
+              origin: pendingResume.origin,
             })
           : await runtime.runNextStage(turnId);
         pendingResume = null;
@@ -909,6 +914,7 @@ export function createCampaignPlayApplication(
           pendingResume = {
             interruptedStage: result.recovery.interruptedStage,
             observedEpoch: result.recovery.workerEpoch,
+            origin: "automatic",
           };
           pendingJudgeRecoveryFeedback = nextJudgeRecoveryFeedback;
           pendingGameMasterRecoveryFeedback = nextGameMasterRecoveryFeedback;
@@ -1020,7 +1026,11 @@ export function createCampaignPlayApplication(
   const schedule = (
     campaignId: string,
     turnId: string,
-    resume: { interruptedStage: LoadedCampaignPlayTurn["interruptedStage"]; observedEpoch: number } | null = null,
+    resume: {
+      interruptedStage: LoadedCampaignPlayTurn["interruptedStage"];
+      observedEpoch: number;
+      origin: CampaignPlayResumeOrigin;
+    } | null = null,
   ): void => {
     const current = drivers.get(campaignId);
     if (current?.turnId === turnId && resume === null) return;
@@ -1307,6 +1317,7 @@ export function createCampaignPlayApplication(
         const turn = createCampaignPlayTurnRepository(handle).loadTurn(turnId);
         if (!turn) return fail("turn_not_found", "Turn was not found.");
         const interruptedActorReplan = turn.stage === "primary_settled" &&
+          !turn.explicitResumeConsumed &&
           handle.sqlite.prepare(`SELECT 1 AS interrupted FROM campaign_play_actor_jobs
             WHERE campaign_id = ? AND turn_id = ? AND stage = 'interrupted'
             LIMIT 1`).get(handle.campaignId, turnId) !== undefined;
@@ -1320,6 +1331,7 @@ export function createCampaignPlayApplication(
         schedule(campaignId, turnId, {
           interruptedStage,
           observedEpoch: turn.workerEpoch,
+          origin: "explicit",
         });
         return { turnId, sequence: turn.nextEventSequence };
       } catch (error) {

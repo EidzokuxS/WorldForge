@@ -1429,6 +1429,16 @@ describe("Campaign Play shared public contracts", () => {
           retryEligible: true,
         },
       },
+      {
+        ...active,
+        phase: "narration_pending",
+        activeTurn: {
+          ...active.activeTurn!,
+          status: "interrupted",
+          progress: null,
+          retryEligible: false,
+        },
+      },
     ];
     for (const state of states) {
       expect(campaignPlayStateSchema.safeParse(state).success).toBe(true);
@@ -1495,6 +1505,12 @@ describe("Campaign Play shared public contracts", () => {
       },
       {
         ...turnBase,
+        status: "interrupted",
+        progress: null,
+        retryEligible: false,
+      },
+      {
+        ...turnBase,
         status: "completed",
         progress: null,
         retryEligible: false,
@@ -1512,9 +1528,14 @@ describe("Campaign Play shared public contracts", () => {
     }
     expect(campaignPlayPublicTurnSchema.safeParse({
       ...turnBase,
-      status: "interrupted",
+      retryEligible: true,
+    }).success).toBe(false);
+    expect(campaignPlayPublicTurnSchema.safeParse({
+      ...turnBase,
+      status: "completed",
       progress: null,
-      retryEligible: false,
+      retryEligible: true,
+      completedAt: 1_100,
     }).success).toBe(false);
     expect(campaignPlayStateSchema.safeParse({
       ...active,
@@ -1712,7 +1733,7 @@ describe("Campaign Play shared public contracts", () => {
     expect(campaignPlaySseEventSchema.safeParse({
       ...events[2],
       retryEligible: false,
-    }).success).toBe(false);
+    }).success).toBe(true);
 
     const turnBase = state.activeTurn!;
     const turnReads = [

@@ -5,6 +5,7 @@ import { hashCampaignPlayProjection } from "./campaign-play-projection.js";
 import {
   CampaignPlayTurnRepositoryError,
   createCampaignPlayTurnRepository,
+  type CampaignPlayResumeOrigin,
   type CampaignPlayAcceptedModelArtifact,
   type CampaignPlayClaimableTurnStage,
   type CampaignPlayExternalInterruptionEvidence,
@@ -114,6 +115,8 @@ export interface ResumeCampaignPlayTurnInput {
   turnId: string;
   interruptedStage: CampaignPlayClaimableTurnStage;
   observedEpoch: number;
+  /** Public/manual callers predate origin propagation; they are explicit resumes. */
+  origin?: CampaignPlayResumeOrigin;
 }
 
 export interface CampaignPlayTurnService {
@@ -881,6 +884,7 @@ export function createCampaignPlayTurnService(
           turnId: resumeInput.turnId,
           interruptedStage: resumeInput.interruptedStage,
           observedEpoch: resumeInput.observedEpoch,
+          origin: resumeInput.origin ?? "explicit",
           owner: input.owner,
           resumedAt,
           leaseExpiresAt: leaseExpiry(resumedAt),

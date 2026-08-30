@@ -871,7 +871,7 @@ export type CampaignPlaySseEvent =
     }
   | CampaignPlaySseEventBase & {
       type: "turn.interrupted";
-      retryEligible: true;
+      retryEligible: boolean;
     }
   | CampaignPlaySseEventBase & {
       type: "turn.completed";

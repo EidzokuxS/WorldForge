@@ -2813,6 +2813,16 @@ function currentGameMasterFrame(
     admission,
     mechanical,
   });
+  const frozenChoice = admission.judgeInput.source === "suggested"
+    ? admission.choiceBindings.find((choice) =>
+        choice.handle === admission.judgeInput.choiceHandle)
+    : null;
+  if (admission.judgeInput.source === "suggested" && frozenChoice === undefined) {
+    throw new CampaignPlayTurnRuntimeError(
+      "turn_artifact_invalid",
+      "Campaign Play suggested action lost its frozen binding.",
+    );
+  }
   return {
     admission,
     frame: {
@@ -2832,6 +2842,9 @@ function currentGameMasterFrame(
       rulebookFrame: mechanical,
       authority: rulebookAuthority(turn.turnId, admission),
       ...(commitmentAuthority === undefined ? {} : { commitmentAuthority }),
+      ...(frozenChoice === undefined || frozenChoice === null
+        ? {}
+        : { admittedIntentTargets: frozenChoice.targets }),
     },
   };
 }
@@ -5325,6 +5338,7 @@ export function createCampaignPlayTurnRuntime(
           turnId: turn.turnId,
           expectedStage: "primary_settled",
           observedEpoch: turn.workerEpoch,
+          consumeExplicitResume: (resume.origin ?? "explicit") === "explicit",
           owner: input.owner,
           claimedAt: resumedAt,
           leaseExpiresAt: expiresAt,

@@ -1591,6 +1591,7 @@ describe("Campaign Play external artifact and recovery fencing", () => {
       turnId: "turn-opening",
       interruptedStage: "admitted",
       observedEpoch: 1,
+      origin: "explicit",
       owner: "worker-before-interruption",
       resumedAt: 1_719,
       leaseExpiresAt: 1_930,
@@ -1601,6 +1602,7 @@ describe("Campaign Play external artifact and recovery fencing", () => {
       turnId: "turn-opening",
       interruptedStage: "admitted",
       observedEpoch: 1,
+      origin: "explicit",
       owner: "worker-beta",
       resumedAt: 1_730,
       leaseExpiresAt: 1_930,
@@ -1634,6 +1636,267 @@ describe("Campaign Play external artifact and recovery fencing", () => {
       mutationId: "old-epoch-result",
     }), "turn_fence_lost");
     expect(runtimeSnapshot(handle)).toEqual(afterResume);
+  });
+
+  it("normalizes a legacy attempt-four interruption and rejects another resume", () => {
+    const { handle, state } = createOpeningReadyCampaign();
+    const repository = createCampaignPlayTurnRepository(handle);
+    repository.admitTurn(openingInput(state));
+
+    let token = repository.claimStage(claimInput());
+    for (const [index, interruptedAt] of [1_720, 1_850, 1_980].entries()) {
+      repository.interruptExternal({
+        token,
+        evidence: interruptionEvidence,
+        interruptedAt,
+        mutationId: `opening-attempt-${index}-interrupted`,
+      });
+      token = repository.resumeExternal({
+        turnId: "turn-opening",
+        interruptedStage: "admitted",
+        observedEpoch: token.epoch,
+        origin: index === 2 ? "explicit" : "automatic",
+        owner: `worker-${index + 1}`,
+        resumedAt: interruptedAt + 10,
+        leaseExpiresAt: interruptedAt + 210,
+        mutationId: `opening-attempt-${index + 1}-resumed`,
+      });
+    }
+    const attemptFour = repository.interruptExternal({
+      token,
+      evidence: interruptionEvidence,
+      interruptedAt: 2_120,
+      mutationId: "opening-attempt-four-interrupted",
+    });
+    expect(attemptFour).toMatchObject({
+      stage: "interrupted",
+      workerEpoch: 4,
+      resumeEligible: false,
+    });
+    expect(attemptFour.events.at(-1)).toMatchObject({
+      type: "turn.interrupted",
+      retryEligible: false,
+    });
+    expect(handle.sqlite.prepare(`SELECT resume_eligible AS resumeEligible,
+        explicit_resume_consumed AS explicitResumeConsumed
+      FROM campaign_play_turns WHERE id = 'turn-opening'`).get())
+      .toEqual({ resumeEligible: 1, explicitResumeConsumed: 1 });
+
+    disableCampaignPlayGuards(handle);
+    handle.sqlite.prepare(`UPDATE campaign_play_turns SET explicit_resume_consumed = 0
+      WHERE id = 'turn-opening'`).run();
+    const legacy = repository.loadTurn("turn-opening");
+    expect(legacy).toMatchObject({
+      stage: "interrupted",
+      workerEpoch: 4,
+      resumeEligible: false,
+    });
+    expect(createCampaignPlayReadModel(handle).loadTurn("turn-opening").turn)
+      .toMatchObject({ status: "interrupted", retryEligible: false });
+
+    const beforeRejectedResume = runtimeSnapshot(handle);
+    expectTurnError(() => repository.resumeExternal({
+      turnId: "turn-opening",
+      interruptedStage: "admitted",
+      observedEpoch: 4,
+      origin: "explicit",
+      owner: "worker-five",
+      resumedAt: 2_510,
+      leaseExpiresAt: 2_700,
+      mutationId: "opening-attempt-five-resumed",
+    }), "turn_fence_lost");
+    expect(runtimeSnapshot(handle)).toEqual(beforeRejectedResume);
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_model_stages WHERE turn_id = 'turn-opening' AND attempt = 5`).get())
+      .toEqual({ count: 0 });
+  });
+
+  it("consumes the explicit resume across a later game-master interruption", () => {
+    const { handle, state } = createOpeningReadyCampaign();
+    const openingRepository = createCampaignPlayTurnRepository(handle);
+    completeOpening(handle, openingRepository, state);
+    const ready = createCampaignPlayStateRepository(handle).loadState();
+    if (!ready) throw new Error("Campaign Play ready state disappeared.");
+    const repository = createCampaignPlayTurnRepository(handle);
+    repository.admitTurn({
+      turnId: "turn-player",
+      supersedesTurnId: null,
+      mutationId: "player-turn-admitted-global-resume",
+      submittedAt: 3_000,
+      document: {
+        turnKind: "player_action",
+        request: {
+          source: "freeform",
+          idempotencyKey: "player-action-global-resume",
+          text: "I watch the gate from the rain.",
+          expectedWorldVersion: ready.authority.worldVersion,
+          expectedRuntimeRevision: ready.authority.runtimeRevision,
+        },
+        frame: ready.publicState.projection as CampaignPlayProjectionRecord,
+      },
+      modelSelection: {
+        turnKind: "player_action",
+        judge: { providerId: "test-provider", model: "judge", strategy: "strict_object", pricing: TEST_MODEL_PRICING },
+        gameMaster: { providerId: "test-provider", model: "game-master", strategy: "strict_object", pricing: TEST_MODEL_PRICING },
+        actorReplanner: { providerId: "test-provider", model: "actor-replanner", strategy: "strict_object", pricing: TEST_MODEL_PRICING },
+        narrator: { providerId: "test-provider", model: "narrator", strategy: "strict_object", pricing: TEST_MODEL_PRICING },
+      },
+    });
+
+    const judgeInterruption = {
+      actualProviderId: "test-provider",
+      actualModel: "judge",
+      actualStrategy: "strict_object" as const,
+      inputTokens: 5,
+      outputTokens: 0,
+      durationMs: 20,
+      finishReason: "timeout" as const,
+      schemaOutcome: "transport_error" as const,
+      errorCode: "provider_unavailable" as const,
+    };
+    let judgeToken = repository.claimStage({
+      turnId: "turn-player", expectedStage: "admitted", observedEpoch: 0,
+      owner: "judge-worker-1", claimedAt: 3_050, leaseExpiresAt: 3_400,
+      mutationId: "global-resume-judge-claim-1",
+    });
+    for (const [attempt, interruptedAt] of [3_100, 3_200, 3_300].entries()) {
+      const interrupted = repository.interruptExternal({
+        token: judgeToken,
+        evidence: judgeInterruption,
+        interruptedAt,
+        mutationId: `global-resume-judge-interrupted-${attempt + 1}`,
+      });
+      expect(interrupted.resumeEligible).toBe(true);
+      judgeToken = repository.resumeExternal({
+        turnId: "turn-player",
+        interruptedStage: "admitted",
+        observedEpoch: judgeToken.epoch,
+        origin: attempt === 2 ? "explicit" : "automatic",
+        owner: `judge-worker-${attempt + 2}`,
+        resumedAt: interruptedAt + 50,
+        leaseExpiresAt: interruptedAt + 400,
+        mutationId: `global-resume-judge-resumed-${attempt + 1}`,
+      });
+    }
+    expect(handle.sqlite.prepare(`SELECT attempt, status, worker_epoch AS workerEpoch
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'judge'
+      ORDER BY attempt`).all(campaignId, "turn-player")).toEqual([
+      { attempt: 1, status: "interrupted", workerEpoch: 1 },
+      { attempt: 2, status: "interrupted", workerEpoch: 2 },
+      { attempt: 3, status: "interrupted", workerEpoch: 3 },
+      { attempt: 4, status: "started", workerEpoch: 4 },
+    ]);
+
+    repository.acceptModelArtifact({
+      token: judgeToken,
+      artifact: {
+        ruling: {
+          disposition: "deterministic",
+          normalizedIntent: {
+            originalText: "I watch the gate from the rain.",
+            source: "freeform",
+            choiceHandle: null,
+            kind: "observe",
+            targets: [],
+            method: null,
+            stakes: null,
+          },
+          movementRouteHandle: null,
+          possessionEffectAuthority: { kind: "none" },
+          requiredObligationEffect: { kind: "none" },
+          citedVisibleFactHandles: [],
+          resultBounds: { minimum: "limited", maximum: "success" },
+          elapsedBounds: { minimumMinutes: 0, maximumMinutes: 10 },
+          uncertainty: { kind: "none" },
+          reason: "The visible gate can be watched from shelter.",
+          clarificationQuestion: null,
+        },
+        resolution: { kind: "deterministic", result: "success" },
+        uncertaintyAuthority: null,
+        publicResult: {
+          intentKind: "observe",
+          disposition: "deterministic",
+          result: "success",
+          clarificationQuestion: null,
+        },
+        primaryPlan: { kind: "game_master_required" },
+      },
+      evidence: executionEvidence("judge"),
+      mutationDomain: "runtime",
+      acceptedAt: 3_450,
+      mutationId: "global-resume-judge-accepted",
+    });
+    const gameMasterToken = repository.claimStage({
+      turnId: "turn-player", expectedStage: "judged", observedEpoch: 4,
+      owner: "game-master-worker-1", claimedAt: 3_500, leaseExpiresAt: 3_800,
+      mutationId: "global-resume-game-master-claim-1",
+    });
+    repository.interruptExternal({
+      token: gameMasterToken,
+      evidence: { ...judgeInterruption, actualModel: "game-master" },
+      interruptedAt: 3_550,
+      mutationId: "global-resume-game-master-interrupted",
+    });
+
+    const loaded = repository.loadTurn("turn-player");
+    expect(loaded).toMatchObject({
+      stage: "interrupted",
+      interruptedStage: "judged",
+      workerEpoch: 5,
+      resumeEligible: false,
+      explicitResumeConsumed: true,
+    });
+    expect(loaded?.events.at(-1)).toMatchObject({
+      type: "turn.interrupted",
+      retryEligible: false,
+    });
+    const readModel = createCampaignPlayReadModel(handle);
+    expect(readModel.loadTurn("turn-player").turn).toMatchObject({
+      status: "interrupted",
+      retryEligible: false,
+    });
+    expect(readModel.loadState().activeTurn).toMatchObject({
+      status: "interrupted",
+      retryEligible: false,
+    });
+    expect(readModel.listTurnEvents("turn-player", 0).at(-1)).toMatchObject({
+      type: "turn.interrupted",
+      retryEligible: false,
+    });
+
+    const mutationSnapshot = () => ({
+      state: handle.sqlite.prepare(`SELECT runtime_revision AS runtimeRevision,
+          next_runtime_event_sequence AS nextRuntimeEventSequence
+        FROM campaign_play_states WHERE campaign_id = ?`).get(campaignId),
+      turn: handle.sqlite.prepare(`SELECT next_event_sequence AS nextEventSequence,
+          worker_lease_owner AS workerLeaseOwner, worker_epoch AS workerEpoch,
+          worker_lease_expires_at AS workerLeaseExpiresAt, resume_eligible AS resumeEligible,
+          explicit_resume_consumed AS explicitResumeConsumed
+        FROM campaign_play_turns WHERE campaign_id = ? AND id = ?`).get(campaignId, "turn-player"),
+      runtimeEvents: handle.sqlite.prepare(`SELECT COUNT(*) AS count
+        FROM campaign_play_runtime_events WHERE campaign_id = ?`).get(campaignId),
+      turnEvents: handle.sqlite.prepare(`SELECT COUNT(*) AS count
+        FROM campaign_play_turn_events WHERE campaign_id = ? AND turn_id = ?`).get(campaignId, "turn-player"),
+      gameMasterAttempts: handle.sqlite.prepare(`SELECT COUNT(*) AS count
+        FROM campaign_play_model_stages WHERE campaign_id = ? AND turn_id = ? AND kind = 'game_master'`).get(campaignId, "turn-player"),
+    });
+    const beforeRejectedResume = mutationSnapshot();
+    expectTurnError(() => repository.resumeExternal({
+      turnId: "turn-player",
+      interruptedStage: "judged",
+      observedEpoch: gameMasterToken.epoch,
+      origin: "explicit",
+      owner: "game-master-worker-2",
+      resumedAt: 3_600,
+      leaseExpiresAt: 3_900,
+      mutationId: "global-resume-game-master-resumed-2",
+    }), "turn_fence_lost");
+    expect(mutationSnapshot()).toEqual(beforeRejectedResume);
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'game_master' AND attempt = 2`)
+      .get(campaignId, "turn-player")).toEqual({ count: 0 });
   });
 
   it("persists schema-invalid interruptions as invalid recovery evidence", () => {
@@ -2191,6 +2454,7 @@ describe("Campaign Play deterministic and terminal turn boundaries", () => {
     });
     const resumedJudge = repository.resumeExternal({
       turnId: "turn-player", interruptedStage: "admitted", observedEpoch: 1,
+      origin: "automatic",
       owner: "judge-worker-two", resumedAt: 3_150, leaseExpiresAt: 3_400,
       mutationId: "judge-resumed",
     });
@@ -2331,6 +2595,53 @@ describe("Campaign Play deterministic and terminal turn boundaries", () => {
         "turn-player",
       ),
     }).toEqual(beforeInvalidDiagnostic);
+    const completedDeliveryDiagnostic = {
+      rejectionPhase: "compilation" as const,
+      safeGenerationCode: null,
+      contractDiagnosticPhase: null,
+      contractDiagnosticCoordinate: null,
+      recoveryDiagnostic: "game_master_semantic_validation_mismatch" as const,
+      failedChecks: [{
+        check: "completed_paid_delivery_destination_reused" as const,
+        fieldPath: "decisionProposal.acceptEffect.destinationHandle",
+        proposedDestinationHandle: "location:contract-board",
+        completedDestinationHandle: "location:crate-yard",
+        visibleOutboundDestinationHandles: ["location:contract-board", "location:crate-yard"],
+      }],
+      reviewFailedChecks: [],
+    } satisfies CampaignPlayGameMasterContractFailureDiagnostic;
+    handle.sqlite.exec("SAVEPOINT completed_delivery_diagnostic");
+    try {
+      repository.interruptExternal({
+        token: gameMasterToken,
+        evidence: {
+          ...interruption,
+          actualModel: "game-master",
+          schemaOutcome: "invalid",
+          errorCode: "model_contract_invalid",
+          contractFailureDiagnostic: completedDeliveryDiagnostic,
+        },
+        interruptedAt: 3_295,
+        mutationId: "gm-completed-delivery-diagnostic",
+      });
+      expect(handle.sqlite.prepare(`SELECT status,
+          contract_failure_diagnostic_json AS contractFailureDiagnosticJson
+        FROM campaign_play_model_stages
+        WHERE campaign_id = ? AND turn_id = ? AND kind = 'game_master' AND attempt = 1`).get(
+        campaignId,
+        "turn-player",
+      )).toEqual({
+        status: "interrupted",
+        contractFailureDiagnosticJson: JSON.stringify(completedDeliveryDiagnostic),
+      });
+      expect(repository.loadLatestGameMasterRecoveryFeedback("turn-player", "judged")).toEqual({
+        diagnostic: "game_master_semantic_validation_mismatch",
+        failedChecks: completedDeliveryDiagnostic.failedChecks,
+      });
+    } finally {
+      handle.sqlite.exec("ROLLBACK TO completed_delivery_diagnostic");
+      handle.sqlite.exec("RELEASE completed_delivery_diagnostic");
+    }
     repository.interruptExternal({
       token: gameMasterToken,
       evidence: {
@@ -2431,6 +2742,7 @@ describe("Campaign Play deterministic and terminal turn boundaries", () => {
     });
     const resumedGameMaster = recovered.resumeExternal({
       turnId: "turn-player", interruptedStage: "judged", observedEpoch: 3,
+      origin: "explicit",
       owner: "gm-worker-two", resumedAt: 3_350, leaseExpiresAt: 3_650,
       mutationId: "gm-resumed",
     });

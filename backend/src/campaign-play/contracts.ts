@@ -1690,11 +1690,11 @@ export const campaignPlayPublicTurnSchema = z.object({
     });
   }
   if (turn.status === "interrupted") {
-    if (turn.completedAt !== null || !turn.retryEligible) {
+    if (turn.completedAt !== null) {
       context.addIssue({
         code: "custom",
-        path: ["retryEligible"],
-        message: "Interrupted turn remains incomplete and exposes resume.",
+        path: ["completedAt"],
+        message: "Interrupted turn remains incomplete.",
       });
     }
     return;
@@ -1879,8 +1879,7 @@ export const campaignPlayStateSchema: z.ZodType<CampaignPlayState> =
         state.activeTurn.progress === "narrating";
       const narrationInterrupted =
         state.activeTurn?.status === "interrupted" &&
-        state.activeTurn.progress === null &&
-        state.activeTurn.retryEligible;
+        state.activeTurn.progress === null;
       if (
         state.character === null ||
         state.currentLocation === null ||
@@ -2429,7 +2428,7 @@ export const campaignPlaySseEventSchema: z.ZodType<CampaignPlaySseEvent> =
     z.object({
       ...campaignPlaySseBaseShape,
       type: z.literal("turn.interrupted"),
-      retryEligible: z.literal(true),
+      retryEligible: z.boolean(),
     }).strict(),
     z.object({
       ...campaignPlaySseBaseShape,

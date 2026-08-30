@@ -1477,6 +1477,76 @@ describe("Campaign Play Judge", () => {
     expect(result.ruling.movementRouteHandle).toBeNull();
   });
 
+  it("rejects a reaction-added actor for a frozen suggested contact and recovers to the frozen target set", async () => {
+    const input: CampaignPlayJudgeInput = {
+      originalText: "Ask the guard.",
+      source: "suggested",
+      choiceHandle: "choice-ask",
+      frozenChoice: {
+        kind: "contact",
+        targets: [{ handle: "actor-guard", kind: "actor" }],
+      },
+    };
+    const invalid = twoActorProposal({
+      visibleActorReactions: [
+        twoActorProposal().visibleActorReactions[0],
+        {
+          actorHandle: "actor-porter",
+          reaction: "immediate",
+          supportingVisibleFactHandle: "actor-porter",
+          reason: "The porter reacts to the question despite not being the addressee.",
+        },
+      ],
+    });
+    const valid = twoActorProposal();
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: invalid, trace: trace() })
+      .mockResolvedValueOnce({ object: valid, trace: trace() });
+    const judge = createCampaignPlayJudge({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    const request = {
+      frame: twoActorFrame(),
+      input,
+      model: model(),
+      temperature: 0.2,
+      budget,
+    };
+
+    let firstError: unknown;
+    try {
+      await judge.judge({ ...request, attempt: 1, workerEpoch: 60 });
+    } catch (cause) {
+      firstError = cause;
+    }
+    expect(firstError).toMatchObject({ code: "model_contract_failed" });
+    const feedback = getCampaignPlayJudgeRecoveryFeedback(firstError);
+    expect(feedback?.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: ["visibleActorReactions", 1, "reaction"],
+        message: "A suggested contact cannot mark a non-frozen actor reaction as immediate.",
+        check: "suggested_contact_reaction_authority",
+      }),
+    ]));
+    if (feedback === undefined) throw new Error("Expected bounded suggested-contact recovery feedback.");
+
+    const result = await judge.judge({
+      ...request,
+      attempt: 2,
+      workerEpoch: 61,
+      recoveryFeedback: feedback,
+    });
+    expect(result.ruling.normalizedIntent.targets).toEqual([
+      { handle: "actor-guard", kind: "actor" },
+    ]);
+    expect(result.ruling.normalizedIntent.kind).toBe("contact");
+    const retryPrompt = String((generateObject.mock.calls[1]![0] as Parameters<typeof safeGenerateObject>[0]).prompt);
+    expect(retryPrompt).toContain("FROZEN_CHOICE targets are the complete direct-participant authority");
+    expect(retryPrompt).toContain("RECOVERY_SUGGESTED_CONTACT_REACTION_NONE=");
+    expect(retryPrompt).toContain("RECOVERY_FINAL_VALIDATION_ISSUES=");
+    expect(generateObject).toHaveBeenCalledTimes(2);
+  });
+
   it("omits code-owned kind and injects the frozen route for a suggested movement", async () => {
     const suggestedInput: CampaignPlayJudgeInput = {
       originalText: "Cross the reef road.",
@@ -1739,6 +1809,60 @@ describe("Campaign Play Judge", () => {
       { handle: "actor-guard", kind: "actor" },
     ]);
     expect(ruling.citedVisibleFactHandles).toContain("observation-latch");
+  });
+
+  it("keeps immediate visible actor reactions as targets for freeform contacts and attempts", () => {
+    const judge = createCampaignPlayJudge();
+    const contact = judge.compile(twoActorFrame(), {
+      originalText: "Ask the guard while the porter watches.",
+      source: "freeform",
+      choiceHandle: null,
+    }, twoActorProposal({
+      targets: [{ handle: "actor-guard", kind: "actor" }],
+      visibleActorReactions: [
+        twoActorProposal().visibleActorReactions[0],
+        {
+          actorHandle: "actor-porter",
+          reaction: "immediate",
+          supportingVisibleFactHandle: "observation-latch",
+          reason: "The porter reacts to the player's direct question.",
+        },
+      ],
+      citedVisibleFactHandles: ["actor-guard", "route-reef", "observation-latch"],
+    }));
+    expect(contact.normalizedIntent.targets).toEqual([
+      { handle: "actor-guard", kind: "actor" },
+      { handle: "actor-porter", kind: "actor" },
+    ]);
+
+    const attempt = judge.compile(twoActorFrame(), {
+      originalText: "I pull at the locked gate while the porter watches.",
+      source: "freeform",
+      choiceHandle: null,
+    }, twoActorProposal({
+      kind: "attempt",
+      targets: [{ handle: "location-harbor", kind: "location" }],
+      visibleActorReactions: [
+        twoActorProposal().visibleActorReactions[0],
+        {
+          actorHandle: "actor-porter",
+          reaction: "immediate",
+          supportingVisibleFactHandle: "observation-latch",
+          reason: "The porter reacts to the attempted interference at the gate.",
+        },
+      ],
+      method: "Pull at the locked gate",
+      stakes: "Open the gate",
+      disposition: "impossible",
+      citedVisibleFactHandles: ["location-harbor", "observation-latch"],
+      resultBounds: { minimum: "no_effect", maximum: "no_effect" },
+      elapsedBounds: { minimumMinutes: 0, maximumMinutes: 0 },
+      reason: "The secured latch prevents the gate from moving.",
+    }));
+    expect(attempt.normalizedIntent.targets).toEqual([
+      { handle: "location-harbor", kind: "location" },
+      { handle: "actor-porter", kind: "actor" },
+    ]);
   });
 
   it("rejects semantic visible actor reaction invariants with bounded diagnostics", () => {

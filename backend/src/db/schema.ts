@@ -2131,6 +2131,9 @@ export const campaignPlayTurns = sqliteTable(
     resumeEligible: integer("resume_eligible", { mode: "boolean" })
       .notNull()
       .default(false),
+    explicitResumeConsumed: integer("explicit_resume_consumed", { mode: "boolean" })
+      .notNull()
+      .default(false),
     mutationAuditJson: text("mutation_audit_json").notNull().default("{}"),
     submittedAt: integer("submitted_at", { mode: "number" }).notNull(),
     updatedAt: integer("updated_at", { mode: "number" }).notNull(),
