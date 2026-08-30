@@ -138,7 +138,16 @@ function SourceSection({ world }: { world: CampaignWorldReview }) {
         {dna ? (
           <dl className="wf-world-source-dna">
             {dnaEntries.map(([label, value]) => (
-              <div key={label}><dt>{label}</dt><dd>{value}</dd></div>
+              <div key={label}>
+                <dt>{label}</dt>
+                <dd>
+                  {value.split("\n").map((line, index) => (
+                    <span className="wf-world-source-dna-line" key={`${label}-${index}`}>
+                      {line}
+                    </span>
+                  ))}
+                </dd>
+              </div>
             ))}
           </dl>
         ) : (

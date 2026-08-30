@@ -182,6 +182,40 @@ describe("WorldReviewPage", () => {
     expect(screen.getByText("Campaign premise")).toBeInTheDocument();
   });
 
+  it("renders each cultural flavor line with its exact punctuation and order", async () => {
+    const user = userEvent.setup();
+    const culturalFlavorLines = [
+      "Couriers wear dry-colored scarves; wet ink voids any delivery.",
+      "Guild ledger scribes tattoo paid debts; the mark fades after service.",
+      "Boat households float candles at high water; each flame honors a lost key.",
+    ];
+    const punctuatedWorld = campaignWorldReviewFixture();
+    punctuatedWorld.source = {
+      ...punctuatedWorld.source,
+      dna: {
+        geography: "The canal city spans drowned districts.",
+        politicalStructure: "Dock guilds divide authority by district.",
+        centralConflict: "Rival guilds race to control the tide-engine.",
+        culturalFlavor: culturalFlavorLines.join("\n"),
+        environment: "Rain and brine fill the narrow lanes.",
+        wildcard: "The tide-engine hums a different melody each season.",
+      },
+    };
+    worldApi.loadCampaignWorldState.mockResolvedValue(worldState("review", punctuatedWorld));
+
+    await renderPage();
+    await user.click(await screen.findByRole("tab", { name: "Source" }));
+
+    const culturalFlavorCell = screen.getByText("Cultural flavor").closest("div");
+    expect(culturalFlavorCell).not.toBeNull();
+    const renderedLines = culturalFlavorCell!.querySelectorAll(
+      ".wf-world-source-dna-line",
+    );
+    expect(Array.from(renderedLines).map((line) => line.textContent)).toEqual(
+      culturalFlavorLines,
+    );
+  });
+
   it("presents structured research as player-readable source context", async () => {
     const user = userEvent.setup();
     const researchedWorld = campaignWorldReviewFixture();

@@ -6350,6 +6350,10 @@
   line-height: 1.5;
 }
 
+.wf-world-source-dna-line {
+  display: block;
+}
+
 .wf-world-source-references {
   display: grid;
   gap: 1px;
