@@ -1206,7 +1206,11 @@ function appendWorldConnectionsRecoveryPrompt(
   return [
     basePrompt,
     "",
-    "WORLD_CONNECTIONS_RECOVERY: The previous object was rejected by the local world-connections contract. Return a complete fresh packet matching the original campaign source, accepted cast skeleton, bounded transport schema, and provider contract. Correct every listed coordinate and recheck the whole object; the list may be non-exhaustive. For relations, return exactly one row for each fixed relationSlotIndex in RELATION_SLOTS, exactly once, with only relationSlotIndex, targetActorIndex, relationType, and intensity. Set targetActorIndex to a direct integer from the allowed actor-index list, and choose a different actor from the relationSlotIndex. Code builds the persisted relation summary from the accepted actor names and relationType; do not return summary, rationale, actor names, or any other relation prose. Use only integer actor indices from the accepted skeleton and persistent location indices from the frame slot list. Every pressure must include actor and location indices with distinct anchor sets. Never emit actorRef, locationRef, or any free-form reference; code derives stable references after acceptance. Do not omit a required relation or pressure, add an extra key, or replace a missing value with a default. SAFE_ISSUES follows and contains only issueIndex, code, path, and check.",
+    "WORLD_CONNECTIONS_RECOVERY: The previous object was rejected by the local world-connections contract. Return one complete fresh packet matching the original campaign source, accepted cast skeleton, bounded transport schema, and provider contract. Correct every listed coordinate and recheck the complete checklist below; SAFE_ISSUES is not the full contract.",
+    "Relations: return exactly one row for every fixed relationSlotIndex in RELATION_SLOTS, exactly once; each row contains only relationSlotIndex, targetActorIndex, relationType, and intensity. relationType must be exactly one of alliance, rivalry, authority, dependency, kinship, association, hostility. targetActorIndex must be a direct integer from ALLOWED_ACTOR_INDICES and must differ from relationSlotIndex. intensity is an integer from 1 through 5.",
+    "Pressures: return exactly 3 or 4 rows; each row contains only name, description, trajectory, urgency, actorIndices, and locationIndices. name is at most 64 characters; description is one sentence at most 160 characters; trajectory is one sentence at most 120 characters; urgency is an integer from 1 through 5. actorIndices must be non-empty in-range integers from the accepted skeleton with no duplicates, and locationIndices must be non-empty in-range integers from persistent location slots with no duplicates; use at least two different combined actor/location anchor sets. At least one pressure must contain a persistent location index from STARTING_MACRO_SCENE_INDICES and a support actor whose presentLocationIndex is included in that same pressure's locationIndices.",
+    "Use no actorRef, locationRef, or free-form references; code derives stable references and relation summaries from accepted indices and relationType. Do not return summary, rationale, actor names, or other relation prose. Do not omit required rows or pressures, add extra keys, or replace missing values with defaults.",
+    "SAFE_ISSUES follows and contains only issueIndex, code, path, and check.",
     "SAFE_ISSUES",
     JSON.stringify(safeIssues),
     "END_SAFE_ISSUES",
@@ -2124,9 +2128,10 @@ export function createCampaignWorldBuilder(
         await request.observer?.onStageStarted("world_frame");
         throwIfAborted(request.abortSignal);
         try {
+          const combinedSeed = capability.primaryStrategy === "tool_mode";
           const frameDeadlineAt = Math.min(
-            buildDeadlineAt - (CAMPAIGN_WORLD_STAGE_BUDGET_MS * 2),
-            Date.now() + CAMPAIGN_WORLD_STAGE_BUDGET_MS,
+            buildDeadlineAt - (CAMPAIGN_WORLD_STAGE_BUDGET_MS * (combinedSeed ? 1 : 2)),
+            Date.now() + (CAMPAIGN_WORLD_STAGE_BUDGET_MS * (combinedSeed ? 2 : 1)),
           );
           let frame: WorldFramePacket;
           let skeleton: WorldCastSkeletonPacket | null = null;

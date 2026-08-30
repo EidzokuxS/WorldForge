@@ -1421,12 +1421,12 @@ export function createCampaignPlayActorReplanner(
                                   AND prior_model.error_code = 'model_contract_invalid'
                                   AND attempt.created_at < prior_attempt.deadline_at
                                   AND attempt.deadline_at > attempt.created_at
-                                  AND attempt.deadline_at > prior_attempt.deadline_at)
+                                  AND attempt.deadline_at >= prior_attempt.deadline_at)
                                   OR (prior_model.schema_outcome = 'transport_error'
                                   AND prior_model.error_code = 'provider_unavailable'
                                   AND attempt.created_at < prior_attempt.deadline_at
                                   AND attempt.deadline_at > attempt.created_at
-                                  AND attempt.deadline_at > prior_attempt.deadline_at)
+                                  AND attempt.deadline_at >= prior_attempt.deadline_at)
                                   OR (prior_model.schema_outcome = 'transport_error'
                                  AND prior_model.error_code = 'stage_timeout'
                                  AND attempt.created_at >= prior_attempt.deadline_at
@@ -1806,15 +1806,15 @@ export function createCampaignPlayActorReplanner(
           (contractRecovery || providerRecovery || stageTimeoutRecovery);
         if (!recoveryAuthorized) return finalizeFailure(attemptResult);
 
-        // Every recovery receives a complete external-operation window. If the
-        // optional actor budget cannot hold it, defer before opening a partial
-        // attempt rather than weakening the durable deadline contract.
         const retryStartedAt = Math.max(dependencies.now(), attemptOperation.startedAt + 1);
-        const retryDeadlineAt = retryStartedAt + request.externalOperationDeadlineMs;
+        const retryDeadlineAt = Math.min(
+          retryStartedAt + request.externalOperationDeadlineMs,
+          request.controlDeadlineAt ?? Number.MAX_SAFE_INTEGER,
+        );
         if (request.deferOnControlBudgetExhaustion === true &&
           request.controlDeadlineAt !== undefined &&
           Number.isSafeInteger(retryDeadlineAt) &&
-          retryDeadlineAt > request.controlDeadlineAt) {
+          retryDeadlineAt <= retryStartedAt) {
           return finalizeFailure({ ...attemptResult, controlBudgetDeferral: true });
         }
         const mayRecover = !request.signal?.aborted &&

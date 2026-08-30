@@ -3742,6 +3742,7 @@ const createPlayerCommitmentCommandBaseShape = {
   title: labelSchema,
   subjectName: nameSchema,
   destinationHandle: handleSchema,
+  destinationLocationId: idSchema,
   acceptedWorldTimeMinutes: worldTimeSchema,
   dueWorldTimeMinutes: worldTimeSchema.nullable(),
   affectedRefs: z.array(campaignPlayEntityRefSchema)
@@ -3770,6 +3771,8 @@ export const completePlayerCommitmentCommandSchema = z.object({
   performerActorId: idSchema,
   counterpartyActorId: idSchema,
   deliveryPossessionId: idSchema,
+  destinationHandle: handleSchema,
+  destinationLocationId: idSchema,
   affectedRefs: z.array(campaignPlayEntityRefSchema)
     .min(1)
     .max(CAMPAIGN_PLAY_LIMITS.affectedRefs),
@@ -5064,12 +5067,14 @@ export const CAMPAIGN_PLAY_MODEL_STAGE_KIND_VALUES = [
 
 function modelStageContractFailureDiagnosticOwner(
   value: string,
-): "game_master" | "narrator" | null {
+): "game_master" | "judge" | "narrator" | null {
   try {
     const parsed = JSON.parse(value) as unknown;
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
     if ("owner" in parsed) {
-      return parsed.owner === "narrator" ? "narrator" : null;
+      if (parsed.owner === "judge") return "judge";
+      if (parsed.owner === "narrator") return "narrator";
+      return null;
     }
     return "game_master";
   } catch {
@@ -5180,7 +5185,9 @@ export const campaignPlayModelStageSchema = z.object({
     (modelStageContractFailureDiagnosticOwner(stage.contractFailureDiagnosticJson) === null ||
       (modelStageContractFailureDiagnosticOwner(stage.contractFailureDiagnosticJson) === "game_master"
         ? stage.kind !== "game_master"
-        : stage.kind !== "narrator") ||
+        : modelStageContractFailureDiagnosticOwner(stage.contractFailureDiagnosticJson) === "judge"
+          ? stage.kind !== "judge"
+          : stage.kind !== "narrator") ||
       (stage.status !== "interrupted" && stage.status !== "failed") ||
       stage.schemaOutcome !== "invalid" ||
       stage.errorCode !== "model_contract_invalid")

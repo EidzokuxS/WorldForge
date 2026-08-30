@@ -253,6 +253,7 @@ function createVisibilityFixture(
   actorBAcquiresPossession = false,
   obligationDirection: "none" | "payable" | "receivable" = "none",
   decision: NonNullable<CampaignPlayOpeningProposal["decision"]> | null = null,
+  actorCArrivesAtCurrentScene = false,
 ) {
   acceptPlayableWorld();
   const handle = track(openCampaignPlayDatabase(CAMPAIGN_ID));
@@ -442,6 +443,9 @@ function createVisibilityFixture(
   const eighthId = deriveCampaignPlayCommandId(CAMPAIGN_ID, "turn-opening", batchId, 7);
   const ninthId = deriveCampaignPlayCommandId(CAMPAIGN_ID, "turn-opening", batchId, 8);
   const tenthId = deriveCampaignPlayCommandId(CAMPAIGN_ID, "turn-opening", batchId, 9);
+  const arrivalOrder = obligationDirection !== "none" ? 10 : 9;
+  const arrivalParentId = obligationDirection !== "none" ? tenthId : ninthId;
+  const arrivalId = deriveCampaignPlayCommandId(CAMPAIGN_ID, "turn-opening", batchId, arrivalOrder);
   const obligationId = deriveCampaignPlayObligationId(
     CAMPAIGN_ID,
     obligationDirection === "receivable" ? "actor-a" : "actor-player",
@@ -762,6 +766,34 @@ function createVisibilityFixture(
             { kind: "actor", id: "actor-a" },
           ],
         }] : []),
+        ...(actorCArrivesAtCurrentScene ? [{
+          commandId: arrivalId,
+          batchId,
+          order: arrivalOrder,
+          kind: "move_actor",
+          causalParent: { kind: "command", commandId: arrivalParentId },
+          source: { kind: "system", system: "game_master" },
+          expectedWorldVersion: frame.worldVersion + (obligationDirection !== "none" ? 4 : 3),
+          readScope: [
+            { kind: "actor", id: "actor-c" },
+            { kind: "route", id: "route-c" },
+            { kind: "location", id: "location-c" },
+            { kind: "location", id: "location-a" },
+          ],
+          writeScope: [
+            { kind: "actor", id: "actor-c" },
+            { kind: "location", id: "location-c" },
+            { kind: "location", id: "location-a" },
+          ],
+          exposure: {
+            mode: "projectable",
+            predicates: [{ channel: "direct_perception", locationId: "location-a" }],
+          },
+          actorId: "actor-c",
+          routeId: "route-c",
+          fromLocationId: "location-c",
+          toLocationId: "location-a",
+        }] : []),
       ],
     },
   });
@@ -770,7 +802,8 @@ function createVisibilityFixture(
   }
   states.commitMechanical({
     updatedAt: 1_600,
-    worldVersionAdvance: obligationDirection !== "none" ? 4 : 3,
+    worldVersionAdvance: (obligationDirection !== "none" ? 4 : 3)
+      + (actorCArrivesAtCurrentScene ? 1 : 0),
     mutate(context) {
       executeCampaignPlayRulebookBatch({
         frame,
@@ -1271,6 +1304,22 @@ describe("Campaign Play visibility service", () => {
         (SELECT count(*) FROM campaign_play_observations WHERE campaign_id = ?) AS observations,
         (SELECT count(*) FROM campaign_play_narrations WHERE campaign_id = ?) AS narrations`)
       .get(CAMPAIGN_ID, CAMPAIGN_ID, CAMPAIGN_ID)).toEqual(countsBeforeRetry);
+  });
+
+  it("renders actor arrival when movement reaches the player's current scene", () => {
+    const fixture = createVisibilityFixture(["inspect"], false, "none", null, true);
+    const result = createCampaignPlayVisibilityService(fixture.handle).projectTurn({
+      token: fixture.visibilityToken,
+      actionContext: null,
+      sourceMoment: null,
+      committedAt: 1_650,
+      mutationId: "visibility-arrival-projected",
+    });
+
+    const texts = result.packet.newObservations.map((entry) => entry.text);
+    expect(texts).toContain("Sel Bell arrived at North Harbor Docks.");
+    expect(texts).not.toContain("Sel Bell left for North Harbor Docks.");
+    expect(texts).toContain("Mara Venn left for Glass Reef Quay.");
   });
 
   it("projects and reloads a visible actor's debt as a player receivable", () => {
@@ -2048,11 +2097,8 @@ describe("Campaign Play visibility service", () => {
     expect(continuation.map((intent) => intent.kind)).toEqual([
       "observe",
       "move",
-      "attempt",
       "move",
-      "attempt",
       "move",
-      "attempt",
       "wait",
     ]);
     expect(continuation.at(-1)?.label).toBe("Wait 10 minutes");
@@ -2061,7 +2107,7 @@ describe("Campaign Play visibility service", () => {
       .toBe(false);
     const routeAttempts = continuation.filter((intent) =>
       intent.kind === "attempt" && intent.targets.some((target) => target.kind === "route"));
-    expect(routeAttempts).toHaveLength(3);
+    expect(routeAttempts).toHaveLength(0);
     expect(routeAttempts.every((intent) =>
       intent.targets.length === 1 && intent.targets[0]?.kind === "route"))
       .toBe(true);
@@ -2132,15 +2178,12 @@ describe("Campaign Play visibility service", () => {
       syntheticOpeningSeed,
       1,
     );
-    expect(withActor).toHaveLength(10);
+    expect(withActor).toHaveLength(7);
     expect(withActor.map((intent) => intent.kind)).toEqual([
       "observe",
       "move",
-      "attempt",
       "move",
-      "attempt",
       "move",
-      "attempt",
       "contact",
       "contact",
       "wait",

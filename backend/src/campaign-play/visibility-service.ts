@@ -32,6 +32,7 @@ import type { CampaignPlayDatabaseHandle } from "./campaign-play-database.js";
 import {
   canonicalizeCampaignPlayProjection,
   deriveCampaignPlayPublicHandle,
+  deriveCampaignPlayPossessionKey,
   hashCampaignPlayProjection,
   type CampaignPlayProjectionRecord,
 } from "./campaign-play-projection.js";
@@ -668,6 +669,7 @@ function publicEntry(
   currentTurnId: string,
   openingTurnId: string,
   openingExposureSeed: CampaignPlayOpeningExposureSeed | null,
+  humanArrivalObservation = false,
 ): CampaignPlayJournalEntry {
   const exposure = candidate.exposure;
   const location = exposure.locationId
@@ -743,6 +745,18 @@ function publicEntry(
   const playerCaused = eventSourceActorId(exposure) === humanActorId || (
     playerParticipated && eventSource.kind === "system" && eventSource.system === "game_master"
   );
+  const commitmentCargoCollect = eventSource.kind === "system"
+    && eventSource.system === "commitment_executor"
+    && exposure.commandKind === "adjust_actor_possession"
+    && typeof commandPayload.possessionKey === "string"
+    && commandPayload.possessionKey !== "copper"
+    && typeof commandPayload.name === "string"
+    && commandPayload.possessionKey === deriveCampaignPlayPossessionKey(commandPayload.name)
+    && typeof commandPayload.quantityDelta === "number"
+    && Number.isInteger(commandPayload.quantityDelta)
+    && commandPayload.quantityDelta > 0
+    && affectedRefs.some((reference) =>
+      reference.kind === "commitment" && typeof reference.id === "string");
   let title = "Seen nearby";
   let text = "You witnessed a change nearby.";
   let cue: CampaignPlayConsequence["causalCue"] = "direct_perception";
@@ -780,7 +794,16 @@ function publicEntry(
     text = `You ${decisionDisposition} the choice presented by ${performingActor.name}: ${commandPayload.summary} Your response was “${commandPayload.selectedLabel}.”`;
   } else if (
     exposure.channel === "direct_perception" && playerParticipated &&
-    eventSource.kind === "system" && eventSource.system === "game_master" &&
+    eventSource.kind === "system" &&
+    (eventSource.system === "game_master" || commitmentCargoCollect || (
+      eventSource.system === "commitment_executor" &&
+      exposure.commandKind === "adjust_actor_possession" &&
+      commandPayload.possessionKey === "copper" &&
+      commandPayload.name === "Copper" &&
+      typeof commandPayload.quantityDelta === "number" &&
+      Number.isInteger(commandPayload.quantityDelta) &&
+      commandPayload.quantityDelta > 0
+    )) &&
     (exposure.commandKind === "record_world_event"
       || exposure.commandKind === "adjust_actor_possession"
       || exposure.commandKind === "incur_actor_obligation"
@@ -819,10 +842,17 @@ function publicEntry(
       WHERE id = ? AND campaign_id = ?`).get(
         commandPayload.toLocationId,
         handle.campaignId,
-      ) as { name: string } | undefined;
+    ) as { name: string } | undefined;
     if (movingActor && destination) {
-      title = `${movingActor.name} moved`;
-      text = `${movingActor.name} left for ${destination.name}.`;
+      const arrived = exposure.locationId === commandPayload.toLocationId;
+      title = humanArrivalObservation && arrived
+        ? "You arrived"
+        : `${movingActor.name} moved`;
+      text = humanArrivalObservation && arrived
+        ? `You arrived at ${destination.name}.`
+        : arrived
+          ? `${movingActor.name} arrived at ${destination.name}.`
+          : `${movingActor.name} left for ${destination.name}.`;
     }
   } else if (exposure.channel === "direct_perception"
     && (exposure.commandKind === "record_world_event"
@@ -1342,8 +1372,6 @@ export function availableIntents(
     kind: "observe",
     targets: [{ handle: scene.currentLocation.handle, kind: "location" }],
   }];
-  const attemptsAvailable = actionContext !== null
-    && actionContext.disposition !== "clarification_required";
   const preferredRoute = preferredOpeningExposureRoute(
     handle,
     scene,
@@ -1368,7 +1396,7 @@ export function availableIntents(
       });
     }
     const routeAttemptAvailable = actionContext?.disposition !== "clarification_required"
-      && (route.state === "restricted" || attemptsAvailable);
+      && route.state === "restricted";
     if (routeAttemptAvailable) {
       intents.push({
         handle: publicHandle("choice", campaignId, `${turnId}:attempt:${route.handle}`),
@@ -2075,6 +2103,15 @@ export function createCampaignPlayVisibilityService(
         left.learnedAtWorldTimeMinutes - right.learnedAtWorldTimeMinutes ||
         left.earnedEventOrder - right.earnedEventOrder ||
         compareText(knowledgeKey(left), knowledgeKey(right)));
+      const actionContext = actionContextForTurn(turn, turnRepository);
+      const humanMoveCandidate = actionContext?.intentKind === "move" &&
+        actionContext.result === "success"
+        ? candidates.find((candidate) =>
+            candidate.actorId === human.id &&
+            candidate.exposure.eventTurnId === turn.turnId &&
+            candidate.exposure.channel === "direct_perception" &&
+            isHumanMovementEvent(candidate, human.id))
+        : undefined;
       const existingObservations = new Set((handle.sqlite.prepare(`SELECT event_id AS eventId,
           channel, source_hash AS sourceHash FROM campaign_play_observations
         WHERE campaign_id = ? AND human_actor_id = ?`).all(
@@ -2082,12 +2119,19 @@ export function createCampaignPlayVisibilityService(
           human.id,
         ) as Array<{ eventId: string; channel: string; sourceHash: string }>)
         .map((row) => `${row.eventId}\u0000${row.channel}\u0000${row.sourceHash}`));
-      const observationPlans = candidates
+      const observationCandidates = candidates
         .filter((candidate) => candidate.actorId === human.id)
-        .filter((candidate) => !isHumanMovementEvent(candidate, human.id))
+        .filter((candidate) => !isHumanMovementEvent(candidate, human.id) || candidate === humanMoveCandidate)
         .filter((candidate) => !existingObservations.has(
           `${candidate.exposure.eventId}\u0000${candidate.exposure.channel}\u0000${candidate.sourceHash}`,
-        ))
+        ));
+      const prioritizedObservationCandidates = humanMoveCandidate === undefined
+        ? observationCandidates
+        : [
+            humanMoveCandidate,
+            ...observationCandidates.filter((candidate) => candidate !== humanMoveCandidate),
+          ];
+      const observationPlans = prioritizedObservationCandidates
         .slice(0, 8)
         .map((candidate) => {
           const observationId = stableId("observation", {
@@ -2106,6 +2150,7 @@ export function createCampaignPlayVisibilityService(
               turn.turnId,
               openingTurnId,
               openingExposureSeed,
+              candidate === humanMoveCandidate,
             ),
           };
         });
@@ -2129,7 +2174,6 @@ export function createCampaignPlayVisibilityService(
             scene.currentLocation.name,
             scene.visibleActors,
           );
-      const actionContext = actionContextForTurn(turn, turnRepository);
       if (
         canonicalizeCampaignPlayProjection(input.actionContext) !==
           canonicalizeCampaignPlayProjection(actionContext)

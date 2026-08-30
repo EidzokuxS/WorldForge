@@ -1221,6 +1221,104 @@ describe("Campaign Play opening planner", () => {
     expect(result.modelEvidence.totalAttempts).toBe(1);
   });
 
+  it("rejects a changed offer qualifier and an untyped future promise before accepting the opening", async () => {
+    const destinationHandle = deriveCampaignPlayPublicHandle(
+      "location",
+      CAMPAIGN_ID,
+      "scene-reef-quay",
+    );
+    const initial = toolProposalFixture();
+    initial.playerPremise = {
+      ...(initial.playerPremise as Record<string, unknown>),
+      summary: "Oren offers unstamped consignment chits for delivery to Glass Reef Quay and promises steadier work after.",
+    };
+    initial.decision = {
+      state: "present",
+      actor: "openingActor",
+      kind: "offer",
+      summary: "Oren offers unstamped consignment chits for delivery to Glass Reef Quay and promises steadier work after.",
+      acceptLabel: "Accept the stamped chits",
+      declineLabel: "Decline the offer",
+      acceptance: {
+        kind: "unpaid_delivery",
+        title: "Consignment chit delivery",
+        subjectName: "Unstamped consignment chits",
+        destinationHandle,
+        dueInMinutes: 180,
+      },
+    };
+    const recovered = toolProposalFixture();
+    recovered.playerPremise = {
+      ...(recovered.playerPremise as Record<string, unknown>),
+      summary: "Oren offers the unstamped consignment chits for delivery to Glass Reef Quay.",
+    };
+    recovered.decision = {
+      state: "present",
+      actor: "openingActor",
+      kind: "offer",
+      summary: "Oren offers unstamped consignment chits for delivery to Glass Reef Quay.",
+      acceptLabel: "Accept the unstamped consignment chits",
+      declineLabel: "Decline the offer",
+      acceptance: {
+        kind: "unpaid_delivery",
+        title: "Consignment chit delivery",
+        subjectName: "Unstamped consignment chits",
+        destinationHandle,
+        dueInMinutes: 180,
+      },
+    };
+    let callIndex = 0;
+    const generateObject = vi.fn(async (options: { prompt?: unknown }) => {
+      const currentIndex = callIndex;
+      callIndex += 1;
+      if (currentIndex === 0) return { object: initial, trace: trace("tool_mode") };
+      if (currentIndex === 1) {
+        const prompt = String(options.prompt);
+        return {
+          object: prompt.includes("playerPremise.summary is the source interaction claim")
+            ? {
+                verdict: "rejected" as const,
+                reason: "The offer changes its qualifier and promises an untyped future benefit.",
+                failedChecks: ["decision_authority_mismatch"] as const,
+              }
+            : semanticReviewFixture(),
+          trace: trace("tool_mode"),
+        };
+      }
+      if (currentIndex === 2) return { object: recovered, trace: trace("tool_mode") };
+      return { object: semanticReviewFixture(), trace: trace("tool_mode") };
+    });
+    const planner = createCampaignPlayOpeningPlanner({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const result = await planner.plan({
+      frame: frameFixture(),
+      startingConditions: chosenConditions,
+      model: toolModel(),
+      temperature: 0,
+      maxOutputTokens: 2_048,
+      signal: new AbortController().signal,
+    });
+
+    expect(generateObject).toHaveBeenCalledTimes(4);
+    const reviewerPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    expect(reviewerPrompt).toContain("playerPremise.summary is the source interaction claim");
+    expect(reviewerPrompt).toContain("steadier");
+    const recoveryPrompt = String(generateObject.mock.calls[2]![0].prompt);
+    expect(recoveryPrompt).toContain("Recovery must align");
+    expect(result.artifact.decision).toMatchObject({
+      summary: "Oren offers unstamped consignment chits for delivery to Glass Reef Quay.",
+      acceptLabel: "Accept the unstamped consignment chits",
+      acceptEffect: {
+        kind: "unpaid_delivery",
+        subjectName: "Unstamped consignment chits",
+        destinationHandle,
+      },
+    });
+    expect(result.artifact.decision?.summary).not.toContain("steadier work");
+  });
+
   it("keeps tool-mode semantic reviewer transport flat while enforcing its domain branches", async () => {
     const generateObject = openingGenerationResponses(toolProposalFixture(), "tool_mode");
     const planner = createCampaignPlayOpeningPlanner({

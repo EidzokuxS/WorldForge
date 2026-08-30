@@ -615,6 +615,7 @@ function commandFixtures(): RulebookBatchCommand[] {
       title: "Bridge delivery",
       subjectName: "Sealed parcel",
       destinationHandle: "location_market",
+      destinationLocationId: "location_market",
       feeUnit: "copper",
       feeAmount: 8,
       paymentTiming: "on_completion",
@@ -642,10 +643,13 @@ function commandFixtures(): RulebookBatchCommand[] {
       performerActorId: "actor_player",
       counterpartyActorId: "actor_guard",
       deliveryPossessionId: "possession_bridge_delivery",
+      destinationHandle: "location_market",
+      destinationLocationId: "location_market",
       affectedRefs: [
         { kind: "commitment", id: "commitment_bridge_delivery" },
         { kind: "actor", id: "actor_player" },
         { kind: "actor", id: "actor_guard" },
+        { kind: "location", id: "location_market" },
       ],
     },
     {

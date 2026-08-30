@@ -92,6 +92,12 @@ const JUDGE_SCHEMA_OWNED_MESSAGES = new Set([
   "An actionable wait must advance world time.",
   "An actionable move requires an explicit movement route handle.",
   "Cited visible fact handles must be unique.",
+  "Visible actor reactions must contain exactly one entry for each visible nonplayer actor.",
+  "Visible actor reaction handles must match the exact visible actor catalog in order.",
+  "Visible actor reaction handles must contain exactly the visible nonplayer actor set.",
+  "Visible actor reaction handles must not contain duplicates.",
+  "A none reaction must use a null supporting visible fact handle.",
+  "An immediate reaction's supporting visible fact handle must be visible or null.",
   "Uncertain judgment requires a code-owned check.",
   "Only uncertain judgment may request a check.",
   "Clarification question must match the judgment disposition.",
@@ -104,6 +110,12 @@ const JUDGE_SCHEMA_OWNED_MESSAGES = new Set([
 ]);
 const JUDGE_SEMANTIC_CHECK_PATHS = {
   visible_actor_reactions: ["visibleActorReactions"],
+  visible_actor_reactions_count: ["visibleActorReactions"],
+  visible_actor_reactions_catalog: ["visibleActorReactions"],
+  visible_actor_reactions_set: ["visibleActorReactions"],
+  visible_actor_reactions_duplicates: ["visibleActorReactions"],
+  visible_actor_reactions_none_support: ["visibleActorReactions"],
+  visible_actor_reactions_immediate_support: ["visibleActorReactions"],
   duplicate_targets: ["targets"],
   normalized_limits: ["targets"],
   visible_authority: ["targets"],
@@ -215,8 +227,11 @@ export interface CampaignPlayJudgeRecoveryFeedback {
 
 type CampaignPlayJudgeRecoveryInstructionClass =
   | "copy_exact_reaction_catalog"
+  | "copy_exact_reaction_support_catalog"
   | "copy_exact_citation_catalog"
-  | "non_empty_reaction_line";
+  | "reaction_none_support_null"
+  | "non_empty_reaction_line"
+  | "none_unsupported_obligation";
 
 function recoveryInstructionClassesFromIssues(
   issues: readonly CampaignPlayJudgeRecoveryIssue[],
@@ -236,6 +251,29 @@ function recoveryInstructionClassesFromIssues(
       path?.length === 3
       && path[0] === "visibleActorReactions"
       && typeof path[1] === "number"
+      && path[2] === "supportingVisibleFactHandle"
+      && issue.check !== "visible_actor_reactions_none_support"
+    ) {
+      classes.add("copy_exact_reaction_support_catalog");
+    }
+    if (
+      issue.check === "visible_actor_reactions_count"
+      || issue.check === "visible_actor_reactions_catalog"
+      || issue.check === "visible_actor_reactions_set"
+      || issue.check === "visible_actor_reactions_duplicates"
+    ) {
+      classes.add("copy_exact_reaction_catalog");
+    }
+    if (issue.check === "visible_actor_reactions_none_support") {
+      classes.add("reaction_none_support_null");
+    }
+    if (issue.check === "visible_actor_reactions_immediate_support") {
+      classes.add("copy_exact_reaction_support_catalog");
+    }
+    if (
+      path?.length === 3
+      && path[0] === "visibleActorReactions"
+      && typeof path[1] === "number"
       && path[2] === "reason"
     ) {
       classes.add("non_empty_reaction_line");
@@ -246,6 +284,13 @@ function recoveryInstructionClassesFromIssues(
       && typeof path[1] === "number"
     ) {
       classes.add("copy_exact_citation_catalog");
+    }
+    if (
+      path?.length === 2
+      && path[0] === "requiredObligationEffect"
+      && path[1] === "kind"
+    ) {
+      classes.add("none_unsupported_obligation");
     }
   }
   return [...classes];
@@ -952,20 +997,26 @@ export function getCampaignPlayJudgeRecoveryFeedback(
     : undefined;
 }
 
+function rejectJudgeSemanticContractIssues(
+  issues: readonly CampaignPlayJudgeContractIssue[],
+  emitContractDiagnostic?: CampaignPlayJudgeContractDiagnosticEmitter,
+): never {
+  emitContractDiagnostic?.(issues);
+  const error = new CampaignPlayJudgeError("model_contract_failed", null);
+  rememberJudgeRecoveryFeedback(error, recoveryFeedbackFromIssues(issues));
+  throw error;
+}
+
 function rejectJudgeSemanticContract(
   check: CampaignPlayJudgeSemanticCheck,
   emitContractDiagnostic?: CampaignPlayJudgeContractDiagnosticEmitter,
 ): never {
-  const issue: CampaignPlayJudgeContractIssue = {
+  return rejectJudgeSemanticContractIssues([{
     issueIndex: 0,
     code: "custom",
     path: JUDGE_SEMANTIC_CHECK_PATHS[check],
     check,
-  };
-  emitContractDiagnostic?.([issue]);
-  const error = new CampaignPlayJudgeError("model_contract_failed", null);
-  rememberJudgeRecoveryFeedback(error, recoveryFeedbackFromIssues([issue]));
-  throw error;
+  }], emitContractDiagnostic);
 }
 
 interface CampaignPlayJudgeDependencies { generateObject: typeof safeGenerateObject }
@@ -1153,12 +1204,13 @@ function prompt(
     "VISIBLE_ROUTES carries code-authoritative travelCost ticks. For a pure move, elapsedBounds.minimumMinutes and elapsedBounds.maximumMinutes must both equal the selected route's travelCost. For a compound action that includes travel, elapsedBounds.minimumMinutes must be at least that travelCost. Never estimate a different route duration.",
     `possessionEffectAuthority is Judge-owned mechanical authority, not prose. Use kind adjust_actor_possession when an actionable result at or above minimumResult must or may acquire a countable possession, spend one, or durably transform an existing retained possession. enforcement is required when the accepted outcome itself entails the transition; it is permitted only when a targeted present actor may choose whether to transfer an item while responding. A plain request for an item uses permitted acquire so the Game Master can grant or refuse it without inventing inventory authority. Writing measurements or other usable records into a visible notebook, form, chart, ledger, or similar retained object is required transform with that exact possession handle and quantity 1. The exact notebook shape is {\"kind\":\"adjust_actor_possession\",\"enforcement\":\"required\",\"operation\":\"transform\",\"possessionHandle\":\"copied visible handle\",\"quantity\":1,\"minimumResult\":\"lowest applicable tier\"}. operation accepts only acquire, spend, or transform; there is no adjustment field. Set minimumResult to the lowest result tier that authorizes the retained change. Use acquire with ${transportNull} possessionHandle for a new item; spend or transform with an exact visible possession handle for an existing item. Cite every ${transportNonNull} possessionHandle in citedVisibleFactHandles. Use kind none when no durable possession change is inside the action's authority. Impossible and clarification rulings always use none.`,
     "A positive possession entry in VISIBLE_FRAME is the only authority that the player currently controls a tool or material. DEPLETED_PLAYER_POSSESSIONS names player-owned stacks whose exact quantity is zero; they are unavailable and have no usable handle. A general tool possession authorizes only the tools it names, never raw material, fasteners, ammunition, medicine, food, fuel, currency, or another consumable. A work assignment, posted supply list, visible stock, offer, request, dialogue, handling, transport, or narration does not issue supplies to the player. If PLAYER_INPUT directly uses a tool or consumable that is depleted or has no visible possession handle, classify it as impossible and identify the missing material basis in reason; do not add that material to method or stakes. A request to a targeted present actor for that item is contact, not direct use: authorize a permitted acquire instead of assuming either transfer or refusal. When a visible possession is consumed or materially changed, possessionEffectAuthority must use required spend or transform with that exact cited handle. Putting newly collected contents into a visible container possession, filling it, or sealing it materially changes that retained possession: require transform of the exact container handle, never acquire the contents as a separate possession while leaving the container stack unchanged. Quantity counts indivisible Rulebook stack units. A plural or kit-like possession at quantity 1 cannot become one used container, unspecified remaining containers, and a separate new possession. Transform the complete quantity-1 stack; the resulting possession may describe both the retained set and its contained sample.",
-    "requiredObligationEffect is Judge-owned mechanical intent, not prose. Use incur_actor_obligation when an actionable result at or above minimumResult creates a definite copper debt between the player and one targeted visible nonplayer actor. Copy both exact actor handles into debtorHandle and creditorHandle, cite both, and preserve the direction: the actor who must pay is the debtor. Completed player work with a definite unpaid fee creates nonplayer-to-player debt; a definite charge accepted by the player creates player-to-nonplayer debt. Its exact shape is {\"kind\":\"incur_actor_obligation\",\"debtorHandle\":\"copied actor handle\",\"creditorHandle\":\"copied actor handle\",\"unitKey\":\"copper\",\"amount\":2,\"minimumResult\":\"success\"}. amount is the newly incurred amount, not the running total. Use pay_actor_obligation only when the player is the debtor and the resolved action physically transfers a positive amount from one cited visible player copper possession against one cited payable obligation. Copy debtorHandle, creditorHandle, obligationHandle, and paymentPossessionHandle exactly and cite all four. Its exact shape is {\"kind\":\"pay_actor_obligation\",\"debtorHandle\":\"copied player actor handle\",\"creditorHandle\":\"copied visible actor handle\",\"obligationHandle\":\"copied payable obligation handle\",\"paymentPossessionHandle\":\"copied visible possession handle\",\"unitKey\":\"copper\",\"amount\":2,\"minimumResult\":\"success\"}. A nonplayer cannot pay from an undisclosed or nonexistent possession during a player action; record the definite unpaid amount as debt and leave later payment to that actor's own sourced action. Accepting offered work, including work that quotes an upfront or completion fee, is not completed work and does not itself transfer money or create a debt; use kind none. A request, offer, promise, quote, cargo movement, or narration without an authoritative transfer neither incurs nor pays debt. Use none when no binding debt changes. Impossible and clarification rulings always use none.",
+    "requiredObligationEffect is Judge-owned mechanical intent, not prose. Use incur_actor_obligation when an actionable result at or above minimumResult creates a definite copper debt between the player and one targeted visible nonplayer actor. Copy both exact actor handles into debtorHandle and creditorHandle, cite both, and preserve the direction: the actor who must pay is the debtor. Completed player work with a definite unpaid fee creates nonplayer-to-player debt, except for a typed paid_delivery commitment whose paymentTiming is on_completion: that branch uses requiredObligationEffect kind none because the compiler pays the player exact feeAmount in Copper on successful delivery. A definite charge accepted by the player creates player-to-nonplayer debt. Its exact shape is {\"kind\":\"incur_actor_obligation\",\"debtorHandle\":\"copied actor handle\",\"creditorHandle\":\"copied actor handle\",\"unitKey\":\"copper\",\"amount\":2,\"minimumResult\":\"success\"}. amount is the newly incurred amount, not the running total. Use pay_actor_obligation only when the player is the debtor and the resolved action physically transfers a positive amount from one cited visible player copper possession against one cited payable obligation. Copy debtorHandle, creditorHandle, obligationHandle, and paymentPossessionHandle exactly and cite all four. Its exact shape is {\"kind\":\"pay_actor_obligation\",\"debtorHandle\":\"copied player actor handle\",\"creditorHandle\":\"copied visible actor handle\",\"obligationHandle\":\"copied payable obligation handle\",\"paymentPossessionHandle\":\"copied visible possession handle\",\"unitKey\":\"copper\",\"amount\":2,\"minimumResult\":\"success\"}. A nonplayer cannot pay from an undisclosed or nonexistent possession during a player action; record the definite unpaid amount as debt and leave later payment to that actor's own sourced action. Accepting offered work, including work that quotes an upfront or completion fee, is not completed work and does not itself transfer money or create a debt; use kind none. A request, offer, promise, quote, cargo movement, or narration without an authoritative transfer neither incurs nor pays debt. Use none when no binding debt changes. Impossible and clarification rulings always use none.",
+    "UNSUPPORTED_SOCIAL_AUTHORITY=When PLAYER_INPUT is a standalone request for a present actor to vouch, endorse, promise privileged access, secure better-paying work, grant permission, make a referral, arrange future service, or change a relationship without an exact typed copper-debt authority, classify the spoken action as contact (or attempt only when the player explicitly tries to persuade or coerce against resistance) and set requiredObligationEffect to kind none. In tool mode use the exact empty or zero sentinels for every requiredObligationEffect branch field. These social promises are not typed possession, payment, access, relationship, or debt effects; preserve the ordinary words for the Game Master, which supplies the actor's truthful in-world refusal or non-commitment. Keep the primary kind in the existing observe/move/contact/wait/attempt domain and never invent a social-obligation kind.",
     ...(input.commitmentBinding === undefined
       ? []
       : [input.commitmentBinding.action === "collect"
         ? `COMMITMENT_BINDING=This frozen paid-delivery collection is for commitment ${input.commitmentBinding.commitmentHandle}; target the exact counterparty ${input.commitmentBinding.counterpartyHandle}, preserve the exact subject name ${JSON.stringify(input.commitmentBinding.subjectName)}, and cite the counterparty. At a result reaching success, use permitted acquire of exactly quantity 1 with a null possessionHandle; this is the only possible cargo transfer and the Game Master may refuse it. requiredObligationEffect is exactly none. Do not invent custody, completion, payment, or debt.`
-        : `COMMITMENT_BINDING=This frozen paid-delivery delivery is at exact destination ${input.commitmentBinding.destinationHandle} for exact subject ${JSON.stringify(input.commitmentBinding.subjectName)}. At a result reaching success, use required spend of exactly quantity 1 from the code-supplied possession handle ${JSON.stringify(input.commitmentPossessionHandle)} and incur exactly ${input.commitmentFeeAmount ?? "the code-supplied"} copper from counterparty ${input.commitmentBinding.counterpartyHandle} to player ${frame.playerActorHandle}, with minimumResult success. Cite the exact destination, possession, and both actor handles. The compiler appends completion after these two effects; never select a commitment, party, amount, or completion field. Below success use none for both effects and create no cargo, debt, or completion.`]),
+        : `COMMITMENT_BINDING=This frozen paid-delivery delivery is at exact destination ${input.commitmentBinding.destinationHandle} for exact subject ${JSON.stringify(input.commitmentBinding.subjectName)}. At a result reaching success, use required spend of exactly quantity 1 from the code-supplied possession handle ${JSON.stringify(input.commitmentPossessionHandle)} and set requiredObligationEffect to exactly none; the compiler pays the player exactly ${input.commitmentFeeAmount ?? "the code-supplied"} Copper and appends completion after the cargo spend. Cite the exact destination and possession and preserve the bound counterparty as target context. Never select a commitment, party, amount, payment, or completion field. Below success use none for both effects and create no cargo, Copper payment, debt, or completion.`]),
     "PLAYER_INPUT stakes ask what the player hopes to learn or accomplish; they are not evidence and do not authorize an answer. For observation, authorize only conclusions supported by SOURCE_MOMENT, VISIBLE_FRAME, or ACTOR_CONTINUITY. Preserve unknown authorship, motive, provenance, prior contents, and hidden causes. A clean, empty, missing, or disturbed surface proves only its currently observable state; it does not prove that something existed, was found, removed, stolen, concealed, or carried away.",
     "The reason field explains feasibility and result bounds. It must not add world facts beyond the supplied frames or resolve an uncertainty that the visible evidence leaves open.",
     "ACTOR_CONTINUITY outranks any conflicting earlier dialogue in VISIBLE_FRAME for authorship and actor knowledge of its own actions. Never cite a prior denial to erase an own action; Judge the current request from the accepted action truth and preserve any separate uncertainty, privacy, or willingness to disclose.",
@@ -1201,13 +1253,22 @@ function prompt(
       sections.push(
         `RECOVERY_SCHEMA_INSTRUCTION_CLASSES=${JSON.stringify(recoveryInstructionClasses)}`,
         ...(recoveryInstructionClasses.includes("copy_exact_reaction_catalog")
-          ? ["RECOVERY_COPY_EXACT_REACTION_CATALOG=COPY_EXACT each visibleActorReactions[i].actorHandle from VISIBLE_ACTOR_REACTION_HANDLE_CATALOG[i], preserving the indexed order."]
+          ? ["RECOVERY_COPY_EXACT_REACTION_CATALOG=COPY_EXACT each visibleActorReactions[i].actorHandle from VISIBLE_ACTOR_REACTION_HANDLE_CATALOG[i]; return exactly one entry per catalog item, preserving the exact indexed order and set with no duplicates, omissions, or additions."]
+          : []),
+        ...(recoveryInstructionClasses.includes("copy_exact_reaction_support_catalog")
+          ? [`RECOVERY_COPY_EXACT_REACTION_SUPPORT_CATALOG=For every visibleActorReactions entry, set supportingVisibleFactHandle to ${transportNull} exactly when reaction is none; for an immediate reaction use ${transportNull} or copy one exact visible handle from CITATION_HANDLE_CATALOG; never use a hidden or invented handle.`]
+          : []),
+        ...(recoveryInstructionClasses.includes("reaction_none_support_null")
+          ? [`RECOVERY_REACTION_NONE_SUPPORT_NULL=For every visibleActorReactions entry with reaction none, set supportingVisibleFactHandle to ${transportNull} exactly; none reactions never cite a supporting visible fact.`]
           : []),
         ...(recoveryInstructionClasses.includes("copy_exact_citation_catalog")
           ? ["RECOVERY_COPY_EXACT_CITATION_CATALOG=COPY_EXACT each citedVisibleFactHandles entry from CITATION_HANDLE_CATALOG and preserve the selected citation order."]
           : []),
         ...(recoveryInstructionClasses.includes("non_empty_reaction_line")
           ? ["RECOVERY_NON_EMPTY_REACTION_LINE=Provide a non-empty single-line reason for every visibleActorReactions entry, including reaction none."]
+          : []),
+        ...(recoveryInstructionClasses.includes("none_unsupported_obligation")
+          ? ["RECOVERY_NONE_UNSUPPORTED_OBLIGATION=For a standalone vouch, endorsement, privileged-access, better-paying-job, permission, referral, future-service, or relationship request without an exact typed copper-debt authority, use requiredObligationEffect kind none. The allowed kind domain is none, incur_actor_obligation, or pay_actor_obligation; in tool mode set debtorHandle=\"\", creditorHandle=\"\", obligationHandle=\"\", paymentPossessionHandle=\"\", unitKey=\"\", amount=0, and minimumResult=\"\". Rebuild the complete object and never create a new social-obligation kind."]
           : []),
       );
     }
@@ -1254,7 +1315,6 @@ function validateCommitmentRuling(
     }
     return;
   }
-  const playerHandle = frame.playerActorHandle;
   const resultRank = (result: CampaignPlayResultTier): number =>
     CAMPAIGN_PLAY_RESULT_TIER_VALUES.indexOf(result);
   const canReachSuccess = resultRank(proposal.resultBounds.maximum) >=
@@ -1321,12 +1381,7 @@ function validateCommitmentRuling(
     possession.possessionHandle !== possessionHandle ||
     possession.quantity !== 1 ||
     possession.minimumResult !== "success" ||
-    obligation.kind !== "incur_actor_obligation" ||
-    obligation.debtorHandle !== binding.counterpartyHandle ||
-    obligation.creditorHandle !== playerHandle ||
-    obligation.unitKey !== "copper" ||
-    obligation.amount !== feeAmount ||
-    obligation.minimumResult !== "success"
+    obligation.kind !== "none"
   ) {
     rejectJudgeSemanticContract("commitment_effect_authority", emitContractDiagnostic);
   }
@@ -1384,15 +1439,86 @@ function compile(
     .filter((fact) => fact.kind === "actor" && fact.handle !== frameResult.data.playerActorHandle)
     .map((fact) => fact.handle);
   const reactionHandles = proposal.visibleActorReactions.map((entry) => entry.actorHandle);
-  if (
-    reactionHandles.length !== visibleNonplayerActorHandles.length
-    || new Set(reactionHandles).size !== reactionHandles.length
-    || visibleNonplayerActorHandles.some((handle) => !reactionHandles.includes(handle))
-    || proposal.visibleActorReactions.some((entry) =>
-      (entry.reaction === "none" && entry.supportingVisibleFactHandle !== null)
-      || (entry.supportingVisibleFactHandle !== null && !visible.has(entry.supportingVisibleFactHandle)))
-  ) {
-    rejectJudgeSemanticContract("visible_actor_reactions", emitContractDiagnostic);
+  const reactionIssues: CampaignPlayJudgeContractIssue[] = [];
+  if (reactionHandles.length !== visibleNonplayerActorHandles.length) {
+    reactionIssues.push({
+      code: "custom",
+      path: ["visibleActorReactions"],
+      message: "Visible actor reactions must contain exactly one entry for each visible nonplayer actor.",
+      check: "visible_actor_reactions_count",
+    });
+  }
+  const duplicateReactionIndex = reactionHandles.findIndex((handle, index) =>
+    reactionHandles.indexOf(handle) !== index);
+  if (duplicateReactionIndex >= 0) {
+    reactionIssues.push({
+      code: "custom",
+      path: ["visibleActorReactions", duplicateReactionIndex, "actorHandle"],
+      message: "Visible actor reaction handles must not contain duplicates.",
+      check: "visible_actor_reactions_duplicates",
+    });
+  }
+  const reactionHandleSet = new Set(reactionHandles);
+  const visibleActorReactionHandleSet = new Set(visibleNonplayerActorHandles);
+  const reactionSetMismatch = reactionHandleSet.size !== visibleActorReactionHandleSet.size
+    || [...visibleActorReactionHandleSet].some((handle) => !reactionHandleSet.has(handle))
+    || [...reactionHandleSet].some((handle) => !visibleActorReactionHandleSet.has(handle));
+  if (reactionSetMismatch) {
+    const unexpectedReactionIndex = reactionHandles.findIndex((handle) =>
+      !visibleActorReactionHandleSet.has(handle));
+    const missingReactionIndex = visibleNonplayerActorHandles.findIndex((handle) =>
+      !reactionHandleSet.has(handle));
+    const issueIndex = unexpectedReactionIndex >= 0
+      ? unexpectedReactionIndex
+      : Math.max(0, missingReactionIndex);
+    reactionIssues.push({
+      code: "custom",
+      path: ["visibleActorReactions", issueIndex, "actorHandle"],
+      message: "Visible actor reaction handles must contain exactly the visible nonplayer actor set.",
+      check: "visible_actor_reactions_set",
+    });
+  }
+  let catalogMismatchIndex = -1;
+  if (reactionHandles.length === visibleNonplayerActorHandles.length) {
+    for (let index = 0; index < visibleNonplayerActorHandles.length; index += 1) {
+      if (reactionHandles[index] !== visibleNonplayerActorHandles[index]) {
+        catalogMismatchIndex = index;
+        break;
+      }
+    }
+  }
+  if (catalogMismatchIndex >= 0) {
+    reactionIssues.push({
+      code: "custom",
+      path: ["visibleActorReactions", catalogMismatchIndex, "actorHandle"],
+      message: "Visible actor reaction handles must match the exact visible actor catalog in order.",
+      check: "visible_actor_reactions_catalog",
+    });
+  }
+  const noneSupportIndex = proposal.visibleActorReactions.findIndex((entry) =>
+    entry.reaction === "none" && entry.supportingVisibleFactHandle !== null);
+  if (noneSupportIndex >= 0) {
+    reactionIssues.push({
+      code: "custom",
+      path: ["visibleActorReactions", noneSupportIndex, "supportingVisibleFactHandle"],
+      message: "A none reaction must use a null supporting visible fact handle.",
+      check: "visible_actor_reactions_none_support",
+    });
+  }
+  const immediateSupportIndex = proposal.visibleActorReactions.findIndex((entry) =>
+    entry.reaction === "immediate"
+    && entry.supportingVisibleFactHandle !== null
+    && !visible.has(entry.supportingVisibleFactHandle));
+  if (immediateSupportIndex >= 0) {
+    reactionIssues.push({
+      code: "custom",
+      path: ["visibleActorReactions", immediateSupportIndex, "supportingVisibleFactHandle"],
+      message: "An immediate reaction's supporting visible fact handle must be visible or null.",
+      check: "visible_actor_reactions_immediate_support",
+    });
+  }
+  if (reactionIssues.length > 0) {
+    rejectJudgeSemanticContractIssues(reactionIssues, emitContractDiagnostic);
   }
   const targetKeys = proposal.targets.map((target) => `${target.kind}:${target.handle}`);
   if (new Set(targetKeys).size !== targetKeys.length) {

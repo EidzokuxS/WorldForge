@@ -215,6 +215,9 @@ describe("Campaign World prompts", () => {
     expect(prompt).toContain('"relationSlotIndex"');
     expect(prompt).toContain('"targetActorIndex"');
     expect(prompt).toContain(
+      '"relationType" must be exactly one of alliance, rivalry, authority, dependency, kinship, association, or hostility.',
+    );
+    expect(prompt).toContain(
       "return exactly one relation row for every integer in RELATION_SLOTS, exactly once",
     );
     expect(prompt).toContain(

@@ -1763,6 +1763,7 @@ describe("Campaign Play atomic Rulebook execution", () => {
       title: acceptEffect.title,
       subjectName: acceptEffect.subjectName,
       destinationHandle,
+      destinationLocationId: destination.id,
       feeUnit: "copper" as const,
       feeAmount: acceptEffect.feeAmount,
       paymentTiming: "on_completion" as const,
@@ -2077,9 +2078,8 @@ describe("Campaign Play atomic Rulebook execution", () => {
     const completeFrame = loadCampaignPlayRulebookFrame(handle);
     const completeBatchId = "batch-commitment-complete";
     const completeRoot = { kind: "turn" as const, turnId: completeTurnId };
-    const completionObligationId = deriveCampaignPlayObligationId(
+    const completionPaymentPossessionId = deriveCampaignPlayPossessionId(
       completeFrame.campaignId,
-      agent.id,
       "actor-player",
       "copper",
     );
@@ -2089,7 +2089,6 @@ describe("Campaign Play atomic Rulebook execution", () => {
       { kind: "actor" as const, id: agent.id },
       { kind: "possession" as const, id: deliveryPossessionId },
       { kind: "location" as const, id: destination.id },
-      { kind: "obligation" as const, id: completionObligationId },
     ];
     const spendCommand = {
       commandId: deriveCampaignPlayCommandId(
@@ -2107,6 +2106,8 @@ describe("Campaign Play atomic Rulebook execution", () => {
       readScope: [
         { kind: "actor" as const, id: "actor-player" },
         { kind: "possession" as const, id: deliveryPossessionId },
+        { kind: "commitment" as const, id: commitmentId },
+        { kind: "location" as const, id: destination.id },
       ],
       writeScope: [{ kind: "possession" as const, id: deliveryPossessionId }],
       exposure: { mode: "protected" as const },
@@ -2119,9 +2120,11 @@ describe("Campaign Play atomic Rulebook execution", () => {
       affectedRefs: [
         { kind: "actor" as const, id: "actor-player" },
         { kind: "possession" as const, id: deliveryPossessionId },
+        { kind: "commitment" as const, id: commitmentId },
+        { kind: "location" as const, id: destination.id },
       ],
     };
-    const incurCommand = {
+    const paymentCommand = {
       commandId: deriveCampaignPlayCommandId(
         completeFrame.campaignId,
         completeTurnId,
@@ -2130,7 +2133,7 @@ describe("Campaign Play atomic Rulebook execution", () => {
       ),
       batchId: completeBatchId,
       order: 1,
-      kind: "incur_actor_obligation" as const,
+      kind: "adjust_actor_possession" as const,
       causalParent: {
         kind: "command" as const,
         commandId: spendCommand.commandId,
@@ -2138,22 +2141,29 @@ describe("Campaign Play atomic Rulebook execution", () => {
       source: { kind: "system" as const, system: "game_master" as const },
       expectedWorldVersion: completeFrame.worldVersion + 1,
       readScope: [
-        { kind: "actor" as const, id: agent.id },
         { kind: "actor" as const, id: "actor-player" },
-        { kind: "obligation" as const, id: completionObligationId },
+        { kind: "possession" as const, id: completionPaymentPossessionId },
+        { kind: "actor" as const, id: agent.id },
+        { kind: "commitment" as const, id: commitmentId },
+        { kind: "location" as const, id: destination.id },
       ],
-      writeScope: [{ kind: "obligation" as const, id: completionObligationId }],
-      exposure: { mode: "protected" as const },
-      debtorActorId: agent.id,
-      creditorActorId: "actor-player",
-      obligationId: completionObligationId,
-      unitKey: "copper" as const,
-      amount: acceptEffect.feeAmount,
-      summary: "The employer owes the agreed delivery fee.",
+      writeScope: [{ kind: "possession" as const, id: completionPaymentPossessionId }],
+      exposure: {
+        mode: "projectable" as const,
+        predicates: [{ channel: "direct_perception" as const, locationId: destination.id }],
+      },
+      actorId: "actor-player",
+      possessionId: completionPaymentPossessionId,
+      possessionKey: "copper" as const,
+      name: "Copper",
+      quantityDelta: acceptEffect.feeAmount,
+      summary: `Paid ${acceptEffect.feeAmount} Copper on completion of ${acceptEffect.subjectName} delivery.`,
       affectedRefs: [
-        { kind: "actor" as const, id: agent.id },
         { kind: "actor" as const, id: "actor-player" },
-        { kind: "obligation" as const, id: completionObligationId },
+        { kind: "possession" as const, id: completionPaymentPossessionId },
+        { kind: "actor" as const, id: agent.id },
+        { kind: "commitment" as const, id: commitmentId },
+        { kind: "location" as const, id: destination.id },
       ],
     };
     const completeCommand = {
@@ -2168,14 +2178,13 @@ describe("Campaign Play atomic Rulebook execution", () => {
       kind: "complete_player_commitment" as const,
       causalParent: {
         kind: "command" as const,
-        commandId: incurCommand.commandId,
+        commandId: paymentCommand.commandId,
       },
       source: { kind: "system" as const, system: "game_master" as const },
       expectedWorldVersion: completeFrame.worldVersion + 2,
       readScope: completionRefs,
       writeScope: [
         { kind: "possession" as const, id: deliveryPossessionId },
-        { kind: "obligation" as const, id: completionObligationId },
         { kind: "commitment" as const, id: commitmentId },
       ],
       exposure: { mode: "protected" as const },
@@ -2183,15 +2192,20 @@ describe("Campaign Play atomic Rulebook execution", () => {
       performerActorId: "actor-player",
       counterpartyActorId: agent.id,
       deliveryPossessionId,
+      destinationHandle,
+      destinationLocationId: destination.id,
       affectedRefs: completionRefs,
     };
-    const completionCommands = [spendCommand, incurCommand, completeCommand];
+    const completionCommands = [spendCommand, paymentCommand, completeCommand];
     const completeAuthority = {
       purpose: "player_action" as const,
       turnId: completeTurnId,
       actorId: "actor-player",
       rootParent: completeRoot,
-      authorizedRefs: completionRefs,
+      authorizedRefs: [
+        ...completionRefs,
+        { kind: "possession" as const, id: completionPaymentPossessionId },
+      ],
       witnessActorIds: [],
       knownWorldEventIds: [],
     };
@@ -2259,21 +2273,16 @@ describe("Campaign Play atomic Rulebook execution", () => {
       completeFrame.campaignId,
       completeFrame.campaignId,
       completionReceiptId,
-    )).toEqual({ obligations: 1, possessions: 1, events: 1, receipts: 1 });
-    expect(handle.sqlite.prepare(`SELECT
-      debtor_actor_id AS debtorActorId, creditor_actor_id AS creditorActorId,
-      unit_key AS unitKey, principal_amount AS principalAmount,
-      outstanding_amount AS outstandingAmount
-      FROM campaign_play_actor_obligations
-      WHERE campaign_id = ? AND obligation_id = ?`).get(
+    )).toEqual({ obligations: 0, possessions: 2, events: 1, receipts: 1 });
+    expect(handle.sqlite.prepare(`SELECT possession_key AS possessionKey, name, quantity
+      FROM campaign_play_actor_possessions
+      WHERE campaign_id = ? AND possession_id = ?`).get(
       completeFrame.campaignId,
-      completionObligationId,
+      completionPaymentPossessionId,
     )).toEqual({
-      debtorActorId: agent.id,
-      creditorActorId: "actor-player",
-      unitKey: "copper",
-      principalAmount: acceptEffect.feeAmount,
-      outstandingAmount: acceptEffect.feeAmount,
+      possessionKey: "copper",
+      name: "Copper",
+      quantity: acceptEffect.feeAmount,
     });
     expect(handle.sqlite.prepare(`SELECT quantity FROM campaign_play_actor_possessions
       WHERE campaign_id = ? AND possession_id = ?`).get(

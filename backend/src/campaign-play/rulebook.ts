@@ -925,21 +925,12 @@ function commandEntityRefs(
         : [...frame.acceptedWorld.locations, ...state.runtimeLocations].find((location) =>
           deriveCampaignPlayPublicHandle("location", frame.campaignId, location.id)
             === commitment.destinationHandle);
-      const obligationId = commitment?.kind === "paid_delivery"
-        ? deriveCampaignPlayObligationId(
-            frame.campaignId,
-            commitment.counterpartyActorId,
-            commitment.performerActorId,
-            "copper",
-          )
-        : null;
       return [
         ref("commitment", command.commitmentId),
         ref("actor", performerActorId),
         ref("actor", counterpartyActorId),
         ref("possession", possessionId),
         ...(destination === undefined ? [] : [ref("location", destination.id)]),
-        ...(obligationId === null ? [] : [ref("obligation", obligationId)]),
       ];
     }
   }
@@ -1034,14 +1025,12 @@ function validatePaidDeliverySettlementInvariants(
     completionEntries.length !== 1
     || commands.length !== 3
     || completion.index !== commands.length - 1
-    || commands.some((command, index) =>
-      index === completion.index
-        ? command.kind !== "complete_player_commitment"
-        : command.kind !== "adjust_actor_possession" && command.kind !== "incur_actor_obligation")
+    || commands[0]?.kind !== "adjust_actor_possession"
+    || commands[1]?.kind !== "adjust_actor_possession"
   ) {
     deny(
       "invalid_batch",
-      "Paid-delivery completion requires exactly one cargo spend and one employer obligation in the same batch, followed by completion.",
+      "Paid-delivery completion requires exactly one cargo spend and one exact Copper payment in the same batch, followed by completion.",
       completion.command,
       completion.index,
     );
@@ -1070,59 +1059,49 @@ function validatePaidDeliverySettlementInvariants(
     commitment.performerActorId,
     expectedPossessionKey,
   );
-  const expectedObligationId = deriveCampaignPlayObligationId(
+  const expectedPaymentPossessionId = deriveCampaignPlayPossessionId(
     frame.campaignId,
-    commitment.counterpartyActorId,
     commitment.performerActorId,
     "copper",
   );
   const possession = state.possessions.find((row) => row.possessionId === expectedPossessionId);
-  const existingObligation = state.obligations.find((row) => row.obligationId === expectedObligationId);
-  const spendEntries = commands
-    .map((command, index) => ({ command, index }))
-    .filter((entry): entry is {
-      command: Extract<RulebookBatchCommand, { kind: "adjust_actor_possession" }>;
-      index: number;
-    } => entry.command.kind === "adjust_actor_possession");
-  const obligationEntries = commands
-    .map((command, index) => ({ command, index }))
-    .filter((entry): entry is {
-      command: Extract<RulebookBatchCommand, { kind: "incur_actor_obligation" }>;
-      index: number;
-    } => entry.command.kind === "incur_actor_obligation");
-  const spend = spendEntries[0]?.command;
-  const obligation = obligationEntries[0]?.command;
+  const spend = commands[0]?.kind === "adjust_actor_possession" ? commands[0] : undefined;
+  const payment = commands[1]?.kind === "adjust_actor_possession" ? commands[1] : undefined;
   if (
     destination === undefined
     || commitment.performerActorId !== frame.human?.actorId
+    || commitment.paymentTiming !== "on_completion"
     || commitment.performerActorId !== completion.command.performerActorId
     || commitment.counterpartyActorId !== completion.command.counterpartyActorId
     || completion.command.deliveryPossessionId !== expectedPossessionId
+    || completion.command.destinationHandle !== commitment.destinationHandle
+    || completion.command.destinationLocationId !== destination.id
     || !operativeActorLocations(frame, state, commitment.performerActorId).includes(destination.id)
     || possession === undefined
     || possession.actorId !== commitment.performerActorId
     || possession.possessionKey !== expectedPossessionKey
     || possession.name !== commitment.subjectName
     || possession.quantity < 1
-    || spendEntries.length !== 1
     || spend === undefined
     || spend.actorId !== commitment.performerActorId
     || spend.possessionId !== expectedPossessionId
     || spend.possessionKey !== expectedPossessionKey
     || spend.name !== commitment.subjectName
     || spend.quantityDelta !== -1
-    || obligationEntries.length !== 1
-    || obligation === undefined
-    || obligation.debtorActorId !== commitment.counterpartyActorId
-    || obligation.creditorActorId !== commitment.performerActorId
-    || obligation.obligationId !== expectedObligationId
-    || obligation.unitKey !== "copper"
-    || obligation.amount !== commitment.feeAmount
-    || existingObligation !== undefined
+    || payment === undefined
+    || payment.actorId !== commitment.performerActorId
+    || payment.possessionId !== expectedPaymentPossessionId
+    || payment.possessionKey !== "copper"
+    || payment.name !== "Copper"
+    || payment.quantityDelta !== commitment.feeAmount
+    || payment.exposure.mode !== "projectable"
+    || payment.exposure.predicates.length !== 1
+    || payment.exposure.predicates[0]?.channel !== "direct_perception"
+    || payment.exposure.predicates[0]?.locationId !== destination.id
   ) {
     deny(
       "precondition_failed",
-      "Paid-delivery settlement must deliver the stored cargo at its stored destination and incur the exact stored employer obligation.",
+      "Paid-delivery settlement must deliver the stored cargo at its stored destination and credit the exact stored Copper fee immediately.",
       completion.command,
       completion.index,
     );
@@ -1217,6 +1196,8 @@ function validateUnpaidDeliverySettlementInvariants(
     || commitment.performerActorId !== completion.command.performerActorId
     || commitment.counterpartyActorId !== completion.command.counterpartyActorId
     || completion.command.deliveryPossessionId !== expectedPossessionId
+    || completion.command.destinationHandle !== commitment.destinationHandle
+    || completion.command.destinationLocationId !== destination.id
     || !operativeActorLocations(frame, state, commitment.performerActorId).includes(destination.id)
     || possession === undefined
     || possession.actorId !== commitment.performerActorId
@@ -1258,12 +1239,11 @@ function validateCommitmentExecutionBatch(
     context.performerActorId,
     expectedPossessionKey,
   );
-  const expectedObligationId = context.commitmentKind === "paid_delivery"
-    ? deriveCampaignPlayObligationId(
+  const expectedPaymentPossessionId = context.commitmentKind === "paid_delivery"
+    ? deriveCampaignPlayPossessionId(
         frame.campaignId,
-        context.counterpartyActorId,
         context.performerActorId,
-        context.feeUnit,
+        "copper",
       )
     : null;
   const possession = state.possessions.find((row) => row.possessionId === expectedPossessionId);
@@ -1273,8 +1253,8 @@ function validateCommitmentExecutionBatch(
     ref("actor", context.counterpartyActorId),
     ref("location", context.destinationLocationId),
     ...(context.possessionId === null ? [] : [ref("possession", context.possessionId)]),
-    ...(context.action === "deliver" && expectedObligationId !== null
-      ? [ref("obligation", expectedObligationId)]
+    ...(context.action === "deliver" && expectedPaymentPossessionId !== null
+      ? [ref("possession", expectedPaymentPossessionId)]
       : []),
   ];
   const commitmentTermsMatch = commitment?.kind === context.commitmentKind &&
@@ -1282,7 +1262,8 @@ function validateCommitmentExecutionBatch(
       || (context.commitmentKind === "paid_delivery"
         && commitment.kind === "paid_delivery"
         && commitment.feeUnit === context.feeUnit
-        && commitment.feeAmount === context.feeAmount));
+        && commitment.feeAmount === context.feeAmount
+        && commitment.paymentTiming === "on_completion"));
   if (
     commitment === undefined
     || commitment.status !== "active"
@@ -1327,15 +1308,15 @@ function validateCommitmentExecutionBatch(
 
   const spend = commands[0];
   const completion = commands[context.commitmentKind === "paid_delivery" ? 2 : 1];
-  const obligation = context.commitmentKind === "paid_delivery" ? commands[1] : undefined;
+  const payment = context.commitmentKind === "paid_delivery" ? commands[1] : undefined;
   const paidDeliveryInvalid = context.commitmentKind === "paid_delivery" && (
     commands.length !== 3
-    || obligation?.kind !== "incur_actor_obligation"
-    || obligation.debtorActorId !== context.counterpartyActorId
-    || obligation.creditorActorId !== context.performerActorId
-    || obligation.obligationId !== expectedObligationId
-    || obligation.unitKey !== context.feeUnit
-    || obligation.amount !== context.feeAmount
+    || payment?.kind !== "adjust_actor_possession"
+    || payment.actorId !== context.performerActorId
+    || payment.possessionId !== expectedPaymentPossessionId
+    || payment.possessionKey !== "copper"
+    || payment.name !== "Copper"
+    || payment.quantityDelta !== context.feeAmount
   );
   const unpaidDeliveryInvalid = context.commitmentKind === "unpaid_delivery" && commands.length !== 2;
   if (
@@ -1352,6 +1333,8 @@ function validateCommitmentExecutionBatch(
     || completion.performerActorId !== context.performerActorId
     || completion.counterpartyActorId !== context.counterpartyActorId
     || completion.deliveryPossessionId !== expectedPossessionId
+    || completion.destinationHandle !== context.destinationHandle
+    || completion.destinationLocationId !== context.destinationLocationId
     || !possession
     || possession.quantity < 1
     || !operativeActorLocations(frame, state, context.performerActorId).includes(destination.id)
@@ -1359,7 +1342,7 @@ function validateCommitmentExecutionBatch(
     deny(
       "precondition_failed",
       context.commitmentKind === "paid_delivery"
-        ? "Deliver requires cargo spend, exact employer obligation, then completion."
+        ? "Deliver requires cargo spend, exact Copper payment, then completion."
         : "Deliver requires cargo spend followed by completion without an employer obligation.",
       completion,
     );
@@ -2661,7 +2644,7 @@ function applyCommand(
       const counterparty = actor(frame, state, command.counterpartyActorId);
       const destination = [...frame.acceptedWorld.locations, ...state.runtimeLocations].find((location) =>
         deriveCampaignPlayPublicHandle("location", frame.campaignId, location.id)
-          === command.destinationHandle);
+          === command.destinationHandle && location.id === command.destinationLocationId);
       const acceptedWorldTimeMinutes = state.worldTimeMinutes;
       const deliveryEffect = sourceDecision?.acceptEffect?.kind === "paid_delivery" ||
         sourceDecision?.acceptEffect?.kind === "unpaid_delivery"
@@ -2790,14 +2773,6 @@ function applyCommand(
           existing.performerActorId,
           expectedPossessionKey,
         );
-      const expectedObligationId = existing?.kind === "paid_delivery"
-        ? deriveCampaignPlayObligationId(
-            frame.campaignId,
-            existing.counterpartyActorId,
-            existing.performerActorId,
-            "copper",
-          )
-        : null;
       const destination = existing === undefined
         ? undefined
         : [...frame.acceptedWorld.locations, ...state.runtimeLocations].find((location) =>
@@ -2806,9 +2781,6 @@ function applyCommand(
       const possession = expectedPossessionId === null
         ? undefined
         : state.possessions.find((row) => row.possessionId === expectedPossessionId);
-      const obligation = expectedObligationId === null
-        ? undefined
-        : state.obligations.find((row) => row.obligationId === expectedObligationId);
       const completionReceiptId = deriveCampaignPlayReceiptId(
         frame.campaignId,
         authority.turnId,
@@ -2830,6 +2802,8 @@ function applyCommand(
         || counterparty.controller !== "agent"
         || expectedPossessionId === null
         || command.deliveryPossessionId !== expectedPossessionId
+        || command.destinationHandle !== existing.destinationHandle
+        || command.destinationLocationId !== destination?.id
         || destination === undefined
         || !operativeActorLocations(frame, state, existing?.performerActorId ?? command.performerActorId)
           .includes(destination.id)
@@ -2838,15 +2812,7 @@ function applyCommand(
         || possession.possessionKey !== expectedPossessionKey
         || possession.name !== existing?.subjectName
         || (existing?.kind !== "paid_delivery" && existing?.kind !== "unpaid_delivery");
-      const paymentInvalid = existing?.kind === "paid_delivery" && (
-        obligation === undefined
-        || obligation.debtorActorId !== existing.counterpartyActorId
-        || obligation.creditorActorId !== existing.performerActorId
-        || obligation.unitKey !== "copper"
-        || obligation.principalAmount !== existing.feeAmount
-        || obligation.outstandingAmount !== existing.feeAmount
-      );
-      if (baseInvalid || paymentInvalid) {
+      if (baseInvalid) {
         deny(
           "precondition_failed",
           "Only an active delivery commitment can be completed by its player performer.",
@@ -3735,12 +3701,12 @@ function applyStoredMutation(
       const paidCommitment = commitment.kind === "paid_delivery" ? commitment : null;
       sqlite.prepare(`INSERT INTO campaign_play_commitments (
         commitment_id, campaign_id, performer_actor_id, counterparty_actor_id,
-        kind, status, title, subject_name, destination_handle, fee_unit,
+        kind, status, title, subject_name, destination_handle, destination_location_id, fee_unit,
         fee_amount, payment_timing, accepted_world_time_minutes,
         due_world_time_minutes, source_decision_key, source_turn_id,
         source_receipt_id, completion_turn_id, completion_receipt_id,
         world_version, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)`)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)`)
         .run(
           commitment.commitmentId,
           campaignId,
@@ -3751,6 +3717,7 @@ function applyStoredMutation(
           commitment.title,
           commitment.subjectName,
           commitment.destinationHandle,
+          command.destinationLocationId,
           paidCommitment?.feeUnit ?? null,
           paidCommitment?.feeAmount ?? null,
           paidCommitment?.paymentTiming ?? null,

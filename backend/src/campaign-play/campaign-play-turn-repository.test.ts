@@ -22,7 +22,11 @@ import {
   hashCampaignPlayProjection,
   type CampaignPlayProjectionRecord,
 } from "./campaign-play-projection.js";
-import type { CampaignPlayGameMasterContractFailureDiagnostic } from "./game-master.js";
+import type {
+  CampaignPlayGameMasterContractFailureDiagnostic,
+  CampaignPlayGameMasterRecoveryFeedback,
+} from "./game-master.js";
+import type { CampaignPlayJudgeRecoveryFeedback } from "./judge.js";
 import type { CampaignPlayNarratorContractFailureDiagnostic } from "./narrator.js";
 import {
   CampaignPlayTurnRepositoryError,
@@ -2274,6 +2278,59 @@ describe("Campaign Play deterministic and terminal turn boundaries", () => {
         "turn-player",
       ),
     }).toEqual(beforeInvalidDiagnostic);
+    const rulebookDeniedCheck = {
+      check: "rulebook_denied" as const,
+      denialCode: "precondition_failed" as const,
+      commandIndex: 2,
+    };
+    const rulebookDeniedDiagnostic = {
+      rejectionPhase: "compilation" as const,
+      safeGenerationCode: null,
+      contractDiagnosticPhase: "domain_mismatch" as const,
+      contractDiagnosticCoordinate: "proposal.domain" as const,
+      recoveryDiagnostic: "game_master_semantic_validation_mismatch" as const,
+      failedChecks: [rulebookDeniedCheck],
+      reviewFailedChecks: [],
+    } satisfies CampaignPlayGameMasterContractFailureDiagnostic;
+    const invalidRulebookDiagnostics: unknown[] = [
+      {
+        ...rulebookDeniedDiagnostic,
+        failedChecks: [{ ...rulebookDeniedCheck, check: "unsupported_check" }],
+      },
+      {
+        ...rulebookDeniedDiagnostic,
+        failedChecks: [{ ...rulebookDeniedCheck, denialCode: "unsupported_denial" }],
+      },
+      {
+        ...rulebookDeniedDiagnostic,
+        failedChecks: [{ ...rulebookDeniedCheck, unexpected: "value" }],
+      },
+    ];
+    for (const [index, contractFailureDiagnostic] of invalidRulebookDiagnostics.entries()) {
+      expectTurnError(() => repository.interruptExternal({
+        token: gameMasterToken,
+        evidence: {
+          ...interruption,
+          actualModel: "game-master",
+          schemaOutcome: "invalid",
+          errorCode: "model_contract_invalid",
+          contractFailureDiagnostic:
+            contractFailureDiagnostic as CampaignPlayGameMasterContractFailureDiagnostic,
+        },
+        interruptedAt: 3_290,
+        mutationId: `gm-invalid-rulebook-diagnostic-${index}`,
+      }), "turn_stage_invalid");
+    }
+    expect({
+      runtime: runtimeSnapshot(handle),
+      stage: handle.sqlite.prepare(`SELECT status, worker_epoch AS workerEpoch,
+          contract_failure_diagnostic_json AS contractFailureDiagnosticJson
+        FROM campaign_play_model_stages
+        WHERE campaign_id = ? AND turn_id = ? AND kind = 'game_master' AND attempt = 1`).get(
+        campaignId,
+        "turn-player",
+      ),
+    }).toEqual(beforeInvalidDiagnostic);
     repository.interruptExternal({
       token: gameMasterToken,
       evidence: {
@@ -2281,15 +2338,7 @@ describe("Campaign Play deterministic and terminal turn boundaries", () => {
         actualModel: "game-master",
         schemaOutcome: "invalid",
         errorCode: "model_contract_invalid",
-        contractFailureDiagnostic: {
-          rejectionPhase: "generation",
-          safeGenerationCode: "invalid_json",
-          contractDiagnosticPhase: "provider_extraction",
-          contractDiagnosticCoordinate: "proposal.provider_response",
-          recoveryDiagnostic: null,
-          failedChecks: [],
-          reviewFailedChecks: [],
-        } satisfies CampaignPlayGameMasterContractFailureDiagnostic,
+        contractFailureDiagnostic: rulebookDeniedDiagnostic,
       },
       interruptedAt: 3_300,
       mutationId: "gm-interrupted",
@@ -2308,16 +2357,20 @@ describe("Campaign Play deterministic and terminal turn boundaries", () => {
       attempt: 1,
       workerEpoch: 3,
       errorCode: "model_contract_invalid",
-      contractFailureDiagnosticJson: JSON.stringify({
-        rejectionPhase: "generation",
-        safeGenerationCode: "invalid_json",
-        contractDiagnosticPhase: "provider_extraction",
-        contractDiagnosticCoordinate: "proposal.provider_response",
-        recoveryDiagnostic: null,
-        failedChecks: [],
-        reviewFailedChecks: [],
-      }),
+      contractFailureDiagnosticJson: JSON.stringify(rulebookDeniedDiagnostic),
     });
+    const expectedGameMasterFeedback: CampaignPlayGameMasterRecoveryFeedback = {
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [rulebookDeniedCheck],
+      contractDiagnostic: {
+        phase: "domain_mismatch",
+        coordinate: "proposal.domain",
+      },
+    };
+    expect(repository.loadLatestGameMasterRecoveryFeedback("turn-player", "judged"))
+      .toEqual(expectedGameMasterFeedback);
+    expect(repository.loadLatestGameMasterRecoveryFeedback("turn-player", "admitted"))
+      .toBeUndefined();
     expect(handle.sqlite.prepare(`SELECT contract_failure_diagnostic_json AS diagnostic
       FROM campaign_play_model_stages
       WHERE campaign_id = ? AND turn_id = ? AND kind = 'judge' AND status = 'accepted'`).get(
@@ -2334,17 +2387,39 @@ describe("Campaign Play deterministic and terminal turn boundaries", () => {
       campaignId,
       "turn-player",
     )).toEqual({
-      contractFailureDiagnosticJson: JSON.stringify({
-        rejectionPhase: "generation",
-        safeGenerationCode: "invalid_json",
-        contractDiagnosticPhase: "provider_extraction",
-        contractDiagnosticCoordinate: "proposal.provider_response",
-        recoveryDiagnostic: null,
-        failedChecks: [],
-        reviewFailedChecks: [],
-      }),
+      contractFailureDiagnosticJson: JSON.stringify(rulebookDeniedDiagnostic),
     });
     const recovered = createCampaignPlayTurnRepository(reopened);
+    expect(recovered.loadLatestGameMasterRecoveryFeedback("turn-player", "judged"))
+      .toEqual(expectedGameMasterFeedback);
+    disableCampaignPlayGuards(reopened);
+    const diagnosticUpdate = reopened.sqlite.prepare(`UPDATE campaign_play_model_stages
+      SET contract_failure_diagnostic_json = ?
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'game_master' AND attempt = 1`);
+    const foreignDiagnostic = JSON.stringify({
+      owner: "narrator",
+      rejectionPhase: "generation",
+      safeGenerationCode: null,
+      contractDiagnosticPhase: null,
+      contractDiagnosticCoordinate: null,
+      recoveryDiagnostic: null,
+      failedChecks: [],
+    });
+    diagnosticUpdate.run(foreignDiagnostic, campaignId, "turn-player");
+    expectTurnError(
+      () => recovered.loadLatestGameMasterRecoveryFeedback("turn-player", "judged"),
+      "turn_corrupt",
+    );
+    diagnosticUpdate.run(
+      JSON.stringify({ owner: "narrator", recoveryDiagnostic: "not-a-valid-diagnostic" }),
+      campaignId,
+      "turn-player",
+    );
+    expectTurnError(
+      () => recovered.loadLatestGameMasterRecoveryFeedback("turn-player", "judged"),
+      "turn_corrupt",
+    );
+    diagnosticUpdate.run(JSON.stringify(rulebookDeniedDiagnostic), campaignId, "turn-player");
     expect(recovered.loadRecoveryState("turn-player", 3_350)).toEqual({
       kind: "explicit_resume_required",
       turnId: "turn-player",
@@ -2512,6 +2587,111 @@ describe("Campaign Play deterministic and terminal turn boundaries", () => {
     `).get(campaignId, "turn-opening")).toEqual({
       contractFailureDiagnosticJson: canonicalDiagnosticJson,
     });
+  });
+
+  it("persists and reloads bounded Judge recovery feedback across an explicit Resume boundary", () => {
+    const { handle, state } = createOpeningReadyCampaign();
+    const openingRepository = createCampaignPlayTurnRepository(handle);
+    completeOpening(handle, openingRepository, state);
+    const ready = createCampaignPlayStateRepository(handle).loadState();
+    if (!ready) throw new Error("Campaign Play ready state disappeared.");
+    const repository = createCampaignPlayTurnRepository(handle);
+    const turnId = "turn-judge-recovery";
+    repository.admitTurn({
+      turnId,
+      supersedesTurnId: null,
+      mutationId: "judge-recovery-admitted",
+      submittedAt: 3_000,
+      document: {
+        turnKind: "player_action",
+        request: {
+          source: "freeform",
+          idempotencyKey: "judge-recovery-one",
+          text: "Ask about the current signal.",
+          expectedWorldVersion: ready.authority.worldVersion,
+          expectedRuntimeRevision: ready.authority.runtimeRevision,
+        },
+        frame: ready.publicState.projection as CampaignPlayProjectionRecord,
+      },
+      modelSelection: {
+        turnKind: "player_action",
+        judge: { providerId: "test-provider", model: "judge", strategy: "strict_object", pricing: TEST_MODEL_PRICING },
+        gameMaster: { providerId: "test-provider", model: "game-master", strategy: "strict_object", pricing: TEST_MODEL_PRICING },
+        actorReplanner: { providerId: "test-provider", model: "actor-replanner", strategy: "strict_object", pricing: TEST_MODEL_PRICING },
+        narrator: { providerId: "test-provider", model: "narrator", strategy: "strict_object", pricing: TEST_MODEL_PRICING },
+      },
+    });
+    const judgeToken = repository.claimStage({
+      turnId,
+      expectedStage: "admitted",
+      observedEpoch: 0,
+      owner: "judge-worker",
+      claimedAt: 3_050,
+      leaseExpiresAt: 3_400,
+      mutationId: "judge-recovery-claim",
+    });
+    const feedback: CampaignPlayJudgeRecoveryFeedback = {
+      issues: [
+        {
+          issueIndex: 0,
+          code: "semantic_contract_invalid",
+          path: ["visibleActorReactions", 1, "actorHandle"],
+          message: "Visible actor reaction handles must match the exact visible actor catalog in order.",
+          check: "visible_actor_reactions_catalog",
+        },
+        {
+          issueIndex: 1,
+          code: "semantic_contract_invalid",
+          path: ["visibleActorReactions", 0, "supportingVisibleFactHandle"],
+          message: "A none reaction must use a null supporting visible fact handle.",
+          check: "visible_actor_reactions_none_support",
+        },
+      ],
+    };
+    const diagnostic = { owner: "judge" as const, issues: feedback.issues };
+    const interrupted = repository.interruptExternal({
+      token: judgeToken,
+      evidence: {
+        ...executionEvidence("judge"),
+        schemaOutcome: "invalid" as const,
+        errorCode: "model_contract_invalid" as const,
+        contractFailureDiagnostic: diagnostic,
+      },
+      interruptedAt: 3_100,
+      mutationId: "judge-recovery-interrupted",
+    });
+    expect(interrupted).toMatchObject({
+      stage: "interrupted",
+      interruptedStage: "admitted",
+      errorCode: "model_contract_invalid",
+    });
+    const expectedDiagnosticJson = JSON.stringify(diagnostic);
+    expect(handle.sqlite.prepare(`
+      SELECT contract_failure_diagnostic_json AS contractFailureDiagnosticJson
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'judge' AND attempt = 1
+    `).get(campaignId, turnId)).toEqual({
+      contractFailureDiagnosticJson: expectedDiagnosticJson,
+    });
+    expect(repository.loadLatestJudgeRecoveryFeedback(turnId, "admitted")).toEqual(feedback);
+
+    handle.close();
+    handles = handles.filter((candidate) => candidate !== handle);
+    const reopened = openPlay();
+    const reopenedRepository = createCampaignPlayTurnRepository(reopened);
+    expect(reopenedRepository.loadLatestJudgeRecoveryFeedback(turnId, "admitted"))
+      .toEqual(feedback);
+
+    disableCampaignPlayGuards(reopened);
+    reopened.sqlite.prepare(`
+      UPDATE campaign_play_model_stages
+      SET contract_failure_diagnostic_json = ?
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'judge' AND attempt = 1
+    `).run(JSON.stringify({ owner: "narrator", recoveryDiagnostic: "not-a-valid-diagnostic" }), campaignId, turnId);
+    expectTurnError(
+      () => reopenedRepository.loadLatestJudgeRecoveryFeedback(turnId, "admitted"),
+      "turn_corrupt",
+    );
   });
 
   it("rejects a narrator contract diagnostic on a game-master stage", () => {

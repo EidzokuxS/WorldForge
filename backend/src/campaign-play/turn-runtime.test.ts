@@ -753,6 +753,48 @@ function judgeFixture(
   };
 }
 
+function visibleActorReactionRecoveryJudgeFixture(
+  modelEvidence: CampaignPlayModelEvidence = acceptedEvidence("test-judge"),
+) {
+  const compiler = createCampaignPlayJudge();
+  let calls = 0;
+  const requests: Array<Parameters<ReturnType<typeof createCampaignPlayJudge>["judge"]>[0]> = [];
+  return {
+    requests,
+    judge: vi.fn(async (request: Parameters<ReturnType<typeof createCampaignPlayJudge>["judge"]>[0]) => {
+      calls += 1;
+      requests.push(request);
+      const actors = request.frame.visibleFacts.filter((fact) =>
+        fact.kind === "actor" && fact.handle !== request.frame.playerActorHandle);
+      if (actors.length < 2) throw new Error("Reaction recovery fixture requires two visible actors.");
+      const reactions = actors.map((actor, index) => ({
+        actorHandle: calls === 1 ? actors[0]!.handle : actor.handle,
+        reaction: "none" as const,
+        supportingVisibleFactHandle: calls === 1 && index === 0 ? actors[0]!.handle : null,
+        reason: "No additional material reaction is established.",
+      }));
+      const ruling = compiler.compile(request.frame, request.input, {
+        kind: "contact",
+        targets: [{ handle: actors[0]!.handle, kind: "actor" }],
+        visibleActorReactions: reactions,
+        method: "Ask the visible signal keeper what changed at the gate.",
+        stakes: "Learn what changes at the signal gate.",
+        movementRouteHandle: null,
+        possessionEffectAuthority: { kind: "none" },
+        requiredObligationEffect: { kind: "none" },
+        disposition: "deterministic",
+        citedVisibleFactHandles: [request.frame.locationHandle],
+        resultBounds: { minimum: "success", maximum: "success" },
+        elapsedBounds: { minimumMinutes: 1, maximumMinutes: 2 },
+        uncertainty: { kind: "none" },
+        reason: "The visible situation supports this ruling.",
+        clarificationQuestion: null,
+      });
+      return { ruling, rulingHash: "f".repeat(64), modelEvidence };
+    }),
+  };
+}
+
 function gameMasterFixture(
   worldEventCount = 1,
   includeSubmittedText = false,
@@ -2242,6 +2284,99 @@ describe("Campaign Play player-action turn runtime", () => {
     await advanceUntilStage(runtime, time, admission.turnId, "completed");
     await runtime.runNarration(admission.turnId);
 
+    const collectCommand = handle.sqlite.prepare(`SELECT command.read_scope_json AS readScopeJson,
+        event.affected_refs_json AS affectedRefsJson
+      FROM campaign_play_commands command
+      JOIN campaign_play_events event ON event.command_id = command.command_id
+        AND event.campaign_id = command.campaign_id
+      WHERE command.campaign_id = ? AND command.turn_id = ?
+        AND command.command_kind = 'adjust_actor_possession'`)
+      .get(CAMPAIGN_ID, admission.turnId) as {
+        readScopeJson: string;
+        affectedRefsJson: string;
+      };
+    expect(JSON.parse(collectCommand.readScopeJson)).toEqual(expect.arrayContaining([
+      { kind: "location", id: "location-a" },
+      { kind: "location", id: "location-c" },
+    ]));
+    expect(JSON.parse(collectCommand.affectedRefsJson)).toEqual(expect.arrayContaining([
+      { kind: "location", id: "location-a" },
+      { kind: "location", id: "location-c" },
+    ]));
+
+    const collectObservationRows = handle.sqlite.prepare(`SELECT observation.observation_id AS observationId,
+        observation.channel, observation.source_location_id AS sourceLocationId,
+        observation.public_entry_json AS publicEntryJson
+      FROM campaign_play_observations observation
+      JOIN campaign_play_events event ON event.event_id = observation.event_id
+        AND event.campaign_id = observation.campaign_id
+      WHERE event.turn_id = ?
+      ORDER BY observation.world_time_minutes, observation.observation_id`)
+      .all(admission.turnId) as Array<{
+        observationId: string;
+        channel: string;
+        sourceLocationId: string | null;
+        publicEntryJson: string;
+      }>;
+    expect(collectObservationRows).toHaveLength(1);
+    const collectObservation = JSON.parse(collectObservationRows[0]!.publicEntryJson) as {
+      observationHandle: string;
+      title: string;
+      text: string;
+      whereOrRoute: string;
+      consequence: { observationHandle: string; causalCue: string } | null;
+    };
+    expect(collectObservationRows[0]).toMatchObject({
+      channel: "direct_perception",
+      sourceLocationId: "location-c",
+    });
+    expect(collectObservation).toMatchObject({
+      title: "Your action",
+      text: `Collected ${decision.acceptEffect.subjectName} from Sel Bell.`,
+      whereOrRoute: "Bell Island Tower",
+      consequence: {
+        causalCue: "direct_perception",
+      },
+    });
+    expect(collectObservation.text).not.toBe(collect.label);
+    expect(collectObservation.text).not.toBe(decisionFixture.summary);
+
+    const collectNarration = handle.sqlite.prepare(`SELECT packet_json AS packetJson,
+        scene.beats_json AS beatsJson, operation.status AS operationStatus
+      FROM campaign_play_narrations narration
+      JOIN campaign_play_narration_operations operation
+        ON operation.campaign_id = narration.campaign_id
+        AND operation.turn_id = narration.turn_id
+        AND operation.narration_id = narration.narration_id
+        AND operation.packet_hash = narration.packet_hash
+      JOIN campaign_play_proper_scenes scene
+        ON scene.campaign_id = operation.campaign_id
+        AND scene.operation_id = operation.operation_id
+      WHERE narration.campaign_id = ? AND narration.turn_id = ?
+      ORDER BY operation.created_at DESC LIMIT 1`).get(
+        CAMPAIGN_ID,
+        admission.turnId,
+      ) as { packetJson: string; beatsJson: string; operationStatus: string };
+    const collectPacket = JSON.parse(collectNarration.packetJson) as CampaignPlayNarratorPacket;
+    expect(collectNarration.operationStatus).toBe("complete");
+    expect(collectPacket.newObservations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        observationHandle: collectObservation.observationHandle,
+        title: "Your action",
+        text: collectObservation.text,
+        whereOrRoute: "Bell Island Tower",
+      }),
+    ]));
+    expect(collectPacket.consequences).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        observationHandle: collectObservation.observationHandle,
+        causalCue: "direct_perception",
+        whatChanged: collectObservation.text,
+      }),
+    ]));
+    expect(JSON.parse(collectNarration.beatsJson) as Array<{ beatId: string; text: string }>)
+      .toHaveLength(1);
+
     expect(judge.judge).toHaveBeenCalledTimes(0);
     expect(gameMaster.plan).toHaveBeenCalledTimes(0);
     expect(handle.sqlite.prepare(`SELECT possession_key AS possessionKey, name, quantity
@@ -2276,7 +2411,109 @@ describe("Campaign Play player-action turn runtime", () => {
     ).get(CAMPAIGN_ID, admission.turnId)).toEqual({ count: 1 });
   });
 
-  it("settles a signed delivery after the employer becomes remote and absent", async () => {
+  it("completes a signed collect when its destination is the current pickup location", async () => {
+    const decision = {
+      ...decisionFixture,
+      acceptEffect: {
+        kind: "paid_delivery" as const,
+        title: "Carry the sealed route map",
+        subjectName: "Sealed route map",
+        destinationHandle: deriveCampaignPlayPublicHandle(
+          "location",
+          CAMPAIGN_ID,
+          "location-c",
+        ),
+        feeUnit: "copper" as const,
+        feeAmount: 7,
+        paymentTiming: "on_completion" as const,
+        dueInMinutes: 15,
+      },
+    };
+    const { handle, state } = await createReadyCampaignWithOpening(10_000, { decision });
+    const time = fixedClock(1_925);
+    const runtime = turnRuntime(handle, time, commitmentCollectJudgeFixture(), commitmentCollectGameMasterFixture(), {
+      narrator: playerNarratorFixture(),
+    });
+    const accept = renderedDecisionSuggestion(handle, "accept");
+    const acceptance = runtime.admitAction({
+      request: {
+        idempotencyKey: "same-location-collect-accept",
+        expectedWorldVersion: state.authority.worldVersion,
+        expectedRuntimeRevision: state.authority.runtimeRevision,
+        source: "suggested",
+        choiceHandle: accept.choiceHandle,
+        decisionBinding: accept.decisionBinding,
+      },
+      submittedAt: 1_925,
+    });
+    await advanceUntilStage(runtime, time, acceptance.turnId, "completed");
+    await runtime.runNarration(acceptance.turnId);
+
+    const collect = renderedCommitmentSuggestionForTurn(handle, acceptance.turnId, "collect");
+    const beforeCollect = createCampaignPlayStateRepository(handle).loadState()!;
+    const admission = runtime.admitAction({
+      request: {
+        idempotencyKey: "same-location-collect",
+        expectedWorldVersion: beforeCollect.authority.worldVersion,
+        expectedRuntimeRevision: beforeCollect.authority.runtimeRevision,
+        source: "suggested",
+        choiceHandle: collect.choiceHandle,
+        commitmentBinding: collect.commitmentBinding,
+      },
+      submittedAt: 1_926,
+    });
+    expect(loadCampaignPlayPlayerActionAdmissionFrame(runtime.loadTurn(admission.turnId)!)
+      .executionRoute.kind).toBe("certified_commitment");
+
+    await advanceUntilStage(runtime, time, admission.turnId, "completed");
+    await runtime.runNarration(admission.turnId);
+    const collectCommand = handle.sqlite.prepare(`SELECT protected_payload_json AS protectedPayloadJson,
+        exposure_policy_json AS exposurePolicyJson,
+        read_scope_json AS readScopeJson, event.affected_refs_json AS affectedRefsJson
+      FROM campaign_play_commands
+      JOIN campaign_play_events event ON event.command_id = campaign_play_commands.command_id
+        AND event.campaign_id = campaign_play_commands.campaign_id
+      WHERE campaign_play_commands.campaign_id = ?
+        AND campaign_play_commands.turn_id = ?
+        AND campaign_play_commands.command_kind = 'adjust_actor_possession'`
+    ).get(CAMPAIGN_ID, admission.turnId) as {
+      protectedPayloadJson: string;
+      exposurePolicyJson: string;
+      readScopeJson: string;
+      affectedRefsJson: string;
+    };
+    expect(JSON.parse(collectCommand.protectedPayloadJson)).toMatchObject({
+      summary: "Collected Sealed route map from Sel Bell.",
+    });
+    expect(JSON.parse(collectCommand.exposurePolicyJson)).toEqual({
+      mode: "projectable",
+      predicates: [{ channel: "direct_perception", locationId: "location-c" }],
+    });
+    const sameLocationReadScope = JSON.parse(collectCommand.readScopeJson) as Array<{
+      kind: string;
+      id: string;
+    }>;
+    const sameLocationAffectedRefs = JSON.parse(collectCommand.affectedRefsJson) as Array<{
+      kind: string;
+      id: string;
+    }>;
+    expect(sameLocationReadScope.filter((reference) =>
+      reference.kind === "location" && reference.id === "location-c")).toHaveLength(1);
+    expect(sameLocationAffectedRefs.filter((reference) =>
+      reference.kind === "location" && reference.id === "location-c")).toHaveLength(1);
+    expect(handle.sqlite.prepare(`SELECT quantity FROM campaign_play_actor_possessions
+      WHERE campaign_id = ? AND actor_id = ? AND name = ?`).get(
+        CAMPAIGN_ID,
+        PLAYER_ID,
+        decision.acceptEffect.subjectName,
+      )).toEqual({ quantity: 1 });
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_commands WHERE campaign_id = ? AND turn_id = ?
+        AND command_kind = 'adjust_actor_possession'`
+    ).get(CAMPAIGN_ID, admission.turnId)).toEqual({ count: 1 });
+  });
+
+  it("completes a signed delivery after the employer becomes remote and absent with immediate Copper payment", async () => {
     const decision = {
       ...decisionFixture,
       acceptEffect: {
@@ -2415,7 +2652,7 @@ describe("Campaign Play player-action turn runtime", () => {
       ORDER BY command_order`).all(CAMPAIGN_ID, delivery.turnId);
     expect(commandKinds).toEqual([
       { commandKind: "adjust_actor_possession" },
-      { commandKind: "incur_actor_obligation" },
+      { commandKind: "adjust_actor_possession" },
       { commandKind: "complete_player_commitment" },
     ]);
     expect(handle.sqlite.prepare(`SELECT quantity FROM campaign_play_actor_possessions
@@ -2424,14 +2661,50 @@ describe("Campaign Play player-action turn runtime", () => {
       PLAYER_ID,
       decision.acceptEffect.subjectName,
     )).toEqual({ quantity: 0 });
-    expect(handle.sqlite.prepare(`SELECT debtor_actor_id AS debtorActorId,
-        creditor_actor_id AS creditorActorId, principal_amount AS amount, unit_key AS unit
-      FROM campaign_play_actor_obligations WHERE campaign_id = ?`).get(CAMPAIGN_ID)).toEqual({
-      debtorActorId: commitment.counterpartyActorId,
-      creditorActorId: PLAYER_ID,
-      amount: decision.acceptEffect.feeAmount,
-      unit: decision.acceptEffect.feeUnit,
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_actor_obligations WHERE campaign_id = ?`).get(CAMPAIGN_ID))
+      .toEqual({ count: 0 });
+    expect(handle.sqlite.prepare(`SELECT possession_key AS possessionKey,
+        name, quantity FROM campaign_play_actor_possessions
+      WHERE campaign_id = ? AND actor_id = ? AND possession_key = 'copper'`
+    ).get(CAMPAIGN_ID, PLAYER_ID)).toEqual({
+      possessionKey: "copper",
+      name: "Copper",
+      quantity: decision.acceptEffect.feeAmount,
     });
+    expect(handle.sqlite.prepare(`SELECT json_extract(protected_payload_json, '$.actorId') AS actorId,
+        json_extract(protected_payload_json, '$.possessionKey') AS possessionKey,
+        json_extract(protected_payload_json, '$.name') AS name,
+        json_extract(protected_payload_json, '$.quantityDelta') AS quantityDelta,
+        json_extract(exposure_policy_json, '$.mode') AS exposureMode,
+        json_extract(exposure_policy_json, '$.predicates[0].channel') AS exposureChannel,
+        json_extract(exposure_policy_json, '$.predicates[0].locationId') AS exposureLocationId
+      FROM campaign_play_commands
+      WHERE campaign_id = ? AND turn_id = ? AND command_order = 1`
+    ).get(CAMPAIGN_ID, delivery.turnId)).toEqual({
+      actorId: PLAYER_ID,
+      possessionKey: "copper",
+      name: "Copper",
+      quantityDelta: decision.acceptEffect.feeAmount,
+      exposureMode: "projectable",
+      exposureChannel: "direct_perception",
+      exposureLocationId: "location-c",
+    });
+    expect(handle.sqlite.prepare(`SELECT event_kind AS eventKind, COUNT(*) AS count
+      FROM campaign_play_events WHERE campaign_id = ? AND turn_id = ?
+        AND event_kind = 'actor_possession_adjusted'
+      GROUP BY event_kind`).all(CAMPAIGN_ID, delivery.turnId)).toEqual([
+      { eventKind: "actor_possession_adjusted", count: 2 },
+    ]);
+    expect(handle.sqlite.prepare(`SELECT exposure.channel,
+        exposure.location_id AS locationId
+      FROM campaign_play_event_exposures exposure
+      JOIN campaign_play_events event ON event.event_id = exposure.event_id
+      JOIN campaign_play_commands command ON command.command_id = event.command_id
+      WHERE exposure.campaign_id = ? AND event.turn_id = ?
+        AND command.command_order = 1`).all(CAMPAIGN_ID, delivery.turnId)).toEqual([
+      { channel: "direct_perception", locationId: "location-c" },
+    ]);
     expect(handle.sqlite.prepare(`SELECT status, completion_turn_id AS completionTurnId
       FROM campaign_play_commitments WHERE campaign_id = ? AND commitment_id = ?`).get(
       CAMPAIGN_ID,
@@ -2451,7 +2724,7 @@ describe("Campaign Play player-action turn runtime", () => {
     ]));
   });
 
-  it("settles a visible paid-delivery receivable through its typed control and retains the completed commitment", async () => {
+  it("pays a visible paid-delivery fee immediately and retains the completed commitment", async () => {
     const decision = {
       ...decisionFixture,
       acceptEffect: {
@@ -2509,104 +2782,31 @@ describe("Campaign Play player-action turn runtime", () => {
 
     const deliver = renderedCommitmentSuggestionForTurn(handle, collection.turnId, "deliver");
     const beforeDelivery = createCampaignPlayStateRepository(handle).loadState()!;
+    const deliveryRequest = {
+      idempotencyKey: "paid-delivery-immediate-payment-deliver",
+      expectedWorldVersion: beforeDelivery.authority.worldVersion,
+      expectedRuntimeRevision: beforeDelivery.authority.runtimeRevision,
+      source: "suggested" as const,
+      choiceHandle: deliver.choiceHandle,
+      commitmentBinding: deliver.commitmentBinding,
+    };
     const delivery = runtime.admitAction({
-      request: {
-        idempotencyKey: "paid-delivery-receivable-deliver",
-        expectedWorldVersion: beforeDelivery.authority.worldVersion,
-        expectedRuntimeRevision: beforeDelivery.authority.runtimeRevision,
-        source: "suggested",
-        choiceHandle: deliver.choiceHandle,
-        commitmentBinding: deliver.commitmentBinding,
-      },
+      request: deliveryRequest,
       submittedAt: 1_927,
     });
     await advanceUntilStage(runtime, time, delivery.turnId, "completed");
     await runtime.runNarration(delivery.turnId);
 
     const commitment = handle.sqlite.prepare(`SELECT commitment_id AS commitmentId,
-        counterparty_actor_id AS counterpartyActorId, status
+        counterparty_actor_id AS counterpartyActorId, status,
+        completion_receipt_id AS completionReceiptId
       FROM campaign_play_commitments WHERE campaign_id = ?`).get(CAMPAIGN_ID) as {
         commitmentId: string;
         counterpartyActorId: string;
         status: string;
-      };
-    const obligationRow = handle.sqlite.prepare(`SELECT obligation_id AS obligationId,
-        debtor_actor_id AS debtorActorId, creditor_actor_id AS creditorActorId,
-        unit_key AS unitKey, outstanding_amount AS outstandingAmount
-      FROM campaign_play_actor_obligations WHERE campaign_id = ?`).get(CAMPAIGN_ID) as {
-        obligationId: string;
-        debtorActorId: string;
-        creditorActorId: string;
-        unitKey: string;
-        outstandingAmount: number;
+        completionReceiptId: string;
       };
     expect(commitment.status).toBe("completed");
-    expect(obligationRow).toMatchObject({
-      debtorActorId: commitment.counterpartyActorId,
-      creditorActorId: PLAYER_ID,
-      unitKey: "copper",
-      outstandingAmount: 7,
-    });
-
-    const collectReceivable = renderedObligationSuggestionForTurn(handle, delivery.turnId);
-    expect(collectReceivable.obligationBinding).toEqual({
-      obligationHandle: deriveCampaignPlayPublicHandle(
-        "obligation",
-        CAMPAIGN_ID,
-        obligationRow.obligationId,
-      ),
-      debtorHandle: deriveCampaignPlayPublicHandle(
-        "actor",
-        CAMPAIGN_ID,
-        obligationRow.debtorActorId,
-      ),
-      creditorHandle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, PLAYER_ID),
-      unitKey: "copper",
-      amount: 7,
-    });
-    expect(collectReceivable.label).toBe(`Collect 7 copper from Sel Bell`);
-
-    const beforeSettlement = createCampaignPlayStateRepository(handle).loadState()!;
-    const judgeCallsBeforeSettlement = judge.judge.mock.calls.length;
-    const gameMasterCallsBeforeSettlement = gameMaster.plan.mock.calls.length;
-    const settlementRequest = {
-      idempotencyKey: "paid-delivery-receivable-settle",
-      expectedWorldVersion: beforeSettlement.authority.worldVersion,
-      expectedRuntimeRevision: beforeSettlement.authority.runtimeRevision,
-      source: "suggested" as const,
-      choiceHandle: collectReceivable.choiceHandle,
-      obligationBinding: collectReceivable.obligationBinding,
-    };
-    const settlement = runtime.admitAction({
-      request: settlementRequest,
-      submittedAt: 1_928,
-    });
-    expect(loadCampaignPlayPlayerActionAdmissionFrame(runtime.loadTurn(settlement.turnId)!)
-      .executionRoute.kind).toBe("certified_obligation");
-    await advanceUntilStage(runtime, time, settlement.turnId, "completed");
-    await runtime.runNarration(settlement.turnId);
-
-    expect(judge.judge).toHaveBeenCalledTimes(judgeCallsBeforeSettlement);
-    expect(gameMaster.plan).toHaveBeenCalledTimes(gameMasterCallsBeforeSettlement);
-    expect(handle.sqlite.prepare(`SELECT command_kind AS commandKind, COUNT(*) AS count
-      FROM campaign_play_commands WHERE campaign_id = ? AND turn_id = ?
-      GROUP BY command_kind`).all(CAMPAIGN_ID, settlement.turnId)).toEqual([
-      { commandKind: "settle_player_receivable", count: 1 },
-    ]);
-    expect(handle.sqlite.prepare(`SELECT command_kind AS commandKind, COUNT(*) AS count
-      FROM campaign_play_receipts WHERE campaign_id = ? AND turn_id = ?
-      GROUP BY command_kind`).all(CAMPAIGN_ID, settlement.turnId)).toEqual([
-      { commandKind: "settle_player_receivable", count: 1 },
-    ]);
-    expect(handle.sqlite.prepare(`SELECT event_kind AS eventKind, COUNT(*) AS count
-      FROM campaign_play_events WHERE campaign_id = ? AND turn_id = ?
-        AND event_kind = 'player_receivable_settled'
-      GROUP BY event_kind`).all(CAMPAIGN_ID, settlement.turnId)).toEqual([
-      { eventKind: "player_receivable_settled", count: 1 },
-    ]);
-    expect(handle.sqlite.prepare(`SELECT outstanding_amount AS outstandingAmount
-      FROM campaign_play_actor_obligations WHERE campaign_id = ? AND obligation_id = ?`)
-      .get(CAMPAIGN_ID, obligationRow.obligationId)).toEqual({ outstandingAmount: 0 });
     expect(handle.sqlite.prepare(`SELECT possession_key AS possessionKey,
         name, quantity FROM campaign_play_actor_possessions
       WHERE campaign_id = ? AND actor_id = ? AND possession_key = 'copper'`)
@@ -2615,10 +2815,24 @@ describe("Campaign Play player-action turn runtime", () => {
         name: "Copper",
         quantity: 7,
       });
-    expect(handle.sqlite.prepare(`SELECT status FROM campaign_play_commitments
-      WHERE campaign_id = ? AND commitment_id = ?`).get(CAMPAIGN_ID, commitment.commitmentId))
-      .toEqual({ status: "completed" });
-
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_actor_obligations WHERE campaign_id = ?`).get(CAMPAIGN_ID))
+      .toEqual({ count: 0 });
+    expect(handle.sqlite.prepare(`SELECT command_kind AS commandKind, COUNT(*) AS count
+      FROM campaign_play_commands WHERE campaign_id = ? AND turn_id = ?
+      GROUP BY command_kind ORDER BY command_kind`).all(CAMPAIGN_ID, delivery.turnId)).toEqual([
+      { commandKind: "adjust_actor_possession", count: 2 },
+      { commandKind: "complete_player_commitment", count: 1 },
+    ]);
+    expect(handle.sqlite.prepare(`SELECT receipt_id AS receiptId,
+        prior_world_version AS priorWorldVersion,
+        result_world_version AS resultWorldVersion
+      FROM campaign_play_receipts WHERE receipt_id = ?`).get(commitment.completionReceiptId))
+      .toEqual({
+        receiptId: commitment.completionReceiptId,
+        priorWorldVersion: expect.any(Number),
+        resultWorldVersion: expect.any(Number),
+      });
     const reloaded = createCampaignPlayReadModel(handle).loadState();
     expect(reloaded.commitments).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -2626,55 +2840,42 @@ describe("Campaign Play player-action turn runtime", () => {
         status: "completed",
       }),
     ]));
-    const settlementNarration = handle.sqlite.prepare(`SELECT packet_json AS packetJson
+    const deliveryNarration = handle.sqlite.prepare(`SELECT packet_json AS packetJson
       FROM campaign_play_narrations WHERE campaign_id = ? AND turn_id = ?
-      ORDER BY completed_at DESC LIMIT 1`).get(CAMPAIGN_ID, settlement.turnId) as {
+      ORDER BY completed_at DESC LIMIT 1`).get(CAMPAIGN_ID, delivery.turnId) as {
         packetJson: string;
       };
-    const settlementPacket = JSON.parse(settlementNarration.packetJson) as CampaignPlayNarratorPacket;
-    expect(settlementPacket.actionContext).toMatchObject({
-      submittedText: collectReceivable.label,
-      intentKind: "contact",
-      disposition: "deterministic",
-      result: "success",
-      obligationSettlement: {
-        obligationHandle: collectReceivable.obligationBinding.obligationHandle,
-        debtorHandle: collectReceivable.obligationBinding.debtorHandle,
-        creditorHandle: collectReceivable.obligationBinding.creditorHandle,
-        unitKey: "copper",
-        amount: 7,
-        status: "settled",
-        sourceTurnId: settlement.turnId,
-        summary: collectReceivable.label,
-      },
-    });
-    expect(settlementPacket.availableIntents.some((intent) => intent.obligationBinding !== undefined))
-      .toBe(false);
+    const deliveryPacket = JSON.parse(deliveryNarration.packetJson) as CampaignPlayNarratorPacket;
+    expect(deliveryPacket.commitments).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "paid_delivery",
+        status: "completed",
+        feeAmount: 7,
+        paymentTiming: "on_completion",
+      }),
+    ]));
+    expect(deliveryPacket.consequences).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        whatChanged: "Paid 7 Copper on completion of Sealed route map delivery.",
+        whereOrRoute: "Bell Island Tower",
+      }),
+    ]));
 
+    const commandCountBeforeReplay = (handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_commands WHERE campaign_id = ?`).get(CAMPAIGN_ID) as { count: number }).count;
     const replay = runtime.admitAction({
-      request: settlementRequest,
+      request: deliveryRequest,
       submittedAt: 1_929,
     });
-    expect(replay.turnId).toBe(settlement.turnId);
+    expect(replay.turnId).toBe(delivery.turnId);
     expect(handle.sqlite.prepare(`SELECT quantity FROM campaign_play_actor_possessions
       WHERE campaign_id = ? AND actor_id = ? AND possession_key = 'copper'`).get(
       CAMPAIGN_ID,
       PLAYER_ID,
     )).toEqual({ quantity: 7 });
-    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count FROM campaign_play_events
-      WHERE campaign_id = ? AND event_kind = 'player_receivable_settled'`).get(CAMPAIGN_ID))
-      .toEqual({ count: 1 });
-
-    const afterSettlement = createCampaignPlayStateRepository(handle).loadState()!;
-    expect(() => runtime.admitAction({
-      request: {
-        ...settlementRequest,
-        idempotencyKey: "paid-delivery-receivable-stale",
-        expectedWorldVersion: afterSettlement.authority.worldVersion,
-        expectedRuntimeRevision: afterSettlement.authority.runtimeRevision,
-      },
-      submittedAt: 1_930,
-    })).toThrowError(expect.objectContaining({ code: "turn_request_invalid" }));
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_commands WHERE campaign_id = ?`).get(CAMPAIGN_ID))
+      .toEqual({ count: commandCountBeforeReplay });
   });
 
   it("declines a custody decision without creating a possession adjustment", async () => {
@@ -3407,7 +3608,7 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(waitDelays).toContain(45_000);
   });
 
-  it("uses default reasoning for a certified semantic recovery without Judge or duplicate settlement", async () => {
+  it("keeps a certified semantic recovery on the admitted model without Judge or duplicate settlement", async () => {
     const { handle, state } = await createReadyCampaignWithOpening(10_000, {
       contactDetail: "What is happening here?",
     });
@@ -3477,7 +3678,7 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "planned", workerEpoch: 2 });
     expect(judge.judge).toHaveBeenCalledTimes(0);
     expect(gameMaster.plan).toHaveBeenCalledTimes(2);
-    expect(observedModels).toEqual([bypassModel, reasoningModel]);
+    expect(observedModels).toEqual([bypassModel, bypassModel]);
     expect(observedModes).toEqual(["auto", "auto"]);
     await advanceUntilStage(runtime, time, admission.turnId, "completed");
     expect(countForTurn(handle, "campaign_play_turn_results", admission.turnId)).toBe(1);
@@ -3778,6 +3979,11 @@ describe("Campaign Play player-action turn runtime", () => {
         result: "success",
       },
     });
+    const arrivalText = `You arrived at ${movePacket.currentLocation.name}.`;
+    expect(movePacket.newObservations.filter((entry) => entry.text === arrivalText))
+      .toHaveLength(1);
+    expect(movePacket.availableIntents.some((intent) =>
+      intent.label.startsWith("Try a risky approach to "))).toBe(false);
     expect(movePacket.sourceMoment).toBeNull();
     expect(countForTurn(handle, "campaign_play_turn_results", admitted.turnId)).toBe(1);
     expect(countForTurn(handle, "campaign_play_receipts", admitted.turnId)).toBeGreaterThan(0);
@@ -4621,17 +4827,15 @@ describe("Campaign Play player-action turn runtime", () => {
       label: "model contract invalid",
       error: "model_contract_failed" as const,
       persistedErrorCode: "model_contract_invalid" as const,
-      expectedSecondModel: "reasoning" as const,
     },
     {
       label: "provider unavailable",
       error: "transport_interrupted" as const,
       persistedErrorCode: "provider_unavailable" as const,
-      expectedSecondModel: "language" as const,
     },
   ])(
     "keeps Judge attempt 2 in native structured-output mode after a no-feedback $label interruption",
-    async ({ error, persistedErrorCode, expectedSecondModel }) => {
+    async ({ error, persistedErrorCode }) => {
       const { handle, state } = await createReadyCampaignWithOpening();
       const time = fixedClock(2_610);
       const acceptedJudge = judgeFixture("deterministic");
@@ -4698,10 +4902,7 @@ describe("Campaign Play player-action turn runtime", () => {
 
       expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "primary_settled" });
       expect(observedModes).toEqual(["auto", "auto"]);
-      expect(observedModels).toEqual([
-        languageModel,
-        expectedSecondModel === "reasoning" ? reasoningModel : languageModel,
-      ]);
+      expect(observedModels).toEqual([languageModel, languageModel]);
       expect(judge.judge).toHaveBeenCalledTimes(2);
       expect(countForTurn(handle, "campaign_play_commands", admission.turnId)).toBe(2);
       expect(handle.sqlite.prepare(`SELECT count(*) AS value FROM campaign_play_model_stages
@@ -4817,6 +5018,114 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(handle.sqlite.prepare(`SELECT count(*) AS value FROM campaign_play_model_stages
       WHERE campaign_id = ? AND turn_id = ? AND kind = 'judge'`)
       .get(CAMPAIGN_ID, admission.turnId)).toEqual({ value: 2 });
+  });
+
+  it("keeps visible actor reaction recovery on the admitted Flash Judge model", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening();
+    const time = fixedClock(2_640);
+    const languageModel = { specificationVersion: "v3" } as unknown as LanguageModel;
+    const reasoningModel = { specificationVersion: "v3" } as unknown as LanguageModel;
+    const modelEvidence = acceptedEvidence(
+      "test-judge",
+      "zai-coding-plan",
+      "glm-5.3-flash",
+    );
+    const judge = visibleActorReactionRecoveryJudgeFixture(modelEvidence);
+    const judgeModel = {
+      languageModel,
+      reasoningModel,
+      requested: {
+        providerId: "zai-coding-plan",
+        model: "glm-5.3-flash",
+        strategy: "strict_object" as const,
+        pricing: TEST_MODEL_PRICING,
+      },
+      temperature: 0.2,
+      maximumInputTokens: 1_000,
+      maximumOutputTokens: 1_000,
+      maximumTotalTokens: 2_000,
+      maximumCostMicros: 10_000,
+    };
+    let recoveredFeedback: CampaignPlayJudgeRecoveryFeedback | undefined;
+    const firstRuntime = turnRuntime(handle, time, judge, gameMasterFixture(), {
+      judgeModel,
+      onJudgeRecoveryFeedback: (feedback) => { recoveredFeedback = feedback; },
+    });
+    const admission = firstRuntime.admitAction({
+      request: admissionRequest(state, "judge-visible-reaction-recovery"),
+      submittedAt: 2_640,
+    });
+    time.advance();
+    const first = await firstRuntime.runNextStage(admission.turnId);
+    expect(first.turn).toMatchObject({
+      stage: "interrupted",
+      interruptedStage: "admitted",
+      errorCode: "model_contract_invalid",
+      resumeEligible: true,
+    });
+    expect(recoveredFeedback?.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ check: "visible_actor_reactions_duplicates" }),
+      expect.objectContaining({ check: "visible_actor_reactions_set" }),
+      expect.objectContaining({ check: "visible_actor_reactions_catalog" }),
+      expect.objectContaining({ check: "visible_actor_reactions_none_support" }),
+    ]));
+    if (recoveredFeedback === undefined) throw new Error("Expected safe Judge reaction recovery feedback.");
+    const interrupted = firstRuntime.loadTurn(admission.turnId)!;
+
+    const secondRuntime = turnRuntime(handle, time, judge, gameMasterFixture(), {
+      judgeModel,
+      judgeRecoveryFeedback: recoveredFeedback,
+    });
+    time.advance();
+    await secondRuntime.resumeInterruptedStage({
+      turnId: admission.turnId,
+      interruptedStage: "admitted",
+      observedEpoch: interrupted.workerEpoch,
+    });
+    time.advance();
+    await secondRuntime.runNextStage(admission.turnId);
+    time.advance();
+    await secondRuntime.runNextStage(admission.turnId);
+
+    expect(secondRuntime.loadTurn(admission.turnId)).toMatchObject({ stage: "primary_settled" });
+    expect(judge.requests).toHaveLength(2);
+    expect(judge.requests.map((request) => request.model)).toEqual([languageModel, languageModel]);
+    expect(judge.requests[0]!.attempt).toBe(1);
+    expect(judge.requests[1]!.attempt).toBe(2);
+    expect(judge.requests[0]!.structuredOutputMode).toBe("auto");
+    expect(judge.requests[1]!.structuredOutputMode).toBe("auto");
+    expect(judge.requests[1]!.recoveryFeedback).toEqual(recoveredFeedback);
+    expect(judge.requests[1]!.input).toEqual(judge.requests[0]!.input);
+    expect(judge.requests[1]!.frame).toEqual(judge.requests[0]!.frame);
+    expect(handle.sqlite.prepare(`SELECT attempt,
+        requested_provider_id AS providerId, requested_model AS model,
+        actual_provider_id AS actualProviderId, actual_model AS actualModel,
+        status
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'judge'
+      ORDER BY attempt`).all(CAMPAIGN_ID, admission.turnId)).toEqual([
+      {
+        attempt: 1,
+        providerId: "zai-coding-plan",
+        model: "glm-5.3-flash",
+        actualProviderId: null,
+        actualModel: null,
+        status: "interrupted",
+      },
+      {
+        attempt: 2,
+        providerId: "zai-coding-plan",
+        model: "glm-5.3-flash",
+        actualProviderId: "zai-coding-plan",
+        actualModel: "glm-5.3-flash",
+        status: "accepted",
+      },
+    ]);
+    expect(playerActionMechanicsSnapshot(handle, admission.turnId)).toMatchObject({
+      commands: 2,
+      receipts: 2,
+      turnResults: 0,
+    });
   });
 
   it("persists a Game Master timeout and resumes the same accepted Judge ledger", async () => {
@@ -8099,13 +8408,9 @@ describe("Campaign Play player-action turn runtime", () => {
     let providerCalls = 0;
     const actorReplanner = createCampaignPlayActorReplanner(handle, {
       now: time.clock.now,
-      generateObject: (async (request: { prompt: string }) => {
+      generateObject: (async () => {
         providerCalls += 1;
-        if (providerCalls === 1) throw new Error("provider transport interrupted");
-        return {
-          object: actorReplanModelObjectFromPrompt(request.prompt),
-          trace: actorReplanTrace(),
-        };
+        throw new Error("provider transport interrupted");
       }) as unknown as typeof safeGenerateObject,
     });
     const runtime = turnRuntime(
@@ -8134,11 +8439,13 @@ describe("Campaign Play player-action turn runtime", () => {
         deferReason: "control_budget",
         workerEpoch: 1,
       });
-    expect(providerCalls).toBe(1);
+    expect(providerCalls).toBe(3);
     expect(handle.sqlite.prepare(`SELECT status, error_code AS errorCode
       FROM campaign_play_model_stages
       WHERE campaign_id = ? AND turn_id = ? AND kind = 'actor_replanner'
       ORDER BY attempt`).all(CAMPAIGN_ID, admission.turnId)).toEqual([
+      { status: "interrupted", errorCode: "provider_unavailable" },
+      { status: "interrupted", errorCode: "provider_unavailable" },
       { status: "interrupted", errorCode: "provider_unavailable" },
     ]);
     expect(runtime.loadTelemetry(admission.turnId)).toMatchObject({
@@ -8162,7 +8469,7 @@ describe("Campaign Play player-action turn runtime", () => {
       workerLeaseOwner: null,
     });
     await advanceUntilStage(runtime, time, admission.turnId, "actors_settled");
-    expect(providerCalls).toBe(1);
+    expect(providerCalls).toBe(3);
   });
 
   it("defers a replan-required actor job at zero critical-path capacity and completes the turn", async () => {
@@ -8327,7 +8634,7 @@ describe("Campaign Play player-action turn runtime", () => {
     time.advanceBy(85_000);
     const actorsSettled = await advanceUntilStage(runtime, time, admission.turnId, "actors_settled");
     expect(actorsSettled.stage).toBe("actors_settled");
-    expect(providerCalls).toBe(1);
+    expect(providerCalls).toBe(3);
 
     const jobs = createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId);
     expect(jobs.length).toBeGreaterThan(0);
@@ -8338,7 +8645,7 @@ describe("Campaign Play player-action turn runtime", () => {
       WHERE campaign_id = ? AND turn_id = ? AND kind = 'actor_replanner'`).get(
       CAMPAIGN_ID,
       admission.turnId,
-    )).toEqual({ count: 1 });
+    )).toEqual({ count: 3 });
 
     const completed = await advanceUntilStage(runtime, time, admission.turnId, "completed");
     expect(completed.terminalReason).toBe("action_resolved");
@@ -8360,7 +8667,7 @@ describe("Campaign Play player-action turn runtime", () => {
     });
   });
 
-  it("defers a provider interruption without a second actor epoch", async () => {
+  it("recovers a provider interruption without a second actor job epoch", async () => {
     const { handle, state } = await createReadyCampaignWithOpening();
     const time = fixedClock(3_800);
     let providerCalls = 0;
@@ -8393,19 +8700,33 @@ describe("Campaign Play player-action turn runtime", () => {
 
     time.advance();
     await runtime.runNextStage(admission.turnId);
-    const interruptedTurn = runtime.loadTurn(admission.turnId)!;
-    expect(providerCalls).toBe(1);
+    expect(providerCalls).toBe(3);
     expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
       .find((job) => job.jobId === jobId)).toMatchObject({
-        stage: "deferred",
-        deferReason: "control_budget",
+        stage: "claimed",
         workerEpoch: 1,
+        planId: expect.any(String),
       });
-    expect(runtime.loadTurn(admission.turnId)).toMatchObject({
+    expect(handle.sqlite.prepare(`SELECT attempt, status, error_code AS errorCode
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'actor_replanner'
+      ORDER BY attempt`).all(CAMPAIGN_ID, admission.turnId)).toEqual([
+      { attempt: 1, status: "interrupted", errorCode: "provider_unavailable" },
+      { attempt: 2, status: "accepted", errorCode: null },
+    ]);
+    const releasedTurn = runtime.loadTurn(admission.turnId)!;
+    expect({
+      stage: releasedTurn.stage,
+      workerLeaseOwner: releasedTurn.workerLeaseOwner,
+      workerLeaseExpiresAt: releasedTurn.workerLeaseExpiresAt,
+    }).toEqual({
       stage: "primary_settled",
       workerLeaseOwner: null,
+      workerLeaseExpiresAt: null,
     });
     await advanceUntilStage(runtime, time, admission.turnId, "actors_settled");
+    const completed = await advanceUntilStage(runtime, time, admission.turnId, "completed");
+    expect(completed.terminalReason).toBe("action_resolved");
   });
 
   it("defers an invalid background replan and continues the committed player turn", async () => {
@@ -8462,21 +8783,31 @@ describe("Campaign Play player-action turn runtime", () => {
     await advanceUntilStage(runtime, time, admission.turnId, "actors_settled");
   });
 
-  it("defers a contract-invalid replan when its fresh recovery window misses the control deadline", async () => {
+  it("recovers a contract-invalid replan inside the shortened control window", async () => {
     const { handle, state } = await createReadyCampaignWithOpening();
     const submittedAt = 3_800;
     const time = fixedClock(submittedAt);
     let providerCalls = 0;
-    const actorReplanner = createCampaignPlayActorReplanner(handle, {
+    const baseActorReplanner = createCampaignPlayActorReplanner(handle, {
       now: time.clock.now,
-      generateObject: (async () => {
+      generateObject: (async (request: { prompt: string }) => {
         providerCalls += 1;
         return {
-          object: { unexpected: true },
+          object: providerCalls === 1
+            ? { unexpected: true }
+            : actorReplanModelObjectFromPrompt(request.prompt),
           trace: actorReplanTrace(),
         };
       }) as unknown as typeof safeGenerateObject,
     });
+    let replanOutcome: Awaited<ReturnType<typeof baseActorReplanner.replan>> | null = null;
+    const actorReplanner = {
+      ...baseActorReplanner,
+      async replan(request: Parameters<typeof baseActorReplanner.replan>[0]) {
+        replanOutcome = await baseActorReplanner.replan(request);
+        return replanOutcome;
+      },
+    };
     const runtime = turnRuntime(
       handle,
       time,
@@ -8513,12 +8844,13 @@ describe("Campaign Play player-action turn runtime", () => {
     time.advance();
     await runtime.runNextStage(admission.turnId);
 
-    expect(providerCalls).toBe(1);
+    expect(providerCalls).toBe(3);
+    expect(replanOutcome).toMatchObject({ kind: "replanned", jobId });
     expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
       .find((job) => job.jobId === jobId)).toMatchObject({
-        stage: "deferred",
-        deferReason: "control_budget",
+        stage: "claimed",
         workerEpoch: 1,
+        planId: expect.any(String),
       });
     expect(handle.sqlite.prepare(`SELECT attempt, status, schema_outcome AS schemaOutcome,
         error_code AS errorCode
@@ -8531,23 +8863,60 @@ describe("Campaign Play player-action turn runtime", () => {
         schemaOutcome: "invalid",
         errorCode: "model_contract_invalid",
       },
+      {
+        attempt: 2,
+        status: "accepted",
+        schemaOutcome: "valid",
+        errorCode: null,
+      },
     ]);
-    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+    const attempts = handle.sqlite.prepare(`SELECT attempt_number AS attemptNumber,
+        actor_job_worker_epoch AS actorJobWorkerEpoch,
+        claim_turn_worker_epoch AS claimTurnWorkerEpoch,
+        frame_hash AS frameHash,
+        frozen_base_world_version AS frozenBaseWorldVersion,
+        deadline_at AS deadlineAt,
+        requested_provider_id AS requestedProviderId,
+        requested_model AS requestedModel,
+        retry_consumed_at AS retryConsumedAt,
+        created_at AS createdAt
       FROM campaign_play_actor_replan_attempts
-      WHERE campaign_id = ? AND job_id = ? AND attempt_number = 2`).get(
-      CAMPAIGN_ID,
-      jobId,
-    )).toEqual({ count: 0 });
-    expect(handle.sqlite.prepare(`SELECT retry_consumed_at AS retryConsumedAt
-      FROM campaign_play_actor_replan_attempts
-      WHERE campaign_id = ? AND job_id = ? AND attempt_number = 1`).get(
-      CAMPAIGN_ID,
-      jobId,
-    )).toEqual({ retryConsumedAt: null });
-    expect(runtime.loadTurn(admission.turnId)).toMatchObject({
-      stage: "primary_settled",
-      workerLeaseOwner: null,
+      WHERE campaign_id = ? AND job_id = ?
+      ORDER BY attempt_number`).all(CAMPAIGN_ID, jobId) as Array<{
+      attemptNumber: number;
+      actorJobWorkerEpoch: number;
+      claimTurnWorkerEpoch: number;
+      frameHash: string;
+      frozenBaseWorldVersion: number;
+      deadlineAt: number;
+      requestedProviderId: string;
+      requestedModel: string;
+      retryConsumedAt: number | null;
+      createdAt: number;
+    }>;
+    expect(attempts).toHaveLength(2);
+    expect(attempts[0]).toMatchObject({
+      attemptNumber: 1,
+      actorJobWorkerEpoch: 1,
+      requestedProviderId: "test",
+      requestedModel: "test-actor-replanner",
     });
+    expect(attempts[1]).toMatchObject({
+      attemptNumber: 2,
+      actorJobWorkerEpoch: 1,
+      requestedProviderId: attempts[0].requestedProviderId,
+      requestedModel: attempts[0].requestedModel,
+      frameHash: attempts[0].frameHash,
+      frozenBaseWorldVersion: attempts[0].frozenBaseWorldVersion,
+      retryConsumedAt: null,
+    });
+    expect(attempts[0].retryConsumedAt).toBe(attempts[1].createdAt);
+    expect(attempts[1].deadlineAt).toBeLessThanOrEqual(attempts[0].createdAt + 90_000);
+    expect(attempts[1].deadlineAt).toBe(attempts[0].deadlineAt);
+    const releasedTurn = runtime.loadTurn(admission.turnId)!;
+    expect(releasedTurn.stage).toBe("primary_settled");
+    expect(releasedTurn.workerLeaseOwner).toBeNull();
+    expect(releasedTurn.workerLeaseExpiresAt).toBeNull();
 
     const completed = await advanceUntilStage(runtime, time, admission.turnId, "completed");
     expect(completed.terminalReason).toBe("action_resolved");

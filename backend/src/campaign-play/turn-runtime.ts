@@ -2560,14 +2560,30 @@ function rulebookAuthority(
       { kind: "commitment", id: certificate.commitmentId },
       { kind: "location", id: certificate.destinationLocationId },
     ];
-    if (isPaidDelivery) {
+    if (certificate.action === "collect") {
+      const currentLocationBinding = frame.handleBindings.find((binding) =>
+        binding.handle === frame.sourcePacket.currentLocation.handle);
+      if (!currentLocationBinding || currentLocationBinding.reference.kind !== "location") {
+        throw new CampaignPlayTurnRuntimeError(
+          "turn_artifact_invalid",
+          "Certified collect commitment lost its current-location authority.",
+        );
+      }
+      if (!authorizedRefs.some((reference) =>
+        reference.kind === "location" && reference.id === currentLocationBinding.reference.id)) {
+        authorizedRefs.push({
+          kind: "location",
+          id: currentLocationBinding.reference.id,
+        });
+      }
+    }
+    if (isPaidDelivery && certificate.action === "deliver") {
       authorizedRefs.push({
-        kind: "obligation",
-        id: deriveCampaignPlayObligationId(
+        kind: "possession",
+        id: deriveCampaignPlayPossessionId(
           frame.campaignId,
-          certificate.counterpartyActorId,
           certificate.actorId,
-          certificate.feeUnit,
+          "copper",
         ),
       });
     }
@@ -3046,18 +3062,45 @@ function compileCertifiedRouteBatch(
     const possessionKey = deriveCampaignPlayPossessionKey(commitment.subjectName);
     const possessionRef = { kind: "possession" as const, id: possessionId };
     const isPaidDelivery = "feeAmount" in commitment;
-    const obligationId = isPaidDelivery
-      ? deriveCampaignPlayObligationId(
+    const paymentPossessionId = isPaidDelivery
+      ? deriveCampaignPlayPossessionId(
           turn.campaignId,
-          commitment.counterpartyActorId,
           commitment.actorId,
-          commitment.feeUnit,
+          "copper",
         )
       : null;
-    const obligationRef = obligationId === null
+    const paymentPossessionRef = paymentPossessionId === null
       ? null
-      : { kind: "obligation" as const, id: obligationId };
+      : { kind: "possession" as const, id: paymentPossessionId };
     if (commitment.action === "collect") {
+      const currentLocationBinding = current.frame.handleBindings.find((binding) =>
+        binding.handle === current.admission.sourcePacket.currentLocation.handle &&
+        binding.reference.kind === "location");
+      const playerPlacement = frame.placements.find((placement) =>
+        placement.actorId === commitment.actorId && placement.placementKind === "present");
+      const counterpartyPlacement = frame.placements.find((placement) =>
+        placement.actorId === commitment.counterpartyActorId && placement.placementKind === "present");
+      const counterparty = [...frame.acceptedWorld.actors, ...frame.runtimeActors]
+        .find((actor) => actor.id === commitment.counterpartyActorId);
+      if (
+        !currentLocationBinding || currentLocationBinding.reference.kind !== "location" ||
+        !playerPlacement || !counterpartyPlacement ||
+        playerPlacement.locationId !== currentLocationBinding.reference.id ||
+        counterpartyPlacement.locationId !== currentLocationBinding.reference.id ||
+        !counterparty || counterparty.kind !== "person" || counterparty.controller !== "agent"
+      ) {
+        throw new CampaignPlayTurnRuntimeError(
+          "turn_artifact_invalid",
+          "Certified collect commitment lost its exact pickup authority.",
+        );
+      }
+      const currentLocationRef = {
+        kind: "location" as const,
+        id: currentLocationBinding.reference.id,
+      };
+      const pickupGroundingRefs = currentLocationRef.id === destinationRef.id
+        ? []
+        : [currentLocationRef];
       commandArguments.push({
         kind: "adjust_actor_possession",
         actorId: commitment.actorId,
@@ -3065,11 +3108,31 @@ function compileCertifiedRouteBatch(
         possessionKey,
         name: commitment.subjectName,
         quantityDelta: 1,
-        summary: commitment.label,
-        affectedRefs: [playerRef, possessionRef, counterpartyRef, commitmentRef, destinationRef],
-        readScope: [playerRef, possessionRef, counterpartyRef, commitmentRef, destinationRef],
+        summary: `Collected ${commitment.subjectName} from ${counterparty.name}.`,
+        affectedRefs: [
+          playerRef,
+          possessionRef,
+          counterpartyRef,
+          commitmentRef,
+          destinationRef,
+          ...pickupGroundingRefs,
+        ],
+        readScope: [
+          playerRef,
+          possessionRef,
+          counterpartyRef,
+          commitmentRef,
+          destinationRef,
+          ...pickupGroundingRefs,
+        ],
         writeScope: [possessionRef],
-        exposure: { mode: "protected" },
+        exposure: {
+          mode: "projectable",
+          predicates: [{
+            channel: "direct_perception",
+            locationId: currentLocationBinding.reference.id,
+          }],
+        },
       });
     } else {
       if (commitment.possessionId === null) {
@@ -3091,19 +3154,22 @@ function compileCertifiedRouteBatch(
         writeScope: [possessionRef],
         exposure: { mode: "protected" },
       });
-      if (isPaidDelivery && obligationId !== null && obligationRef !== null) {
+      if (isPaidDelivery && paymentPossessionId !== null && paymentPossessionRef !== null) {
         commandArguments.push({
-          kind: "incur_actor_obligation",
-          debtorActorId: commitment.counterpartyActorId,
-          creditorActorId: commitment.actorId,
-          obligationId,
-          unitKey: commitment.feeUnit,
-          amount: commitment.feeAmount,
-          summary: commitment.label,
-          affectedRefs: [counterpartyRef, playerRef, obligationRef],
-          readScope: [counterpartyRef, playerRef, obligationRef],
-          writeScope: [obligationRef],
-          exposure: { mode: "protected" },
+          kind: "adjust_actor_possession",
+          actorId: commitment.actorId,
+          possessionId: paymentPossessionId,
+          possessionKey: "copper",
+          name: "Copper",
+          quantityDelta: commitment.feeAmount,
+          summary: `Paid ${commitment.feeAmount} Copper on completion of ${commitment.subjectName} delivery.`,
+          affectedRefs: [playerRef, paymentPossessionRef, counterpartyRef, commitmentRef, destinationRef],
+          readScope: [playerRef, paymentPossessionRef, counterpartyRef, commitmentRef, destinationRef],
+          writeScope: [paymentPossessionRef],
+          exposure: {
+            mode: "projectable",
+            predicates: [{ channel: "direct_perception", locationId: commitment.destinationLocationId }],
+          },
         });
       }
       commandArguments.push({
@@ -3112,13 +3178,14 @@ function compileCertifiedRouteBatch(
         performerActorId: commitment.actorId,
         counterpartyActorId: commitment.counterpartyActorId,
         deliveryPossessionId: commitment.possessionId,
+        destinationHandle: commitment.destinationHandle,
+        destinationLocationId: commitment.destinationLocationId,
         affectedRefs: [
           commitmentRef,
           playerRef,
           counterpartyRef,
           possessionRef,
           destinationRef,
-          ...(obligationRef === null ? [] : [obligationRef]),
         ],
         readScope: [
           commitmentRef,
@@ -3126,9 +3193,8 @@ function compileCertifiedRouteBatch(
           counterpartyRef,
           possessionRef,
           destinationRef,
-          ...(obligationRef === null ? [] : [obligationRef]),
         ],
-        writeScope: [possessionRef, ...(obligationRef === null ? [] : [obligationRef]), commitmentRef],
+        writeScope: [possessionRef, commitmentRef],
         exposure: { mode: "protected" },
       });
     }
@@ -3250,6 +3316,7 @@ function compileCertifiedRouteBatch(
           title: acceptEffect.title,
           subjectName: acceptEffect.subjectName,
           destinationHandle: acceptEffect.destinationHandle,
+          destinationLocationId: destinationBinding.reference.id,
           acceptedWorldTimeMinutes,
           dueWorldTimeMinutes,
           affectedRefs: [
@@ -3501,21 +3568,28 @@ function judgeInterruption(
   requested: CampaignPlayRequestedModel,
   cause: unknown,
   durationMs: number,
+  recoveryFeedback?: CampaignPlayJudgeRecoveryFeedback,
 ): CampaignPlayExternalStageInterruption {
   const evidence = cause instanceof CampaignPlayJudgeError ? cause.modelEvidence : null;
   const budget = cause instanceof CampaignPlayJudgeError && cause.code === "stage_budget_exceeded";
   const timeout = cause instanceof CampaignPlayJudgeError && cause.code === "stage_timeout";
   const contract = cause instanceof CampaignPlayJudgeError &&
     cause.code !== "transport_interrupted" && cause.code !== "stage_timeout";
+  const contractFailureDiagnostic = contract && recoveryFeedback !== undefined
+    ? { owner: "judge" as const, issues: recoveryFeedback.issues }
+    : null;
+  const interruption = interruptionEvidence({
+    requested,
+    evidence,
+    durationMs: evidence?.durationMs ?? durationMs,
+    errorCode: timeout ? "stage_timeout" : budget ? "stage_budget_exceeded"
+      : contract ? "model_contract_invalid" : "provider_unavailable",
+    schemaOutcome: contract ? "invalid" : "transport_error",
+  });
   return new CampaignPlayExternalStageInterruption(
-    interruptionEvidence({
-      requested,
-      evidence,
-      durationMs: evidence?.durationMs ?? durationMs,
-      errorCode: timeout ? "stage_timeout" : budget ? "stage_budget_exceeded"
-        : contract ? "model_contract_invalid" : "provider_unavailable",
-      schemaOutcome: contract ? "invalid" : "transport_error",
-    }),
+    contractFailureDiagnostic === null
+      ? interruption
+      : { ...interruption, contractFailureDiagnostic },
     "Campaign Play Judge requires explicit resume.",
     { cause },
   );
@@ -3908,23 +3982,20 @@ export function createCampaignPlayTurnRuntime(
         ) as { count: number }).count;
 
   const modelForExternalAttempt = (
+    _turnId: string,
+    _kind: "judge" | "game_master",
+    _attempt: number,
+    model: CampaignPlayTurnRuntimeStageModel,
+  ): LanguageModel => model.languageModel;
+
+  const modelForJudgeAttempt = (
     turnId: string,
-    kind: "judge" | "game_master",
     attempt: number,
     model: CampaignPlayTurnRuntimeStageModel,
+    recoveryFeedback: CampaignPlayJudgeRecoveryFeedback | undefined,
   ): LanguageModel => {
-    if (attempt <= 1 || model.reasoningModel === undefined) return model.languageModel;
-    const previous = input.handle.sqlite.prepare(`SELECT error_code AS errorCode
-      FROM campaign_play_model_stages
-      WHERE campaign_id = ? AND turn_id = ? AND kind = ? AND attempt = ?`).get(
-        input.handle.campaignId,
-        turnId,
-        kind,
-        attempt - 1,
-      ) as { errorCode: string | null } | undefined;
-    return previous?.errorCode === "model_contract_invalid"
-      ? model.reasoningModel
-      : model.languageModel;
+    if (attempt > 1 && recoveryFeedback !== undefined) return model.languageModel;
+    return modelForExternalAttempt(turnId, "judge", attempt, model);
   };
 
   const modelForGameMasterAttempt = (
@@ -3964,7 +4035,9 @@ export function createCampaignPlayTurnRuntime(
     jobId: string,
     outcome: string,
   ): void => {
-    const committedAt = now();
+    const observedAt = now();
+    const durableTurn = repository.loadTurn(token.turnId);
+    const committedAt = Math.max(observedAt, durableTurn?.updatedAt ?? observedAt);
     if (outcome === "interrupted") {
       const turn = repository.loadTurn(token.turnId);
       const job = actorScheduler.listTurnJobs(token.turnId).find((candidate) =>
@@ -4433,11 +4506,11 @@ export function createCampaignPlayTurnRuntime(
                             current.frame.commitmentAuthority.possessionHandle,
                         }),
                 },
-                model: modelForExternalAttempt(
+                model: modelForJudgeAttempt(
                   context.turn.turnId,
-                  "judge",
                   context.attempt,
                   input.judgeModel,
+                  input.judgeRecoveryFeedback,
                 ),
                 temperature: input.judgeModel.temperature,
                 budget: modelBudget(input.judgeModel),
@@ -4524,6 +4597,7 @@ export function createCampaignPlayTurnRuntime(
                 input.judgeModel.requested,
                 cause,
                 now() - startedAt,
+                recoveryFeedback,
               );
             }
           },

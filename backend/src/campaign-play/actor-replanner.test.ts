@@ -1989,6 +1989,102 @@ describe("Campaign Play actor replanner", () => {
     ]);
   });
 
+  it("keeps provider recovery inside one shared control deadline across all attempts", async () => {
+    const { handle, token, jobId } = createReplanFixture();
+    const bypassModel = {} as LanguageModel;
+    const recoveryModel = {} as LanguageModel;
+    const generateObject = vi.fn(async (_request: { model: LanguageModel }) => {
+      throw new Error("provider transport unavailable");
+    });
+    const replanner = createCampaignPlayActorReplanner(handle, {
+      now: () => 1_600,
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const outcome = await replanner.replan({
+      jobId,
+      token,
+      model: bypassModel,
+      recoveryModel,
+      temperature: 0.2,
+      maxOutputTokens: 100,
+      maximumInputTokens: 1_000,
+      maximumOutputTokens: 100,
+      maximumTotalTokens: 2_000,
+      maximumCostMicros: 10_000,
+      externalOperationDeadlineMs: 100,
+      controlDeadlineAt: 1_700,
+      deferOnControlBudgetExhaustion: true,
+      signal: new AbortController().signal,
+      createdAt: 1_590,
+    });
+
+    expect(outcome).toEqual({
+      kind: "deferred",
+      jobId,
+      reason: "control_budget",
+      errorCode: "provider_unavailable",
+      workerEpoch: 1,
+    });
+    expect(generateObject).toHaveBeenCalledTimes(3);
+    expect(generateObject.mock.calls.map((call) => call[0]!.model)).toEqual([
+      bypassModel,
+      bypassModel,
+      bypassModel,
+    ]);
+    expect(handle.sqlite.prepare(`SELECT attempt_number AS attemptNumber,
+        model_worker_epoch AS modelWorkerEpoch, deadline_at AS deadlineAt,
+        retry_consumed_at AS retryConsumedAt, frame_hash AS frameHash,
+        frozen_base_world_version AS frozenBaseWorldVersion,
+        requested_provider_id AS requestedProviderId, requested_model AS requestedModel,
+        requested_strategy AS requestedStrategy
+      FROM campaign_play_actor_replan_attempts
+      WHERE campaign_id = ? AND job_id = ? ORDER BY attempt_number`).all(CAMPAIGN_ID, jobId))
+      .toEqual([
+        {
+          attemptNumber: 1,
+          modelWorkerEpoch: 1,
+          deadlineAt: 1_700,
+          retryConsumedAt: 1_601,
+          frameHash: expect.any(String),
+          frozenBaseWorldVersion: 2,
+          requestedProviderId: "test-provider",
+          requestedModel: "actor-replanner",
+          requestedStrategy: "strict_object",
+        },
+        {
+          attemptNumber: 2,
+          modelWorkerEpoch: 2,
+          deadlineAt: 1_700,
+          retryConsumedAt: 1_602,
+          frameHash: expect.any(String),
+          frozenBaseWorldVersion: 2,
+          requestedProviderId: "test-provider",
+          requestedModel: "actor-replanner",
+          requestedStrategy: "strict_object",
+        },
+        {
+          attemptNumber: 3,
+          modelWorkerEpoch: 3,
+          deadlineAt: 1_700,
+          retryConsumedAt: null,
+          frameHash: expect.any(String),
+          frozenBaseWorldVersion: 2,
+          requestedProviderId: "test-provider",
+          requestedModel: "actor-replanner",
+          requestedStrategy: "strict_object",
+        },
+      ]);
+    expect(handle.sqlite.prepare(`SELECT attempt, status, schema_outcome AS schemaOutcome,
+        error_code AS errorCode FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = 'turn-player' AND kind = 'actor_replanner'
+      ORDER BY attempt`).all(CAMPAIGN_ID)).toEqual([
+      { attempt: 1, status: "interrupted", schemaOutcome: "transport_error", errorCode: "provider_unavailable" },
+      { attempt: 2, status: "interrupted", schemaOutcome: "transport_error", errorCode: "provider_unavailable" },
+      { attempt: 3, status: "interrupted", schemaOutcome: "transport_error", errorCode: "provider_unavailable" },
+    ]);
+  });
+
   it("fences a late recovery result after the outer abort", async () => {
     const { handle, token, jobId } = createReplanFixture();
     const controller = new AbortController();
@@ -2446,7 +2542,133 @@ describe("Campaign Play actor replanner", () => {
     )).toEqual({ count: 0 });
   });
 
-  it("defers an authorized contract recovery when its full retry window cannot fit", async () => {
+  it("recovers a compilation rejection inside the shortened control window", async () => {
+    const { handle, token, jobId } = createReplanFixture();
+    const actorModel = {} as LanguageModel;
+    const recoveryModel = {} as LanguageModel;
+    let now = 1_600;
+    let proposalCallNumber = 0;
+    const timerDelays: number[] = [];
+    const generateObject = vi.fn(async (request: {
+      prompt: string;
+      model: LanguageModel;
+      mode: "auto" | "tool";
+    }) => {
+      if (request.prompt.includes("ACTOR_PLAN_REVIEW\n")) {
+        return { object: { verdict: "accepted", violations: [] }, trace: acceptedTrace() };
+      }
+      proposalCallNumber += 1;
+      if (proposalCallNumber === 1) {
+        now = 1_650;
+        return {
+          object: reverseMoveProposalFromPrompt(request.prompt),
+          trace: acceptedTrace(),
+        };
+      }
+      return {
+        object: singleStepProposalFromPrompt(request.prompt),
+        trace: acceptedTrace(),
+      };
+    });
+    const replanner = createCampaignPlayActorReplanner(handle, {
+      now: () => now,
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+      setTimer: (_callback, delayMs) => {
+        timerDelays.push(delayMs);
+        return timerDelays.length as unknown as ReturnType<typeof setTimeout>;
+      },
+      clearTimer: () => undefined,
+    });
+
+    const outcome = await replanner.replan({
+      jobId,
+      token,
+      model: actorModel,
+      recoveryModel,
+      temperature: 0.2,
+      maxOutputTokens: 100,
+      maximumInputTokens: 1_000,
+      maximumOutputTokens: 100,
+      maximumTotalTokens: 2_000,
+      maximumCostMicros: 10_000,
+      externalOperationDeadlineMs: 100,
+      controlDeadlineAt: 1_720,
+      deferOnControlBudgetExhaustion: true,
+      createdAt: 1_590,
+    });
+
+    expect(outcome).toMatchObject({ kind: "replanned", jobId, workerEpoch: 1 });
+    expect(generateObject).toHaveBeenCalledTimes(3);
+    expect(generateObject.mock.calls.map((call) => call[0]!.model)).toEqual([
+      actorModel,
+      actorModel,
+      actorModel,
+    ]);
+    expect(generateObject.mock.calls.map((call) => call[0]!.mode)).toEqual([
+      "auto",
+      "auto",
+      "tool",
+    ]);
+    const firstPrompt = generateObject.mock.calls[0]![0].prompt;
+    const recoveryPrompt = generateObject.mock.calls[1]![0].prompt;
+    expect(recoveryPrompt.startsWith(`${firstPrompt}\n\nACTOR_REPLAN_RECOVERY\n`)).toBe(true);
+    expect(timerDelays).toEqual([100, 70]);
+
+    expect(handle.sqlite.prepare(`SELECT attempt, status, schema_outcome AS schemaOutcome,
+        error_code AS errorCode, duration_ms AS durationMs
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = 'turn-player' AND kind = 'actor_replanner'
+      ORDER BY attempt`).all(CAMPAIGN_ID)).toEqual([
+      { attempt: 1, status: "interrupted", schemaOutcome: "invalid", errorCode: "model_contract_invalid", durationMs: 50 },
+      { attempt: 2, status: "accepted", schemaOutcome: "valid", errorCode: null, durationMs: 0 },
+    ]);
+    const attempts = handle.sqlite.prepare(`SELECT attempt_number AS attemptNumber,
+        model_worker_epoch AS modelWorkerEpoch,
+        actor_job_worker_epoch AS actorJobWorkerEpoch,
+        claim_turn_worker_epoch AS claimTurnWorkerEpoch,
+        frame_hash AS frameHash,
+        frozen_base_world_version AS frozenBaseWorldVersion,
+        deadline_at AS deadlineAt,
+        requested_provider_id AS requestedProviderId,
+        requested_model AS requestedModel,
+        retry_consumed_at AS retryConsumedAt,
+        created_at AS createdAt
+      FROM campaign_play_actor_replan_attempts
+      WHERE campaign_id = ? AND job_id = ? ORDER BY attempt_number`).all(
+      CAMPAIGN_ID,
+      jobId,
+    ) as Array<Record<string, unknown>>;
+    expect(attempts).toHaveLength(2);
+    expect(attempts[0]).toMatchObject({
+      attemptNumber: 1,
+      modelWorkerEpoch: 1,
+      actorJobWorkerEpoch: 1,
+      claimTurnWorkerEpoch: token.epoch,
+      deadlineAt: 1_700,
+      requestedProviderId: "test-provider",
+      requestedModel: "actor-replanner",
+      retryConsumedAt: 1_650,
+      createdAt: 1_600,
+    });
+    expect(attempts[1]).toMatchObject({
+      attemptNumber: 2,
+      modelWorkerEpoch: 2,
+      actorJobWorkerEpoch: 1,
+      claimTurnWorkerEpoch: token.epoch,
+      frameHash: attempts[0]!.frameHash,
+      frozenBaseWorldVersion: attempts[0]!.frozenBaseWorldVersion,
+      deadlineAt: 1_720,
+      requestedProviderId: "test-provider",
+      requestedModel: "actor-replanner",
+      retryConsumedAt: null,
+      createdAt: 1_650,
+    });
+    expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_plans
+      WHERE campaign_id = ? AND actor_id = 'actor-b' AND status = 'active'`).get(CAMPAIGN_ID))
+      .toEqual({ count: 1 });
+  });
+
+  it("defers an authorized contract recovery when no positive retry window remains", async () => {
     const { handle, token, jobId } = createReplanFixture();
     const generateObject = vi.fn(async (request: { prompt: string }) => ({
       object: reverseMoveProposalFromPrompt(request.prompt),
@@ -2469,7 +2691,7 @@ describe("Campaign Play actor replanner", () => {
       maximumTotalTokens: 2_000,
       maximumCostMicros: 10_000,
       externalOperationDeadlineMs: 90_000,
-      controlDeadlineAt: 1_650,
+      controlDeadlineAt: 1_601,
       deferOnControlBudgetExhaustion: true,
       createdAt: 1_590,
     });
@@ -2497,7 +2719,7 @@ describe("Campaign Play actor replanner", () => {
       jobId,
     )).toEqual([{
       attemptNumber: 1,
-      deadlineAt: 1_650,
+      deadlineAt: 1_601,
       retryConsumedAt: null,
     }]);
     expect(createCampaignPlayActorScheduler(handle).listTurnJobs("turn-player")[0])

@@ -945,6 +945,42 @@ describe("Campaign Play core and Rulebook storage", () => {
         .toContain("'actor_obligation_payment_applied'");
       expect(paymentStorage.find((row) => row.name === "campaign_play_events_insert_guard")?.sql)
         .toContain("'pay_actor_obligation'");
+      const commitmentTransitionTrigger = sqlite.prepare(`SELECT sql FROM sqlite_schema
+        WHERE type = 'trigger' AND name = 'campaign_play_commitments_update_guard'`)
+        .get() as { sql: string };
+      expect(commitmentTransitionTrigger.sql).toContain("NEW.world_version - 3");
+      expect(commitmentTransitionTrigger.sql).toContain("NEW.world_version - 2");
+      expect(commitmentTransitionTrigger.sql).toContain("NOT EXISTS");
+      expect(commitmentTransitionTrigger.sql).toContain(
+        "incur_command.batch_id = completion_command.batch_id",
+      );
+      expect(commitmentTransitionTrigger.sql).toContain(
+        "json_extract(payment_command.protected_payload_json, '$.quantityDelta') = NEW.fee_amount",
+      );
+      expect(commitmentTransitionTrigger.sql).toContain(
+        "payment_possession.causal_receipt_id = payment_receipt.receipt_id",
+      );
+      expect(commitmentTransitionTrigger.sql).toContain(
+        "json_extract(completion_command.protected_payload_json, '$.destinationHandle') = NEW.destination_handle",
+      );
+      expect(commitmentTransitionTrigger.sql).toContain(
+        "json_extract(completion_command.protected_payload_json, '$.destinationLocationId') = NEW.destination_location_id",
+      );
+      expect(commitmentTransitionTrigger.sql).toContain(
+        "json_extract(destination_ref.value, '$.id') = NEW.destination_location_id",
+      );
+      expect(sqlite.prepare(`SELECT name, "notnull" AS required
+        FROM pragma_table_info('campaign_play_commitments')
+        WHERE name = 'destination_location_id'`).get()).toEqual({
+        name: "destination_location_id",
+        required: 1,
+      });
+      const commitmentDestinationInsertGuard = sqlite.prepare(`SELECT sql FROM sqlite_schema
+        WHERE type = 'trigger' AND name = 'campaign_play_commitments_destination_insert_guard'`)
+        .get() as { sql: string };
+      expect(commitmentDestinationInsertGuard.sql).toContain(
+        "json_extract(source_command.protected_payload_json, '$.destinationLocationId') = NEW.destination_location_id",
+      );
       const runtimeTriggers = sqlite.prepare(`SELECT name FROM sqlite_master
         WHERE type = 'trigger' AND (
           name LIKE 'campaign_play_actor_due_sets_%'
@@ -1006,6 +1042,262 @@ describe("Campaign Play core and Rulebook storage", () => {
         "campaign_play_states",
         "campaign_play_turns",
       ]);
+      expect(sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
+      expect(sqlite.pragma("foreign_key_check")).toEqual([]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("backfills legacy commitment destinations when upgrading to destination-bound storage", () => {
+    const databasePath = path.join(root, "legacy-commitment-upgrade.db");
+    const sqlite = new Database(databasePath);
+    try {
+      sqlite.pragma("foreign_keys = ON");
+      const db = drizzle(sqlite, { schema });
+      runForeignKeySafeMigrations(db, sqlite, migrationFolderThrough(26));
+      sqlite.prepare(`
+        INSERT INTO campaigns (id, name, premise, created_at, updated_at)
+        VALUES (?, 'Legacy Commitment Upgrade', 'Premise', 1, 1)
+      `).run(CAMPAIGN_A);
+
+      const worldRepository = createCampaignWorldRepository({
+        campaignId: CAMPAIGN_A,
+        databasePath,
+        sqlite,
+        db,
+        close() {},
+      });
+      const source = sourceFixture(CAMPAIGN_A);
+      worldRepository.acquireBuild({
+        buildId: "build-legacy-commitment-upgrade",
+        source,
+        expectedSourceDigest: source.sourceDigest,
+        providerId: "test-provider",
+        model: "test-model",
+        startedAt: 1_000,
+      });
+      advanceBuildToPersistence(worldRepository, "build-legacy-commitment-upgrade");
+      const review = worldRepository.completeBuild({
+        buildId: "build-legacy-commitment-upgrade",
+        candidate: candidateFixture(source),
+        completedAt: 1_100,
+      });
+      worldRepository.acceptWorld({
+        expectedVersion: review.version,
+        expectedContentHash: review.contentHash,
+        acceptedAt: 1_200,
+      });
+
+      runForeignKeySafeMigrations(db, sqlite, migrationFolderThrough(66));
+      const handle: CampaignPlayDatabaseHandle = {
+        campaignId: CAMPAIGN_A,
+        databasePath,
+        sqlite,
+        db,
+        close() {},
+      };
+      insertPlayState(handle);
+      insertPlayerActor(handle);
+      insertTurn(handle);
+      const state = sqlite.prepare(`
+        SELECT world_version AS worldVersion, world_hash AS worldHash
+        FROM campaign_play_states WHERE campaign_id = ?
+      `).get(CAMPAIGN_A) as { worldVersion: number; worldHash: string };
+      const acceptedEffect = {
+        kind: "paid_delivery",
+        title: "Legacy delivery",
+        subjectName: "sealed parcel",
+        destinationHandle: "legacy-yard",
+        feeUnit: "copper",
+        feeAmount: 3,
+        paymentTiming: "on_completion",
+        dueInMinutes: 35,
+      };
+      const acceptedEffectJson = canonicalizeCampaignPlayProjection(acceptedEffect);
+      const decisionCommandPayload = {
+        decisionKey: "decision-legacy",
+        actorId: "actor-a",
+        actorHandle: "actor-a",
+        decisionKind: "offer",
+        sourceTurnId: "turn-one",
+        summary: "Offer a sealed parcel delivery.",
+        acceptLabel: "Accept delivery",
+        declineLabel: "Decline delivery",
+        acceptEffect: acceptedEffect,
+      };
+      const commitmentCommandPayload = {
+        commitmentId: "commitment-legacy",
+        sourceDecisionKey: "decision-legacy",
+        sourceTurnId: "turn-one",
+        performerActorId: "actor-player",
+        counterpartyActorId: "actor-a",
+        commitmentKind: "paid_delivery",
+        title: "Legacy delivery",
+        subjectName: "sealed parcel",
+        destinationHandle: "legacy-yard",
+        destinationLocationId: "location-a",
+        feeUnit: "copper",
+        feeAmount: 3,
+        paymentTiming: "on_completion",
+        acceptedWorldTimeMinutes: 0,
+        dueWorldTimeMinutes: 35,
+        affectedRefs: [
+          { kind: "commitment", id: "commitment-legacy" },
+          { kind: "actor", id: "actor-player" },
+          { kind: "actor", id: "actor-a" },
+          { kind: "location", id: "location-a" },
+        ],
+      };
+      const sourceJson = JSON.stringify({ kind: "system", system: "game_master" });
+      const batchId = "batch-legacy-commitment";
+      const decisionCommandId = "command-legacy-decision";
+      const decisionReceiptId = "receipt-legacy-decision";
+      const commitmentCommandId = "command-legacy-commitment";
+      const commitmentReceiptId = "receipt-legacy-commitment";
+      const commitmentEventId = "event-legacy-commitment";
+      sqlite.prepare(`
+        INSERT INTO campaign_play_commands (
+          command_id, campaign_id, turn_id, batch_id, command_order, command_kind,
+          causal_parent_json, source_json, expected_world_version,
+          read_scope_json, write_scope_json, exposure_policy_json,
+          arguments_hash, protected_payload_json, protected_payload_hash, created_at
+        ) VALUES (?, ?, 'turn-one', ?, 0, 'decision_open', ?, ?, ?, '[]', '[]',
+          '{"mode":"protected"}', ?, ?, ?, 1700)
+      `).run(
+        decisionCommandId,
+        CAMPAIGN_A,
+        batchId,
+        JSON.stringify({ kind: "turn", turnId: "turn-one" }),
+        sourceJson,
+        state.worldVersion,
+        HASH_B,
+        canonicalizeCampaignPlayProjection(decisionCommandPayload),
+        HASH_C,
+      );
+      sqlite.prepare(`
+        INSERT INTO campaign_play_commands (
+          command_id, campaign_id, turn_id, batch_id, command_order, command_kind,
+          causal_parent_json, source_json, expected_world_version,
+          read_scope_json, write_scope_json, exposure_policy_json,
+          arguments_hash, protected_payload_json, protected_payload_hash, created_at
+        ) VALUES (?, ?, 'turn-one', ?, 1, 'create_player_commitment', ?, ?, ?, '[]', '[]',
+          '{"mode":"protected"}', ?, ?, ?, 1710)
+      `).run(
+        commitmentCommandId,
+        CAMPAIGN_A,
+        batchId,
+        JSON.stringify({ kind: "turn", turnId: "turn-one" }),
+        sourceJson,
+        state.worldVersion + 1,
+        HASH_B,
+        canonicalizeCampaignPlayProjection(commitmentCommandPayload),
+        HASH_C,
+      );
+      sqlite.prepare(`
+        INSERT INTO campaign_play_receipts (
+          receipt_id, campaign_id, turn_id, command_id, command_kind, outcome,
+          applied_world_mutation, prior_world_version, result_world_version,
+          prior_world_hash, result_world_hash, causal_event_ids_json,
+          protected_payload_json, protected_payload_hash, created_at
+        ) VALUES (?, ?, 'turn-one', ?, 'decision_open', 'applied', 1, ?, ?, ?, ?, ?, '{}', ?, 1700)
+      `).run(
+        decisionReceiptId,
+        CAMPAIGN_A,
+        decisionCommandId,
+        state.worldVersion,
+        state.worldVersion + 1,
+        state.worldHash,
+        HASH_B,
+        JSON.stringify([commitmentEventId]),
+        HASH_C,
+      );
+      sqlite.prepare(`
+        INSERT INTO campaign_play_receipts (
+          receipt_id, campaign_id, turn_id, command_id, command_kind, outcome,
+          applied_world_mutation, prior_world_version, result_world_version,
+          prior_world_hash, result_world_hash, causal_event_ids_json,
+          protected_payload_json, protected_payload_hash, created_at
+        ) VALUES (?, ?, 'turn-one', ?, 'create_player_commitment', 'applied', 1, ?, ?, ?, ?, ?, '{}', ?, 1710)
+      `).run(
+        commitmentReceiptId,
+        CAMPAIGN_A,
+        commitmentCommandId,
+        state.worldVersion + 1,
+        state.worldVersion + 2,
+        HASH_B,
+        HASH_C,
+        JSON.stringify([commitmentEventId]),
+        HASH_C,
+      );
+
+      // The historical row points at its completion event before that event exists.
+      // Keep the fixture faithful to that old shape, then let the migration verify it.
+      sqlite.pragma("foreign_keys = OFF");
+      sqlite.prepare(`
+        INSERT INTO campaign_play_decisions (
+          decision_key, campaign_id, actor_id, actor_handle, decision_kind,
+          source_turn_id, status, summary, accept_label, decline_label,
+          accept_effect_json, opened_at, resolved_at, resolution_turn_id,
+          resolution_event_id, world_version, created_at, updated_at
+        ) VALUES (?, ?, 'actor-a', 'actor-a', 'offer', 'turn-one', 'accepted', ?, ?, ?,
+          ?, 1700, 1700, 'turn-one', ?, ?, 1700, 1700)
+      `).run(
+        "decision-legacy",
+        CAMPAIGN_A,
+        decisionCommandPayload.summary,
+        decisionCommandPayload.acceptLabel,
+        decisionCommandPayload.declineLabel,
+        acceptedEffectJson,
+        commitmentEventId,
+        state.worldVersion + 1,
+      );
+      sqlite.prepare(`
+        INSERT INTO campaign_play_commitments (
+          commitment_id, campaign_id, performer_actor_id, counterparty_actor_id,
+          kind, status, title, subject_name, destination_handle, fee_unit, fee_amount,
+          payment_timing, accepted_world_time_minutes, due_world_time_minutes,
+          source_decision_key, source_turn_id, source_receipt_id,
+          completion_turn_id, completion_receipt_id, world_version, created_at, updated_at
+        ) VALUES (?, ?, 'actor-player', 'actor-a', 'paid_delivery', 'active', ?, ?, ?,
+          'copper', 3, 'on_completion', 0, 35, 'decision-legacy', 'turn-one', ?,
+          NULL, NULL, ?, 1710, 1710)
+      `).run(
+        "commitment-legacy",
+        CAMPAIGN_A,
+        commitmentCommandPayload.title,
+        commitmentCommandPayload.subjectName,
+        commitmentCommandPayload.destinationHandle,
+        commitmentReceiptId,
+        state.worldVersion + 2,
+      );
+      sqlite.prepare(`
+        INSERT INTO campaign_play_events (
+          event_id, campaign_id, turn_id, command_id, receipt_id, parent_event_id,
+          event_kind, source_json, world_time_minutes, world_version,
+          affected_refs_json, before_payload_json, after_payload_json,
+          payload_hash, created_at
+        ) VALUES (?, ?, 'turn-one', ?, ?, NULL, 'player_commitment_created', ?, 0, ?, ?, '{}',
+          '{"status":"active"}', ?, 1710)
+      `).run(
+        commitmentEventId,
+        CAMPAIGN_A,
+        commitmentCommandId,
+        commitmentReceiptId,
+        sourceJson,
+        state.worldVersion + 2,
+        JSON.stringify(commitmentCommandPayload.affectedRefs),
+        HASH_C,
+      );
+      sqlite.pragma("foreign_keys = ON");
+
+      runForeignKeySafeMigrations(db, sqlite, migrationFolderThrough(67));
+      expect(sqlite.prepare(`
+        SELECT destination_location_id AS destinationLocationId
+        FROM campaign_play_commitments WHERE commitment_id = 'commitment-legacy'
+      `).get()).toEqual({ destinationLocationId: "location-a" });
+      expect((sqlite.pragma("foreign_key_list('campaign_play_commitments')") as Array<{ table: string }>)
+        .map((foreignKey) => foreignKey.table)).toContain("locations");
       expect(sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
       expect(sqlite.pragma("foreign_key_check")).toEqual([]);
     } finally {
@@ -1817,7 +2109,7 @@ describe("Campaign Play core and Rulebook storage", () => {
       .get() as { sql: string };
     expect(after.sql).toContain("job.defer_reason = 'actor_capacity'");
     expect(opened.sqlite.prepare(`SELECT max(created_at) AS latest
-      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_787_701_600_000 });
+      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_787_701_900_000 });
     const terminalResultTriggerSql = opened.sqlite.prepare(`SELECT sql FROM sqlite_master
       WHERE type = 'trigger' AND name = 'campaign_play_turn_terminal_result'`)
       .get() as { sql: string };
@@ -3290,7 +3582,37 @@ describe("Campaign Play core and Rulebook storage", () => {
       modelStageId: "actor-replan-model-two-33333333",
       createdAt: 2010,
       deadlineAt: 3000,
-    })).toThrow(/campaign_play_actor_replan_attempt_identity_invalid|campaign_play_actor_replan_retry_not_authorized/);
+    })).not.toThrow();
+
+    const sharedDeadlineThree = createActorReplanAttemptFixture("12121212-1212-4121-8121-121212121212");
+    finishActorReplanFirstStage(sharedDeadlineThree, {
+      schemaOutcome: "invalid",
+      errorCode: "model_contract_invalid",
+    });
+    consumeActorReplanRetry(sharedDeadlineThree, 2010);
+    expect(() => insertActorReplanSecondAttempt(sharedDeadlineThree, {
+      attemptId: "actor-replan-attempt-two-12121212",
+      modelStageId: "actor-replan-model-two-12121212",
+      createdAt: 2010,
+      deadlineAt: 3000,
+    })).not.toThrow();
+    finishActorReplanStage(sharedDeadlineThree, {
+      modelStageId: "actor-replan-model-two-12121212",
+      schemaOutcome: "invalid",
+      errorCode: "model_contract_invalid",
+      completedAt: 2015,
+    });
+    consumeActorReplanAttempt(sharedDeadlineThree, {
+      attemptId: "actor-replan-attempt-two-12121212",
+      retryConsumedAt: 2020,
+    });
+    expect(() => insertActorReplanAttempt(sharedDeadlineThree, {
+      attemptId: "actor-replan-attempt-three-12121212",
+      modelStageId: "actor-replan-model-three-12121212",
+      attemptNumber: 3,
+      createdAt: 2020,
+      deadlineAt: 3000,
+    })).not.toThrow();
 
     const freshDeadlineContract = createActorReplanAttemptFixture("44444444-4444-4444-8444-444444444444");
     finishActorReplanFirstStage(freshDeadlineContract, {
@@ -3368,6 +3690,19 @@ describe("Campaign Play core and Rulebook storage", () => {
       modelStageId: "actor-replan-model-two-88888888",
       createdAt: 2010,
       deadlineAt: 3900,
+    })).not.toThrow();
+
+    const providerSharedDeadline = createActorReplanAttemptFixture("13131313-1313-4131-8131-131313131313");
+    finishActorReplanFirstStage(providerSharedDeadline, {
+      schemaOutcome: "transport_error",
+      errorCode: "provider_unavailable",
+    });
+    consumeActorReplanRetry(providerSharedDeadline, 2010);
+    expect(() => insertActorReplanSecondAttempt(providerSharedDeadline, {
+      attemptId: "actor-replan-attempt-two-13131313",
+      modelStageId: "actor-replan-model-two-13131313",
+      createdAt: 2010,
+      deadlineAt: 3000,
     })).not.toThrow();
 
     const invalidContractError = createActorReplanAttemptFixture("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
@@ -3451,12 +3786,14 @@ describe("Campaign Play core and Rulebook storage", () => {
 
     for (const fixture of [
       sharedDeadlineContract,
+      sharedDeadlineThree,
       freshDeadlineContract,
       retryMarkerDrift,
       freshDeadlineTimeout,
       sharedDeadlineTimeout,
       expiredDeadlineTimeout,
       providerUnavailable,
+      providerSharedDeadline,
       invalidContractError,
       timeoutContractError,
       attemptThree,
@@ -3537,7 +3874,7 @@ describe("Campaign Play core and Rulebook storage", () => {
       modelStageId: "actor-replan-model-two-eeeeeeee",
       createdAt: 2010,
       deadlineAt: 3000,
-    })).toThrow(/campaign_play_actor_replan_attempt_identity_invalid|campaign_play_actor_replan_retry_not_authorized/);
+    })).not.toThrow();
     expect(historical.handle.sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
     expect(historical.handle.sqlite.pragma("foreign_key_check")).toEqual([]);
   });

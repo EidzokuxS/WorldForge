@@ -829,6 +829,7 @@ export function createCampaignPlayApplication(
     resume: { interruptedStage: LoadedCampaignPlayTurn["interruptedStage"]; observedEpoch: number } | null,
   ): Promise<void> => {
     let pendingResume = resume;
+    const explicitResumeRequested = resume !== null;
     const automaticRecoveryEnabled = resume === null;
     let pendingJudgeRecoveryFeedback: CampaignPlayJudgeRecoveryFeedback | undefined;
     let pendingGameMasterRecoveryFeedback: CampaignPlayGameMasterRecoveryFeedback | undefined;
@@ -840,6 +841,24 @@ export function createCampaignPlayApplication(
         const before = repository.loadTurn(turnId);
         if (!before || before.stage === "completed" || before.stage === "failed") return;
         if (before.stage === "interrupted" && pendingResume === null) return;
+        if (
+          explicitResumeRequested && pendingResume !== null &&
+          pendingJudgeRecoveryFeedback === undefined
+        ) {
+          pendingJudgeRecoveryFeedback = repository.loadLatestJudgeRecoveryFeedback(
+            turnId,
+            pendingResume.interruptedStage!,
+          );
+        }
+        if (
+          explicitResumeRequested && pendingResume !== null &&
+          pendingGameMasterRecoveryFeedback === undefined
+        ) {
+          pendingGameMasterRecoveryFeedback = repository.loadLatestGameMasterRecoveryFeedback(
+            turnId,
+            pendingResume.interruptedStage!,
+          );
+        }
         let recoveredJudgeFeedback: CampaignPlayJudgeRecoveryFeedback | undefined;
         let recoveredGameMasterFeedback: CampaignPlayGameMasterRecoveryFeedback | undefined;
         let recoveredNarratorFeedback: CampaignPlayNarratorRecoveryFeedback | undefined;

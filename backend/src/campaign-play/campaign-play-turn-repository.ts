@@ -32,7 +32,11 @@ import {
 import { createCampaignPlayStateRepository } from "./campaign-play-state-repository.js";
 import type { CampaignPlayMutationContext } from "./campaign-play-state-repository.js";
 import { campaignPlayResponseModelMatches } from "./model-identity.js";
-import type { CampaignPlayGameMasterContractFailureDiagnostic } from "./game-master.js";
+import type {
+  CampaignPlayGameMasterContractFailureDiagnostic,
+  CampaignPlayGameMasterRecoveryFeedback,
+} from "./game-master.js";
+import type { CampaignPlayJudgeRecoveryFeedback } from "./judge.js";
 import {
   CAMPAIGN_PLAY_NARRATOR_CONTRACT_DIAGNOSTIC_COORDINATES,
   CAMPAIGN_PLAY_NARRATOR_CONTRACT_DIAGNOSTIC_PHASES,
@@ -43,7 +47,13 @@ import {
 
 type CampaignPlayContractFailureDiagnostic =
   | CampaignPlayGameMasterContractFailureDiagnostic
+  | CampaignPlayJudgeContractFailureDiagnostic
   | CampaignPlayNarratorContractFailureDiagnostic;
+
+type CampaignPlayJudgeContractFailureDiagnostic = {
+  owner: "judge";
+  issues: CampaignPlayJudgeRecoveryFeedback["issues"];
+};
 
 export type CampaignPlayTurnRepositoryErrorCode =
   | "turn_not_found"
@@ -441,6 +451,14 @@ export interface CampaignPlayTurnRepository {
     turnId: string,
     kind: CampaignPlayTurnModelStageKind,
   ): CampaignPlayAcceptedModelArtifact | null;
+  loadLatestJudgeRecoveryFeedback(
+    turnId: string,
+    interruptedStage: CampaignPlayClaimableTurnStage,
+  ): CampaignPlayJudgeRecoveryFeedback | undefined;
+  loadLatestGameMasterRecoveryFeedback(
+    turnId: string,
+    interruptedStage: CampaignPlayClaimableTurnStage,
+  ): CampaignPlayGameMasterRecoveryFeedback | undefined;
   loadWorkerStageTiming(turnId: string, workerEpoch: number): CampaignPlayWorkerStageTiming;
   loadTurnTelemetry(turnId: string): CampaignPlayTurnTelemetry;
   loadTurn(turnId: string): LoadedCampaignPlayTurn | null;
@@ -869,6 +887,22 @@ const contractFailureDiagnosticFieldPathSchema = z.string()
   .min(1)
   .max(CAMPAIGN_PLAY_LIMITS.id)
   .regex(/^[A-Za-z0-9_.\[\]-]+$/);
+const contractFailureDiagnosticRulebookDenialCodeSchema = z.enum([
+  "invalid_frame",
+  "invalid_authority",
+  "invalid_batch",
+  "stale_world_version",
+  "command_unavailable",
+  "invalid_source",
+  "invalid_causal_parent",
+  "unauthorized_reference",
+  "invalid_reference",
+  "invalid_read_scope",
+  "invalid_write_scope",
+  "precondition_failed",
+  "invalid_exposure",
+  "invalid_bootstrap_coverage",
+]);
 const contractFailureDiagnosticReviewCheckSchema = z.enum([
   "player_intent_unfulfilled",
   "possession_authority_missing",
@@ -906,6 +940,13 @@ const contractFailureDiagnosticFailedChecksSchema = z.discriminatedUnion("check"
     proposedAffectedHandleCount: z.number().int().nonnegative().max(CAMPAIGN_PLAY_LIMITS.affectedRefs),
     compilerOwnedAppendCount: z.number().int().nonnegative().max(CAMPAIGN_PLAY_LIMITS.affectedRefs),
     maximumAffectedRefCount: z.number().int().nonnegative().max(CAMPAIGN_PLAY_LIMITS.affectedRefs),
+  }).strict(),
+  z.object({
+    check: z.literal("rulebook_denied"),
+    denialCode: contractFailureDiagnosticRulebookDenialCodeSchema,
+    commandIndex: z.number().int().nonnegative()
+      .max(CAMPAIGN_PLAY_LIMITS.commandsPerBatch)
+      .nullable(),
   }).strict(),
 ]);
 const gameMasterContractFailureDiagnosticSchema = z.object({
@@ -999,8 +1040,25 @@ const narratorContractFailureDiagnosticSchema = z.object({
   }
 });
 
+const judgeContractFailureDiagnosticIssuePathSegmentSchema = z.union([
+  contractFailureDiagnosticFieldPathSchema,
+  z.number().int().nonnegative().max(1_024),
+]);
+const judgeContractFailureDiagnosticIssueSchema = z.object({
+  issueIndex: z.number().int().nonnegative().max(1_024),
+  code: z.string().min(1).max(64).regex(/^[A-Za-z0-9_.-]+$/),
+  path: z.array(judgeContractFailureDiagnosticIssuePathSegmentSchema).max(16).optional(),
+  message: z.string().min(1).max(CAMPAIGN_PLAY_LIMITS.shortText).optional(),
+  check: z.string().min(1).max(64).regex(/^[a-z0-9_]+$/).optional(),
+}).strict();
+const judgeContractFailureDiagnosticSchema = z.object({
+  owner: z.literal("judge"),
+  issues: z.array(judgeContractFailureDiagnosticIssueSchema).min(1).max(32),
+}).strict();
+
 const contractFailureDiagnosticSchema = z.union([
   gameMasterContractFailureDiagnosticSchema,
+  judgeContractFailureDiagnosticSchema,
   narratorContractFailureDiagnosticSchema,
 ]);
 
@@ -1009,6 +1067,23 @@ function canonicalizeContractFailureDiagnostic(value: unknown): string | null {
   const parsed = contractFailureDiagnosticSchema.safeParse(value);
   if (!parsed.success) {
     throw stageInvalid("Campaign Play contract failure diagnostic is outside its bounded shape.");
+  }
+  if ("owner" in parsed.data && parsed.data.owner === "judge") {
+    const canonical = {
+      owner: "judge" as const,
+      issues: parsed.data.issues.map((issue) => ({
+        issueIndex: issue.issueIndex,
+        code: issue.code,
+        ...(issue.path === undefined ? {} : { path: [...issue.path] }),
+        ...(issue.message === undefined ? {} : { message: issue.message }),
+        ...(issue.check === undefined ? {} : { check: issue.check }),
+      })),
+    } satisfies CampaignPlayJudgeContractFailureDiagnostic;
+    const json = JSON.stringify(canonical);
+    if (Buffer.byteLength(json, "utf8") > CAMPAIGN_PLAY_CONTRACT_FAILURE_DIAGNOSTIC_MAX_BYTES) {
+      throw stageInvalid("Campaign Play contract failure diagnostic exceeds its bounded size.");
+    }
+    return json;
   }
   if ("owner" in parsed.data) {
     const narratorFeedback = parsed.data.recoveryDiagnostic === null
@@ -1063,23 +1138,31 @@ function canonicalizeContractFailureDiagnostic(value: unknown): string | null {
   return json;
 }
 
-function parseStoredContractFailureDiagnostic(
+function parseStoredContractFailureDiagnosticValue(
   value: string | null,
   label: string,
-): void {
-  if (value === null) return;
+): CampaignPlayContractFailureDiagnostic | null {
+  if (value === null) return null;
   try {
     const parsed = JSON.parse(value) as unknown;
     const canonical = canonicalizeContractFailureDiagnostic(parsed);
     if (canonical !== value) throw new TypeError("non-canonical contract failure diagnostic bytes");
+    return contractFailureDiagnosticSchema.parse(parsed) as CampaignPlayContractFailureDiagnostic;
   } catch (error) {
     throw corrupt(`${label} contains invalid contract failure diagnostic bytes.`, error);
   }
 }
 
+function parseStoredContractFailureDiagnostic(
+  value: string | null,
+  label: string,
+): void {
+  parseStoredContractFailureDiagnosticValue(value, label);
+}
+
 function contractFailureDiagnosticOwner(
   value: CampaignPlayContractFailureDiagnostic | null | undefined,
-): "game_master" | "narrator" | null {
+): "game_master" | "judge" | "narrator" | null {
   if (value === undefined || value === null) return null;
   return "owner" in value ? value.owner : "game_master";
 }
@@ -1598,28 +1681,22 @@ function validateModelStages(
   ): boolean => {
     const priorStage = stageById.get(priorAttempt.modelStageRowId);
     if (priorStage?.status !== "interrupted") return false;
+    const sharedControlDeadlineValid = laterAttempt.deadlineAt > laterAttempt.createdAt
+      && laterAttempt.deadlineAt >= priorAttempt.deadlineAt;
+    const extendedDeadlineValid = laterAttempt.deadlineAt > laterAttempt.createdAt
+      && laterAttempt.deadlineAt > priorAttempt.deadlineAt;
     const modelContractInvalid = priorStage.schemaOutcome === "invalid"
       && priorStage.errorCode === "model_contract_invalid"
       && laterAttempt.createdAt < priorAttempt.deadlineAt
-      && (
-        // Keep immutable Task 213 chains readable after the guard migration.
-        (priorAttempt.attemptNumber === 1 && laterAttempt.attemptNumber === 2 &&
-          laterAttempt.deadlineAt === priorAttempt.deadlineAt)
-        || (
-          laterAttempt.deadlineAt > laterAttempt.createdAt
-          && laterAttempt.deadlineAt > priorAttempt.deadlineAt
-        )
-      );
+      && sharedControlDeadlineValid;
     const providerUnavailable = priorStage.schemaOutcome === "transport_error"
       && priorStage.errorCode === "provider_unavailable"
       && laterAttempt.createdAt < priorAttempt.deadlineAt
-      && laterAttempt.deadlineAt > laterAttempt.createdAt
-      && laterAttempt.deadlineAt > priorAttempt.deadlineAt;
+      && sharedControlDeadlineValid;
     const stageTimeout = priorStage.schemaOutcome === "transport_error"
       && priorStage.errorCode === "stage_timeout"
       && laterAttempt.createdAt >= priorAttempt.deadlineAt
-      && laterAttempt.deadlineAt > laterAttempt.createdAt
-      && laterAttempt.deadlineAt > priorAttempt.deadlineAt;
+      && extendedDeadlineValid;
     return modelContractInvalid || providerUnavailable || stageTimeout;
   };
   const retryChainLinkValid = (
@@ -2790,6 +2867,98 @@ export function createCampaignPlayTurnRepository(
     const row = selectTurn(handle, "id", turnId);
     if (!row || row.campaignId !== handle.campaignId) return null;
     return loadRow(handle, row);
+  };
+
+  const loadLatestJudgeRecoveryFeedback = (
+    turnId: string,
+    interruptedStage: CampaignPlayClaimableTurnStage,
+  ): CampaignPlayJudgeRecoveryFeedback | undefined => {
+    if (interruptedStage !== "admitted") return undefined;
+    const turn = loadTurn(turnId);
+    if (
+      !turn || turn.stage !== "interrupted" || turn.interruptedStage !== interruptedStage ||
+      turn.turnKind !== "player_action"
+    ) {
+      return undefined;
+    }
+    const latest = selectModelStages(handle, turnId)
+      .filter((stage) =>
+        stage.kind === "judge" &&
+        (stage.status === "interrupted" || stage.status === "failed") &&
+        stage.contractFailureDiagnosticJson !== null,
+      )
+      .at(-1);
+    if (!latest) return undefined;
+    const diagnostic = parseStoredContractFailureDiagnosticValue(
+      latest.contractFailureDiagnosticJson,
+      `Campaign Play Judge model stage ${latest.id}`,
+    );
+    if (
+      diagnostic === null || !(
+        "owner" in diagnostic && diagnostic.owner === "judge"
+      )
+    ) {
+      return undefined;
+    }
+    return {
+      issues: diagnostic.issues.map((issue) => ({
+        ...issue,
+        ...(issue.path === undefined ? {} : { path: [...issue.path] }),
+      })),
+    };
+  };
+
+  const loadLatestGameMasterRecoveryFeedback = (
+    turnId: string,
+    interruptedStage: CampaignPlayClaimableTurnStage,
+  ): CampaignPlayGameMasterRecoveryFeedback | undefined => {
+    if (interruptedStage !== "judged") return undefined;
+    const turn = loadTurn(turnId);
+    if (
+      !turn || turn.stage !== "interrupted" || turn.interruptedStage !== interruptedStage ||
+      turn.turnKind !== "player_action"
+    ) {
+      return undefined;
+    }
+    const latest = selectModelStages(handle, turnId)
+      .filter((stage) =>
+        stage.kind === "game_master" &&
+        (stage.status === "interrupted" || stage.status === "failed") &&
+        stage.contractFailureDiagnosticJson !== null,
+      )
+      .at(-1);
+    if (!latest) return undefined;
+    const diagnostic = parseStoredContractFailureDiagnosticValue(
+      latest.contractFailureDiagnosticJson,
+      `Campaign Play Game Master model stage ${latest.id}`,
+    );
+    if (
+      diagnostic === null || "owner" in diagnostic || diagnostic.recoveryDiagnostic === null
+    ) {
+      return undefined;
+    }
+    const hasContractDiagnostic =
+      diagnostic.contractDiagnosticPhase !== null &&
+      diagnostic.contractDiagnosticCoordinate !== null;
+    return {
+      diagnostic: diagnostic.recoveryDiagnostic,
+      failedChecks: diagnostic.failedChecks.map((check) => ({
+        ...check,
+        ...(check.check === "mechanical_authority_rejected"
+          ? { reviewFailedChecks: [...check.reviewFailedChecks] }
+          : check.check === "targeted_actor_response_missing"
+            ? { requiredActorHandles: [...check.requiredActorHandles] }
+            : {}),
+      })),
+      ...(hasContractDiagnostic
+        ? {
+            contractDiagnostic: {
+              phase: diagnostic.contractDiagnosticPhase,
+              coordinate: diagnostic.contractDiagnosticCoordinate,
+            },
+          }
+        : {}),
+    };
   };
 
   const loadTurnByIdempotencyKey = (idempotencyKey: string): LoadedCampaignPlayTurn | null => {
@@ -4240,6 +4409,8 @@ export function createCampaignPlayTurnRepository(
         completedAt: stage.completedAt,
       };
     },
+    loadLatestJudgeRecoveryFeedback,
+    loadLatestGameMasterRecoveryFeedback,
     loadWorkerStageTiming(turnId, workerEpoch) {
       const turn = loadTurn(turnId);
       if (!turn) {

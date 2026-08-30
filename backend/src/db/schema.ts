@@ -3433,6 +3433,9 @@ export const campaignPlayCommitments = sqliteTable(
     title: text("title").notNull(),
     subjectName: text("subject_name").notNull(),
     destinationHandle: text("destination_handle").notNull(),
+    destinationLocationId: text("destination_location_id")
+      .notNull()
+      .references(() => locations.id, { onDelete: "restrict" }),
     feeUnit: text("fee_unit", { enum: ["copper"] }),
     feeAmount: integer("fee_amount"),
     paymentTiming: text("payment_timing", { enum: ["on_completion"] }),
@@ -3499,6 +3502,7 @@ export const campaignPlayCommitments = sqliteTable(
         AND length(${table.title}) BETWEEN 1 AND 240
         AND length(${table.subjectName}) BETWEEN 1 AND 120
         AND length(${table.destinationHandle}) BETWEEN 1 AND 128
+        AND length(${table.destinationLocationId}) BETWEEN 1 AND 128
         AND (
           (${table.kind} = 'paid_delivery'
             AND ${table.feeUnit} = 'copper'

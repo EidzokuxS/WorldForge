@@ -43,6 +43,12 @@ const line = (maximum: number) => text(maximum)
   .refine((value) => !value.includes("\n") && !value.includes("\r"));
 const requiredReplyDetailPromptInstruction = "When requiredReplyDetail is present, it contains only the player's exact spoken words addressed to the required actor, preferably a concise first-person utterance. Do not include a speaker tag, quotation marks, stage direction, narrated movement, or an action instruction. The application adds quotation marks and binds this utterance to the contact intent.";
 
+const narratorDeliveryMechanicalAuthorityPromptInstruction = "Typed packet commitments and obligations define the complete delivery predicate and payment eligibility. For paid_delivery and unpaid_delivery, use only the typed commitment terms and the code-owned completionCondition=deliver_subject_to_destination. A grounded physical or cargo condition may be narrated as scene truth, but it may not add, remove, postpone, forfeit, or change delivery completion, commitment status, fee eligibility, payment, debt, or another mechanical outcome unless matching typed packet authority says so.";
+
+const narratorSceneCompositionPromptInstruction = `SCENE_COMPOSITION_GUIDANCE
+Lead each player-visible scene with the player's current action, arrival, or immediate choice. Follow it with one scene-specific sensory detail or actor response, then state only a new durable or visible delta. Treat adjacent scene text and sourceMoment as already shown. After an offer is accepted, during pickup or travel, and at delivery, do not repeat an unchanged contract or its load, destination, deadline, or payment terms. Preserve exact terms only when they are first introduced, changed, disputed, or needed for the player's immediate choice. If dialogue already shows an offer or acceptance, move to the immediate response or new visible delta instead of echoing it as chalk, signage, or an acceptance summary. Write concrete scene prose without system/meta framing, administrative recaps, or generic filler. Incidental atmosphere may remain untyped; do not imply a ledger, standing, access, audit, or similar consequence without typed packet authority. When no new delta exists, ground the beat in a supported current sensory or actor observation. Do not echo actionContext.submittedText as a recap. State a code-owned acceptance or decline once when needed for legibility.
+END_SCENE_COMPOSITION_GUIDANCE`;
+
 const toolIntentSelectionDetailPolicyPromptInstruction = "For each selected key, copy the exact code-owned entry from TOOL_INTENT_SELECTION_FRAME. Each frame entry is a closed binding to its exact intentHandle, label, kind, and targets; choose only a key present in the frame. Do not invent, rename, retarget, or rewrite an intent or target handle. Every selectedIntents entry is an ordinary packet-owned action: return explicit JSON null for both detail and mode, include both properties, and do not use empty strings, omit either property, or add placeholder text. The application publishes the entry's exact label, kind, targets, and bindings. A required player reply is not a selectedIntents entry; when requiredReplyDetail is present, it alone carries the player's exact spoken words addressed to the bound actor.";
 
 const contactFollowThroughDetailPromptInstruction = "After a contact action, selectedIntents is the ordered ranking of packet-owned actions. Return exactly expectedSelectedCount distinct entries from TOOL_INTENT_SELECTION_FRAME in publication order, with the first selected entry marked mayLead=true. Each selected entry copies one exact key and uses detail:null and mode:null. The application publishes the packet's exact label, kind, targets, handle, and bindings; the model only ranks the frozen intents. Do not invent, rename, retarget, or add an object, actor, location, purpose, result, or utterance to an action. A required player reply, when the packet explicitly provides one, is separate requiredReplyDetail and contains only the player's exact spoken words addressed to its bound actor.";
@@ -1730,12 +1736,14 @@ function toolIntentSelectionDetailPolicy(
 
 function buildToolIntentSelectionFrame(
   packet: CampaignPlayNarratorPacket,
+  options: { omitRequiredCommitmentIndexes?: boolean } = {},
 ): ToolIntentSelectionFrame {
   const requiredIntentIndex = requiredReplyIntentIndex(packet);
   const mandatoryDecisionIndexes = decisionIntentIndexes(packet);
   const mandatoryDecisionSet = new Set(mandatoryDecisionIndexes);
   const requiredCommitmentIndexes = requiredCommitmentIntentIndexes(packet);
   const requiredCommitmentSet = new Set(requiredCommitmentIndexes);
+  const omitRequiredCommitmentIndexes = options.omitRequiredCommitmentIndexes === true;
   const allowedLeadingIntentIndexes = new Set(
     leadingIntentIndexes(packet).filter((intentIndex) =>
       !mandatoryDecisionSet.has(intentIndex) &&
@@ -1746,14 +1754,18 @@ function buildToolIntentSelectionFrame(
     CAMPAIGN_PLAY_LIMITS.suggestedActions,
     packet.availableIntents.length,
   );
+  const expectedSelectedCount = Math.max(
+    0,
+    expectedActionCount - mandatoryDecisionIndexes.length -
+      (requiredIntentIndex === null ? 0 : 1) -
+      (omitRequiredCommitmentIndexes ? requiredCommitmentIndexes.length : 0),
+  );
   return {
-    expectedSelectedCount: Math.max(
-      0,
-      expectedActionCount - mandatoryDecisionIndexes.length -
-        (requiredIntentIndex === null ? 0 : 1),
-    ),
+    expectedSelectedCount,
     entries: packet.availableIntents.flatMap((intent, intentIndex) =>
-      intentIndex === requiredIntentIndex || mandatoryDecisionSet.has(intentIndex)
+      intentIndex === requiredIntentIndex ||
+        mandatoryDecisionSet.has(intentIndex) ||
+        (omitRequiredCommitmentIndexes && requiredCommitmentSet.has(intentIndex))
         ? []
         : [{
           key: toolIntentSelectionKey(intentIndex),
@@ -1762,10 +1774,10 @@ function buildToolIntentSelectionFrame(
           label: intent.label,
           kind: intent.kind,
           targets: intent.targets,
-          mayLead: requiredCommitmentSet.size > 0
+          mayLead: requiredCommitmentSet.size > 0 && !omitRequiredCommitmentIndexes
             ? requiredCommitmentSet.has(intentIndex)
             : allowedLeadingIntentIndexes.has(intentIndex),
-          required: requiredCommitmentSet.has(intentIndex),
+          required: !omitRequiredCommitmentIndexes && requiredCommitmentSet.has(intentIndex),
           ...toolIntentSelectionDetailPolicy(packet, intent),
         }]),
   };
@@ -1845,7 +1857,11 @@ function maximumNarratorBeatsForPacket(packet: CampaignPlayNarratorPacket): numb
   const isSingleContactResult = packet.turnKind === "player_action" &&
     packet.actionContext?.intentKind === "contact" &&
     packet.newObservations.length <= 1;
-  if (isSingleContactResult) return 1;
+  const isSingleDecisionResult = packet.newObservations.length <= 1 &&
+    (decisionIntentIndexes(packet).length > 0 ||
+      requiredCommitmentIntentIndexes(packet).length > 0 ||
+      packet.actionContext?.decisionOutcome !== undefined);
+  if (isSingleContactResult || isSingleDecisionResult) return 1;
   return packet.turnKind === "opening"
     ? CAMPAIGN_PLAY_OPENING_NARRATOR_MAX_BEATS
     : CAMPAIGN_PLAY_LIMITS.narrationBeats;
@@ -1924,9 +1940,13 @@ function narratorToolSchemaForPacket(packet: CampaignPlayNarratorPacket) {
   })).min(1).max(maximumBeats);
   const requiredIntentIndex = requiredReplyIntentIndex(packet);
   const mandatoryDecisionIndexes = decisionIntentIndexes(packet);
-  const selectionFrame = buildToolIntentSelectionFrame(packet);
+  const requiredCommitmentIndexes = requiredCommitmentIntentIndexes(packet);
   const applicationOwnedDecisionTransport = requiredIntentIndex === null &&
     mandatoryDecisionIndexes.length > 0;
+  const applicationOwnedCommitmentTransport = requiredCommitmentIndexes.length > 0;
+  const selectionFrame = buildToolIntentSelectionFrame(packet, {
+    omitRequiredCommitmentIndexes: applicationOwnedCommitmentTransport,
+  });
   const selectedIntentKeySchema = selectionFrame.entries.length === 0
     ? z.string().min(1).max(CAMPAIGN_PLAY_LIMITS.id)
     : z.enum(
@@ -2018,8 +2038,10 @@ function decodeNarratorToolResult(
   };
   const requiredIntentIndex = requiredReplyIntentIndex(packet);
   const mandatoryDecisionIndexes = decisionIntentIndexes(packet);
+  const requiredCommitmentIndexes = requiredCommitmentIntentIndexes(packet);
   const applicationOwnedDecisionTransport = requiredIntentIndex === null &&
     mandatoryDecisionIndexes.length > 0;
+  const applicationOwnedCommitmentTransport = requiredCommitmentIndexes.length > 0;
   if (applicationOwnedDecisionTransport) {
     if (transport.selectedIntents.length !== 0) {
       throw new CampaignPlayNarratorToolContractError({
@@ -2034,7 +2056,9 @@ function decodeNarratorToolResult(
       actionSelections: applicationOwnedOpenDecisionActionSelections(packet),
     });
   }
-  const selectionFrame = buildToolIntentSelectionFrame(packet);
+  const selectionFrame = buildToolIntentSelectionFrame(packet, {
+    omitRequiredCommitmentIndexes: applicationOwnedCommitmentTransport,
+  });
   const intentSelectionByKey = new Map(
     selectionFrame.entries.map((entry) => [entry.key, entry]),
   );
@@ -2070,17 +2094,18 @@ function decodeNarratorToolResult(
       selectedCount: selectedIntents.length,
     });
   }
-  const requiredCommitmentIndexes = requiredCommitmentIntentIndexes(packet);
-  const missingRequiredCommitmentIndexes = requiredCommitmentIndexes
-    .filter((intentIndex) => !selectedKeySet.has(toolIntentSelectionKey(intentIndex)));
-  if (missingRequiredCommitmentIndexes.length > 0) {
-    throw new CampaignPlayNarratorToolContractError({
-      phase: "private_decode",
-      check: "missing_required_commitment_intents",
-      missingIntentIndexes: [...missingRequiredCommitmentIndexes],
-      requiredCount: requiredCommitmentIndexes.length,
-      selectedCount: selectedIntents.length,
-    });
+  if (!applicationOwnedCommitmentTransport) {
+    const missingRequiredCommitmentIndexes = requiredCommitmentIndexes
+      .filter((intentIndex) => !selectedKeySet.has(toolIntentSelectionKey(intentIndex)));
+    if (missingRequiredCommitmentIndexes.length > 0) {
+      throw new CampaignPlayNarratorToolContractError({
+        phase: "private_decode",
+        check: "missing_required_commitment_intents",
+        missingIntentIndexes: [...missingRequiredCommitmentIndexes],
+        requiredCount: requiredCommitmentIndexes.length,
+        selectedCount: selectedIntents.length,
+      });
+    }
   }
   const selectedSelections = selectedIntents.map((selectedIntent, selectedPosition) => {
     const { key } = selectedIntent;
@@ -2164,10 +2189,22 @@ function decodeNarratorToolResult(
       detail: null,
       mode: null,
   }));
+  const commitmentActions: CampaignPlayNarratorProposal["actionSelections"] =
+    applicationOwnedCommitmentTransport
+      ? requiredCommitmentIndexes.map((intentIndex) => ({
+          intentIndex,
+          detail: null,
+          mode: null,
+        }))
+      : [];
   if (requiredIntentIndex === null) {
     return parseNarratorProposalForTool(packet, {
       beats: transport.beats,
-      actionSelections: [...mandatoryDecisionActions, ...selectedActions],
+      actionSelections: [
+        ...mandatoryDecisionActions,
+        ...commitmentActions,
+        ...selectedActions,
+      ],
     });
   }
   return parseNarratorProposalForTool(packet, {
@@ -2178,6 +2215,7 @@ function decodeNarratorToolResult(
         intentIndex: requiredIntentIndex,
         detail: transport.requiredReplyDetail,
       },
+      ...commitmentActions,
       ...selectedActions,
     ],
   });
@@ -2210,6 +2248,11 @@ function mechanicalTruthReviewPrompt(
     "",
     "MECHANICAL_TRUTH_CRITERIA",
     "Names, prices, purchases, offers, promises, and background bargains are not mechanical state by themselves. Allow a named one-off person or incidental commerce as prose-only atmosphere when it does not create actionable future reliance or a state change. Treat a claim as mechanically consequential only when the scene accepts a player's offer or choice, exposes a concrete next control, creates a cargo, currency, access, relation, or world-state delta, creates a commitment or obligation, or asserts a later consequence or check. Statements of intent, requests, offers, questions, refusal, and agreement are allowed when the packet supports them. Do not upgrade intent or agreement into completed transfer, possession, custody, payment, debt, route or location movement, actor or pressure change, or another world change unless the packet explicitly authorizes that fact. A decision outcome may acknowledge the player's accepted or declined choice, its summary, and selected response, but may not exaggerate it into an effect absent from packet authority. Do not introduce hidden or unobserved mechanically consequential facts. Audit every suggested-action label and detail as well as beats, displayText, and effects: labels may target only packet-authorized available intents and may not imply an unavailable object, actor, location, result, or completed action. Return the bounded checklist and general check names below; never return candidate text or a reason.",
+    "SCENE_COMPOSITION_SEMANTIC_CRITERIA",
+    "Judge scene meaning across beats against sourceMoment and adjacent packet observations, not sentence-level plausibility alone. Full exact offer terms may appear only when first introducing the offer, recording a changed or disputed term, or supporting the player's immediate choice. Once the terms are visible, an acceptance scene acknowledges acceptance once and shows one immediate new sensory or actor delta; it does not repeat an unchanged load, destination, deadline, or payment. A later beat that only says the offer waits, hangs, or remains open without new supported information is unsupported under other_mechanical_contradiction. Apply this semantic check even when each repeated sentence is individually grounded; this is a meaning check, not lexical filtering or a style preference.",
+    "DELIVERY_MECHANICAL_AUTHORITY",
+    narratorDeliveryMechanicalAuthorityPromptInstruction,
+    "For this delivery boundary, classify violations with the existing unsupported_obligation_or_payment, decision_outcome_exaggerated, or other_mechanical_contradiction checks; do not invent a new check.",
     "WAIT_MECHANICAL_AUTHORITY: For actionContext.intentKind=wait, elapsedMinutes advances only the clock. Time passing and supported sensory continuity are allowed. Claim pressure, route, actor, task, or hazard completion, progress, movement, escalation, easing, or resolution only when a matching current typed newObservation, visible pressure fact, consequence, or accepted mechanical effect authorizes that exact change. In a pure time-only wait with newObservations=[], consequences=[], and no matching visible pressure fact, reject any such claim as unsupported_actor_or_pressure_change or other_mechanical_contradiction. sourceMoment and playerHistory prose are continuity evidence, not mechanical authority. A typed fact authorizes only the exact supplied change.",
     "MECHANICAL_TRUTH_DIMENSION_CHECKLIST",
     "Return dimensions with exactly one status for every listed key: supported means the candidate is fully authorized by the public packet; unsupported means at least one consequential claim in that dimension lacks exact packet authority. Check each dimension independently, including when another dimension is already unsupported.",
@@ -2220,7 +2263,7 @@ function mechanicalTruthReviewPrompt(
     "hidden_or_unobserved_fact: mark unsupported only for a mechanically consequential fact, object, event, or participant presented as present or known without public observation or typed authority. A named one-off extra, quoted price, purchase, offer, or promise may remain prose-only when it is atmospheric and creates no actionable future reliance, concrete next control, cargo, currency, access, relation, world-state delta, commitment, obligation, later consequence, or check.",
     "unsupported_action_target: mark unsupported when a suggested-action label or detail targets an object, actor, location, result, or completed action that is not the exact target of a packet-authorized available intent; a concrete crate is not authorized merely because a broader setting premise mentions it.",
     "decision_outcome_exaggerated: mark unsupported when prose expands a typed decision beyond its exact status, summary, selected response, controls, or acceptEffect terms.",
-    "other_mechanical_contradiction: mark unsupported for another mechanically consequential contradiction not covered above.",
+    "other_mechanical_contradiction: mark unsupported for another mechanically consequential contradiction not covered above. Also mark unsupported when scene prose repeats unchanged offer terms after acceptance or adds a beat that only says the offer waits, hangs, or remains open without an immediate new sensory or actor delta; full exact terms are reserved for first introduction, change, dispute, or immediate choice.",
     "The application derives rejection from any unsupported dimension as well as any reported bounded failed check, so verdict=approve cannot override an unsupported status. Apply this exact checklist to every candidate, including same-input recovery; recovery has no leniency or synthetic continuity.",
     "DECISION_AND_COMMITMENT_AUTHORITY: Treat actionContext.decisionOutcome, decisionOutcomes, and commitments as typed mechanical authority, not as prose invitations. For a generic decision_open offer (kind=offer) with acceptEffect=null, acceptance or decline of the exact application-owned summary/selected label is the complete nonmonetary outcome: it authorizes that acknowledgement only, not a benefit, access, reward, payment, ownership, debt, delivery, other-party commitment, or world change. Reject renamed or invented decision controls or terms; an atmospheric offer or random trade without a typed decision remains prose-only and cannot become mechanics. Declined decisions authorize no assignment or commitment effect, regardless of any acceptEffect field. A paid_delivery acceptEffect authorizes saying that the exact assignment, subject, fee, destination, and supplied deadline were accepted; it does not authorize cargo custody, already carrying the cargo, work completed, fee due, payment made, payment owed as a debt, or another completion claim. An unpaid_delivery acceptEffect authorizes the exact assignment, subject, destination, and supplied deadline only; it authorizes no fee, payment, debt, or compensation. An active commitment is outstanding and cannot be narrated as complete, delivered, paid, or carrying. A commitment-bound collect or deliver control is only a code-owned request or attempt label; it never proves custody, transfer, delivery, completion, payment, or debt. A completed commitment authorizes completion only together with its exact terms, and payment or fee due only when a matching public obligations entry also exists; a completed commitment alone never creates payment or debt authority. When actionContext.obligationSettlement.status is settled, the debtor identified by debtorHandle paid you exactly amount unitKey, and that exact obligationHandle is settled. Match its obligationHandle, debtorHandle, creditorHandle, unitKey, amount, status, sourceTurnId, and summary to the packet; it authorizes no other payment, debt, ownership, custody, delivery, commitment, job reopening, or world change. Use only exact handles, names, payment terms when present, status, and dueWorldTimeLabel supplied by the packet. Every eligible commitment-bound control that fits the publication budget must remain in suggestedActions in the packet's stable commitment order; omission or altered label/binding is a mechanical contradiction.",
     "",
@@ -2239,20 +2282,27 @@ function buildPrompt(
 ): string {
   const requiredIntentIndex = requiredReplyIntentIndex(packet);
   const mandatoryDecisionIndexes = decisionIntentIndexes(packet);
+  const requiredCommitmentIndexes = requiredCommitmentIntentIndexes(packet);
   const toolRequiredReply = toolMode && requiredIntentIndex !== null;
   const applicationOwnedDecisionTransport = toolMode &&
     requiredIntentIndex === null &&
     mandatoryDecisionIndexes.length > 0;
+  const applicationOwnedCommitmentTransport = toolMode &&
+    requiredCommitmentIndexes.length > 0;
   const expectedActionCount = Math.min(
     CAMPAIGN_PLAY_LIMITS.suggestedActions,
     packet.availableIntents.length,
   );
+  const toolSelectionFrame = toolMode
+    ? buildToolIntentSelectionFrame(packet, {
+      omitRequiredCommitmentIndexes: applicationOwnedCommitmentTransport,
+    })
+    : null;
   const outputActionSelectionCount = applicationOwnedDecisionTransport
     ? 0
-    : toolRequiredReply
-    ? Math.max(0, expectedActionCount - mandatoryDecisionIndexes.length - 1)
+    : toolMode
+    ? toolSelectionFrame?.expectedSelectedCount ?? 0
     : expectedActionCount;
-  const requiredCommitmentIndexes = requiredCommitmentIntentIndexes(packet);
   const observationActorNameFrame = buildObservationActorNameFrame(packet);
   const actorScopeRepairFrame = buildActorScopeRepairFrame(
     observationActorNameFrame,
@@ -2276,10 +2326,12 @@ NARRATOR_GENERATION_RECOVERY
 The prior response did not match the provider-facing schema. Regenerate a fresh object. ${toolMode
     ? applicationOwnedDecisionTransport
       ? "This packet contains an open typed decision. Return selectedIntents as exactly []: the application publishes the complete packet-owned suggested-action set, with exact decision controls first and remaining controls in stable packet order. Do not author, rename, or retarget any action."
+      : applicationOwnedCommitmentTransport
+      ? "This packet's active typed commitment controls are application-owned. The application publishes each required commitment control with its exact packet-owned label and binding in stable commitment order before the model-ranked generic intents. Return selectedIntents only for the remaining generic entries in TOOL_INTENT_SELECTION_FRAME; the commitment controls are absent from that frame."
       : `Rebuild selectedIntents from TOOL_INTENT_SELECTION_FRAME. Return exactly expectedSelectedCount distinct entries in publication order; each entry must contain its exact key with detail:null and mode:null, and the first selected entry must have mayLead=true. ${toolIntentSelectionDetailPolicyPromptInstruction} Keep every other schema, packet, grounding, visibility, and narration rule unchanged.${toolRequiredReply ? " The required reply key is application-owned and absent from selectedIntents. requiredReplyDetail contains only the player's exact spoken words addressed to that actor as one non-empty single-line utterance; the application adds quotation marks and binds it to the contact intent." : ""}`
     : "Rebuild actionSelections from ACTION_SELECTION_INDEX_FRAME: at each actionSelectionIndex, set intentIndex to one integer from allowedIntentIndexes, and use each selected index once. Keep every other schema, packet, grounding, visibility, and narration rule unchanged."}
 ${toolMode ? `TOOL_INTENT_SELECTION_FRAME
-${canonicalizeCampaignPlayProjection(buildToolIntentSelectionFrame(packet))}
+${canonicalizeCampaignPlayProjection(toolSelectionFrame)}
 END_TOOL_INTENT_SELECTION_FRAME` : `ACTION_SELECTION_INDEX_FRAME
 ${canonicalizeCampaignPlayProjection(buildActionSelectionIndexFrame(packet))}
 END_ACTION_SELECTION_INDEX_FRAME`}
@@ -2306,9 +2358,11 @@ END_OBSERVATION_COVERAGE_REPAIR_FRAME` : "";
 TOOL_INTENT_SELECTION_CONTRACT
   ${applicationOwnedDecisionTransport
     ? "This packet contains an open typed decision. Return selectedIntents as exactly []. The application publishes the complete suggested-action set: exact decision controls first, then the remaining packet-owned intents in stable order. Every published action keeps its exact handle, label, targets, and binding, with detail=null and mode=null. Do not author, rename, or retarget an action."
+    : applicationOwnedCommitmentTransport
+    ? "This packet's active typed commitment controls are application-owned. The application publishes each required commitment control with its exact packet-owned label and binding in stable commitment order before the model-ranked generic intents. Return selectedIntents only for the remaining generic entries in TOOL_INTENT_SELECTION_FRAME; the commitment controls are absent from that frame."
     : `selectedIntents is an ordered array of exactly expectedSelectedCount distinct entries from TOOL_INTENT_SELECTION_FRAME. Each entry contains one exact application-owned key with detail:null and mode:null; put the strongest supported continuation first, and the first selected entry must have mayLead=true. ${toolIntentSelectionDetailPolicyPromptInstruction}${toolRequiredReply ? " The required reply key is application-owned and absent from selectedIntents. requiredReplyDetail contains only the player's exact spoken words addressed to that actor as one non-empty single-line utterance; the application adds quotation marks and binds it to the contact intent." : ""}`}
 TOOL_INTENT_SELECTION_FRAME
-${canonicalizeCampaignPlayProjection(buildToolIntentSelectionFrame(packet))}
+${canonicalizeCampaignPlayProjection(toolSelectionFrame)}
 END_TOOL_INTENT_SELECTION_FRAME
 END_TOOL_INTENT_SELECTION_CONTRACT` : "";
   const decisionSlotInstruction = mandatoryDecisionIndexes.length > 0
@@ -2319,7 +2373,7 @@ END_TOOL_INTENT_SELECTION_CONTRACT` : "";
   const actionSelectionOutputInstruction = toolMode
     ? applicationOwnedDecisionTransport
       ? `Return selectedIntents as exactly []. The application publishes all ${expectedActionCount} suggested actions from the packet in its fixed order, with exact decision controls first and every detail and mode null. Do not author, rename, or retarget an action.${decisionSlotInstruction}`
-      : `Select exactly ${outputActionSelectionCount} entries through selectedIntents in publication order. Each entry carries one exact key with detail:null and mode:null; the application publishes those supported intents.${toolRequiredReply ? " It publishes the required spoken utterance before them as the first contact action." : ""}${decisionSlotInstruction}${requiredCommitmentIndexes.length > 0 ? ` Include the required commitment controls marked in TOOL_INTENT_SELECTION_FRAME before generic intents; copy every marked key exactly.` : ""}`
+      : `Select exactly ${outputActionSelectionCount} entries through selectedIntents in publication order. Each entry carries one exact key with detail:null and mode:null; the application publishes those supported intents.${toolRequiredReply ? " It publishes the required spoken utterance before them as the first contact action." : ""}${applicationOwnedCommitmentTransport ? " It publishes the required commitment controls before these model-ranked generic intents in stable commitment order." : ""}${decisionSlotInstruction}${requiredCommitmentIndexes.length > 0 && !applicationOwnedCommitmentTransport ? ` Include the required commitment controls marked in TOOL_INTENT_SELECTION_FRAME before generic intents; copy every marked key exactly.` : ""}`
     : `Return exactly ${outputActionSelectionCount} actionSelections. Every ordinary selection must copy one exact, unique intentIndex from availableIntents with detail:null and mode:null; only an explicitly required reply selection may carry detail.${decisionSlotInstruction}${requiredCommitmentIndexes.length > 0 ? " Include the required commitment intent indexes in their fixed slots before generic intents; copy each exact index." : ""}`;
   const nativeRequiredReplyInstruction = !toolRequiredReply && requiredIntentIndex !== null
     ? mandatoryDecisionIndexes.length === 0
@@ -2347,10 +2401,20 @@ ${canonicalizeCampaignPlayProjection(narratorBeatContractFrame)}
 END_NARRATOR_BEAT_CONTRACT
 The NARRATOR_BEAT_CONTRACT is derived from the packet-specific output schema and is authoritative. Return at least minimumBeatCount and never more than maximumBeatCount beats. When maximumBeatCount is 1, return exactly one beat. Use only the listed allowedPurposes, and do not add a beat merely to repeat a purpose or an available intent.
 
+${narratorSceneCompositionPromptInstruction}
+
+SCENE_COMPOSITION_SEMANTIC_CONTRACT
+This is a hard meaning contract, not a style suggestion. Full exact offer terms are for first introduction, a changed or disputed term, or the player's immediate choice. After terms are visible, an acceptance scene acknowledges acceptance once and shows one immediate new sensory or actor delta; it does not repeat unchanged load, destination, deadline, or payment. If an earlier beat introduced the offer, omit any later beat that only says the offer hangs, waits, or remains open. Every beat must add supported information, and changing the wording does not make an unchanged recap new information.
+END_SCENE_COMPOSITION_SEMANTIC_CONTRACT
+
 NARRATOR_INTENT_TARGET_FRAME
 ${canonicalizeCampaignPlayProjection(narratorIntentTargetFrame)}
 END_NARRATOR_INTENT_TARGET_FRAME
 The NARRATOR_INTENT_TARGET_FRAME is the complete closed target allow-list for each intentIndex. Copy only an exact intentIndex from its row and keep the application-owned label, kind, and targets bound to that row. Ordinary action selections carry no model-authored detail or mode; the application publishes the row's exact label and targets. Do not turn a noun in submittedText, sourceMoment, or another string into a new action target; for example, a Talk-to-actor intent cannot become an Inspect-object action when that object is not listed. A row with no targets authorizes no invented target. targetHandle values are reference-only and must never appear in player-facing text or model output. Only an explicitly required reply may carry detail, and requiredReplyDetail contains the player's exact spoken words addressed to its bound actor.
+
+DELIVERY_MECHANICAL_AUTHORITY
+${narratorDeliveryMechanicalAuthorityPromptInstruction}
+END_DELIVERY_MECHANICAL_AUTHORITY
 
 WAIT_MECHANICAL_AUTHORITY
 For actionContext.intentKind=wait, elapsedMinutes advances only the clock. Time passing and supported sensory continuity are allowed. Claim pressure, route, actor, task, or hazard completion, progress, movement, escalation, easing, or resolution only when a matching current typed newObservation, visible pressure fact, consequence, or accepted mechanical effect authorizes that exact change. In a pure time-only wait with newObservations=[], consequences=[], and no matching visible pressure fact, do not imply any such change. sourceMoment and playerHistory prose are continuity evidence, not mechanical authority. A typed fact authorizes only the exact supplied change.
@@ -2386,7 +2450,7 @@ Use sourceMoment as immediate continuity at currentLocation, changed only by cur
 
 Cover every newObservations index exactly once across beat observationIndexes, in causal order. The beat must visibly express that observation. When a later observation supersedes an earlier state, narrate the latest state without repeating the stale one. If consequence.performingActorName is present, name that actor in the beat carrying the observation.
 
-When actionContext.decisionOutcome is present, cover its code-owned decision outcome observation index on a consequence beat. Preserve the actor, the fact that the player accepted or declined the choice presented by that actor, the summary, and selected response as natural scene facts without inventing a mechanical effect.
+When actionContext.decisionOutcome is present, cover its code-owned decision outcome observation index on a consequence beat. Preserve the actor, the fact that the player accepted or declined the choice presented by that actor, the summary, and selected response as natural scene facts, but represent each once and do not repeat wording already visible in dialogue or another current observation. Never add a meta acceptance summary or mechanical effect.
 
 When actionContext.obligationSettlement.status is settled, cover only its exact receivable fact: the debtor identified by debtorHandle paid you exactly amount unitKey, and that exact obligationHandle is settled. Do not add another payment, debt, ownership, custody, delivery, commitment, job reopening, or world change.
 
@@ -2397,6 +2461,8 @@ ${actionSelectionOutputInstruction}${nativeRequiredReplyInstruction} Select the 
 
   ${applicationOwnedDecisionTransport
       ? "This open-decision packet is application-owned: return selectedIntents=[]; the application publishes exact decision controls and remaining packet-owned intents in fixed order, all with detail=null and mode=null."
+      : applicationOwnedCommitmentTransport
+      ? "This packet's active typed commitment controls are application-owned: the application publishes their exact labels and bindings before these model-ranked generic intents. Return only generic keys in selectedIntents."
       : packet.actionContext?.intentKind === "contact"
       ? `${contactFollowThroughDetailPromptInstruction} Optional intents keep their application-owned kind, target, handle, and base label. Return selectedIntents in publication order with detail:null and mode:null on every entry.`
       : toolMode
@@ -2442,7 +2508,7 @@ Before finalizing each beat, check every visible actor name or unique name fragm
 
 An actor may still be present in visibleActors without being bound to a current observation. Put any orientation mention of that actor in a separate beat with observationIndexes: []. On a movement turn, assign the travel observation to its consequence beat, then orient the player to unbound people at the destination in a separate empty-index beat. Do not attach an unbound actor name to the travel observation.
 
-${actionSelectionOutputInstruction}${nativeRequiredReplyInstruction} Select the actions that make the strongest immediate follow-through from the visible scene, the player's submitted action, and its consequences. Put the strongest option first. After a contact action, a direct answer to the NPC may lead when the visible consequence asks a question, makes an offer, or demands a decision; otherwise prefer an option that advances the scene. ${applicationOwnedDecisionTransport ? "This open-decision packet is application-owned: return selectedIntents=[] and do not author, rename, or retarget any action." : packet.actionContext?.intentKind === "contact" ? contactFollowThroughDetailPromptInstruction : toolMode ? "The model ranks frozen intents but never rewrites them." : "Keep every ordinary actionSelection detail and mode as explicit null values."} Strongest means the most meaningful continuation of the player's visible chosen direction, not the highest world stakes; a central pressure has no automatic priority. When the player explicitly ignores, refuses, corrects, or leaves one thread and the accepted consequence supports another, include a supported local intent for the chosen thread before any unrelated pressure. Prefer an unresolved person, object, pressure, or change that the prose makes salient now. Preserve meaningful contrast between options instead of following packet order: do not spend a slot on wait when a more consequential supported interaction exists, and do not select several moves unless travel is the scene's central decision. The application owns every available intent, kind, target, and identifier. Never invent or alter an intentIndex.
+${actionSelectionOutputInstruction}${nativeRequiredReplyInstruction} Select the actions that make the strongest immediate follow-through from the visible scene, the player's submitted action, and its consequences. Put the strongest option first. After a contact action, a direct answer to the NPC may lead when the visible consequence asks a question, makes an offer, or demands a decision; otherwise prefer an option that advances the scene. ${applicationOwnedDecisionTransport ? "This open-decision packet is application-owned: return selectedIntents=[] and do not author, rename, or retarget any action." : applicationOwnedCommitmentTransport ? "This packet's active typed commitment controls are application-owned: the application publishes their exact labels and bindings before these model-ranked generic intents. Return only generic keys in selectedIntents." : packet.actionContext?.intentKind === "contact" ? contactFollowThroughDetailPromptInstruction : toolMode ? "The model ranks frozen intents but never rewrites them." : "Keep every ordinary actionSelection detail and mode as explicit null values."} Strongest means the most meaningful continuation of the player's visible chosen direction, not the highest world stakes; a central pressure has no automatic priority. When the player explicitly ignores, refuses, corrects, or leaves one thread and the accepted consequence supports another, include a supported local intent for the chosen thread before any unrelated pressure. Prefer an unresolved person, object, pressure, or change that the prose makes salient now. Preserve meaningful contrast between options instead of following packet order: do not spend a slot on wait when a more consequential supported interaction exists, and do not select several moves unless travel is the scene's central decision. The application owns every available intent, kind, target, and identifier. Never invent or alter an intentIndex.
 
 ${packet.actionContext?.intentKind === "contact"
     ? "Optional available intents keep their application-owned kind, target, handle, and base label. After this contact action, select only an immediate grounded follow-through from the current visible scene; use detail:null and mode:null so the application publishes the exact packet label. A required player reply, when explicitly provided by the packet, is separate requiredReplyDetail and may contain only the player's exact spoken words."
@@ -2470,7 +2536,7 @@ Write every beat in second person. Address the player as "you" and never switch 
 
 Match the turn disposition:
 - Opening: use openingContext to establish the player's present situation. The first beat must use orientation. When a visible consequence exists, describe it inside that orientation beat with only the location detail needed to understand it. Do not label the first beat consequence, and do not delay the change behind a tour of the setting. Otherwise begin with the player's specific arrival or immediate situation. Convey only the pressure or calm openingContext supplies, and leave concrete room to act. When openingContext.decision is present, cover its code-owned decision observation index on that first orientation beat and present the actor's offer, question, or demand in natural scene prose so the player's choice is legible without relying on controls alone. Keep the exact acceptLabel and declineLabel available as the immediate choices without inventing consequences. openingContext is descriptive and cannot create a route restriction. visibleRoutes is mechanical authority: when a route is open, do not say or imply that passage, departure, or travel is stopped, denied, blocked, gated, or requires payment or permission. Mention a visible actor only when their presence matters now.
-- When actionContext.decisionOutcome is present, cover its code-owned decision outcome observation index on a consequence beat and naturally acknowledge that the player accepted or declined the choice presented by the actor, along with the summary and selected response. Treat those fields as immutable public facts from the code-owned resolution. Do not replace the acknowledgement with generic action prose or add a mechanical consequence that the packet does not state.
+- When actionContext.decisionOutcome is present, cover its code-owned decision outcome observation index on a consequence beat and naturally acknowledge that the player accepted or declined the choice presented by the actor, along with the summary and selected response, once in natural scene prose. If dialogue or another current observation already conveys that fact, do not repeat it or add a meta acceptance summary. Treat those fields as immutable public facts from the code-owned resolution. Do not replace the acknowledgement with generic action prose or add a mechanical consequence that the packet does not state.
 - When actionContext.obligationSettlement.status is settled, cover its exact receivable fact: the debtor identified by debtorHandle paid you exactly amount unitKey, and that exact obligationHandle is settled. Treat its binding and amount as immutable public facts from the code-owned resolution. Do not expand it into another payment, debt, ownership, custody, delivery, commitment, job reopening, or world change.
 - Actionable: render the visible result with consequence beats. Add one action_handoff only when the packet supports a separate unresolved edge.
 - No effect: the action resolves without a state change. Use consequence to show what the scene actually presents or what was observed. Invent no state change, item, or offstage event.

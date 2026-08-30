@@ -112,6 +112,17 @@ function frame(): CampaignPlayJudgeFrame {
   };
 }
 
+function twoActorFrame(): CampaignPlayJudgeFrame {
+  const value = frame();
+  return {
+    ...value,
+    visibleFacts: [
+      ...value.visibleFacts,
+      { handle: "actor-porter", kind: "actor", summary: "A porter waits beside the gate." },
+    ],
+  };
+}
+
 function proposal(overrides: Record<string, unknown> = {}) {
   return {
     kind: "contact",
@@ -136,6 +147,26 @@ function proposal(overrides: Record<string, unknown> = {}) {
     clarificationQuestion: null,
     ...overrides,
   };
+}
+
+function twoActorProposal(overrides: Record<string, unknown> = {}) {
+  return proposal({
+    visibleActorReactions: [
+      {
+        actorHandle: "actor-guard",
+        reaction: "none",
+        supportingVisibleFactHandle: null,
+        reason: "The guard is present but has no established stake in this question.",
+      },
+      {
+        actorHandle: "actor-porter",
+        reaction: "none",
+        supportingVisibleFactHandle: null,
+        reason: "The porter is visible but has no established stake in this question.",
+      },
+    ],
+    ...overrides,
+  });
 }
 
 function toolProposal(overrides: Record<string, unknown> = {}): Record<string, any> {
@@ -364,14 +395,7 @@ describe("Campaign Play Judge", () => {
         quantity: 1,
         minimumResult: "success",
       },
-      requiredObligationEffect: {
-        kind: "incur_actor_obligation",
-        debtorHandle: "actor-guard",
-        creditorHandle: "actor-you",
-        unitKey: "copper",
-        amount: 8,
-        minimumResult: "success",
-      },
+      requiredObligationEffect: { kind: "none" },
       citedVisibleFactHandles: ["location-reef", "notebook", "actor-guard", "actor-you"],
     }));
     expect(deliver.possessionEffectAuthority).toMatchObject({
@@ -381,14 +405,7 @@ describe("Campaign Play Judge", () => {
       quantity: 1,
       minimumResult: "success",
     });
-    expect(deliver.requiredObligationEffect).toEqual({
-      kind: "incur_actor_obligation",
-      debtorHandle: "actor-guard",
-      creditorHandle: "actor-you",
-      unitKey: "copper",
-      amount: 8,
-      minimumResult: "success",
-    });
+    expect(deliver.requiredObligationEffect).toEqual({ kind: "none" });
     const deliverBelowSuccess = judge.compile(frame(), deliverInput, proposal({
       kind: "attempt",
       targets: [{ handle: "location-reef", kind: "location" }],
@@ -1098,6 +1115,114 @@ describe("Campaign Play Judge", () => {
     expect(secondPrompt).not.toContain("citation-rogue");
   });
 
+  it("recovers a standalone vouch request through bounded citation, reaction-support, and obligation-kind errors", async () => {
+    const invalidCitation = toolProposal();
+    invalidCitation.citedVisibleFactHandles = [
+      "actor-guard",
+      "route-reef",
+      "location-harbor",
+      "citation-rogue",
+    ];
+    const invalidReactionSupport = toolProposal();
+    invalidReactionSupport.visibleActorReactions = [{
+      ...invalidReactionSupport.visibleActorReactions[0],
+      reaction: "immediate",
+      supportingVisibleFactHandle: "support-rogue",
+    }];
+    const invalidObligationKind = toolProposal();
+    invalidObligationKind.requiredObligationEffect = {
+      ...invalidObligationKind.requiredObligationEffect,
+      kind: "vouch",
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: invalidCitation, trace: trace("tool_mode", "tool") })
+      .mockResolvedValueOnce({ object: invalidReactionSupport, trace: trace("tool_mode", "tool") })
+      .mockResolvedValueOnce({ object: invalidObligationKind, trace: trace("tool_mode", "tool") })
+      .mockResolvedValueOnce({ object: toolProposal(), trace: trace("tool_mode", "tool") });
+    const judge = createCampaignPlayJudge({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    const input = {
+      originalText: "I ask Marta Grieve to vouch to Tobias Reed and promise privileged access to better-paying jobs.",
+      source: "freeform" as const,
+      choiceHandle: null,
+    };
+    const request = {
+      frame: frame(), input, model: model(), temperature: 0.2, budget,
+      structuredOutputMode: "tool" as const,
+    };
+
+    const feedbacks: Array<NonNullable<ReturnType<typeof getCampaignPlayJudgeRecoveryFeedback>>> = [];
+    let recoveryFeedback: ReturnType<typeof getCampaignPlayJudgeRecoveryFeedback>;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      let failure: unknown;
+      try {
+        await judge.judge({
+          ...request,
+          attempt,
+          workerEpoch: 50 + attempt,
+          ...(recoveryFeedback === undefined ? {} : { recoveryFeedback }),
+        });
+      } catch (cause) {
+        failure = cause;
+      }
+      expect(failure).toMatchObject({ code: "model_contract_failed" });
+      const feedback = getCampaignPlayJudgeRecoveryFeedback(failure);
+      if (feedback === undefined) throw new Error("Expected bounded recovery feedback for each invalid field.");
+      feedbacks.push(feedback);
+      recoveryFeedback = feedback;
+    }
+
+    expect(feedbacks[0]!.issues).toEqual([
+      expect.objectContaining({ code: "invalid_value", path: ["citedVisibleFactHandles", 3] }),
+    ]);
+    expect(feedbacks[1]!.issues).toEqual([
+      expect.objectContaining({ code: "invalid_value", path: ["visibleActorReactions", 0, "supportingVisibleFactHandle"] }),
+    ]);
+    expect(feedbacks[2]!.issues).toEqual([
+      expect.objectContaining({ code: "invalid_value", path: ["requiredObligationEffect", "kind"] }),
+    ]);
+    expect(JSON.stringify(feedbacks)).not.toContain("citation-rogue");
+    expect(JSON.stringify(feedbacks)).not.toContain("support-rogue");
+
+    if (recoveryFeedback === undefined) throw new Error("Expected final bounded recovery feedback.");
+    const result = await judge.judge({
+      ...request,
+      attempt: 4,
+      workerEpoch: 54,
+      recoveryFeedback,
+    });
+    expect(result.ruling.normalizedIntent).toMatchObject({
+      originalText: input.originalText,
+      kind: "contact",
+    });
+    expect(result.ruling).toMatchObject({
+      disposition: "deterministic",
+      possessionEffectAuthority: { kind: "none" },
+      requiredObligationEffect: { kind: "none" },
+    });
+    expect(generateObject).toHaveBeenCalledTimes(4);
+
+    const prompts = generateObject.mock.calls.map((call) =>
+      String((call[0] as Parameters<typeof safeGenerateObject>[0]).prompt));
+    expect(prompts[0]).toContain("UNSUPPORTED_SOCIAL_AUTHORITY=");
+    expect(prompts[0]).toContain(`PLAYER_INPUT=${JSON.stringify(input.originalText)}`);
+    expect(prompts[1]).toContain('RECOVERY_SCHEMA_INSTRUCTION_CLASSES=["copy_exact_citation_catalog"]');
+    expect(prompts[1]).toContain("RECOVERY_COPY_EXACT_CITATION_CATALOG=COPY_EXACT");
+    expect(prompts[2]).toContain('RECOVERY_SCHEMA_INSTRUCTION_CLASSES=["copy_exact_reaction_support_catalog"]');
+    expect(prompts[2]).toContain("RECOVERY_COPY_EXACT_REACTION_SUPPORT_CATALOG=For every visibleActorReactions entry");
+    expect(prompts[3]).toContain('RECOVERY_SCHEMA_INSTRUCTION_CLASSES=["none_unsupported_obligation"]');
+    expect(prompts[3]).toContain("RECOVERY_NONE_UNSUPPORTED_OBLIGATION=For a standalone vouch");
+    expect(prompts[3]).toContain('debtorHandle="", creditorHandle="", obligationHandle="", paymentPossessionHandle="", unitKey="", amount=0, and minimumResult=""');
+    for (const prompt of prompts.slice(1)) {
+      const recoveryMarker = prompt.indexOf("RECOVERY_SCHEMA_INSTRUCTION_CLASSES");
+      expect(recoveryMarker).toBeGreaterThan(0);
+      expect(prompt.slice(0, recoveryMarker).trimEnd()).toBe(prompts[0]);
+      expect(prompt).not.toContain("citation-rogue");
+      expect(prompt).not.toContain("support-rogue");
+    }
+  });
+
   it("decodes every tool null sentinel back to the exact null ruling fields", async () => {
     const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
       object: toolProposal({ method: null, stakes: null }),
@@ -1614,6 +1739,119 @@ describe("Campaign Play Judge", () => {
       { handle: "actor-guard", kind: "actor" },
     ]);
     expect(ruling.citedVisibleFactHandles).toContain("observation-latch");
+  });
+
+  it("rejects semantic visible actor reaction invariants with bounded diagnostics", () => {
+    const judge = createCampaignPlayJudge();
+    const input: CampaignPlayJudgeInput = {
+      originalText: "I ask the guard why the road is closed.",
+      source: "freeform",
+      choiceHandle: null,
+    };
+    const compileError = (candidate: unknown) => {
+      let error: unknown;
+      try {
+        judge.compile(twoActorFrame(), input, candidate);
+      } catch (cause) {
+        error = cause;
+      }
+      expect(error).toMatchObject({ code: "model_contract_failed" });
+      const feedback = getCampaignPlayJudgeRecoveryFeedback(error);
+      if (feedback === undefined) throw new Error("Expected bounded semantic reaction feedback.");
+      return feedback;
+    };
+
+    const duplicateFeedback = compileError(twoActorProposal({
+      visibleActorReactions: [
+        {
+          actorHandle: "actor-guard",
+          reaction: "none",
+          supportingVisibleFactHandle: "observation-latch",
+          reason: "The guard's reaction was duplicated by the model.",
+        },
+        {
+          actorHandle: "actor-guard",
+          reaction: "none",
+          supportingVisibleFactHandle: null,
+          reason: "The duplicate entry has no established stake.",
+        },
+      ],
+    }));
+    expect(duplicateFeedback.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: ["visibleActorReactions", 1, "actorHandle"],
+        message: "Visible actor reaction handles must not contain duplicates.",
+        check: "visible_actor_reactions_duplicates",
+      }),
+      expect.objectContaining({
+        path: ["visibleActorReactions", 1, "actorHandle"],
+        message: "Visible actor reaction handles must match the exact visible actor catalog in order.",
+        check: "visible_actor_reactions_catalog",
+      }),
+      expect.objectContaining({ check: "visible_actor_reactions_set" }),
+      expect.objectContaining({
+        path: ["visibleActorReactions", 0, "supportingVisibleFactHandle"],
+        message: "A none reaction must use a null supporting visible fact handle.",
+        check: "visible_actor_reactions_none_support",
+      }),
+    ]));
+
+    const countFeedback = compileError(twoActorProposal({
+      visibleActorReactions: [twoActorProposal().visibleActorReactions[0]],
+    }));
+    expect(countFeedback.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: ["visibleActorReactions"],
+        message: "Visible actor reactions must contain exactly one entry for each visible nonplayer actor.",
+        check: "visible_actor_reactions_count",
+      }),
+      expect.objectContaining({ check: "visible_actor_reactions_set" }),
+    ]));
+
+    const immediateSupportFeedback = compileError(twoActorProposal({
+      visibleActorReactions: [
+        {
+          actorHandle: "actor-guard",
+          reaction: "immediate",
+          supportingVisibleFactHandle: "hidden-support",
+          reason: "The guard's immediate reaction cites an unavailable fact.",
+        },
+        twoActorProposal().visibleActorReactions[1],
+      ],
+    }));
+    expect(immediateSupportFeedback.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: ["visibleActorReactions", 0, "supportingVisibleFactHandle"],
+        message: "An immediate reaction's supporting visible fact handle must be visible or null.",
+        check: "visible_actor_reactions_immediate_support",
+      }),
+    ]));
+
+    const immediateRuling = judge.compile(twoActorFrame(), input, twoActorProposal({
+      targets: [{ handle: "location-harbor", kind: "location" }],
+      visibleActorReactions: [
+        {
+          actorHandle: "actor-guard",
+          reaction: "immediate",
+          supportingVisibleFactHandle: "observation-latch",
+          reason: "The attempted interference concerns the gate the guard just secured.",
+        },
+        twoActorProposal().visibleActorReactions[1],
+      ],
+      kind: "attempt",
+      disposition: "impossible",
+      citedVisibleFactHandles: ["location-harbor"],
+      resultBounds: { minimum: "no_effect", maximum: "no_effect" },
+      elapsedBounds: { minimumMinutes: 0, maximumMinutes: 0 },
+      method: "Pull at the locked gate",
+      stakes: "Open the gate",
+      reason: "The secured latch prevents the gate from moving.",
+    }));
+    expect(immediateRuling.normalizedIntent.targets).toEqual([
+      { handle: "location-harbor", kind: "location" },
+      { handle: "actor-guard", kind: "actor" },
+    ]);
+    expect(immediateRuling.citedVisibleFactHandles).toContain("observation-latch");
   });
 
   it("keeps a compound action's primary intent while authorizing its explicit route movement", () => {
@@ -2577,6 +2815,95 @@ describe("Campaign Play Judge", () => {
       expect(JSON.stringify(capture.records())).not.toContain(unsafe);
       expect(generateObject).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it("recovers a semantically invalid visible actor reaction vector with the exact actor catalog", async () => {
+    const unsafe = "provider-secret-reaction-detail";
+    const invalid = twoActorProposal({
+      visibleActorReactions: [
+        {
+          actorHandle: "actor-guard",
+          reaction: "none",
+          supportingVisibleFactHandle: "actor-guard",
+          reason: unsafe,
+        },
+        {
+          actorHandle: "actor-guard",
+          reaction: "none",
+          supportingVisibleFactHandle: null,
+          reason: unsafe,
+        },
+      ],
+    });
+    const valid = twoActorProposal();
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: invalid, trace: trace() })
+      .mockResolvedValueOnce({ object: valid, trace: trace() });
+    const judge = createCampaignPlayJudge({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    const input = { originalText: "I ask the guard why the road is closed.", source: "freeform" as const, choiceHandle: null };
+    const request = {
+      frame: twoActorFrame(), input, model: model(), temperature: 0.2, budget,
+    };
+
+    let firstError: unknown;
+    try {
+      await judge.judge({ ...request, attempt: 1, workerEpoch: 40 });
+    } catch (cause) {
+      firstError = cause;
+    }
+    expect(firstError).toMatchObject({ code: "model_contract_failed" });
+    const feedback = getCampaignPlayJudgeRecoveryFeedback(firstError);
+    if (feedback === undefined) throw new Error("Expected bounded semantic reaction feedback.");
+    expect(feedback.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ check: "visible_actor_reactions_duplicates" }),
+      expect.objectContaining({ check: "visible_actor_reactions_set" }),
+      expect.objectContaining({ check: "visible_actor_reactions_catalog" }),
+      expect.objectContaining({ check: "visible_actor_reactions_none_support" }),
+    ]));
+    expect(JSON.stringify(feedback)).not.toContain(unsafe);
+
+    const result = await judge.judge({
+      ...request,
+      attempt: 2,
+      workerEpoch: 41,
+      recoveryFeedback: feedback,
+    });
+    expect(result.ruling.normalizedIntent.originalText).toBe(input.originalText);
+    expect(result.modelEvidence).toMatchObject({
+      actualProviderId: "test-provider",
+      repairUsed: false,
+      retryUsed: false,
+      textFallbackUsed: false,
+    });
+    expect(generateObject).toHaveBeenCalledTimes(2);
+
+    const firstOptions = generateObject.mock.calls[0]![0] as Parameters<typeof safeGenerateObject>[0];
+    const secondOptions = generateObject.mock.calls[1]![0] as Parameters<typeof safeGenerateObject>[0];
+    expect(secondOptions.model).toBe(firstOptions.model);
+    for (const key of [
+      "temperature", "maxOutputTokens", "mode", "strictSchema",
+      "allowRepair", "allowTextFallback", "retries",
+    ] as const) {
+      expect(secondOptions[key]).toBe(firstOptions[key]);
+    }
+    expect(secondOptions).toMatchObject({
+      allowRepair: false,
+      allowTextFallback: false,
+      retries: 1,
+    });
+    const firstPrompt = String(firstOptions.prompt);
+    const secondPrompt = String(secondOptions.prompt);
+    const actorCatalog = 'VISIBLE_ACTOR_REACTION_HANDLE_CATALOG=[{"index":0,"actorHandle":"actor-guard"},{"index":1,"actorHandle":"actor-porter"}]';
+    expect(firstPrompt).toContain(actorCatalog);
+    expect(secondPrompt).toContain(actorCatalog);
+    expect(secondPrompt).toContain('RECOVERY_SCHEMA_INSTRUCTION_CLASSES=["copy_exact_reaction_catalog","reaction_none_support_null"]');
+    expect(secondPrompt).toContain("RECOVERY_COPY_EXACT_REACTION_CATALOG=COPY_EXACT");
+    expect(secondPrompt).toContain("exact indexed order and set with no duplicates, omissions, or additions");
+    expect(secondPrompt).toContain("RECOVERY_REACTION_NONE_SUPPORT_NULL=For every visibleActorReactions entry with reaction none, set supportingVisibleFactHandle to null exactly");
+    expect(secondPrompt).toContain(`RECOVERY_FINAL_VALIDATION_ISSUES=${JSON.stringify(feedback.issues)}`);
+    expect(secondPrompt).not.toContain(unsafe);
   });
 
   it("carries only safe final-validation issues into one recovery prompt", async () => {

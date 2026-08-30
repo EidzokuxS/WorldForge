@@ -165,6 +165,33 @@ function frame(): CampaignPlayGameMasterFrame {
   };
 }
 
+function martleContactFrame(): CampaignPlayGameMasterFrame {
+  const value = frame();
+  const actor = value.rulebookFrame.acceptedWorld.actors.find((candidate) => candidate.id === "actor-guard");
+  if (actor === undefined) {
+    throw new Error("Martle fixture actor is missing.");
+  }
+  actor.name = "Martle Vess";
+  actor.summary = "A dockside broker at the harbor gate.";
+  const visibleActor = value.visibleFacts.find((fact) => fact.handle === "guard");
+  if (visibleActor !== undefined) {
+    visibleActor.summary = "Martle Vess waits nearby.";
+  }
+  value.sourceMoment = "Martle Vess sorts the harbor ledger at the gate.";
+  value.actorContinuity = value.actorContinuity.map((context) =>
+    context.actorHandle === "guard"
+      ? {
+        ...context,
+        recentOwnActions: [{
+          summary: "Martle Vess inspected the harbor ledger before the traveler arrived.",
+          observableTrace: "Fresh ink marks the harbor ledger.",
+        }],
+      }
+      : context,
+  );
+  return value;
+}
+
 function paidDeliveryFrame(action: "collect" | "deliver"): CampaignPlayGameMasterFrame {
   const value = frame();
   const commitmentId = "commitment-paid";
@@ -244,6 +271,15 @@ function paidDeliveryFrame(action: "collect" | "deliver"): CampaignPlayGameMaste
     worldVersion: 7,
   }];
   if (action === "deliver") {
+    value.visibleFacts.push({
+      handle: destinationHandle,
+      kind: "location",
+      summary: "South Harbor beyond the route.",
+    });
+    value.handleBindings.push({
+      handle: destinationHandle,
+      reference: { kind: "location", id: "location-b" },
+    });
     const possessionRef = { kind: "possession" as const, id: possessionId };
     value.visibleFacts.push({ handle: "parcel", kind: "possession", summary: subjectName });
     value.handleBindings.push({ handle: "parcel", reference: possessionRef });
@@ -274,7 +310,7 @@ function paidDeliveryFrame(action: "collect" | "deliver"): CampaignPlayGameMaste
     counterpartyActorId: "actor-guard",
     counterpartyHandle: "guard",
     subjectName,
-    destinationHandle: "south",
+    destinationHandle,
     feeAmount: 8,
     possessionId: action === "deliver" ? possessionId : null,
     possessionHandle: action === "deliver" ? "parcel" : null,
@@ -366,6 +402,51 @@ function completedPaidDeliveryContactFrame(): CampaignPlayGameMasterFrame {
     principalAmount: 8,
     outstandingAmount: 8,
   });
+  return value;
+}
+
+function completedPaidDeliveryWithAlternateDestinationFrame(): CampaignPlayGameMasterFrame {
+  const value = completedPaidDeliveryContactFrame();
+  const alternateLocationId = "location-c";
+  const alternateRouteId = "route-a-c";
+  value.rulebookFrame.acceptedWorld.locations.push({
+    id: alternateLocationId,
+    name: "East Harbor Wharf",
+    description: "A working wharf beyond the eastern route.",
+    kind: "persistent_sublocation",
+    parentLocationId: "region-a",
+    tags: ["harbor", "wharf"],
+    isStarting: false,
+  });
+  value.rulebookFrame.acceptedWorld.routes.push({
+    id: alternateRouteId,
+    fromLocationId: "location-a",
+    toLocationId: alternateLocationId,
+    travelCost: 4,
+  });
+  value.visibleFacts.push(
+    { handle: "east", kind: "location", summary: "East Harbor Wharf beyond the eastern route." },
+    { handle: "east-passage", kind: "route", summary: "An open eastern route." },
+  );
+  value.handleBindings.push(
+    { handle: "east", reference: { kind: "location", id: alternateLocationId } },
+    { handle: "east-passage", reference: { kind: "route", id: alternateRouteId } },
+  );
+  value.authority.authorizedRefs.push(
+    { kind: "location", id: alternateLocationId },
+    { kind: "route", id: alternateRouteId },
+  );
+  return value;
+}
+
+function settledDirectPaidDeliveryContactFrame(): CampaignPlayGameMasterFrame {
+  const value = completedPaidDeliveryContactFrame();
+  value.visibleFacts = value.visibleFacts.filter((fact) => fact.handle !== "guard-receivable");
+  value.handleBindings = value.handleBindings.filter((binding) => binding.handle !== "guard-receivable");
+  value.authority.authorizedRefs = value.authority.authorizedRefs.filter((reference) =>
+    reference.kind !== "obligation",
+  );
+  value.rulebookFrame.obligations = [];
   return value;
 }
 
@@ -532,14 +613,59 @@ type ContactDecisionFixture = {
   acceptEffect: Record<string, unknown> | null;
 };
 
-function contactDecisionNone(contactDetail: string): ContactDecisionFixture {
+function contactDecisionNone(contactDetail: string) {
   return {
-    kind: "none",
+    kind: "none" as const,
     contactDetail,
     summary: null,
     acceptLabel: null,
     declineLabel: null,
     acceptEffect: null,
+  };
+}
+
+function paidDeliveryContactDecision(
+  destinationHandle: string,
+  feeAmount: number,
+  subjectName = "Sealed parcel",
+) {
+  return {
+    kind: "paid_delivery" as const,
+    contactDetail: "Ask the guard what happened here",
+    summary: `Carry ${subjectName} to ${destinationHandle} for ${feeAmount} copper.`,
+    acceptLabel: "Take the delivery",
+    declineLabel: "Decline the delivery",
+    acceptEffect: {
+      kind: "paid_delivery" as const,
+      title: `Carry ${subjectName}`,
+      subjectName,
+      destinationHandle,
+      feeUnit: "copper" as const,
+      feeAmount,
+      paymentTiming: "on_completion" as const,
+      dueInMinutes: 10,
+    },
+  };
+}
+
+function acceptedPaidDeliveryDeal(contactDetail: string, destinationHandle: string) {
+  return {
+    contactDetail,
+    counterpartyActorHandle: "guard",
+    summary: `Oren accepts eight copper for the sealed parcel delivered to ${destinationHandle}.`,
+    acceptLabel: "Accept the delivery",
+    declineLabel: "Decline the delivery",
+    acceptEffect: {
+      kind: "paid_delivery" as const,
+      title: "Carry the sealed parcel",
+      subjectName: "Sealed parcel",
+      destinationHandle,
+      feeUnit: "copper" as const,
+      feeAmount: 8,
+      paymentTiming: "on_completion" as const,
+      dueInMinutes: 10,
+    },
+    completionCondition: "deliver_subject_to_destination" as const,
   };
 }
 
@@ -1118,7 +1244,7 @@ describe("Campaign Play Game Master paid-delivery authority", () => {
     expect(refusal.batch.commands.some((command) => command.kind === "complete_player_commitment")).toBe(false);
   });
 
-  it("settles delivery at the bound destination and rejects an unbound remote debt", () => {
+  it("settles paid delivery with compiler-owned payment and rejects model debt", () => {
     const gameMaster = createCampaignPlayGameMaster();
     const deliveryFrame = paidDeliveryFrame("deliver");
     const deliveryRuling = ruling({
@@ -1139,17 +1265,96 @@ describe("Campaign Play Game Master paid-delivery authority", () => {
         quantity: 1,
         minimumResult: "success",
       },
-      requiredObligationEffect: {
-        kind: "incur_actor_obligation",
-        debtorHandle: "guard",
-        creditorHandle: "you",
-        unitKey: "copper",
-        amount: 8,
-        minimumResult: "success",
-      },
+      requiredObligationEffect: { kind: "none" },
       citedVisibleFactHandles: ["south", "parcel", "guard", "you"],
     });
     const success = gameMaster.compile(
+      deliveryFrame,
+      deliveryRuling,
+      resolution,
+      null,
+      {
+        elapsedMinutes: 1,
+        effects: [
+          {
+            kind: "adjust_actor_possession",
+            operation: "spend",
+            actorHandle: "you",
+            possessionHandle: "parcel",
+            name: null,
+            quantity: 1,
+            summary: "The sealed parcel is delivered.",
+            affectedHandles: ["you", "parcel", "south"],
+          },
+        ],
+      },
+    );
+    expect(success.batch.commands.map((command) => command.kind)).toEqual([
+      "adjust_actor_possession",
+      "adjust_actor_possession",
+      "complete_player_commitment",
+    ]);
+    const [spend, payment, completion] = success.batch.commands;
+    if (spend.kind !== "adjust_actor_possession"
+      || payment.kind !== "adjust_actor_possession"
+      || completion.kind !== "complete_player_commitment") {
+      throw new Error("Paid delivery settlement compiled unexpected command kinds.");
+    }
+    const deliveryPossessionId = deriveCampaignPlayPossessionId(
+      CAMPAIGN_ID,
+      PLAYER_ID,
+      deriveCampaignPlayPossessionKey("Sealed parcel"),
+    );
+    const paymentPossessionId = deriveCampaignPlayPossessionId(CAMPAIGN_ID, PLAYER_ID, "copper");
+    const playerRef = { kind: "actor" as const, id: PLAYER_ID };
+    const counterpartyRef = { kind: "actor" as const, id: "actor-guard" };
+    const commitmentRef = { kind: "commitment" as const, id: "commitment-paid" };
+    const deliveryRef = { kind: "possession" as const, id: deliveryPossessionId };
+    const paymentRef = { kind: "possession" as const, id: paymentPossessionId };
+    const destinationRef = { kind: "location" as const, id: "location-b" };
+    expect(spend).toMatchObject({
+      kind: "adjust_actor_possession",
+      actorId: PLAYER_ID,
+      possessionId: deliveryPossessionId,
+      possessionKey: deriveCampaignPlayPossessionKey("Sealed parcel"),
+      name: "Sealed parcel",
+      quantityDelta: -1,
+    });
+    expect(spend.affectedRefs).toEqual([playerRef, deliveryRef, destinationRef]);
+    expect(spend.readScope).toEqual([playerRef, deliveryRef, destinationRef]);
+    expect(spend.writeScope).toEqual([deliveryRef]);
+    expect(payment).toMatchObject({
+      kind: "adjust_actor_possession",
+      actorId: PLAYER_ID,
+      possessionId: paymentPossessionId,
+      possessionKey: "copper",
+      name: "Copper",
+      quantityDelta: 8,
+      summary: "Paid 8 Copper on completion of Sealed parcel delivery.",
+      affectedRefs: [playerRef, paymentRef, counterpartyRef, commitmentRef, destinationRef],
+      readScope: [playerRef, paymentRef, counterpartyRef, commitmentRef, destinationRef],
+      writeScope: [paymentRef],
+      exposure: {
+        mode: "projectable",
+        predicates: [{ channel: "direct_perception", locationId: "location-b" }],
+      },
+    });
+    expect(completion).toMatchObject({
+      kind: "complete_player_commitment",
+      commitmentId: "commitment-paid",
+      performerActorId: PLAYER_ID,
+      counterpartyActorId: "actor-guard",
+      deliveryPossessionId,
+      destinationHandle: deliveryFrame.commitmentAuthority!.destinationHandle,
+      destinationLocationId: "location-b",
+      affectedRefs: [commitmentRef, playerRef, counterpartyRef, deliveryRef, destinationRef],
+      readScope: [commitmentRef, playerRef, counterpartyRef, deliveryRef, destinationRef],
+      writeScope: [deliveryRef, commitmentRef],
+    });
+    expect(success.batch.commands.flatMap((command) => "affectedRefs" in command
+      ? [...command.affectedRefs, ...command.readScope, ...command.writeScope]
+      : []).some((reference) => reference.kind === "obligation")).toBe(false);
+    expect(() => gameMaster.compile(
       deliveryFrame,
       deliveryRuling,
       resolution,
@@ -1174,52 +1379,6 @@ describe("Campaign Play Game Master paid-delivery authority", () => {
             unitKey: "copper",
             amount: 8,
             summary: "The guard owes the agreed delivery fee.",
-            affectedHandles: ["guard", "you"],
-          },
-        ],
-      },
-    );
-    expect(success.batch.commands.map((command) => command.kind)).toEqual([
-      "adjust_actor_possession",
-      "incur_actor_obligation",
-      "complete_player_commitment",
-    ]);
-    expect(success.batch.commands.at(-1)).toMatchObject({
-      kind: "complete_player_commitment",
-      commitmentId: "commitment-paid",
-      performerActorId: PLAYER_ID,
-      counterpartyActorId: "actor-guard",
-      deliveryPossessionId: deriveCampaignPlayPossessionId(
-        CAMPAIGN_ID,
-        PLAYER_ID,
-        deriveCampaignPlayPossessionKey("Sealed parcel"),
-      ),
-    });
-    expect(() => gameMaster.compile(
-      deliveryFrame,
-      deliveryRuling,
-      resolution,
-      null,
-      {
-        elapsedMinutes: 1,
-        effects: [
-          {
-            kind: "adjust_actor_possession",
-            operation: "spend",
-            actorHandle: "you",
-            possessionHandle: "parcel",
-            name: null,
-            quantity: 1,
-            summary: "The sealed parcel is delivered.",
-            affectedHandles: ["you", "parcel", "south"],
-          },
-          {
-            kind: "incur_actor_obligation",
-            debtorActorHandle: "guard",
-            creditorActorHandle: "you",
-            unitKey: "copper",
-            amount: 9,
-            summary: "The guard owes an altered fee.",
             affectedHandles: ["guard", "you"],
           },
         ],
@@ -1405,7 +1564,7 @@ describe("Campaign Play Game Master obligation authority prompt", () => {
     expect(initialReviewPrompt.match(/OBLIGATION_AUTHORITY=.*$/m)?.[0]).toBe(expected);
     expect(recoveryReviewPrompt.match(/OBLIGATION_AUTHORITY=.*$/m)?.[0]).toBe(expected);
     expect(recoveryPrompt).toContain(
-      "For obligation_authority_missing, follow OBLIGATION_AUTHORITY exactly. If kind is none, remove every claim that a debt, payment, fee liability, duty balance, or completed bargain changed; keep only the non-binding offer, request, promise, quoted terms, refusal, counteroffer, accepted assignment, future appointment, or future plan established by the action. An ordinary acknowledgement of future intent is not a tracked obligation. If kind is incur_actor_obligation or pay_actor_obligation, emit the one exact permitted typed effect and match its parties, handles, unit, and amount in the public consequence. Do not invent a second obligation or payment.",
+      "For obligation_authority_missing, follow OBLIGATION_AUTHORITY exactly. If kind is none, remove every claim that a debt, payment, fee liability, duty balance, or completed bargain changed; keep only the non-binding offer, request, promise, quoted terms, refusal, counteroffer, accepted assignment, future appointment, or future plan established by the action. A promise may remain only when clearly non-binding and creates no reasonable future reliance; otherwise use the same refusal or present-observation recovery. An ordinary acknowledgement of future intent is not a tracked obligation. If kind is incur_actor_obligation or pay_actor_obligation, emit the one exact permitted typed effect and match its parties, handles, unit, and amount in the public consequence. Do not invent a second obligation or payment.",
     );
     expect(initialPrompt).not.toContain("For obligation_authority_missing,");
     expect(initialGenerateObject).toHaveBeenCalledTimes(2);
@@ -6642,6 +6801,326 @@ describe("Campaign Play Game Master generic contact proposer", () => {
     expect(reviewerPrompt).toContain("other_mechanical_authority_mismatch");
   });
 
+  it("uses a completed paid delivery as terminal authority after direct settlement and rejects stale delivery reopening", async () => {
+    const method = "Ask whether the completed parcel still needs delivery";
+    const genericRuling = genericActorContactRuling(method);
+    const staleProposal = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        summary: "Oren asks the traveler to deliver the already completed sealed parcel later.",
+      }],
+      decisionProposal: contactDecisionNone(method),
+      lifecycleAssertion: "reopen_completed_commitment" as const,
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: staleProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "rejected",
+          reason: "A completed directly settled delivery cannot be reopened.",
+          failedChecks: ["other_mechanical_authority_mismatch"],
+        },
+        trace: trace(),
+      });
+    const contactFrame = settledDirectPaidDeliveryContactFrame();
+    let thrown: unknown;
+    try {
+      await createCampaignPlayGameMaster({
+        generateObject: generateObject as unknown as typeof safeGenerateObject,
+      }).plan({
+        frame: contactFrame,
+        ruling: genericRuling,
+        resolution,
+        uncertaintyAuthority: null,
+        model: model(),
+        temperature: 0.2,
+        budget,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({
+      code: "model_contract_failed",
+      modelEvidence: expect.objectContaining({ errorCode: "mechanical_authority_rejected" }),
+    });
+    expect(getCampaignPlayGameMasterRecoveryFeedback(thrown)).toEqual({
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [{
+        check: "mechanical_authority_rejected",
+        reviewFailedChecks: ["other_mechanical_authority_mismatch"],
+      }],
+    });
+    expect(generateObject).toHaveBeenCalledTimes(2);
+    const proposerPrompt = String(generateObject.mock.calls[0]![0].prompt);
+    expect(proposerPrompt).toContain('"paymentState":"settled_direct_payment"');
+    expect(proposerPrompt).toContain('"outstandingReceivable":null');
+    const reviewerPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    expect(reviewerPrompt).toContain('"completionTurnId":"turn-delivery"');
+    expect(reviewerPrompt).toContain('"completionReceiptId":"receipt-delivery"');
+    expect(reviewerPrompt).toContain('"paymentState":"settled_direct_payment"');
+  });
+
+  it("keeps direct-settled payment distinct from an outstanding receivable in contact prompts", async () => {
+    const method = "Ask how the completed parcel was paid";
+    const genericRuling = genericActorContactRuling(method);
+    const statusProposal = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        summary: "Oren acknowledges the completed sealed-parcel delivery and confirms the eight Copper fee was settled directly.",
+      }],
+      decisionProposal: contactDecisionNone(method),
+      lifecycleAssertion: "contact_response" as const,
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: statusProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The response preserves the completed delivery and direct settlement.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+    const contactFrame = settledDirectPaidDeliveryContactFrame();
+    await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: contactFrame,
+      ruling: genericRuling,
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+    });
+    expect(generateObject).toHaveBeenCalledTimes(2);
+    const proposerPrompt = String(generateObject.mock.calls[0]![0].prompt);
+    const reviewerPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    for (const promptText of [proposerPrompt, reviewerPrompt]) {
+      expect(promptText).toContain('"paymentState":"settled_direct_payment"');
+      expect(promptText).toContain('"outstandingReceivable":null');
+      expect(promptText).not.toContain("remains due");
+    }
+  });
+
+  it("rejects an unsupported vouch promise on a paid delivery and requests truthful recovery", async () => {
+    const method = "Ask the guard for a paid parcel delivery";
+    const genericRuling = genericActorContactRuling(method, "Decide whether to carry the sealed parcel");
+    const sidePromiseProposal = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        summary: "The guard offers eight Copper to carry a sealed parcel to South Harbor and promises to vouch for the traveler at the market.",
+      }],
+      decisionProposal: {
+        kind: "paid_delivery" as const,
+        contactDetail: method,
+        summary: "Carry the sealed parcel for eight Copper and the guard will vouch for you at the market.",
+        acceptLabel: "Take the delivery and earn the vouch",
+        declineLabel: "Decline the delivery",
+        acceptEffect: {
+          kind: "paid_delivery" as const,
+          title: "Carry the sealed parcel",
+          subjectName: "Sealed parcel",
+          destinationHandle: "south",
+          feeUnit: "copper" as const,
+          feeAmount: 8,
+          paymentTiming: "on_completion" as const,
+          dueInMinutes: 10,
+        },
+      },
+    };
+    const firstGenerateObject = vi.fn()
+      .mockResolvedValueOnce({ object: sidePromiseProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "rejected",
+          reason: "The vouch promise is an unsupported consequential side promise.",
+          failedChecks: ["other_mechanical_authority_mismatch"],
+        },
+        trace: trace(),
+      });
+    let firstError: unknown;
+    try {
+      await createCampaignPlayGameMaster({
+        generateObject: firstGenerateObject as unknown as typeof safeGenerateObject,
+      }).plan({
+        frame: frame(),
+        ruling: genericRuling,
+        resolution,
+        uncertaintyAuthority: null,
+        model: model(),
+        temperature: 0.2,
+        budget,
+      });
+    } catch (error) {
+      firstError = error;
+    }
+    expect(firstError).toMatchObject({
+      code: "model_contract_failed",
+      modelEvidence: expect.objectContaining({ errorCode: "mechanical_authority_rejected" }),
+    });
+    expect(getCampaignPlayGameMasterRecoveryFeedback(firstError)).toEqual({
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [{
+        check: "mechanical_authority_rejected",
+        reviewFailedChecks: ["other_mechanical_authority_mismatch"],
+      }],
+    });
+    const reviewerPrompt = String(firstGenerateObject.mock.calls[1]![0].prompt);
+    expect(reviewerPrompt).toContain("future relationship, access, permission, endorsement, vouch, service");
+    expect(reviewerPrompt).toContain("PROPOSAL_EFFECT_KINDS");
+    expect(reviewerPrompt).toContain("other_mechanical_authority_mismatch");
+
+    const purePaidProposal = {
+      ...sidePromiseProposal,
+      effects: [{
+        ...sidePromiseProposal.effects[0],
+        summary: "The guard offers eight Copper to carry a sealed parcel to South Harbor.",
+      }],
+      decisionProposal: {
+        ...sidePromiseProposal.decisionProposal,
+        summary: "Carry the sealed parcel for eight Copper to South Harbor.",
+        acceptLabel: "Take the delivery",
+      },
+    };
+    const recoveryGenerateObject = vi.fn()
+      .mockResolvedValueOnce({ object: purePaidProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The recovered proposal contains only the exact typed delivery terms.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+    const recoveryCandidate = await createCampaignPlayGameMaster({
+      generateObject: recoveryGenerateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(),
+      ruling: genericRuling,
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      recoveryFeedback: getCampaignPlayGameMasterRecoveryFeedback(firstError)!,
+    });
+    expect(recoveryCandidate.batch.commands).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "decision_open" }),
+    ]));
+    expect(String(recoveryGenerateObject.mock.calls[0]![0].prompt)).toContain("unsupported side promise");
+  });
+
+  it("rejects a no-effect future-priority promise and recovers to non-binding contact", async () => {
+    const method = "Ask Martle Vess for a concrete paid delivery job";
+    const genericRuling = genericActorContactRuling(method, "Find a concrete paid delivery job");
+    const futurePromiseProposal = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        summary: "Martle Vess says she owns no loads or coin, but if a whole consignment appears, \"I'll tell you first.\"",
+      }],
+      decisionProposal: contactDecisionNone(method),
+    };
+    const firstGenerateObject = vi.fn()
+      .mockResolvedValueOnce({ object: futurePromiseProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "rejected",
+          reason: "The definite future-priority promise has no typed authority.",
+          failedChecks: ["other_mechanical_authority_mismatch"],
+        },
+        trace: trace(),
+      });
+    let firstError: unknown;
+    try {
+      await createCampaignPlayGameMaster({
+        generateObject: firstGenerateObject as unknown as typeof safeGenerateObject,
+      }).plan({
+        frame: martleContactFrame(),
+        ruling: genericRuling,
+        resolution,
+        uncertaintyAuthority: null,
+        model: model(),
+        temperature: 0.2,
+        budget,
+      });
+    } catch (error) {
+      firstError = error;
+    }
+    expect(firstError).toMatchObject({
+      code: "model_contract_failed",
+      modelEvidence: expect.objectContaining({ errorCode: "mechanical_authority_rejected" }),
+    });
+    expect(getCampaignPlayGameMasterRecoveryFeedback(firstError)).toEqual({
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [{
+        check: "mechanical_authority_rejected",
+        reviewFailedChecks: ["other_mechanical_authority_mismatch"],
+      }],
+    });
+    expect(firstGenerateObject).toHaveBeenCalledTimes(2);
+    const reviewerPrompt = String(firstGenerateObject.mock.calls[1]![0].prompt);
+    expect(reviewerPrompt).toContain("I will tell you first");
+    expect(reviewerPrompt).toContain("reasonable future reliance");
+    expect(reviewerPrompt).toContain('"kind":"none"');
+    expect(reviewerPrompt).toContain('"acceptedDeal":null');
+    expect(reviewerPrompt).toContain('"typedResourceEffects":[]');
+    expect(reviewerPrompt).toContain("other_mechanical_authority_mismatch");
+
+    const recoveryProposal = {
+      ...futurePromiseProposal,
+      effects: [{
+        ...futurePromiseProposal.effects[0],
+        summary: "Martle Vess says she owns no loads or coin and offers no advance notice; she can only discuss a consignment if one is actually offered.",
+      }],
+    };
+    const recoveryGenerateObject = vi.fn()
+      .mockResolvedValueOnce({ object: recoveryProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The response is a present refusal without future reliance.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+    const recoveryCandidate = await createCampaignPlayGameMaster({
+      generateObject: recoveryGenerateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: martleContactFrame(),
+      ruling: genericRuling,
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      recoveryFeedback: getCampaignPlayGameMasterRecoveryFeedback(firstError)!,
+    });
+    expect(recoveryCandidate.batch.commands.map((command) => command.kind)).toEqual([
+      "advance_world_time",
+      "record_world_event",
+    ]);
+    expect(recoveryCandidate.batch.commands).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "decision_open" }),
+      expect.objectContaining({ kind: "create_player_commitment" }),
+      expect.objectContaining({ kind: "update_actor_relation" }),
+      expect.objectContaining({ kind: "update_actor_goal" }),
+    ]));
+    expect(recoveryCandidate.batch.commands[1]).toMatchObject({
+      kind: "record_world_event",
+      summary: recoveryProposal.effects[0].summary,
+    });
+    const recoveryPrompt = String(recoveryGenerateObject.mock.calls[0]![0].prompt);
+    expect(recoveryPrompt).toContain("future-reliance promise");
+    expect(recoveryPrompt).toContain("no accepted delivery or offer and no typed effect");
+    expect(recoveryPrompt).toContain("natural in-world refusal or clearly non-binding present observation");
+    expect(recoveryProposal.effects[0].summary).not.toContain("I'll tell you first");
+  });
+
   it("accepts ordinary contact status on a completed paid delivery without payment effects", async () => {
     const method = "Ask about the completed parcel delivery";
     const genericRuling = genericActorContactRuling(method);
@@ -6765,6 +7244,314 @@ describe("Campaign Play Game Master generic contact proposer", () => {
     });
   });
 
+  it("rejects a consequential support identity collision and recovers with a distinct actor", async () => {
+    const ambientRuling = ruling({
+      normalizedIntent: {
+        originalText: "I call to nearby workers and ask one to stop and answer.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "contact",
+        targets: [{ handle: "here", kind: "location" }],
+        method: "Call to nearby workers for one willing reply",
+        stakes: "Find one resident willing to stop and answer",
+      },
+      citedVisibleFactHandles: ["here"],
+      reason: "Nearby residents can hear and choose whether to respond.",
+    });
+    const collisionFrame = frame();
+    collisionFrame.rulebookFrame.acceptedWorld.actors[0]!.name = "Wick Halloway";
+    const collisionProposal = {
+      elapsedMinutes: 2,
+      effects: [
+        {
+          kind: "materialize_support_actor" as const,
+          actorHandle: "introduced-support-actor" as const,
+          name: "Foreman Wick Halloway",
+          summary: "A foreman who handles dockside cargo.",
+          goal: "Keep deliveries moving before the market closes.",
+          motivation: "Support the harbor crew.",
+          nextIntentKind: "contact" as const,
+          nextAction: "Check the next dockside delivery.",
+          observableTrace: "The foreman checks a marked crate.",
+          cadenceMinutes: 3,
+        },
+        {
+          kind: "record_world_event" as const,
+          eventClass: "dialogue" as const,
+          performingActorHandle: "introduced-support-actor" as const,
+          summary: "Foreman Wick Halloway introduces himself and offers to coordinate the next load.",
+          affectedHandles: ["you", "here", "introduced-support-actor"],
+        },
+      ],
+    };
+    const firstGenerateObject = vi.fn()
+      .mockResolvedValueOnce({ object: collisionProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "rejected",
+          reason: "The proposed consequential person collides with canonical Wick Halloway.",
+          failedChecks: ["other_mechanical_authority_mismatch"],
+        },
+        trace: trace(),
+      });
+    let firstError: unknown;
+    try {
+      await createCampaignPlayGameMaster({
+        generateObject: firstGenerateObject as unknown as typeof safeGenerateObject,
+      }).plan({
+        frame: collisionFrame,
+        ruling: ambientRuling,
+        resolution,
+        uncertaintyAuthority: null,
+        model: model(),
+        temperature: 0.2,
+        budget,
+      });
+    } catch (error) {
+      firstError = error;
+    }
+    expect(firstError).toMatchObject({
+      code: "model_contract_failed",
+      modelEvidence: expect.objectContaining({ errorCode: "mechanical_authority_rejected" }),
+    });
+    const recoveryFeedback = getCampaignPlayGameMasterRecoveryFeedback(firstError);
+    expect(recoveryFeedback).toEqual({
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [{
+        check: "mechanical_authority_rejected",
+        reviewFailedChecks: ["other_mechanical_authority_mismatch"],
+      }],
+    });
+    const distinctProposal = {
+      ...collisionProposal,
+      effects: [
+        {
+          ...collisionProposal.effects[0],
+          name: "Mara Quill",
+          summary: "A rope mender who works the market edge.",
+          goal: "Repair worn rigging before the next rain.",
+          motivation: "Keep the family workshop supplied.",
+          nextAction: "Test a frayed rope by hand.",
+          observableTrace: "Waxed thread lies beside a repaired rope.",
+        },
+        {
+          ...collisionProposal.effects[1],
+          summary: "Mara Quill introduces herself and offers to inspect a frayed rope.",
+        },
+      ],
+    };
+    const recoveryGenerateObject = vi.fn()
+      .mockResolvedValueOnce({ object: distinctProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The recovered support person is distinct and grounded.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: recoveryGenerateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: structuredClone(collisionFrame),
+      ruling: ambientRuling,
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      recoveryFeedback,
+    });
+    expect(candidate.batch.commands.map((command) => command.kind)).toEqual([
+      "advance_world_time",
+      "materialize_support_actor",
+      "record_world_event",
+    ]);
+    expect(candidate.batch.commands[1]).toMatchObject({
+      kind: "materialize_support_actor",
+      name: "Mara Quill",
+    });
+    expect(recoveryGenerateObject).toHaveBeenCalledTimes(2);
+    const reviewerPrompt = String(firstGenerateObject.mock.calls[1]![0].prompt);
+    expect(reviewerPrompt).toContain("CANONICAL_RUNTIME_PEOPLE");
+    expect(reviewerPrompt).toContain('"name":"Wick Halloway"');
+    expect(reviewerPrompt).toContain("SUPPORT_ACTOR_MATERIALIZATIONS");
+    expect(reviewerPrompt).toContain("other_mechanical_authority_mismatch");
+    const recoveryPrompt = String(recoveryGenerateObject.mock.calls[0]![0].prompt);
+    expect(recoveryPrompt).toContain("semantically distinct person");
+    expect(recoveryPrompt).toContain("CANONICAL_RUNTIME_PEOPLE");
+  });
+
+  it("rejects a prose-only per-unit pseudo-assignment and recovers as a pending fixed-total paid delivery", async () => {
+    const method = "Ask the foreman for your first paid load, cargo, destination, and exact copper.";
+    const genericRuling = genericActorContactRuling(
+      method,
+      "Learn the complete paid delivery terms before accepting.",
+    );
+    const pseudoAssignmentProposal = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        summary: "The foreman assigns three salt-fish crates to South Harbor Market at two copper per crate; loading starts now.",
+      }],
+      decisionProposal: contactDecisionNone(method),
+    };
+    const firstGenerateObject = vi.fn()
+      .mockResolvedValueOnce({ object: pseudoAssignmentProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "rejected",
+          reason: "The per-unit prose leaves the requested lot and total unresolved while claiming assignment.",
+          failedChecks: ["player_intent_unfulfilled", "other_mechanical_authority_mismatch"],
+        },
+        trace: trace(),
+      });
+    let firstError: unknown;
+    try {
+      await createCampaignPlayGameMaster({
+        generateObject: firstGenerateObject as unknown as typeof safeGenerateObject,
+      }).plan({
+        frame: frame(),
+        ruling: genericRuling,
+        resolution,
+        uncertaintyAuthority: null,
+        model: model(),
+        temperature: 0.2,
+        budget,
+      });
+    } catch (error) {
+      firstError = error;
+    }
+    expect(firstError).toMatchObject({
+      code: "model_contract_failed",
+      modelEvidence: expect.objectContaining({ errorCode: "mechanical_authority_rejected" }),
+    });
+    const recoveryFeedback = getCampaignPlayGameMasterRecoveryFeedback(firstError);
+    expect(recoveryFeedback).toEqual({
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [{
+        check: "mechanical_authority_rejected",
+        reviewFailedChecks: ["player_intent_unfulfilled", "other_mechanical_authority_mismatch"],
+      }],
+    });
+    const recoveredProposal = {
+      ...pseudoAssignmentProposal,
+      effects: [{
+        ...pseudoAssignmentProposal.effects[0],
+        summary: "The foreman offers three salt-fish crates for South Harbor Market for six copper total on completion; accept or decline.",
+      }],
+      decisionProposal: {
+        kind: "paid_delivery" as const,
+        contactDetail: method,
+        summary: "Carry three salt-fish crates to South Harbor Market for six copper on completion.",
+        acceptLabel: "Accept the load",
+        declineLabel: "Decline the load",
+        acceptEffect: {
+          kind: "paid_delivery" as const,
+          title: "Carry the salt-fish crates",
+          subjectName: "Three salt-fish crates",
+          destinationHandle: "south",
+          feeUnit: "copper" as const,
+          feeAmount: 6,
+          paymentTiming: "on_completion" as const,
+          dueInMinutes: 10,
+        },
+      },
+    };
+    const recoveryGenerateObject = vi.fn()
+      .mockResolvedValueOnce({ object: recoveredProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The complete whole-lot delivery remains pending player acceptance.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: recoveryGenerateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(),
+      ruling: genericRuling,
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      recoveryFeedback,
+    });
+    expect(candidate.batch.commands.map((command) => command.kind)).toEqual([
+      "advance_world_time",
+      "record_world_event",
+      "decision_open",
+    ]);
+    expect(candidate.batch.commands.some((command) => command.kind === "create_player_commitment")).toBe(false);
+    expect(candidate.batch.commands.some((command) => command.kind === "decision_resolve")).toBe(false);
+    expect(candidate.batch.commands[2]).toMatchObject({
+      kind: "decision_open",
+      acceptEffect: {
+        kind: "paid_delivery",
+        subjectName: "Three salt-fish crates",
+        feeUnit: "copper",
+        feeAmount: 6,
+        paymentTiming: "on_completion",
+      },
+    });
+    expect(firstGenerateObject).toHaveBeenCalledTimes(2);
+    expect(recoveryGenerateObject).toHaveBeenCalledTimes(2);
+    const reviewerPrompt = String(firstGenerateObject.mock.calls[1]![0].prompt);
+    expect(reviewerPrompt).toContain("per-unit rate without a complete lot size and total copper is incomplete");
+    expect(reviewerPrompt).toContain('"kind":"none"');
+    const recoveryPrompt = String(recoveryGenerateObject.mock.calls[0]![0].prompt);
+    expect(recoveryPrompt).toContain("complete pending typed paid_delivery");
+    expect(recoveryPrompt).toContain("whole lot in subjectName and total copper feeAmount");
+  });
+
+  it("preserves an incomplete paid-delivery clarification as kind none without a decision", async () => {
+    const method = "Ask the foreman for the missing load quantity and total copper.";
+    const genericRuling = genericActorContactRuling(
+      method,
+      "Clarify the consignment before deciding whether to accept it.",
+    );
+    const clarificationProposal = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        summary: "The foreman asks how many crates the player means and says no load is assigned until the whole lot and total copper are clear.",
+      }],
+      decisionProposal: contactDecisionNone(method),
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: clarificationProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The contact leaves incomplete delivery terms unresolved without opening a decision.",
+          failedChecks: [],
+        },
+        trace: trace(),
+      });
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(),
+      ruling: genericRuling,
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+    });
+    expect(candidate.batch.commands.map((command) => command.kind)).toEqual([
+      "advance_world_time",
+      "record_world_event",
+    ]);
+    expect(candidate.batch.commands.some((command) => command.kind === "decision_open")).toBe(false);
+    expect(candidate.batch.commands.some((command) => command.kind === "create_player_commitment")).toBe(false);
+    const reviewerPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    expect(reviewerPrompt).toContain("kind=none with summary, acceptLabel, declineLabel, and acceptEffect all null may clarify");
+  });
+
   it("compiles an explicitly accepted copper delivery into one atomic proposal, acceptance, and commitment", async () => {
     const method = "Ask about a paid delivery";
     const genericRuling = genericActorContactRuling(method, "Decide whether to carry the sealed parcel");
@@ -6825,6 +7612,9 @@ describe("Campaign Play Game Master generic contact proposer", () => {
     const second = await gameMaster.plan({ ...request, frame: structuredClone(request.frame) });
     const proposerSchema = generateObject.mock.calls[0]![0].schema as z.ZodType<unknown>;
     expect(proposerSchema.safeParse(acceptedProposal).success).toBe(true);
+    expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
+      "Typed delivery commitments define the complete delivery predicate and payment eligibility.",
+    );
     expect(first.batch).toEqual(second.batch);
     expect(first.batch.commands.map((command) => command.kind)).toEqual([
       "advance_world_time",
@@ -6876,6 +7666,7 @@ describe("Campaign Play Game Master generic contact proposer", () => {
       title: acceptedDeal.acceptEffect.title,
       subjectName: acceptedDeal.acceptEffect.subjectName,
       destinationHandle,
+      destinationLocationId: "location-b",
       acceptedWorldTimeMinutes: 11,
       dueWorldTimeMinutes: 21,
       commitmentKind: "paid_delivery",
@@ -6886,6 +7677,57 @@ describe("Campaign Play Game Master generic contact proposer", () => {
     expect(new Set(first.batch.commands.map((command) => command.commandId)).size)
       .toBe(first.batch.commands.length);
     expect(first.preflight.accepted).toBe(true);
+  });
+
+  it("rejects an accepted deal that repeats a completed paid-delivery destination", () => {
+    const method = "Ask about a paid delivery";
+    const acceptedDeal = acceptedPaidDeliveryDeal(method, "south");
+    let thrown: unknown;
+    try {
+      createCampaignPlayGameMaster().compile(
+        completedPaidDeliveryWithAlternateDestinationFrame(),
+        genericActorContactRuling(method),
+        resolution,
+        null,
+        proposal,
+        contactDecisionNone(method),
+        acceptedDeal,
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({ code: "model_contract_failed" });
+    expect(getCampaignPlayGameMasterRecoveryFeedback(thrown)).toEqual({
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [{
+        check: "completed_paid_delivery_destination_reused",
+        fieldPath: "acceptedDeal.acceptEffect.destinationHandle",
+        proposedDestinationHandle: "south",
+        completedDestinationHandle: deriveCampaignPlayPublicHandle("location", CAMPAIGN_ID, "location-b"),
+        visibleOutboundDestinationHandles: ["south", "east"],
+      }],
+    });
+  });
+
+  it("accepts an accepted deal to a different visible destination after completion", () => {
+    const method = "Ask about a paid delivery";
+    const acceptedDeal = acceptedPaidDeliveryDeal(method, "east");
+    const candidate = createCampaignPlayGameMaster().compile(
+      completedPaidDeliveryWithAlternateDestinationFrame(),
+      genericActorContactRuling(method),
+      resolution,
+      null,
+      proposal,
+      contactDecisionNone(method),
+      acceptedDeal,
+    );
+    const commitment = candidate.batch.commands.find((command) => command.kind === "create_player_commitment");
+    expect(commitment).toMatchObject({
+      kind: "create_player_commitment",
+      destinationHandle: deriveCampaignPlayPublicHandle("location", CAMPAIGN_ID, "location-c"),
+      destinationLocationId: "location-c",
+      commitmentKind: "paid_delivery",
+    });
   });
 
   it("rejects an accepted deal paired with a non-none decision", async () => {
@@ -7388,6 +8230,7 @@ describe("Campaign Play certified contact proposer", () => {
       "TARGET_ACTOR_CONTINUITY=",
       "REQUIRED_TARGET_RESPONSE=",
       "CANONICAL_PEOPLE=",
+      "PAID_DELIVERY_DESTINATION_CONTEXT=",
       "HANDLE_BINDINGS=",
       "EVENT_RULE=",
     ]) {
@@ -7677,6 +8520,9 @@ describe("Campaign Play certified contact proposer", () => {
       contract: "certified_contact",
     });
     expect(atmosphericContactProposal.decisionProposal.kind).toBe("none");
+    expect(atmosphericContactProposal.decisionProposal).toEqual(
+      contactDecisionNone("Ask the guard what happened here"),
+    );
     expect(candidate.batch.commands.map((command) => command.kind)).toEqual([
       "advance_world_time",
       "record_world_event",
@@ -7719,10 +8565,12 @@ describe("Campaign Play certified contact proposer", () => {
         },
         trace: trace(),
       });
+    const activeDeliveryFrame = paidDeliveryFrame("collect");
+    activeDeliveryFrame.commitmentAuthority = undefined;
     const candidate = await createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).plan({
-      frame: frame(),
+      frame: activeDeliveryFrame,
       ruling: certifiedContactRuling(),
       resolution,
       uncertaintyAuthority: null,
@@ -7759,6 +8607,163 @@ describe("Campaign Play certified contact proposer", () => {
     const reviewerPrompt = String(generateObject.mock.calls[1]![0].prompt);
     expect(reviewerPrompt).toContain('"decisionProposal"');
     expect(reviewerPrompt).toContain('"kind":"paid_delivery"');
+    expect(reviewerPrompt).toContain('"activeDeliveryCommitments"');
+    expect(reviewerPrompt).toContain('"commitmentId":"commitment-paid"');
+    expect(reviewerPrompt).toContain('"subjectName":"Sealed parcel"');
+    expect(reviewerPrompt).toContain('"completionCondition":"deliver_subject_to_destination"');
+    expect(reviewerPrompt).toContain('"feeUnit":"copper","feeAmount":8,"paymentTiming":"on_completion"');
+  });
+
+  it("keeps a first paid-delivery contact eligible", () => {
+    const candidate = createCampaignPlayGameMaster().compile(
+      frame(),
+      certifiedContactRuling(),
+      resolution,
+      null,
+      proposal,
+      paidDeliveryContactDecision("south", 8),
+    );
+    const decision = candidate.batch.commands.find((command) => command.kind === "decision_open");
+    expect(decision).toMatchObject({
+      kind: "decision_open",
+      acceptEffect: {
+        kind: "paid_delivery",
+        destinationHandle: deriveCampaignPlayPublicHandle("location", CAMPAIGN_ID, "location-b"),
+        feeAmount: 8,
+      },
+    });
+  });
+
+  it("rejects a completed paid-delivery repeat to the same destination even when cargo and fee change", () => {
+    const requestFrame = completedPaidDeliveryWithAlternateDestinationFrame();
+    let thrown: unknown;
+    try {
+      createCampaignPlayGameMaster().compile(
+        requestFrame,
+        certifiedContactRuling(),
+        resolution,
+        null,
+        proposal,
+        paidDeliveryContactDecision("south", 11, "Copper-bound ledger"),
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({ code: "model_contract_failed" });
+    expect(getCampaignPlayGameMasterRecoveryFeedback(thrown)).toEqual({
+      diagnostic: "game_master_semantic_validation_mismatch",
+      failedChecks: [{
+        check: "completed_paid_delivery_destination_reused",
+        fieldPath: "decisionProposal.acceptEffect.destinationHandle",
+        proposedDestinationHandle: "south",
+        completedDestinationHandle: deriveCampaignPlayPublicHandle("location", CAMPAIGN_ID, "location-b"),
+        visibleOutboundDestinationHandles: ["south", "east"],
+      }],
+    });
+  });
+
+  it("accepts a completed paid-delivery proposal to a different visible destination", () => {
+    const candidate = createCampaignPlayGameMaster().compile(
+      completedPaidDeliveryWithAlternateDestinationFrame(),
+      certifiedContactRuling(),
+      resolution,
+      null,
+      proposal,
+      paidDeliveryContactDecision("east", 11, "Copper-bound ledger"),
+    );
+    const decision = candidate.batch.commands.find((command) => command.kind === "decision_open");
+    expect(decision).toMatchObject({
+      kind: "decision_open",
+      acceptEffect: {
+        kind: "paid_delivery",
+        destinationHandle: deriveCampaignPlayPublicHandle("location", CAMPAIGN_ID, "location-c"),
+        feeAmount: 11,
+      },
+    });
+  });
+
+  it("requires kind none when a completed target has no different visible destination", () => {
+    const requestFrame = completedPaidDeliveryContactFrame();
+    const noneDecision = {
+      kind: "none" as const,
+      contactDetail: "Ask the guard what happened here",
+      summary: null,
+      acceptLabel: null,
+      declineLabel: null,
+      acceptEffect: null,
+    };
+    const noneCandidate = createCampaignPlayGameMaster().compile(
+      requestFrame,
+      certifiedContactRuling(),
+      resolution,
+      null,
+      proposal,
+      noneDecision,
+    );
+    expect(noneCandidate.batch.commands.some((command) => command.kind === "decision_open")).toBe(false);
+
+    let thrown: unknown;
+    try {
+      createCampaignPlayGameMaster().compile(
+        requestFrame,
+        certifiedContactRuling(),
+        resolution,
+        null,
+        proposal,
+        paidDeliveryContactDecision("south", 99, "Another sealed crate"),
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({ code: "model_contract_failed" });
+    expect(getCampaignPlayGameMasterRecoveryFeedback(thrown)?.failedChecks[0]).toMatchObject({
+      check: "completed_paid_delivery_destination_reused",
+      proposedDestinationHandle: "south",
+    });
+  });
+
+  it("rejects an untyped delivery condition that changes payment eligibility", async () => {
+    const method = "Ask the guard about delivery terms";
+    const activeDeliveryFrame = paidDeliveryFrame("collect");
+    activeDeliveryFrame.commitmentAuthority = undefined;
+    const untypedConditionProposal = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        summary: "The delivery fails an added cargo-quality condition, so completion is forfeited and the fee is no longer due.",
+      }],
+      decisionProposal: contactDecisionNone(method),
+    };
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({ object: untypedConditionProposal, trace: trace() })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "rejected",
+          reason: "The proposal adds a payment condition outside typed delivery authority.",
+          failedChecks: ["obligation_authority_missing"],
+        },
+        trace: trace(),
+      });
+
+    await expect(createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: activeDeliveryFrame,
+      ruling: genericActorContactRuling(method),
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+    })).rejects.toMatchObject({
+      code: "model_contract_failed",
+      modelEvidence: expect.objectContaining({ errorCode: "mechanical_authority_rejected" }),
+    });
+    expect(generateObject).toHaveBeenCalledTimes(2);
+    const reviewerPrompt = String(generateObject.mock.calls[1]![0].prompt);
+    expect(reviewerPrompt).toContain("A grounded physical or cargo condition may be narrated");
+    expect(reviewerPrompt).toContain("obligation_authority_missing");
+    expect(reviewerPrompt).toContain('"completionCondition":"deliver_subject_to_destination"');
   });
 
   it("rejects a concrete paid Aye/Nay delivery paired with kind none", async () => {
