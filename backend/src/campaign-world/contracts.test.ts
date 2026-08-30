@@ -231,12 +231,14 @@ function connectionsTransportFixture(): WorldConnectionsTransportPacket {
       intensity: 3,
     },
   ];
+  const orderedRelations = [...semanticRelations].sort((left, right) =>
+    actorIndexByRef.get(left.sourceActorRef)! - actorIndexByRef.get(right.sourceActorRef)!
+  );
+  const pressureTrajectories = ["escalating", "holding", "shifting"] as const;
   return {
-    relations: semanticRelations.map((relation) => {
-      const relationSlotIndex = actorIndexByRef.get(relation.sourceActorRef)!;
+    relations: orderedRelations.map((relation) => {
       const targetActorIndex = actorIndexByRef.get(relation.targetActorRef)!;
       return {
-        relationSlotIndex,
         targetActorIndex,
         relationType: relation.relationType,
         intensity: relation.intensity,
@@ -252,10 +254,10 @@ function connectionsTransportFixture(): WorldConnectionsTransportPacket {
         actorRefs: ["actor:rhea-quill"],
         locationRefs: ["location:tide-gate"],
       },
-    ].map((pressure) => ({
+    ].map((pressure, index) => ({
       name: pressure.name,
       description: pressure.description,
-      trajectory: pressure.trajectory,
+      trajectory: pressureTrajectories[index]!,
       urgency: pressure.urgency,
       actorIndices: pressure.actorRefs.map((actorRef) => actorIndexByRef.get(actorRef)!),
       locationIndices: pressure.locationRefs.map((locationRef) => locationIndexByRef.get(locationRef)!),
@@ -411,38 +413,38 @@ describe("Campaign World model contracts", () => {
     const transport = createWorldConnectionsTransportPacketSchema(frame, skeleton);
     const validTransport = connectionsTransportFixture();
     expect(transport.safeParse(validTransport).success).toBe(true);
-    const duplicateRelation = transport.safeParse({
+    expect(validTransport.relations).toHaveLength(skeleton.actors.length);
+    expect(Object.keys(validTransport.relations[0]!).sort()).toEqual([
+      "intensity",
+      "relationType",
+      "targetActorIndex",
+    ]);
+    const extraRelationKey = transport.safeParse({
       ...validTransport,
       relations: validTransport.relations.map((relation, index) => index === 1
-        ? { ...relation, relationSlotIndex: validTransport.relations[0]!.relationSlotIndex }
+        ? { ...relation, relationSlotIndex: 0 }
         : relation),
     });
-    expect(duplicateRelation.success).toBe(false);
-    if (!duplicateRelation.success) {
-      expect(duplicateRelation.error.issues).toContainEqual(expect.objectContaining({
-        path: ["relations"],
-        message: expect.stringContaining("Relation slots must be unique"),
+    expect(extraRelationKey.success).toBe(false);
+    if (!extraRelationKey.success) {
+      expect(extraRelationKey.error.issues).toContainEqual(expect.objectContaining({
+        code: "unrecognized_keys",
+        path: ["relations", 1],
+        keys: ["relationSlotIndex"],
       }));
     }
     expect(transport.safeParse({
       ...validTransport,
       relations: validTransport.relations.map((relation, index) => index === 0
-        ? { ...relation, targetActorIndex: relation.relationSlotIndex }
+        ? { ...relation, targetActorIndex: 0 }
         : relation),
     }).success).toBe(false);
-    const missingRelationSlot = transport.safeParse({
+    expect(transport.safeParse({
       ...validTransport,
-      relations: validTransport.relations.map((relation, index) => index === 0
-        ? { ...relation, relationSlotIndex: 1 }
-        : relation),
-    });
-    expect(missingRelationSlot.success).toBe(false);
-    if (!missingRelationSlot.success) {
-      expect(missingRelationSlot.error.issues).toContainEqual(expect.objectContaining({
-        path: ["relations"],
-        message: "Relation slot 0 must appear exactly once.",
-      }));
-    }
+      pressures: validTransport.pressures.map((pressure, index) => index === 0
+        ? { ...pressure, trajectory: "A freeform trajectory" }
+        : pressure),
+    }).success).toBe(false);
     expect(transport.safeParse({
       ...validTransport,
       pressures: validTransport.pressures.map((pressure, index) => index === 0
@@ -465,7 +467,6 @@ describe("Campaign World model contracts", () => {
 
     expect(Object.keys(validTransport.relations[0]!).sort()).toEqual([
       "intensity",
-      "relationSlotIndex",
       "relationType",
       "targetActorIndex",
     ]);
@@ -766,7 +767,6 @@ describe("Campaign World model contracts", () => {
           minItems?: number;
           maxItems?: number;
           items?: { properties?: {
-            relationSlotIndex?: { minimum?: number; maximum?: number };
             targetActorIndex?: { minimum?: number; maximum?: number };
           } };
         };
@@ -784,8 +784,6 @@ describe("Campaign World model contracts", () => {
       .toMatchObject({ minimum: 0, maximum: 7 });
     expect(connectionsJson.properties?.relations)
       .toMatchObject({ minItems: 8, maxItems: 8 });
-    expect(connectionsJson.properties?.relations?.items?.properties?.relationSlotIndex)
-      .toMatchObject({ minimum: 0, maximum: 7 });
     expect(connectionsJson.properties?.relations?.items?.properties?.targetActorIndex)
       .toMatchObject({ minimum: 0, maximum: 7 });
     expect(connectionsJson.properties?.pressures?.items?.properties?.actorIndices?.items)

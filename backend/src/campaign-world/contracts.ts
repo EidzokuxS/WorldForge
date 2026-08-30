@@ -59,7 +59,12 @@ const providerDetailMotivationSchema = boundedStringSchema(160, false);
 const providerAdditionalGoalTextSchema = boundedStringSchema(140, false);
 const providerPressureNameSchema = boundedStringSchema(64, true);
 const providerPressureDescriptionSchema = boundedStringSchema(220, false);
-const providerPressureTrajectorySchema = boundedStringSchema(120, false);
+const providerPressureTrajectorySchema = z.enum([
+  "escalating",
+  "holding",
+  "breaking",
+  "shifting",
+]);
 
 function localReferenceSchema(prefix: "location" | "actor") {
   const marker = `${prefix}:`;
@@ -955,7 +960,6 @@ export function mapWorldCastDetailBatchPacketToGlobal(
 }
 
 const worldConnectionsTransportRelationSchema = z.object({
-  relationSlotIndex: z.number().int(),
   targetActorIndex: z.number().int(),
   relationType: z.enum(relationTypeValues),
   intensity: z.number().int().min(1).max(5),
@@ -995,7 +999,6 @@ export function createWorldConnectionsTransportPacketSchema(
     .min(0)
     .max(persistentLocations.length - 1);
   const relationSchema = worldConnectionsTransportRelationSchema.extend({
-    relationSlotIndex: actorIndexSchema,
     targetActorIndex: actorIndexSchema,
   }).strict();
   const pressureSchema = worldConnectionsTransportPressureSchema.extend({
@@ -1017,29 +1020,8 @@ export function createWorldConnectionsTransportPacketSchema(
       ),
   );
   return packetSchema.superRefine((packet, context) => {
-    const relationSlotIndices = packet.relations.map((relation) =>
-      String(relation.relationSlotIndex)
-    );
-    addDuplicateIssues(
-      relationSlotIndices,
-      context,
-      ["relations"],
-      "Relation slots",
-    );
-    const relationSlots = new Set(packet.relations.map((relation) =>
-      relation.relationSlotIndex
-    ));
-    skeleton.actors.forEach((_, index) => {
-      if (!relationSlots.has(index)) {
-        context.addIssue({
-          code: "custom",
-          path: ["relations"],
-          message: `Relation slot ${index} must appear exactly once.`,
-        });
-      }
-    });
     packet.relations.forEach((relation, index) => {
-      if (relation.targetActorIndex === relation.relationSlotIndex) {
+      if (relation.targetActorIndex === index) {
         context.addIssue({
           code: "custom",
           path: ["relations", index],

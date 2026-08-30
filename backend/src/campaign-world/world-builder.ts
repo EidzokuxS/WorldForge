@@ -266,7 +266,6 @@ type WorldCastRecoveryDiagnostic = Readonly<{
 }>;
 
 const WORLD_CONNECTIONS_RECOVERY_CHECKS = [
-  "relation_slot_index",
   "relation_target_actor_index",
   "relation_type",
   "relation_count",
@@ -377,7 +376,6 @@ const WORLD_CAST_SKELETON_SLOT_NAMES = new Set([
 const SAFE_CONNECTIONS_SCHEMA_PATH_NAMES = new Set([
   "relations",
   "pressures",
-  "relationSlotIndex",
   "targetActorIndex",
   "actorIndices",
   "locationIndices",
@@ -473,7 +471,6 @@ function directWorldConnectionsIssueCheck(
     path[0] === "relations" &&
     typeof path[1] === "number" &&
     path.length === 3;
-  if (relationFieldPath && last === "relationSlotIndex") return "relation_slot_index";
   if (relationFieldPath && last === "targetActorIndex") return "relation_target_actor_index";
   if (relationFieldPath && last === "relationType") return "relation_type";
   const pressureReferencePath =
@@ -1207,8 +1204,8 @@ function appendWorldConnectionsRecoveryPrompt(
     basePrompt,
     "",
     "WORLD_CONNECTIONS_RECOVERY: The previous object was rejected by the local world-connections contract. Return one complete fresh packet matching the original campaign source, accepted cast skeleton, bounded transport schema, and provider contract. Correct every listed coordinate and recheck the complete checklist below; SAFE_ISSUES is not the full contract.",
-    "Relations: return exactly one row for every fixed relationSlotIndex in RELATION_SLOTS, exactly once; each row contains only relationSlotIndex, targetActorIndex, relationType, and intensity. relationType must be exactly one of alliance, rivalry, authority, dependency, kinship, association, hostility. targetActorIndex must be a direct integer from ALLOWED_ACTOR_INDICES and must differ from relationSlotIndex. intensity is an integer from 1 through 5.",
-    "Pressures: return exactly 3 or 4 rows; each row contains only name, description, trajectory, urgency, actorIndices, and locationIndices. name is at most 64 characters; description is one sentence at most 160 characters; trajectory is one sentence at most 120 characters; urgency is an integer from 1 through 5. actorIndices must be non-empty in-range integers from the accepted skeleton with no duplicates, and locationIndices must be non-empty in-range integers from persistent location slots with no duplicates; use at least two different combined actor/location anchor sets. At least one pressure must contain a persistent location index from STARTING_MACRO_SCENE_INDICES and a support actor whose presentLocationIndex is included in that same pressure's locationIndices.",
+    "Relations: return exactly one row for every accepted skeleton actor, ordered by source actor slot; relations array position i is source actor i. Each row contains only targetActorIndex, relationType, and intensity. relationType must be exactly one of alliance, rivalry, authority, dependency, kinship, association, hostility. targetActorIndex must be a direct integer from ALLOWED_ACTOR_INDICES and must differ from the row's array index. intensity is an integer from 1 through 5.",
+    "Pressures: return exactly 3 or 4 rows; each row contains only name, description, trajectory, urgency, actorIndices, and locationIndices. name is at most 64 characters; description is one sentence at most 160 characters; trajectory is exactly one of escalating, holding, breaking, or shifting; do not return free-form trajectory text. urgency is an integer from 1 through 5. actorIndices must be non-empty in-range integers from the accepted skeleton with no duplicates, and locationIndices must be non-empty in-range integers from persistent location slots with no duplicates; use at least two different combined actor/location anchor sets. At least one pressure must contain a persistent location index from STARTING_MACRO_SCENE_INDICES and a support actor whose presentLocationIndex is included in that same pressure's locationIndices.",
     "Use no actorRef, locationRef, or free-form references; code derives stable references and relation summaries from accepted indices and relationType. Do not return summary, rationale, actor names, or other relation prose. Do not omit required rows or pressures, add extra keys, or replace missing values with defaults.",
     "SAFE_ISSUES follows and contains only issueIndex, code, path, and check.",
     "SAFE_ISSUES",
@@ -1491,13 +1488,30 @@ function canonicalRelationSummary(
   }
 }
 
+function canonicalPressureTrajectory(
+  pressureName: string,
+  trajectory: WorldConnectionsTransportPacket["pressures"][number]["trajectory"],
+): string {
+  switch (trajectory) {
+    case "escalating":
+      return `${pressureName} continues to escalate.`;
+    case "holding":
+      return `${pressureName} holds steady.`;
+    case "breaking":
+      return `${pressureName} reaches a breaking point.`;
+    case "shifting":
+      return `${pressureName} shifts into a new form.`;
+    default:
+      throw new Error(`Unsupported pressure trajectory: ${String(trajectory)}`);
+  }
+}
+
 export function composeWorldConnectionsPacketFromTransport(
   frame: WorldFramePacket,
   skeleton: Pick<WorldCastSkeletonPacket, "actors"> | Pick<WorldCastPacket, "actors">,
   input: WorldConnectionsTransportPacket,
 ): WorldConnectionsPacket {
-  const relations = input.relations.map((relation) => {
-    const sourceActorIndex = relation.relationSlotIndex;
+  const relations = input.relations.map((relation, sourceActorIndex) => {
     const targetActorIndex = relation.targetActorIndex;
     return {
       sourceActorRef: actorReferenceForIndex(sourceActorIndex),
@@ -1514,7 +1528,7 @@ export function composeWorldConnectionsPacketFromTransport(
   const pressures = input.pressures.map((pressure) => ({
     name: pressure.name,
     description: pressure.description,
-    trajectory: pressure.trajectory,
+    trajectory: canonicalPressureTrajectory(pressure.name, pressure.trajectory),
     urgency: pressure.urgency,
     actorRefs: pressure.actorIndices.map((index) => actorReferenceForIndex(index)),
     locationRefs: pressure.locationIndices.map((index) =>

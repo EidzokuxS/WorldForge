@@ -443,12 +443,14 @@ function connectionsTransportPacket(): WorldConnectionsTransportPacket {
       intensity: 3,
     },
   ];
+  const orderedRelations = [...semanticRelations].sort((left, right) =>
+    actorIndexByRef.get(left.sourceActorRef)! - actorIndexByRef.get(right.sourceActorRef)!
+  );
+  const pressureTrajectories = ["escalating", "holding", "shifting"] as const;
   return {
-    relations: semanticRelations.map((relation) => {
-      const relationSlotIndex = actorIndexByRef.get(relation.sourceActorRef)!;
+    relations: orderedRelations.map((relation) => {
       const targetActorIndex = actorIndexByRef.get(relation.targetActorRef)!;
       return {
-        relationSlotIndex,
         targetActorIndex,
         relationType: relation.relationType,
         intensity: relation.intensity,
@@ -464,10 +466,10 @@ function connectionsTransportPacket(): WorldConnectionsTransportPacket {
         actorRefs: ["actor:rhea-quill"],
         locationRefs: ["location:glass-garden"],
       },
-    ].map((pressure) => ({
+    ].map((pressure, index) => ({
       name: pressure.name,
       description: pressure.description,
-      trajectory: pressure.trajectory,
+      trajectory: pressureTrajectories[index]!,
       urgency: pressure.urgency,
       actorIndices: pressure.actorRefs.map((ref) => actorIndexByRef.get(ref)!),
       locationIndices: pressure.locationRefs.map((ref) => locationIndexByRef.get(ref)!),
@@ -500,7 +502,7 @@ function toolConnectionsTransportPacket(): WorldConnectionsTransportPacket {
 }
 
 describe("Campaign World connections transport", () => {
-  it("maps fixed relation slots and direct target indices to canonical actor references", () => {
+  it("maps ordered source rows and direct target indices to canonical actor references", () => {
     const frame = framePacket();
     const skeleton = fixedSlotSkeletonPacket();
     const cast = composeWorldCastPacketFromTransport(frame, skeleton, detailPacket());
@@ -509,7 +511,7 @@ describe("Campaign World connections transport", () => {
 
     expect(composed.relations).toHaveLength(cast.actors.length);
     expect(composed.relations).toEqual(transport.relations.map((relation, relationIndex) => {
-      const sourceActorIndex = relation.relationSlotIndex;
+      const sourceActorIndex = relationIndex;
       const targetActorIndex = relation.targetActorIndex;
       return {
         sourceActorRef: cast.actors[sourceActorIndex]!.actorRef,
@@ -517,13 +519,13 @@ describe("Campaign World connections transport", () => {
         relationType: relation.relationType,
         summary: [
           "Mara Venn answers to Ilya Venn's authority.",
+          "Rhea Quill is associated with Mara Venn.",
           "Oren Tide depends on Mara Venn.",
           "Sel Bell and Ilya Venn are active rivals.",
           "Ilya Venn is associated with Niko Salt.",
           "Niko Salt depends on Rhea Quill.",
           "Tavi Reed is associated with Uma Vale.",
           "Uma Vale depends on Tavi Reed.",
-          "Rhea Quill is associated with Mara Venn.",
         ][relationIndex]!,
         intensity: relation.intensity,
       };
@@ -531,7 +533,33 @@ describe("Campaign World connections transport", () => {
     expect(composed.relations.every((relation) =>
       relation.sourceActorRef !== relation.targetActorRef
     )).toBe(true);
+    expect(composed.pressures.map((pressure) => pressure.trajectory)).toEqual([
+      "Failing Routes continues to escalate.",
+      "False Bells holds steady.",
+      "Tide Ledger shifts into a new form.",
+    ]);
     expect(createWorldConnectionsPacketSchema(frame, cast).safeParse(composed).success).toBe(true);
+  });
+
+  it("decodes every closed pressure trajectory into a code-owned canonical sentence", () => {
+    const frame = framePacket();
+    const skeleton = fixedSlotSkeletonPacket();
+    const transport = connectionsTransportPacket();
+    const [firstPressure] = transport.pressures;
+    const composed = composeWorldConnectionsPacketFromTransport(frame, skeleton, {
+      ...transport,
+      pressures: [
+        ...transport.pressures,
+        { ...firstPressure!, name: "Breaking Tide", trajectory: "breaking" },
+      ],
+    });
+
+    expect(composed.pressures.map((pressure) => pressure.trajectory)).toEqual([
+      "Failing Routes continues to escalate.",
+      "False Bells holds steady.",
+      "Tide Ledger shifts into a new form.",
+      "Breaking Tide reaches a breaking point.",
+    ]);
   });
 
   it("builds canonical relation summaries for every relation type from accepted actor names", () => {
@@ -559,10 +587,9 @@ describe("Campaign World connections transport", () => {
     ] as const;
     const transport = {
       ...connectionsTransportPacket(),
-      relations: namedSkeleton.actors.map((_, relationSlotIndex) => ({
-        relationSlotIndex,
-        targetActorIndex: relationSlotIndex === 0 ? 1 : 0,
-        relationType: relationTypes[relationSlotIndex],
+      relations: namedSkeleton.actors.map((_, sourceActorIndex) => ({
+        targetActorIndex: sourceActorIndex === 0 ? 1 : 0,
+        relationType: relationTypes[sourceActorIndex],
         intensity: 1,
       })),
     } satisfies WorldConnectionsTransportPacket;
@@ -1248,9 +1275,14 @@ describe("Campaign World staged builder", () => {
       "At most one actor in this batch may receive one additional goal",
     );
     expect(prompts[4]).toContain("WORLD_CAST_SKELETON");
-    expect(prompts[4]).toContain("RELATION_SLOTS");
-    expect(prompts[4]).toContain("relationSlotIndex");
-    expect(prompts[4]).toContain("targetActorIndex");
+    expect(prompts[4]).toContain(
+      "Each relations[] object contains exactly targetActorIndex, relationType, and intensity.",
+    );
+    expect(prompts[4]).toContain(
+      "Return exactly 8 relation rows in source-slot order: array position i is source actor i, so row 0 is source actor 0 and so on.",
+    );
+    expect(prompts[4]).not.toContain("RELATION_SLOTS");
+    expect(prompts[4]).not.toContain("relationSlotIndex");
     expect(prompts[4]).not.toContain("targetOffset");
     expect(prompts[4]).toContain("locationIndices");
     expect(prompts[0]).toContain(
@@ -2465,7 +2497,7 @@ describe("Campaign World staged builder", () => {
       Object.assign(relation, { relationType: "not-a-relation" });
     }
     const invalidSelf = JSON.parse(JSON.stringify(connectionsTransportPacket())) as WorldConnectionsTransportPacket;
-    invalidSelf.relations[0]!.targetActorIndex = invalidSelf.relations[0]!.relationSlotIndex;
+    invalidSelf.relations[0]!.targetActorIndex = 0;
     const schema = createWorldConnectionsTransportPacketSchema(framePacket(), skeletonPacket());
     const rejectedEnum = schema.safeParse(invalidEnum);
     expect(rejectedEnum.success).toBe(false);
@@ -2541,16 +2573,16 @@ describe("Campaign World staged builder", () => {
     }
 
     const recoveryChecklist = [
-      "exactly one row for every fixed relationSlotIndex in RELATION_SLOTS, exactly once",
-      "each row contains only relationSlotIndex, targetActorIndex, relationType, and intensity",
+      "exactly one row for every accepted skeleton actor, ordered by source actor slot; relations array position i is source actor i",
+      "Each row contains only targetActorIndex, relationType, and intensity",
       "relationType must be exactly one of alliance, rivalry, authority, dependency, kinship, association, hostility",
-      "targetActorIndex must be a direct integer from ALLOWED_ACTOR_INDICES and must differ from relationSlotIndex",
+      "targetActorIndex must be a direct integer from ALLOWED_ACTOR_INDICES and must differ from the row's array index",
       "intensity is an integer from 1 through 5",
       "return exactly 3 or 4 rows",
       "each row contains only name, description, trajectory, urgency, actorIndices, and locationIndices",
       "name is at most 64 characters",
       "description is one sentence at most 160 characters",
-      "trajectory is one sentence at most 120 characters",
+      "trajectory is exactly one of escalating, holding, breaking, or shifting",
       "urgency is an integer from 1 through 5",
       "actorIndices must be non-empty in-range integers from the accepted skeleton with no duplicates",
       "locationIndices must be non-empty in-range integers from persistent location slots with no duplicates",
@@ -2591,12 +2623,12 @@ describe("Campaign World staged builder", () => {
     ]);
   });
 
-  it("recovers duplicate world-connection transport inside the stage retry", async () => {
+  it("recovers an extra world-connection transport key inside the stage retry", async () => {
     const valid = connectionsTransportPacket();
     const invalid: WorldConnectionsTransportPacket = {
       ...valid,
       relations: valid.relations.map((relation, index) => index === 1
-        ? { ...relation, relationSlotIndex: valid.relations[0]!.relationSlotIndex }
+        ? { ...relation, relationSlotIndex: 0 }
         : relation),
     };
     const schema = createWorldConnectionsTransportPacketSchema(framePacket(), skeletonPacket());
@@ -2604,11 +2636,12 @@ describe("Campaign World staged builder", () => {
     const providerDiagnostics = getSafeGenerateObjectSchemaDiagnostics(providerError);
     expect(providerDiagnostics).toMatchObject({
       schemaParseOutcome: "invalid",
-      schemaIssueCount: 3,
+      schemaIssueCount: 1,
       schemaIssues: [
-        expect.objectContaining({ code: "custom", path: ["relations"] }),
-        expect.objectContaining({ code: "custom", path: ["relations"] }),
-        expect.objectContaining({ code: "custom", path: ["relations", 1] }),
+        expect.objectContaining({
+          code: "unrecognized_keys",
+          path: ["relations", 1],
+        }),
       ],
     });
 
@@ -2663,21 +2696,9 @@ describe("Campaign World staged builder", () => {
     expect(recoveryIssuesFromPrompt(secondPrompt)).toEqual([
       {
         issueIndex: 0,
-        code: "custom",
-        path: ["relations"],
-        check: "relation_duplicate",
-      },
-      {
-        issueIndex: 1,
-        code: "custom",
-        path: ["relations"],
-        check: "relation_participation",
-      },
-      {
-        issueIndex: 2,
-        code: "custom",
+        code: "unrecognized_keys",
         path: ["relations", 1],
-        check: "relation_self",
+        check: "unknown_contract_issue",
       },
     ]);
     expect(secondPrompt).not.toContain(JSON.stringify(invalid));
@@ -2809,14 +2830,14 @@ describe("Campaign World staged builder", () => {
 
   it("recovers production-shaped world-connections diagnostics with nested safe coordinates", async () => {
     const invalid = JSON.parse(JSON.stringify(connectionsTransportPacket())) as WorldConnectionsTransportPacket;
-    invalid.relations[0]!.relationSlotIndex = 99;
+    (invalid.relations[0] as Record<string, unknown>).relationSlotIndex = 99;
     (invalid.relations[1] as Record<string, unknown>).relationType = "PRIVATE_RELATION_TYPE";
     invalid.pressures[0]!.actorIndices[2] = 99;
     const schema = createWorldConnectionsTransportPacketSchema(framePacket(), skeletonPacket());
     const providerError = await productionConnectionsSafeGenerateError(schema, invalid);
     const providerDiagnostics = getSafeGenerateObjectSchemaDiagnostics(providerError);
     expect(providerDiagnostics?.schemaIssues.map((issue) => issue.path)).toEqual([
-      ["relations", 0, "relationSlotIndex"],
+      ["relations", 0],
       ["relations", 1, "relationType"],
       ["pressures", 0, "actorIndices", 2],
     ]);
@@ -2872,6 +2893,12 @@ describe("Campaign World staged builder", () => {
     const secondPrompt = String(secondOptions.prompt);
     const recoveryIssues = recoveryIssuesFromPrompt(secondPrompt);
     expect(recoveryIssues).toEqual(expect.arrayContaining([
+      {
+        issueIndex: expect.any(Number),
+        code: "unrecognized_keys",
+        path: ["relations", 0],
+        check: "unknown_contract_issue",
+      },
       {
         issueIndex: expect.any(Number),
         code: "invalid_value",

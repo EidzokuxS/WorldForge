@@ -210,23 +210,22 @@ describe("Campaign World prompts", () => {
     );
     expect(prompt).toContain("actor indices are integers from 0 through 0");
     expect(prompt).toContain("persistent location indices are integers from 0 through 0");
-    expect(prompt).toContain("RELATION_SLOTS");
     expect(prompt).toContain("ALLOWED_ACTOR_INDICES");
-    expect(prompt).toContain('"relationSlotIndex"');
-    expect(prompt).toContain('"targetActorIndex"');
+    expect(prompt).toContain(
+      "Each relations[] object contains exactly targetActorIndex, relationType, and intensity.",
+    );
+    expect(prompt).toContain(
+      "Return exactly 1 relation row in source-slot order: array position i is source actor i, so row 0 is source actor 0 and so on.",
+    );
     expect(prompt).toContain(
       '"relationType" must be exactly one of alliance, rivalry, authority, dependency, kinship, association, or hostility.',
     );
     expect(prompt).toContain(
-      "return exactly one relation row for every integer in RELATION_SLOTS, exactly once",
-    );
-    expect(prompt).toContain(
-      "must differ from relationSlotIndex",
+      '"targetActorIndex" must be copied as one direct integer from ALLOWED_ACTOR_INDICES and must differ from its row array index.',
     );
     expect(prompt).toContain("Never calculate or derive the target from the source index");
-    expect(prompt).toContain(
-      "Each relations[] object contains exactly relationSlotIndex, targetActorIndex, relationType, and intensity.",
-    );
+    expect(prompt).not.toContain("RELATION_SLOTS");
+    expect(prompt).not.toContain("relationSlotIndex");
     expect(prompt).toContain(
       "Code builds each persisted relation summary from those accepted actor names and relationType; do not return summary, rationale, actor names, or any other relation prose.",
     );
@@ -234,7 +233,8 @@ describe("Campaign World prompts", () => {
     expect(prompt).not.toContain("Keep each relation summary to one sentence <=120 characters");
     expect(prompt).toContain("Keep each pressure name <=64 characters");
     expect(prompt).toContain("description to one sentence <=160 characters");
-    expect(prompt).toContain("trajectory to one sentence <=120 characters");
+    expect(prompt).toContain("Set trajectory to exactly one of escalating, holding, breaking, or shifting.");
+    expect(prompt).toContain("Do not return free-form trajectory text.");
     expect(prompt).toContain("Create 3 or 4 distinct pressures grounded in the source");
     expect(prompt).toContain("using only the concrete actor and location anchors each pressure needs");
     expect(prompt).not.toContain(

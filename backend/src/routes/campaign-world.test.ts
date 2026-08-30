@@ -485,21 +485,22 @@ function connectionsTransportPacket(): WorldConnectionsTransportPacket {
       intensity: 3,
     },
   ];
+  semanticRelations.sort((left, right) =>
+    actorIndexByRef.get(left.sourceActorRef)! - actorIndexByRef.get(right.sourceActorRef)!
+  );
   return {
     relations: semanticRelations.map((relation) => {
-      const relationSlotIndex = actorIndexByRef.get(relation.sourceActorRef)!;
       const targetActorIndex = actorIndexByRef.get(relation.targetActorRef)!;
       return {
-        relationSlotIndex,
         targetActorIndex,
         relationType: relation.relationType,
         intensity: relation.intensity,
       };
     }),
-    pressures: connections.pressures.map((pressure) => ({
+    pressures: connections.pressures.map((pressure, index) => ({
       name: pressure.name,
       description: pressure.description,
-      trajectory: pressure.trajectory,
+      trajectory: (["escalating", "holding"] as const)[index]!,
       urgency: pressure.urgency,
       actorIndices: pressure.actorRefs.map((ref) => actorIndexByRef.get(ref)!),
       locationIndices: pressure.locationRefs.map((ref) => locationIndexByRef.get(ref)!),
@@ -511,21 +512,7 @@ function toolConnectionsTransportPacket(): WorldConnectionsTransportPacket {
   const base = connectionsTransportPacket();
   return {
     ...base,
-    relations: [
-      ...base.relations,
-      {
-        relationSlotIndex: 6,
-        targetActorIndex: 1,
-        relationType: "association",
-        intensity: 3,
-      },
-      {
-        relationSlotIndex: 7,
-        targetActorIndex: 0,
-        relationType: "dependency",
-        intensity: 3,
-      },
-    ],
+    relations: base.relations,
     pressures: [
       {
         ...base.pressures[0]!,
@@ -540,7 +527,7 @@ function toolConnectionsTransportPacket(): WorldConnectionsTransportPacket {
       {
         name: "Tide Ledger",
         description: "Route records disagree after the latest eclipse.",
-        trajectory: "Couriers lose confidence in the next crossing.",
+        trajectory: "shifting",
         urgency: 4,
         actorIndices: [1],
         locationIndices: [3],
