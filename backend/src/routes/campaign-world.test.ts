@@ -12,6 +12,7 @@ import {
   safeGenerateObject,
   type SafeGenerateTrace,
 } from "../ai/generate-object-safe.js";
+import { markGenerationComplete as syncCampaignGeneration } from "../campaign/index.js";
 import { closeDb } from "../db/index.js";
 import {
   createCampaignWorldBuilder,
@@ -31,6 +32,7 @@ import type {
   WorldFramePacket,
 } from "../campaign-world/contracts.js";
 import { createCampaignWorldRoutes } from "./campaign-world.js";
+import campaignRoutes from "./campaigns.js";
 import { worldFrameAndCastSkeletonToolPacketSchema } from "../campaign-world/world-builder.js";
 
 const CAMPAIGN_ID = "33333333-3333-4333-8333-333333333333";
@@ -719,7 +721,11 @@ interface RouteHarness {
   createModel: ReturnType<typeof vi.fn>;
 }
 
-function createHarness(generateObject: typeof safeGenerateObject, toolMode = false): RouteHarness {
+function createHarness(
+  generateObject: typeof safeGenerateObject,
+  toolMode = false,
+  syncGenerationComplete?: (campaignId: string, refinedPremise: string) => void,
+): RouteHarness {
   let entitySequence = 0;
   let buildSequence = 0;
   const sourceService = createCampaignWorldSourceService();
@@ -753,6 +759,9 @@ function createHarness(generateObject: typeof safeGenerateObject, toolMode = fal
       },
     }),
     eventPollMilliseconds: 1,
+    ...(syncGenerationComplete
+      ? { markGenerationComplete: syncGenerationComplete }
+      : {}),
   });
   const app = new Hono();
   app.route("/api/campaigns", routes);
@@ -968,7 +977,12 @@ describe("Campaign World routes", () => {
       currentBuildId: string;
       currentStage: string;
       lastEventSequence: number;
-      world: { version: number; contentHash: string; locations: unknown[] };
+      world: {
+        version: number;
+        contentHash: string;
+        worldSummary: string;
+        locations: unknown[];
+      };
     };
     expect(reviewState).toMatchObject({
       status: "review",
@@ -995,7 +1009,12 @@ describe("Campaign World routes", () => {
 
     closeDb();
     const restartedProvider = controlledSuccessfulProvider();
-    const restarted = createHarness(restartedProvider.generateObject).app;
+    const syncGenerationComplete = vi.fn(syncCampaignGeneration);
+    const restarted = createHarness(
+      restartedProvider.generateObject,
+      false,
+      syncGenerationComplete,
+    ).app;
     const restartedState = await restarted.request(
       `/api/campaigns/${CAMPAIGN_ID}/world/state`,
     );
@@ -1044,6 +1063,41 @@ describe("Campaign World routes", () => {
     expect(await staleHashAccept.json()).toMatchObject({
       error: { code: "world_version_conflict" },
     });
+    expect(syncGenerationComplete).not.toHaveBeenCalled();
+
+    const rejectionDatabase = openCampaignWorldDatabase(CAMPAIGN_ID);
+    try {
+      rejectionDatabase.sqlite.exec(`
+        CREATE TRIGGER reject_campaign_world_accept
+        BEFORE UPDATE OF status ON campaign_worlds
+        WHEN NEW.status = 'accepted'
+        BEGIN
+          SELECT RAISE(ABORT, 'acceptance rejected for route test');
+        END;
+      `);
+    } finally {
+      rejectionDatabase.close();
+    }
+    const failedAccept = await restarted.request(
+      `/api/campaigns/${CAMPAIGN_ID}/world/accept`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          expectedVersion: reviewState.world.version,
+          expectedContentHash: reviewState.world.contentHash,
+        }),
+      },
+    );
+    expect(failedAccept.status).toBe(500);
+    expect(syncGenerationComplete).not.toHaveBeenCalled();
+
+    const cleanupDatabase = openCampaignWorldDatabase(CAMPAIGN_ID);
+    try {
+      cleanupDatabase.sqlite.exec("DROP TRIGGER reject_campaign_world_accept");
+    } finally {
+      cleanupDatabase.close();
+    }
 
     const accepted = await restarted.request(
       `/api/campaigns/${CAMPAIGN_ID}/world/accept`,
@@ -1062,6 +1116,24 @@ describe("Campaign World routes", () => {
       worldVersion: 1,
       contentHash: reviewState.world.contentHash,
     });
+    expect(syncGenerationComplete).toHaveBeenCalledTimes(1);
+    expect(syncGenerationComplete).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      reviewState.world.worldSummary,
+    );
+    const config = JSON.parse(
+      fs.readFileSync(path.join(campaignDirectory(), "config.json"), "utf-8"),
+    ) as { generationComplete?: boolean; premise?: string };
+    expect(config).toMatchObject({
+      generationComplete: true,
+      premise: reviewState.world.worldSummary,
+    });
+    const mounted = new Hono();
+    mounted.route("/api/campaigns", campaignRoutes);
+    const legacyWorld = await mounted.request(
+      `/api/campaigns/${CAMPAIGN_ID}/world?projection=review`,
+    );
+    expect(legacyWorld.status).toBe(200);
     const acceptedState = await (await restarted.request(
       `/api/campaigns/${CAMPAIGN_ID}/world/state`,
     )).json();

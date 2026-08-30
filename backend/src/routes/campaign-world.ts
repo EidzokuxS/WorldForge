@@ -7,7 +7,10 @@ import type {
   CampaignWorldState,
 } from "@worldforge/shared";
 import { createModel } from "../ai/index.js";
-import { loadCampaign } from "../campaign/index.js";
+import {
+  loadCampaign,
+  markGenerationComplete,
+} from "../campaign/index.js";
 import {
   campaignWorldBuildService,
   campaignWorldPlayerMessages,
@@ -60,6 +63,7 @@ interface CampaignWorldRouteDependencies {
   buildService: CampaignWorldBuildService;
   sourceService: CampaignWorldSourceService;
   loadCampaign: typeof loadCampaign;
+  markGenerationComplete: typeof markGenerationComplete;
   loadSettings: typeof loadSettings;
   resolveGenerator: typeof resolveGenerator;
   createModel: typeof createModel;
@@ -293,6 +297,7 @@ export function createCampaignWorldRoutes(
     buildService: campaignWorldBuildService,
     sourceService: campaignWorldSourceService,
     loadCampaign,
+    markGenerationComplete,
     loadSettings,
     resolveGenerator,
     createModel,
@@ -476,11 +481,21 @@ export function createCampaignWorldRoutes(
       dependencies.buildService.recoverInterruptedBuild(campaignId);
       const handle = dependencies.openDatabase(campaignId);
       try {
-        return c.json(createCampaignWorldRepository(handle).acceptWorld({
+        const repository = createCampaignWorldRepository(handle);
+        const acceptance = repository.acceptWorld({
           expectedVersion: body.expectedVersion,
           expectedContentHash: body.expectedContentHash,
           acceptedAt: dependencies.now(),
-        }));
+        });
+        const acceptedWorld = repository.loadWorld();
+        if (!acceptedWorld || acceptedWorld.status !== "accepted") {
+          throw new CampaignWorldRepositoryError(
+            "world_state_corrupt",
+            "Campaign World acceptance did not produce an accepted world.",
+          );
+        }
+        dependencies.markGenerationComplete(campaignId, acceptedWorld.worldSummary);
+        return c.json(acceptance);
       } finally {
         handle.close();
       }
