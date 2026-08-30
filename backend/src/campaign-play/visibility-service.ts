@@ -813,6 +813,15 @@ function publicEntry(
     title = "Your action";
     text = commandPayload.summary;
   } else if (
+    exposure.channel === "direct_perception" && playerParticipated &&
+    eventSource.kind === "system" && eventSource.system === "game_master" &&
+    exposure.commandKind === "set_actor_condition" &&
+    commandPayload.actorId === humanActorId &&
+    typeof commandPayload.summary === "string"
+  ) {
+    title = "Your condition";
+    text = commandPayload.summary;
+  } else if (
     exposure.channel === "direct_perception" && playerParticipated
     && eventSource.kind === "system" && eventSource.system === "opening_bootstrap"
     && exposure.commandKind === "record_world_event"
@@ -1057,14 +1066,20 @@ function directlyPerceivedObservationSubjects(
     : eventSource.kind === "actor" && typeof eventSource.actorId === "string"
       ? eventSource.actorId
       : undefined;
-  const actorIds = [...new Set(
-    parseRecordArray(exposure.eventAffectedRefsJson, "Event affected references")
+  const humanConditionActorId = exposure.commandKind === "set_actor_condition" &&
+    eventSource.kind === "system" && eventSource.system === "game_master" &&
+    commandPayload.actorId === humanActorId
+    ? humanActorId
+    : undefined;
+  const actorIds = [...new Set([
+    ...(humanConditionActorId === undefined ? [] : [humanConditionActorId]),
+    ...parseRecordArray(exposure.eventAffectedRefsJson, "Event affected references")
       .filter((reference) => reference.kind === "actor"
         && typeof reference.id === "string"
         && reference.id !== humanActorId
         && reference.id !== attributedActorId)
       .map((reference) => reference.id as string),
-  )].filter((actorId) =>
+  ])].filter((actorId) =>
     actorLocationFromSnapshot(exposure.eventAfterPayloadJson, actorId) === exposure.locationId);
   const actors = actorIds.length === 0
     ? []

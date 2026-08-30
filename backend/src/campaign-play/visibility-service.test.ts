@@ -961,12 +961,31 @@ function setPresentActorCondition(
   handle: CampaignPlayDatabaseHandle,
   actorId: string,
   condition: "occupied" | "strained" | "incapacitated",
+  exposureMode: "protected" | "projectable" = "protected",
 ): void {
   const states = createCampaignPlayStateRepository(handle);
   const frame = rulebookFrame(handle);
   const turnId = "turn-opening";
   const batchId = `batch-condition-${actorId}-${condition}`;
   const summary = `Actor is ${condition}.`;
+  const presentLocation = exposureMode === "projectable"
+    ? handle.sqlite.prepare(`SELECT location_id AS locationId
+        FROM actor_placements
+        WHERE campaign_id = ? AND actor_id = ? AND placement_kind = 'present'
+        LIMIT 1`).get(CAMPAIGN_ID, actorId) as { locationId: string } | undefined
+    : undefined;
+  if (exposureMode === "projectable" && !presentLocation) {
+    throw new Error(`Condition visibility fixture has no present location for ${actorId}.`);
+  }
+  const exposure = exposureMode === "projectable"
+    ? {
+        mode: "projectable" as const,
+        predicates: [{
+          channel: "direct_perception" as const,
+          locationId: presentLocation!.locationId,
+        }],
+      }
+    : { mode: "protected" as const };
   const command = {
     commandId: deriveCampaignPlayCommandId(CAMPAIGN_ID, turnId, batchId, 0),
     batchId,
@@ -976,7 +995,7 @@ function setPresentActorCondition(
     expectedWorldVersion: frame.worldVersion,
     readScope: [{ kind: "actor" as const, id: actorId }],
     writeScope: [{ kind: "actor" as const, id: actorId }],
-    exposure: { mode: "protected" as const },
+    exposure,
     kind: "set_actor_condition" as const,
     actorId,
     condition,
@@ -992,6 +1011,10 @@ function setPresentActorCondition(
       rootParent: { kind: "turn", turnId },
       authorizedRefs: [
         { kind: "actor" as const, id: "actor-player" },
+        ...(presentLocation === undefined ? [] : [{
+          kind: "location" as const,
+          id: presentLocation.locationId,
+        }]),
         ...frame.acceptedWorld.actors.map((actor) => ({
           kind: "actor" as const,
           id: actor.id,
@@ -1115,6 +1138,31 @@ describe("Campaign Play visibility service", () => {
     expect(stored?.payloadJson).toContain(
       "Mara Venn says the signal lantern has failed while Ilya Venn listens nearby.",
     );
+  });
+
+  it("projects a player condition with its concrete summary and human subject", () => {
+    const fixture = createVisibilityFixture(["attempt"], false);
+    setPresentActorCondition(fixture.handle, "actor-player", "strained", "projectable");
+
+    const result = createCampaignPlayVisibilityService(fixture.handle).projectTurn({
+      token: fixture.visibilityToken,
+      actionContext: null,
+      sourceMoment: null,
+      committedAt: 1_650,
+      mutationId: "visibility-player-condition",
+    });
+    const conditionObservation = result.packet.newObservations.find((observation) =>
+      observation.title === "Your condition" && observation.text === "Actor is strained.");
+
+    expect(conditionObservation).toBeDefined();
+    if (!conditionObservation) throw new Error("Player condition observation was not projected.");
+    expect(result.packet.observationSubjects).toContainEqual({
+      observationHandle: conditionObservation.observationHandle,
+      actors: [{
+        handle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-player"),
+        name: "Player",
+      }],
+    });
   });
 
   it("earns valid channels while keeping sibling-scene perception and aftermath hidden", () => {
