@@ -3985,11 +3985,12 @@ export function createCampaignPlayTurnRuntime(
     );
   }
 
-  const acceptedActorReplanCount = (turnId: string): number =>
-    (input.handle.sqlite.prepare(`SELECT count(*) AS count
+  const terminalActorReplanCount = (turnId: string): number =>
+    (input.handle.sqlite.prepare(`SELECT count(DISTINCT stage_id) AS count
       FROM campaign_play_model_stages
       WHERE campaign_id = ? AND turn_id = ?
-        AND kind = 'actor_replanner' AND status = 'accepted'`).get(
+        AND kind = 'actor_replanner'
+        AND status IN ('accepted', 'interrupted', 'failed')`).get(
           input.handle.campaignId,
           turnId,
         ) as { count: number }).count;
@@ -5032,7 +5033,7 @@ export function createCampaignPlayTurnRuntime(
                   executionRoute.kind === "certified_wait"
                 ? actorCriticalPathReplanLimit
                 : 0;
-              if (acceptedActorReplanCount(context.turn.turnId) >= criticalPathReplanLimit) {
+              if (terminalActorReplanCount(context.turn.turnId) >= criticalPathReplanLimit) {
                 const deferred = actorProposalService.deferReplan({
                   jobId: outcome.jobId,
                   token: context.token,
@@ -5293,7 +5294,7 @@ export function createCampaignPlayTurnRuntime(
         if (
           next?.stage === "queued" &&
           actorScheduler.buildActorFrame(next.jobId).selection.kind === "replan_required" &&
-          acceptedActorReplanCount(active.turnId) === 0
+          terminalActorReplanCount(active.turnId) === 0
         ) {
           return {
             turn: active,

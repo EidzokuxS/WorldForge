@@ -8784,6 +8784,89 @@ describe("Campaign Play player-action turn runtime", () => {
     await advanceUntilStage(runtime, time, admission.turnId, "actors_settled");
   });
 
+  it("consumes actor replan capacity after a terminal invalid job", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening();
+    const time = fixedClock(3_800);
+    let providerCalls = 0;
+    const actorReplanner = createCampaignPlayActorReplanner(handle, {
+      now: time.clock.now,
+      generateObject: (async () => {
+        providerCalls += 1;
+        return {
+          object: { unexpected: true },
+          trace: actorReplanTrace(),
+        };
+      }) as unknown as typeof safeGenerateObject,
+    });
+    const judge = judgeFixture("deterministic");
+    const baseJudge = judge.judge;
+    judge.judge = vi.fn(async (...args: Parameters<typeof judge.judge>) => {
+      const result = await baseJudge(...args);
+      return {
+        ...result,
+        ruling: {
+          ...result.ruling,
+          elapsedBounds: { minimumMinutes: 5, maximumMinutes: 5 },
+        },
+      };
+    });
+    const runtime = turnRuntime(
+      handle,
+      time,
+      judge,
+      gameMasterFixture(),
+      { actorReplanner },
+    );
+    const admission = runtime.admitAction({
+      request: admissionRequest(state, "actor-replanner-terminal-capacity"),
+      submittedAt: 3_800,
+    });
+
+    await advanceToPrimarySettlement(runtime, time, admission.turnId);
+    time.advance();
+    await runtime.runNextStage(admission.turnId);
+    const firstJobId = forceFirstActorReplan(handle, time, admission.turnId);
+
+    time.advance();
+    await runtime.runNextStage(admission.turnId);
+    const scheduler = createCampaignPlayActorScheduler(handle);
+    expect(providerCalls).toBe(1);
+    expect(scheduler.listTurnJobs(admission.turnId).find((job) => job.jobId === firstJobId))
+      .toMatchObject({
+        stage: "deferred",
+        deferReason: "replan_invalid",
+        workerEpoch: 1,
+      });
+
+    const secondJobId = forceFirstActorReplan(handle, time, admission.turnId);
+    time.advance();
+    await runtime.runNextStage(admission.turnId);
+
+    expect(providerCalls).toBe(1);
+    expect(scheduler.listTurnJobs(admission.turnId).find((job) => job.jobId === secondJobId))
+      .toMatchObject({
+        stage: "deferred",
+        deferReason: "replan_capacity",
+        workerEpoch: 0,
+      });
+    expect(handle.sqlite.prepare(`SELECT status, error_code AS errorCode
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'actor_replanner'`).all(
+      CAMPAIGN_ID,
+      admission.turnId,
+    )).toEqual([{ status: "interrupted", errorCode: "model_contract_invalid" }]);
+    expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "primary_settled" });
+
+    await advanceUntilStage(runtime, time, admission.turnId, "actors_settled");
+    const completed = await advanceUntilStage(runtime, time, admission.turnId, "completed");
+    expect(completed).toMatchObject({ stage: "completed", terminalReason: "action_resolved" });
+    expect(providerCalls).toBe(1);
+    expect(scheduler.listTurnJobs(admission.turnId).find((job) => job.jobId === firstJobId))
+      .toMatchObject({ stage: "deferred", deferReason: "replan_invalid" });
+    expect(scheduler.listTurnJobs(admission.turnId).find((job) => job.jobId === secondJobId))
+      .toMatchObject({ stage: "deferred", deferReason: "replan_capacity" });
+  });
+
   it("recovers a contract-invalid replan inside the shortened control window", async () => {
     const { handle, state } = await createReadyCampaignWithOpening();
     const submittedAt = 3_800;
