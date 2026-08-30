@@ -19,6 +19,7 @@ export type CampaignNewFlowSession = {
   researchEnabled: boolean;
   selectedWorldbooks: WorldbookLibraryItem[];
   dnaState: DnaState | null;
+  suggestionError?: string | null;
   researchArtifact: WorldgenResearchArtifactV2 | null;
   step: 1 | 2;
   phase: CampaignNewFlowPhaseSnapshot;
@@ -56,6 +57,10 @@ export function readCampaignNewFlowSession(): CampaignNewFlowSession | null {
       researchEnabled: parsed.researchEnabled !== false,
       selectedWorldbooks: Array.isArray(parsed.selectedWorldbooks) ? parsed.selectedWorldbooks : [],
       dnaState: parsed.dnaState ?? null,
+      suggestionError:
+        typeof parsed.suggestionError === "string" && parsed.suggestionError.trim().length > 0
+          ? parsed.suggestionError
+          : null,
       researchArtifact:
         parsed.researchArtifact && typeof parsed.researchArtifact === "object"
           ? (parsed.researchArtifact as WorldgenResearchArtifactV2)
@@ -96,6 +101,7 @@ export function isCampaignNewFlowSessionEmpty(session: CampaignNewFlowSession): 
     && session.campaignFranchise.trim().length === 0
     && session.selectedWorldbooks.length === 0
     && session.dnaState === null
+    && !session.suggestionError
     && session.researchArtifact === null
     && session.step === 1
     && session.phase.kind === "idle"

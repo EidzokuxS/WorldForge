@@ -23,10 +23,11 @@ export function DnaWorkspace() {
   }
 
   const hasUsableSeeds = collectEnabledSeeds(w.dnaState) !== undefined;
+  const showGenerationFailure = !w.dnaState && Boolean(w.suggestionError);
   const activeProgressLabel = w.isSuggesting ? "Preparing World DNA suggestions..." : null;
   const showFooterProgress = Boolean(activeProgressLabel);
   const createLabel = w.creatingCampaign ? "Creating Campaign..." : "Create Campaign";
-  const readyProgressRatio = w.isSuggesting ? 52 : hasUsableSeeds ? 100 : 18;
+  const readyProgressRatio = w.isSuggesting ? 52 : showGenerationFailure ? 0 : hasUsableSeeds ? 100 : 18;
   const enabledCount = w.dnaState
     ? WORLD_DNA_CARDS.filter((item) => w.dnaState?.[item.category].enabled).length
     : 0;
@@ -65,8 +66,8 @@ export function DnaWorkspace() {
             <div style={{ width: `${readyProgressRatio}%` }} />
           </div>
           <div className="wf-gen-progress-meta">
-            <span>{enabledCount} of 6 seeds active</span>
-            <span><b>{hasUsableSeeds ? "ready" : "empty"}</b></span>
+            <span>{showGenerationFailure ? "0 of 6 seeds active" : `${enabledCount} of 6 seeds active`}</span>
+            <span><b>{showGenerationFailure ? "failed" : hasUsableSeeds ? "ready" : "empty"}</b></span>
           </div>
         </div>
       </header>
@@ -153,18 +154,34 @@ export function DnaWorkspace() {
           </section>
         </>
       ) : (
-        <div className="wf-v4-card flex min-h-[360px] flex-col items-center justify-center gap-4 px-8 text-center">
+        <div className="wf-v4-card flex min-h-[360px] flex-col items-center justify-center gap-4 px-8 text-center" role={w.suggestionError ? "alert" : undefined}>
           <h2 className="font-serif text-3xl font-semibold text-[var(--fg)]">
-            World DNA has not been prepared.
+            {w.suggestionError ? "World DNA could not be generated." : "World DNA has not been prepared."}
           </h2>
           <p className="wf-prose max-w-[58ch] text-[var(--fg-2)]">
-            Return to concept and prepare suggestions, or start with manual seed cards.
+            {w.suggestionError
+              ? w.suggestionError
+              : "Return to concept and prepare suggestions, or start with manual seed cards."}
           </p>
-          <button type="button" className="wf-v4-btn" onClick={() => w.handlePrepareManualDna()}>
-            Start With Manual DNA
-          </button>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            {w.suggestionError ? (
+              <button type="button" className="wf-v4-btn wf-v4-btn-primary" onClick={() => void w.handleNextToDna()} disabled={w.isBusy}>
+                Try Again
+              </button>
+            ) : null}
+            <button type="button" className="wf-v4-btn" onClick={() => w.handlePrepareManualDna()} disabled={w.isBusy}>
+              Start With Manual DNA
+            </button>
+          </div>
         </div>
       )}
+
+      {w.suggestionError && w.dnaState ? (
+        <div role="alert" className="mt-5 border border-red-400/25 bg-red-400/[0.07] px-4 py-3 text-sm text-red-100">
+          <strong>World DNA suggestions could not be refreshed.</strong>
+          <p className="mt-1 text-red-100/80">{w.suggestionError}</p>
+        </div>
+      ) : null}
 
       {w.dnaState && !hasUsableSeeds && !w.isBusy ? (
         <div className="mt-5 border border-yellow-500/20 bg-yellow-500/[0.06] px-4 py-3 text-sm text-yellow-200/85">

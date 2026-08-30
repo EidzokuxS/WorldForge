@@ -52,6 +52,7 @@ vi.mock("@/components/title/use-new-campaign-wizard", async () => {
           researchEnabled?: boolean;
           selectedWorldbooks?: Array<{ id: string; displayName: string }>;
           dnaState?: ReturnType<typeof createEmptyDnaState> | null;
+          suggestionError?: string | null;
           step?: 1 | 2;
           researchArtifact?: { rawPremise: string } | null;
         };
@@ -66,6 +67,7 @@ vi.mock("@/components/title/use-new-campaign-wizard", async () => {
       const [selectedWorldbooks] = React.useState(initial?.selectedWorldbooks ?? []);
       const [step, setStep] = React.useState<1 | 2>(initial?.step ?? 1);
       const [dnaState, setDnaState] = React.useState(initial?.dnaState ?? null);
+      const [suggestionError, setSuggestionError] = React.useState(initial?.suggestionError ?? null);
       const [researchArtifact, setResearchArtifact] = React.useState(
         initial?.researchArtifact ?? null,
       );
@@ -77,6 +79,7 @@ vi.mock("@/components/title/use-new-campaign-wizard", async () => {
         setResearchEnabled(true);
         setStep(1);
         setDnaState(null);
+        setSuggestionError(null);
         setResearchArtifact(null);
       }
 
@@ -96,6 +99,7 @@ vi.mock("@/components/title/use-new-campaign-wizard", async () => {
         researchEnabled,
         setResearchEnabled,
         dnaState,
+        suggestionError,
         isBusy: false,
         creatingCampaign: false,
         researchArtifact,

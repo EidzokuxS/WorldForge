@@ -193,6 +193,12 @@ function expectWorldDnaPromptContract(prompt: string): void {
   expect(prompt).toContain("six nested fields");
   expect(prompt).toContain("Every nested category requires exactly value and reasoning");
   expect(prompt).toContain("Caps:");
+  expect(prompt).toContain("12-24 words");
+  expect(prompt).toContain("8-18 words");
+  expect(prompt).toContain("6-10 words");
+  expect(prompt).toContain("180 characters");
+  expect(prompt).toContain("72 characters");
+  expect(prompt).toContain("Sentence rules:");
   expect(prompt).toContain("nullable");
   expect(prompt).toContain("Minimal valid output:");
   expect(prompt).toContain("Valid example:");
@@ -211,11 +217,11 @@ function expectWorldDnaPromptContract(prompt: string): void {
 describe("suggestWorldSeeds (coherent DNA packet)", () => {
   const coherentPacket = {
     geography: {
-      value: "Five Great Shinobi Nations connected by contested mountain passes.",
+      value: "Five Great Shinobi Nations connect through contested mountain passes across the eastern frontier.",
       reasoning: "The premise needs a recognizable shinobi geography with meaningful travel boundaries.",
     },
     politicalStructure: {
-      value: "Hidden villages govern through ranked councils, contracts, and military missions.",
+      value: "Hidden villages govern through ranked councils, contracts, and military missions across the five nations.",
       reasoning: "The village system turns the geography into a concrete distribution of power.",
     },
     centralConflict: {
@@ -223,11 +229,11 @@ describe("suggestWorldSeeds (coherent DNA packet)", () => {
       reasoning: "The resource rivalry and emerging threat create one connected present struggle.",
     },
     culturalFlavor: {
-      value: ["Village elders knot red thread before missions; a cut knot voids a debt", "Students bow to retired masters and repeat their names before sparring"],
+      value: ["Village elders knot red thread before missions; cuts void debts", "Students repeat retired masters' names before sparring"],
       reasoning: "These practices make hierarchy, obligation, and combat education visible.",
     },
     environment: {
-      value: "Temperate forests, humid river valleys, and seasonal monsoons shape every journey.",
+      value: "Temperate forests, humid river valleys, and seasonal monsoons shape every journey across the nations.",
       reasoning: "The physical conditions make the established routes and settlements feel distinct.",
     },
     wildcard: {
@@ -242,6 +248,24 @@ describe("suggestWorldSeeds (coherent DNA packet)", () => {
 
   function generationOptions(index = 0): Record<string, unknown> {
     return mockGenerateObject.mock.calls[index]![0] as Record<string, unknown>;
+  }
+
+  function sentenceWithWordCount(wordCount: number): string {
+    return `${Array.from({ length: wordCount - 1 }, (_, index) => `word${index + 1}`).join(" ")} final.`;
+  }
+
+  function sentenceAtCharacterCount(characterCount: number): string {
+    const suffix = "Compact worlds share one route power conflict custom climate and mystery";
+    return `${"x".repeat(characterCount - suffix.length - 2)} ${suffix}.`;
+  }
+
+  function itemWithWordCount(wordCount: number): string {
+    return Array.from({ length: wordCount - 1 }, (_, index) => `item${index + 1}`).concat("practice").join(" ");
+  }
+
+  function itemAtCharacterCount(characterCount: number): string {
+    const suffix = "ritual binds crews before dawn";
+    return `${"x".repeat(characterCount - suffix.length - 1)} ${suffix}`;
   }
 
   it("calls generateObject once and returns the complete six-category packet", async () => {
@@ -289,6 +313,52 @@ describe("suggestWorldSeeds (coherent DNA packet)", () => {
       ...coherentPacket,
       extra: "forbidden",
     }).success).toBe(false);
+  });
+
+  it("enforces compact sentence, word, and character boundaries", async () => {
+    setupPacketMock();
+
+    await suggestWorldSeeds({ premise: "Naruto world", role: fakeRole });
+
+    const schema = generationOptions().schema as {
+      safeParse: (value: unknown) => { success: boolean };
+    };
+    const withGeographyValue = (value: string) => ({
+      ...coherentPacket,
+      geography: { ...coherentPacket.geography, value },
+    });
+    const withGeographyReasoning = (reasoning: string) => ({
+      ...coherentPacket,
+      geography: { ...coherentPacket.geography, reasoning },
+    });
+    const withCulturalItem = (item: string) => ({
+      ...coherentPacket,
+      culturalFlavor: { ...coherentPacket.culturalFlavor, value: [item, coherentPacket.culturalFlavor.value[1]] },
+    });
+
+    expect(schema.safeParse(withGeographyValue(sentenceWithWordCount(12))).success).toBe(true);
+    expect(schema.safeParse(withGeographyValue(sentenceWithWordCount(24))).success).toBe(true);
+    expect(schema.safeParse(withGeographyValue(sentenceWithWordCount(11))).success).toBe(false);
+    expect(schema.safeParse(withGeographyValue(sentenceWithWordCount(25))).success).toBe(false);
+    expect(schema.safeParse(withGeographyValue(sentenceAtCharacterCount(180))).success).toBe(true);
+    expect(schema.safeParse(withGeographyValue(sentenceAtCharacterCount(181))).success).toBe(false);
+    expect(schema.safeParse(withGeographyValue(sentenceWithWordCount(12).slice(0, -1))).success).toBe(false);
+    expect(schema.safeParse(withGeographyValue(`${sentenceWithWordCount(12).slice(0, -1)}?`)).success).toBe(false);
+    expect(schema.safeParse(withGeographyValue(`${sentenceWithWordCount(12)} Again.`)).success).toBe(false);
+
+    expect(schema.safeParse(withGeographyReasoning(sentenceWithWordCount(8))).success).toBe(true);
+    expect(schema.safeParse(withGeographyReasoning(sentenceWithWordCount(18))).success).toBe(true);
+    expect(schema.safeParse(withGeographyReasoning(sentenceWithWordCount(7))).success).toBe(false);
+    expect(schema.safeParse(withGeographyReasoning(sentenceWithWordCount(19))).success).toBe(false);
+    expect(schema.safeParse(withGeographyReasoning(sentenceAtCharacterCount(180))).success).toBe(true);
+    expect(schema.safeParse(withGeographyReasoning(sentenceAtCharacterCount(181))).success).toBe(false);
+
+    expect(schema.safeParse(withCulturalItem(itemWithWordCount(6))).success).toBe(true);
+    expect(schema.safeParse(withCulturalItem(itemWithWordCount(10))).success).toBe(true);
+    expect(schema.safeParse(withCulturalItem(itemWithWordCount(5))).success).toBe(false);
+    expect(schema.safeParse(withCulturalItem(itemWithWordCount(11))).success).toBe(false);
+    expect(schema.safeParse(withCulturalItem(itemAtCharacterCount(72))).success).toBe(true);
+    expect(schema.safeParse(withCulturalItem(itemAtCharacterCount(73))).success).toBe(false);
   });
 
   it("rejects backend redaction markers from every player-facing DNA value", async () => {
@@ -484,8 +554,10 @@ describe("suggestWorldSeeds (coherent DNA packet)", () => {
     expect(prompt).toContain("The wildcard must introduce something NOT covered");
     expect(prompt).toContain("not already covered or restated");
     expect(prompt).toContain("value is an array of 2-3 compact, concrete diegetic practices");
+    expect(prompt).toContain("each item is 6-10 words and at most 72 characters");
     expect(prompt).not.toContain("value is an array of 2-3 specific cultural or thematic inspirations");
-    expect(prompt).toContain("value is a concrete 1-2 sentence description naming specific places, systems, or conditions");
+    expect(prompt).toContain("value is exactly one compact sentence of 12-24 words and at most 180 characters");
+    expect(prompt).toContain("reasoning is exactly one sentence of 8-18 words and at most 180 characters");
   });
 
   it("known IP premise includes franchise name and packet instruction", async () => {

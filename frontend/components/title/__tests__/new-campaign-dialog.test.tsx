@@ -40,6 +40,7 @@ function createMockWizard(
     isSuggesting: false,
     suggestingCategory: null,
     dnaState: null,
+    suggestionError: null,
     researchArtifact: null,
     setCampaignName: vi.fn(),
     setCampaignPremise: vi.fn(),

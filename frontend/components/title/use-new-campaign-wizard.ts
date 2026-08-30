@@ -32,6 +32,10 @@ import {
 } from "./utils";
 
 const DEFAULT_API_ERROR = "Unknown API error.";
+const DNA_SUGGESTION_ERROR =
+  "The generator did not return six valid seed cards. Try again, or write the seed cards yourself.";
+const DNA_CATEGORY_SUGGESTION_ERROR =
+  "The generator did not return a valid seed card. Try again, or edit it yourself.";
 
 function sortWorldbookItems(items: WorldbookLibraryItem[]): WorldbookLibraryItem[] {
   return [...items].sort((left, right) => {
@@ -96,6 +100,9 @@ export function useNewCampaignWizard(
   const [campaignFranchise, setCampaignFranchise] = useState(initialSession?.campaignFranchise ?? "");
   const [researchEnabled, setResearchEnabled] = useState(initialSession?.researchEnabled ?? true);
   const [dnaState, setDnaState] = useState<DnaState | null>(initialSession?.dnaState ?? null);
+  const [suggestionError, setSuggestionError] = useState<string | null>(
+    initialSession?.suggestionError ?? null,
+  );
   const [phase, setPhase] = useState<Phase>((initialSession?.phase as Phase | undefined) ?? { kind: "idle" });
   const [ipContext, setIpResearchContext] = useState<IpResearchContext | null>(null);
   const [premiseDivergence, setPremiseDivergence] = useState<PremiseDivergence | null>(null);
@@ -129,6 +136,7 @@ export function useNewCampaignWizard(
     setCampaignFranchise("");
     setResearchEnabled(true);
     setDnaState(null);
+    setSuggestionError(null);
     setIpResearchContext(null);
     setPremiseDivergence(null);
     setResearchArtifact(null);
@@ -142,6 +150,7 @@ export function useNewCampaignWizard(
 
   function invalidatePreparedDna() {
     setDnaState(null);
+    setSuggestionError(null);
     setIpResearchContext(null);
     setPremiseDivergence(null);
     setResearchArtifact(null);
@@ -350,6 +359,7 @@ export function useNewCampaignWizard(
       return false;
     }
 
+    setSuggestionError(null);
     setStep(2);
     setPhase({ kind: "suggesting-all" });
     try {
@@ -361,12 +371,14 @@ export function useNewCampaignWizard(
         });
       applySuggestedAuthorityContext(suggested);
       setDnaState(createDnaStateFromSeeds(suggested));
+      setSuggestionError(null);
     } catch (error) {
+      setSuggestionError(DNA_SUGGESTION_ERROR);
       toast.error("Failed to generate suggestions", {
-        description: getErrorMessage(error, "Try again or write seeds manually."),
+        description: getErrorMessage(error, DNA_SUGGESTION_ERROR),
       });
       applySuggestedAuthorityContext({});
-      setDnaState(createEmptyDnaState());
+      setDnaState(null);
     } finally {
       setPhase({ kind: "idle" });
     }
@@ -388,6 +400,7 @@ export function useNewCampaignWizard(
       return;
     }
 
+    setSuggestionError(null);
     setPhase({ kind: "suggesting-all" });
     try {
       const suggested = await suggestSeeds(campaignPremise.trim(), {
@@ -409,9 +422,11 @@ export function useNewCampaignWizard(
         }
         return next;
       });
+      setSuggestionError(null);
     } catch (error) {
+      setSuggestionError(DNA_SUGGESTION_ERROR);
       toast.error("Failed to re-suggest seeds", {
-        description: getErrorMessage(error, DEFAULT_API_ERROR),
+        description: getErrorMessage(error, DNA_SUGGESTION_ERROR),
       });
     } finally {
       setPhase({ kind: "idle" });
@@ -422,6 +437,7 @@ export function useNewCampaignWizard(
     if (!settings || !dnaState) return;
     if (!dnaState[category].enabled) return;
 
+    setSuggestionError(null);
     setPhase({ kind: "suggesting-category", category });
     try {
       const result = await suggestSeed(
@@ -443,9 +459,11 @@ export function useNewCampaignWizard(
           },
         };
       });
+      setSuggestionError(null);
     } catch (error) {
+      setSuggestionError(DNA_CATEGORY_SUGGESTION_ERROR);
       toast.error(`Failed to re-suggest ${category}`, {
-        description: getErrorMessage(error, DEFAULT_API_ERROR),
+        description: getErrorMessage(error, DNA_CATEGORY_SUGGESTION_ERROR),
       });
     } finally {
       setPhase({ kind: "idle" });
@@ -492,6 +510,7 @@ export function useNewCampaignWizard(
   }
 
   function handlePrepareManualDna() {
+    setSuggestionError(null);
     setStep(2);
     setDnaState((current) => current ?? createEmptyDnaState());
   }
@@ -515,6 +534,7 @@ export function useNewCampaignWizard(
     researchEnabled,
     setResearchEnabled: updateResearchEnabled,
     dnaState,
+    suggestionError,
     researchArtifact,
 
     // Derived state

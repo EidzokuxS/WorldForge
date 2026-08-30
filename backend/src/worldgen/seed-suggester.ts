@@ -50,18 +50,18 @@ const categoryDescriptions: Record<SeedCategory, string> = {
   politicalStructure: "how power is organized - government, authority, hierarchy",
   centralConflict: "the core tension or struggle driving the world",
   culturalFlavor: "2-3 concrete in-world cultural practices tied to the premise and current conflict",
-  environment: "climate, weather, biomes, and sensory atmosphere — what you SEE, HEAR, SMELL walking through this world",
+  environment: "climate, weather, biomes, and sensory atmosphere: what you SEE, HEAR, SMELL walking through this world",
   wildcard: "one unexpected, unique element that makes this world stand out",
 };
 
 /** Per-category rules to prevent overlap between DNA categories */
 const categoryConstraints: Partial<Record<SeedCategory, string>> = {
-  environment: `CRITICAL: Environment is about the PHYSICAL WORLD the player experiences — weather, light, sounds, smells, flora, fauna, seasons, natural hazards.
+  environment: `CRITICAL: Environment is about the PHYSICAL WORLD the player experiences: weather, light, sounds, smells, flora, fauna, seasons, natural hazards.
 NOT about who controls territory (that's Political Structure) or who fights whom (that's Central Conflict).
 Describe what a traveler would SENSE, not what armies are doing.
-Examples of GOOD environment: "Perpetual fog blankets the lowlands, broken only by volcanic vents that turn nights orange" or "Three moons create unpredictable tides that flood coastal cities twice daily."
-Examples of BAD environment (these belong in other categories): "Imperial forces patrol the streets" or "Factions compete for resources."`,
-  wildcard: `The wildcard must introduce something NOT covered by any previous category. It should surprise the player — a strange custom, hidden mechanic, cosmic anomaly, unique creature, or cultural quirk that makes this world memorable.`,
+Examples of GOOD environment: "Perpetual fog blankets the lowlands, broken only by volcanic vents that turn nights orange." or "Three moons create unpredictable tides that flood coastal cities twice each day."
+Examples of BAD environment (these belong in other categories): "Imperial forces patrol the streets." or "Factions compete for resources."`,
+  wildcard: `The wildcard must introduce something NOT covered by any previous category. It should surprise the player: a strange custom, hidden mechanic, cosmic anomaly, unique creature, or cultural quirk that makes this world memorable.`,
 };
 
 const DNA_CATEGORIES: ReadonlyArray<{ key: SeedCategory; label: string }> = [
@@ -74,26 +74,91 @@ const DNA_CATEGORIES: ReadonlyArray<{ key: SeedCategory; label: string }> = [
 ];
 
 // ---------------------------------------------------------------------------
-// Coherent DNA generation — one call for the complete packet
+// Coherent DNA generation: one call for the complete packet
 // ---------------------------------------------------------------------------
 
 const WORLD_DNA_BACKEND_REF_REDACTION_MARKER = "[backend ref hidden]";
+const WORLD_DNA_VALUE_MAX_CHARS = 180;
+const WORLD_DNA_VALUE_MIN_WORDS = 12;
+const WORLD_DNA_VALUE_MAX_WORDS = 24;
+const WORLD_DNA_REASONING_MAX_CHARS = 180;
+const WORLD_DNA_REASONING_MIN_WORDS = 8;
+const WORLD_DNA_REASONING_MAX_WORDS = 18;
+const WORLD_DNA_CULTURAL_ITEM_MAX_CHARS = 72;
+const WORLD_DNA_CULTURAL_ITEM_MIN_WORDS = 6;
+const WORLD_DNA_CULTURAL_ITEM_MAX_WORDS = 10;
 
-function playerFacingWorldDnaText(maxLength: number) {
-  return z.string().min(1).max(maxLength).refine(
+function worldDnaWordCount(value: string): number {
+  return value.trim().split(/\s+/u).filter(Boolean).length;
+}
+
+function isExactlyOneSentence(value: string): boolean {
+  return /^[^.!?]+\.$/u.test(value.trim());
+}
+
+function playerFacingWorldDnaText(
+  maxLength: number,
+  minWords: number,
+  maxWords: number,
+  requireSingleSentence = false,
+) {
+  let schema = z.string().min(1).max(maxLength)
+    .refine(
+      (value) => {
+        const wordCount = worldDnaWordCount(value);
+        return wordCount >= minWords && wordCount <= maxWords;
+      },
+      { message: `World DNA text must contain ${minWords}-${maxWords} words` },
+    );
+  if (requireSingleSentence) {
+    schema = schema.refine(
+      isExactlyOneSentence,
+      { message: "World DNA text must be exactly one sentence" },
+    );
+  }
+  return schema.refine(
     (value) => !value.includes(WORLD_DNA_BACKEND_REF_REDACTION_MARKER),
     { message: "player-facing World DNA value must not contain backend redaction markers" },
   );
 }
 
 const dnaCategorySchema = z.object({
-  value: playerFacingWorldDnaText(260),
-  reasoning: z.string().min(1).max(220),
+  value: playerFacingWorldDnaText(
+    WORLD_DNA_VALUE_MAX_CHARS,
+    WORLD_DNA_VALUE_MIN_WORDS,
+    WORLD_DNA_VALUE_MAX_WORDS,
+    true,
+  ),
+  reasoning: z.string().min(1).max(WORLD_DNA_REASONING_MAX_CHARS)
+    .refine(
+      (value) => {
+        const wordCount = worldDnaWordCount(value);
+        return wordCount >= WORLD_DNA_REASONING_MIN_WORDS && wordCount <= WORLD_DNA_REASONING_MAX_WORDS;
+      },
+      {
+        message: `World DNA reasoning must contain ${WORLD_DNA_REASONING_MIN_WORDS}-${WORLD_DNA_REASONING_MAX_WORDS} words`,
+      },
+    )
+    .refine(isExactlyOneSentence, { message: "World DNA reasoning must be exactly one sentence" }),
 }).strict();
 
 const culturalFlavorSchema = z.object({
-  value: z.array(playerFacingWorldDnaText(80)).min(2).max(3),
-  reasoning: z.string().min(1).max(220),
+  value: z.array(playerFacingWorldDnaText(
+    WORLD_DNA_CULTURAL_ITEM_MAX_CHARS,
+    WORLD_DNA_CULTURAL_ITEM_MIN_WORDS,
+    WORLD_DNA_CULTURAL_ITEM_MAX_WORDS,
+  )).min(2).max(3),
+  reasoning: z.string().min(1).max(WORLD_DNA_REASONING_MAX_CHARS)
+    .refine(
+      (value) => {
+        const wordCount = worldDnaWordCount(value);
+        return wordCount >= WORLD_DNA_REASONING_MIN_WORDS && wordCount <= WORLD_DNA_REASONING_MAX_WORDS;
+      },
+      {
+        message: `World DNA reasoning must contain ${WORLD_DNA_REASONING_MIN_WORDS}-${WORLD_DNA_REASONING_MAX_WORDS} words`,
+      },
+    )
+    .refine(isExactlyOneSentence, { message: "World DNA reasoning must be exactly one sentence" }),
 }).strict();
 
 const worldDnaSchema = z.object({
@@ -202,9 +267,9 @@ export async function suggestWorldSeeds(
     const categoryRequirements = DNA_CATEGORIES.map(({ key, label }) => {
       const categoryRule = categoryConstraints[key];
       const outputShape = key === "culturalFlavor"
-        ? "value is an array of 2-3 compact, concrete diegetic practices; each item names a ritual, custom, value, language habit, or material practice plus a situation or consequence tied to the premise/world; use diegetic facts only, not real-world culture names, genre/style labels, or inspiration lists"
-        : "value is a concrete 1-2 sentence description naming specific places, systems, or conditions, not vague adjectives";
-      return `- ${label} (${categoryDescriptions[key]}): ${outputShape}; reasoning is one sentence explaining why it follows from the premise and the other packet fields.${categoryRule ? `\n  ${categoryRule}` : ""}`;
+        ? `value is an array of 2-3 compact, concrete diegetic practices; each item is ${WORLD_DNA_CULTURAL_ITEM_MIN_WORDS}-${WORLD_DNA_CULTURAL_ITEM_MAX_WORDS} words and at most ${WORLD_DNA_CULTURAL_ITEM_MAX_CHARS} characters; each item names a ritual, custom, value, language habit, or material practice plus a situation or consequence tied to the premise/world; use diegetic facts only, not real-world culture names, genre/style labels, or inspiration lists`
+        : `value is exactly one compact sentence of ${WORLD_DNA_VALUE_MIN_WORDS}-${WORLD_DNA_VALUE_MAX_WORDS} words and at most ${WORLD_DNA_VALUE_MAX_CHARS} characters; name specific places, systems, or conditions, not vague adjectives`;
+      return `- ${label} (${categoryDescriptions[key]}): ${outputShape}; reasoning is exactly one sentence of ${WORLD_DNA_REASONING_MIN_WORDS}-${WORLD_DNA_REASONING_MAX_WORDS} words and at most ${WORLD_DNA_REASONING_MAX_CHARS} characters explaining why it follows from the premise and the other packet fields.${categoryRule ? `\n  ${categoryRule}` : ""}`;
     }).join("\n");
 
     const prompt = `You are defining a complete World DNA packet for a text RPG engine.
@@ -265,7 +330,7 @@ ${buildStopSlopRules()}`;
 }
 
 // ---------------------------------------------------------------------------
-// Single seed suggestion (independent — no sequential dependency)
+// Single seed suggestion (independent: no sequential dependency)
 // ---------------------------------------------------------------------------
 
 export async function suggestSingleSeed(

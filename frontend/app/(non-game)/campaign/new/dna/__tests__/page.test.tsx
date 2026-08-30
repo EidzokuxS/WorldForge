@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 
 const flowState = {
   campaignName: "Arcadia",
@@ -11,9 +11,11 @@ const flowState = {
   isSuggesting: false,
   suggestingCategory: null,
   creatingCampaign: false,
+  suggestionError: null as string | null,
   handleResuggestAll: vi.fn(),
   handleResuggestCategory: vi.fn(),
   handleCreateWithDna: vi.fn(),
+  handleNextToDna: vi.fn(),
   handleSeedTextChange: vi.fn(),
   handleSeedToggle: vi.fn(),
   handlePrepareManualDna: vi.fn(),
@@ -44,6 +46,7 @@ describe("CampaignDnaPage", () => {
     flowState.isSuggesting = false;
     flowState.suggestingCategory = null;
     flowState.creatingCampaign = false;
+    flowState.suggestionError = null;
     flowState.dnaState = {
       geography: { enabled: true, value: "Storm coast", isCustom: false },
       politicalStructure: { enabled: true, value: "Guild council", isCustom: false },
@@ -86,6 +89,24 @@ describe("CampaignDnaPage", () => {
     expect(screen.getByText("World DNA has not been prepared.")).toBeInTheDocument();
     expect(screen.queryByText("DNA suggestions are not ready yet. Return to concept and continue when the flow is populated.")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start With Manual DNA" })).toBeInTheDocument();
+  });
+
+  it("shows truthful generation failure recovery without false active slots", () => {
+    flowState.dnaState = null;
+    flowState.suggestionError =
+      "The generator did not return six valid seed cards. Try again, or write the seed cards yourself.";
+
+    render(<CampaignDnaPage />);
+
+    expect(screen.getByRole("heading", { name: "World DNA could not be generated." })).toBeInTheDocument();
+    expect(screen.getByText("The generator did not return six valid seed cards. Try again, or write the seed cards yourself.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try Again" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start With Manual DNA" })).toBeInTheDocument();
+    expect(screen.getByText("0 of 6 seeds active")).toBeInTheDocument();
+    expect(screen.queryByText("6 of 6 seeds active")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Try Again" }));
+    expect(flowState.handleNextToDna).toHaveBeenCalledTimes(1);
   });
 
   it("does not duplicate DNA generation progress in the center and footer", () => {

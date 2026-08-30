@@ -89,6 +89,7 @@ export function CampaignNewFlowProvider({ children }: { children: React.ReactNod
       researchEnabled: wizard.researchEnabled,
       selectedWorldbooks: wizard.selectedWorldbooks,
       dnaState: wizard.dnaState,
+      suggestionError: wizard.suggestionError,
       researchArtifact: wizard.researchArtifact,
       step: wizard.step,
       phase,
@@ -112,6 +113,7 @@ export function CampaignNewFlowProvider({ children }: { children: React.ReactNod
     wizard.researchEnabled,
     wizard.selectedWorldbooks,
     wizard.step,
+    wizard.suggestionError,
     wizard.suggestingCategory,
   ]);
 

@@ -91,6 +91,11 @@ const SETTINGS: Settings = {
   },
 };
 
+const DNA_SUGGESTION_FAILURE_COPY =
+  "The generator did not return six valid seed cards. Try again, or write the seed cards yourself.";
+const DNA_CATEGORY_SUGGESTION_FAILURE_COPY =
+  "The generator did not return a valid seed card. Try again, or edit it yourself.";
+
 const LIBRARY_ITEMS: WorldbookLibraryItem[] = [
   {
     id: "wb-alpha",
@@ -275,6 +280,92 @@ describe("useNewCampaignWizard", () => {
       }),
     );
     expect(mockSuggestSeeds.mock.calls[0]?.[1]).not.toHaveProperty("worldbookEntries");
+  });
+
+  it("keeps DNA unprepared after generation failure and clears the error after retry success", async () => {
+    const { result } = renderHook(() => useNewCampaignWizard(SETTINGS, vi.fn()));
+
+    act(() => {
+      result.current.setCampaignName("Arcadia");
+      result.current.setCampaignPremise("A haunted coast of guild cities.");
+    });
+    mockSuggestSeeds.mockRejectedValueOnce(new Error("strict generation failed"));
+
+    await act(async () => {
+      await expect(result.current.handleNextToDna()).resolves.toBe(true);
+    });
+
+    expect(result.current.dnaState).toBeNull();
+    expect(result.current.suggestionError).toBe(DNA_SUGGESTION_FAILURE_COPY);
+    expect(result.current.step).toBe(2);
+
+    await act(async () => {
+      await expect(result.current.handleNextToDna()).resolves.toBe(true);
+    });
+
+    expect(result.current.dnaState?.geography.value).toBe("Cliffside kingdoms");
+    expect(result.current.suggestionError).toBeNull();
+  });
+
+  it("preserves custom DNA values when re-suggestion fails and clears the error on retry", async () => {
+    const { result } = renderHook(() => useNewCampaignWizard(SETTINGS, vi.fn()));
+
+    act(() => {
+      result.current.setCampaignName("Arcadia");
+      result.current.setCampaignPremise("A haunted coast of guild cities.");
+    });
+    await act(async () => {
+      await result.current.handleNextToDna();
+    });
+
+    act(() => {
+      result.current.handleSeedTextChange("geography", "A hand-written coast");
+    });
+    mockSuggestSeeds.mockRejectedValueOnce(new Error("reroll failed"));
+
+    await act(async () => {
+      await result.current.handleResuggestAll();
+    });
+
+    expect(result.current.dnaState?.geography).toEqual({
+      enabled: true,
+      isCustom: true,
+      value: "A hand-written coast",
+    });
+    expect(result.current.dnaState?.politicalStructure.value).toBe("Merchant republics");
+    expect(result.current.suggestionError).toBe(DNA_SUGGESTION_FAILURE_COPY);
+
+    await act(async () => {
+      await result.current.handleResuggestAll();
+    });
+
+    expect(result.current.dnaState?.geography).toEqual({
+      enabled: true,
+      isCustom: true,
+      value: "A hand-written coast",
+    });
+    expect(result.current.suggestionError).toBeNull();
+  });
+
+  it("records a singular failure when a category re-suggestion fails", async () => {
+    const { result } = renderHook(() => useNewCampaignWizard(SETTINGS, vi.fn()));
+
+    act(() => {
+      result.current.setCampaignName("Arcadia");
+      result.current.setCampaignPremise("A haunted coast of guild cities.");
+    });
+    await act(async () => {
+      await result.current.handleNextToDna();
+    });
+    const originalGeography = result.current.dnaState?.geography.value;
+    mockSuggestSeed.mockRejectedValueOnce(new Error("category reroll failed"));
+
+    await act(async () => {
+      await result.current.handleResuggestCategory("geography");
+    });
+
+    expect(result.current.dnaState?.geography.value).toBe(originalGeography);
+    expect(result.current.suggestionError).toBe(DNA_CATEGORY_SUGGESTION_FAILURE_COPY);
   });
 
   it("creates campaigns with worldbookSelection and never rebuilds ipContext in the browser", async () => {
