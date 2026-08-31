@@ -515,7 +515,7 @@ export async function researchWorldgenArtifact(
   const rawKnownIP = req.knownIP?.trim() || null;
 
   const { object: briefObject } = await generateObject({
-    model: createModel(role.provider),
+    model: createModel(role.provider, { role: "generator", reasoningMode: "bypass" }),
     schema: researchArtifactBriefSchema,
     prompt: buildResearchArtifactBriefPrompt(req),
     temperature: 0.1,
@@ -549,7 +549,7 @@ export async function researchWorldgenArtifact(
     searchResults,
   };
   const { object: generatedContext } = await generateObject({
-    model: createModel(role.provider),
+    model: createModel(role.provider, { role: "generator", reasoningMode: "bypass" }),
     schema: generatedResearchContextSchema,
     prompt: buildGeneratedContextPrompt(artifactForContext),
     temperature: 0.1,

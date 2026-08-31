@@ -39,6 +39,7 @@ import {
 } from "../ip-researcher.js";
 import { buildWorldgenResearchPlan } from "../retrieval-intent.js";
 import { safeGenerateObject } from "../../ai/generate-object-safe.js";
+import { createModel } from "../../ai/index.js";
 import { webSearch } from "../../lib/web-search.js";
 import type { ResolvedRole } from "../../ai/resolve-role-model.js";
 import type { Mock } from "vitest";
@@ -214,6 +215,21 @@ describe("researchWorldgenArtifact", () => {
 
         const briefPrompt = vi.mocked(safeGenerateObject).mock.calls[0]?.[0]?.prompt;
         expectMixedBriefPrompt(String(briefPrompt));
+    });
+
+    it("uses generator bypass semantics for both research generations", async () => {
+        mockArtifactGeneration();
+
+        await researchWorldgenArtifact(
+            makeReq({ premise: "Jujutsu Kaisen world with Naruto power system" }),
+            fakeRole,
+            10,
+        );
+
+        expect(vi.mocked(createModel).mock.calls).toEqual([
+            [fakeRole.provider, { role: "generator", reasoningMode: "bypass" }],
+            [fakeRole.provider, { role: "generator", reasoningMode: "bypass" }],
+        ]);
     });
 
     it("preserves likely/search source-specific jobs without collapsing to one franchise", async () => {
