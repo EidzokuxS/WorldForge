@@ -633,6 +633,90 @@ function activeCommitmentPacket(): CampaignPlayNarratorPacket {
   };
 }
 
+function acceptedPaidDeliveryPacket(): CampaignPlayNarratorPacket {
+  const packet = activeCommitmentPacket();
+  const commitment = packet.commitments[0]!;
+  if (commitment.kind !== "paid_delivery" || commitment.status !== "active") {
+    throw new Error("Paid delivery fixture must include an active paid delivery commitment");
+  }
+  const decisionBinding = {
+    decisionKey: "decision_harbor_delivery",
+    actorHandle: commitment.counterpartyHandle,
+    kind: "offer" as const,
+    disposition: "accept" as const,
+  };
+  const decisionOutcome = {
+    ...decisionBinding,
+    status: "accepted" as const,
+    sourceTurnId: "turn-harbor-delivery-accepted",
+    summary: "Mara Venn accepts the sealed dispatch assignment.",
+    acceptEffect: {
+      kind: "paid_delivery" as const,
+      title: commitment.title,
+      subjectName: commitment.subjectName,
+      destinationHandle: commitment.destinationHandle,
+      feeUnit: commitment.feeUnit,
+      feeAmount: commitment.feeAmount,
+      paymentTiming: commitment.paymentTiming,
+    },
+  };
+  const consequence = {
+    observationHandle: "observation_harbor_delivery_accepted",
+    performingActorHandle: commitment.counterpartyHandle,
+    performingActorName: commitment.counterpartyName,
+    whatChanged: "Mara Venn accepts the sealed dispatch assignment.",
+    whereOrRoute: packet.currentLocation.name,
+    worldTimeLabel: "Day 1, 00:10",
+    causalCue: "direct_perception" as const,
+  };
+  return {
+    ...packet,
+    campaignId: "campaign-harbor-delivery",
+    turnId: decisionOutcome.sourceTurnId,
+    turnKind: "player_action",
+    openingContext: null,
+    sourceMoment: "Mara Venn waits beside the rain-dark ferry steps.",
+    actionContext: {
+      submittedText: "Accept Mara Venn's sealed dispatch delivery.",
+      intentKind: "contact",
+      disposition: "deterministic",
+      result: "success",
+      clarificationQuestion: null,
+      decisionBinding,
+      decisionOutcome,
+    },
+    newObservations: [{
+      observationHandle: consequence.observationHandle,
+      title: "Delivery accepted",
+      text: consequence.whatChanged,
+      whereOrRoute: consequence.whereOrRoute,
+      worldTimeLabel: consequence.worldTimeLabel,
+      consequence,
+      decisionOutcome: {
+        decisionKey: decisionOutcome.decisionKey,
+        actorName: commitment.counterpartyName,
+        actorHandle: decisionOutcome.actorHandle,
+        kind: decisionOutcome.kind,
+        disposition: decisionOutcome.disposition,
+        summary: decisionOutcome.summary,
+        selectedLabel: "Accept the sealed dispatch",
+      },
+    }],
+    consequences: [consequence],
+    possessions: [],
+    availableIntents: [
+      {
+        handle: "choice_delivery_observe",
+        label: "Study the wet signal ledger",
+        kind: "observe",
+        targets: [{ handle: commitment.counterpartyHandle, kind: "actor" }],
+      },
+      ...packet.availableIntents,
+    ],
+    decisionOutcomes: [decisionOutcome],
+  };
+}
+
 function activeCommitmentPacketWithGenericIntents(
   action: "collect" | "deliver",
 ): CampaignPlayNarratorPacket {
@@ -1692,6 +1776,236 @@ describe("Campaign Play narrator mechanical truth reviewer", () => {
       "Talk to Sister Ashiya Voln",
     );
     expect(generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps paid-delivery selected-intents schema recovery compact and packet-exact", async () => {
+    const packet = acceptedPaidDeliveryPacket();
+    const generateText = vi.spyOn(raindropWorkshop, "generateText");
+    generateText
+      .mockResolvedValueOnce({
+        text: "",
+        finishReason: "tool-calls",
+        toolCalls: [{
+          type: "tool-call",
+          toolName: "structured_output",
+          invalid: true,
+          input: {
+            beats: [{
+              purpose: "consequence",
+              observationIndexes: [0],
+              text: "Mara Venn accepts the sealed dispatch assignment.",
+            }],
+            selectedIntents: [],
+          },
+        }],
+        usage: { inputTokens: 10, outputTokens: 4, totalTokens: 14 },
+        response: { modelId: "test-model" },
+      } as never)
+      .mockResolvedValueOnce({
+        text: "",
+        finishReason: "tool-calls",
+        toolCalls: [{
+          type: "tool-call",
+          toolName: "structured_output",
+          input: {
+            beats: [{
+              purpose: "consequence",
+              observationIndexes: [0],
+              text: "Mara Venn accepts the sealed dispatch assignment.",
+            }],
+            selectedIntents: [{ key: "intent0", detail: null, mode: null }],
+          },
+        }],
+        usage: { inputTokens: 12, outputTokens: 20, totalTokens: 32 },
+        response: { modelId: "test-model" },
+      } as never);
+
+    try {
+      const narrator = createCampaignPlayNarrator({
+        generateObject: reviewerAwareGenerateObject(
+          (options) => safeGenerateObject(options),
+        ) as unknown as typeof safeGenerateObject,
+      });
+      const request = {
+        ...requestFor(packet, "narration-paid-delivery-selected-intents-recovery"),
+        structuredOutputMode: "tool" as const,
+      };
+      let firstError: CampaignPlayNarratorError | undefined;
+      try {
+        await narrator.narrate(request);
+      } catch (cause) {
+        firstError = cause as CampaignPlayNarratorError;
+      }
+
+      expect(firstError).toMatchObject({
+        code: "model_contract_failed",
+        recoveryFeedback: {
+          diagnostic: "narrator_generation_schema_mismatch",
+          failedChecks: [{ check: "generation_schema_invalid" }],
+          recoveryInstruction: "structured_output_tool_call",
+          contractDiagnostic: {
+            phase: "provider_extraction",
+            coordinate: "selectedIntents",
+          },
+        },
+      });
+      const recovered = await narrator.narrate({
+        ...request,
+        recoveryFeedback: firstError?.recoveryFeedback ?? undefined,
+      });
+      expect(recovered.narration.displayText).toBe(
+        "Mara Venn accepts the sealed dispatch assignment.",
+      );
+      expect(recovered.narration.suggestedActions.map(({ choiceHandle }) => choiceHandle))
+        .toEqual(["choice_collect_dispatch", "choice_delivery_observe"]);
+
+      const recoveryPrompt = String(generateText.mock.calls[1]?.[0]?.prompt ?? "");
+      expect(recoveryPrompt).toContain("PAID_DELIVERY_RECOVERY_BOUNDARY");
+      expect(recoveryPrompt).toContain("NARRATOR_GENERATION_RECOVERY");
+      expect(recoveryPrompt).toContain("BEAT_COUNT_RECOVERY");
+      expect(recoveryPrompt).toContain(
+        "The exact packet maximum is 1; when it is 1, return exactly one beat.",
+      );
+      expect(recoveryPrompt).toContain("STRUCTURED_OUTPUT_TOOL_CALL_RECOVERY");
+      expect(recoveryPrompt).toContain("TOOL_INTENT_SELECTION_FRAME");
+      expect(recoveryPrompt).toContain("\"expectedSelectedCount\":1");
+      expect(recoveryPrompt).toContain("detail:null");
+      expect(recoveryPrompt).toContain("mode:null");
+      expect(recoveryPrompt).toContain("RECOVERY_DIAGNOSTIC");
+      expect(recoveryPrompt).not.toContain("MECHANICAL_TRUTH_DIMENSION_CHECKLIST");
+      expect(generateText).toHaveBeenCalledTimes(2);
+    } finally {
+      generateText.mockRestore();
+    }
+  });
+
+  it("keeps the single paid-delivery custody recovery compact and preserves the call seam", async () => {
+    const packet = acceptedPaidDeliveryPacket();
+    const invalidProposal: CampaignPlayNarratorProposal = {
+      beats: [{
+        purpose: "consequence",
+        observationIndexes: [0],
+        text: "Mara Venn accepts the dispatch, hands it to you, and you carry it to Flood Market, complete delivery, and earn the fee.",
+      }],
+      actionSelections: [
+        { intentIndex: 1, detail: null, mode: null },
+        { intentIndex: 0, detail: null, mode: null },
+      ],
+    };
+    const generateObject = reviewerAwareGenerateObject(
+      async () => ({ object: invalidProposal, trace: trace() }),
+      {
+        verdict: "reject",
+        failedChecks: ["unsupported_possession_or_custody"],
+      },
+    );
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    const request = requestFor(packet, "narration-paid-delivery-custody-recovery");
+
+    let firstError: CampaignPlayNarratorError | undefined;
+    try {
+      await narrator.narrate(request);
+    } catch (cause) {
+      firstError = cause as CampaignPlayNarratorError;
+    }
+    expect(firstError).toMatchObject({
+      code: "narration_invalid",
+      recoveryFeedback: {
+        diagnostic: "narrator_packet_validation_mismatch",
+        failedChecks: [{ check: "unsupported_possession_or_custody" }],
+      },
+    });
+    await expect(narrator.narrate({
+      ...request,
+      recoveryFeedback: firstError?.recoveryFeedback ?? undefined,
+    })).rejects.toMatchObject({
+      code: "narration_invalid",
+      recoveryFeedback: {
+        diagnostic: "narrator_packet_validation_mismatch",
+        failedChecks: [{ check: "unsupported_possession_or_custody" }],
+      },
+    });
+
+    const firstGenerationOptions = generateObject.mock.calls[0]![0] as NarratorGenerateObjectOptions;
+    const recoveryGenerationOptions = generateObject.mock.calls[2]![0] as NarratorGenerateObjectOptions;
+    const recoveryPrompt = String(recoveryGenerationOptions.prompt ?? "");
+    expect(recoveryPrompt).toContain("PAID_DELIVERY_RECOVERY_BOUNDARY");
+    expect(recoveryPrompt).toContain(
+      "The sole failed semantic check is unsupported_possession_or_custody.",
+    );
+    for (const forbiddenTerm of [
+      "handed off",
+      "carried",
+      "possession",
+      "custody",
+      "delivery completion",
+      "payment",
+    ]) {
+      expect(recoveryPrompt).toContain(forbiddenTerm);
+    }
+    expect(recoveryPrompt).toContain("RECOVERY_DIAGNOSTIC");
+    expect(recoveryPrompt).not.toContain("NARRATOR_GENERATION_RECOVERY");
+    expect(recoveryPrompt).not.toContain("MECHANICAL_TRUTH_DIMENSION_CHECKLIST");
+    expect(firstGenerationOptions.model).toBe(recoveryGenerationOptions.model);
+    expect(firstGenerationOptions.mode).toBe(recoveryGenerationOptions.mode);
+    expect(firstGenerationOptions.temperature).toBe(recoveryGenerationOptions.temperature);
+    expect(firstGenerationOptions.maxOutputTokens).toBe(recoveryGenerationOptions.maxOutputTokens);
+    expect(recoveryPrompt).toContain("campaign-harbor-delivery");
+    expect(recoveryPrompt).toContain("turn-harbor-delivery-accepted");
+    expect(recoveryPrompt).toContain("Sealed dispatch");
+    expect(generateObject).toHaveBeenCalledTimes(4);
+  });
+
+  it("rejects paid-delivery tool output above the exact packet beat maximum", async () => {
+    const packet = acceptedPaidDeliveryPacket();
+    const toolTrace = trace("tool_mode");
+    toolTrace.requestedMode = "tool";
+    toolTrace.primaryStrategy = "tool_mode";
+    toolTrace.capability = {
+      requestedMode: "tool",
+      primaryStrategy: "tool_mode",
+      fallbackStrategy: "text_fallback",
+      actualMode: "tool_mode",
+      reason: "test tool capability",
+      providerId: "test-provider",
+    };
+    const transport = {
+      beats: [
+        {
+          purpose: "consequence" as const,
+          observationIndexes: [0],
+          text: "Mara Venn accepts the sealed dispatch assignment.",
+        },
+        {
+          purpose: "moment" as const,
+          observationIndexes: [],
+          text: "Rain ticks against the ferry steps.",
+        },
+      ],
+      selectedIntents: [{ key: "intent0", detail: null, mode: null }],
+    };
+    const generateObject = vi.fn(async (
+      _options: NarratorGenerateObjectOptions,
+    ) => ({ object: transport, trace: toolTrace }));
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    await expect(narrator.narrate({
+      ...requestFor(packet, "narration-paid-delivery-too-many-beats"),
+      structuredOutputMode: "tool" as const,
+    })).rejects.toMatchObject({
+      code: "model_contract_failed",
+      recoveryFeedback: {
+        diagnostic: "narrator_generation_schema_mismatch",
+        failedChecks: [{ check: "generation_schema_invalid" }],
+      },
+    });
+    expect(transport.beats).toHaveLength(2);
+    expect(generateObject).toHaveBeenCalledTimes(1);
+    expect(generateObject.mock.calls[0]![0].schema.safeParse(transport).success).toBe(false);
   });
 
   it("rejects an untyped required reply that accepts future work and payment", async () => {

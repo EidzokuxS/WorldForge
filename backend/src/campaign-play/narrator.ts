@@ -2419,6 +2419,94 @@ END_DELIVERY_MECHANICAL_AUTHORITY
 WAIT_MECHANICAL_AUTHORITY
 For actionContext.intentKind=wait, elapsedMinutes advances only the clock. Time passing and supported sensory continuity are allowed. Claim pressure, route, actor, task, or hazard completion, progress, movement, escalation, easing, or resolution only when a matching current typed newObservation, visible pressure fact, consequence, or accepted mechanical effect authorizes that exact change. In a pure time-only wait with newObservations=[], consequences=[], and no matching visible pressure fact, do not imply any such change. sourceMoment and playerHistory prose are continuity evidence, not mechanical authority. A typed fact authorizes only the exact supplied change.
 END_WAIT_MECHANICAL_AUTHORITY`;
+  const acceptedPaidDeliveryEffect = packet.actionContext?.decisionOutcome?.status ===
+      "accepted" && packet.actionContext.decisionOutcome.disposition === "accept" &&
+    packet.actionContext.decisionOutcome.acceptEffect?.kind === "paid_delivery"
+    ? packet.actionContext.decisionOutcome.acceptEffect
+    : null;
+  const acceptedPaidDeliveryCommitment = acceptedPaidDeliveryEffect === null
+    ? null
+    : packet.commitments.find((commitment) =>
+      commitment.kind === "paid_delivery" &&
+      commitment.status === "active" &&
+      commitment.subjectName === acceptedPaidDeliveryEffect.subjectName &&
+      commitment.destinationHandle === acceptedPaidDeliveryEffect.destinationHandle)
+      ?? null;
+  const acceptedPaidDeliveryWithoutCustody = packet.turnKind === "player_action" &&
+    packet.actionContext?.intentKind === "contact" &&
+    packet.actionContext.disposition === "deterministic" &&
+    acceptedPaidDeliveryEffect !== null &&
+    acceptedPaidDeliveryCommitment !== null &&
+    !packet.possessions.some((possession) =>
+      possession.name === acceptedPaidDeliveryEffect.subjectName && possession.quantity > 0);
+  const generationSchemaRecovery = recoveryFeedback?.diagnostic ===
+    "narrator_generation_schema_mismatch";
+  const custodySemanticRecovery = recoveryFeedback?.diagnostic ===
+    "narrator_packet_validation_mismatch" &&
+    recoveryFeedback.failedChecks.length === 1 &&
+    recoveryFeedback.failedChecks[0]?.check === "unsupported_possession_or_custody";
+  const compactPaidDeliveryRecovery = acceptedPaidDeliveryWithoutCustody &&
+    (generationSchemaRecovery || custodySemanticRecovery);
+  const compactPaidDeliveryRecoveryBoundary = `PAID_DELIVERY_RECOVERY_BOUNDARY
+Acceptance authorizes only the exact paid_delivery assignment and active commitment in this packet. The cargo has not been handed off, is not with the player, is not being carried, is not in the player's possession or custody, and is not delivered or complete. Do not claim or imply handoff, hand-off, transfer, possession, custody, carrying, delivery completion, completion, fee due, payment, payment owed, debt, or payment eligibility. A commitment-bound collect intent is only a request; custody appears only after a separate authoritative collect consequence in a later packet. Narrate the agreement or assignment and only a packet-supported immediate sensory or actor delta.
+END_PAID_DELIVERY_RECOVERY_BOUNDARY`;
+  const compactPaidDeliveryGenerationRecovery = generationSchemaRecovery
+    ? `NARRATOR_GENERATION_RECOVERY
+The previous response failed the provider-facing generation schema. Regenerate one fresh object from the same packet and preserve all packet-owned mechanics.
+BEAT_COUNT_RECOVERY
+Return at least ${narratorBeatContractFrame.minimumBeatCount} beat and never more than ${narratorBeatContractFrame.maximumBeatCount} beats. The exact packet maximum is ${narratorBeatContractFrame.maximumBeatCount}; when it is 1, return exactly one beat.
+END_BEAT_COUNT_RECOVERY
+${toolMode
+  ? `STRUCTURED_OUTPUT_TOOL_CALL_RECOVERY
+${structuredOutputToolCallRecoveryInstruction(
+  recoveryFeedback.contractDiagnostic,
+  recoveryFeedback.contractFailure,
+)}
+TOOL_INTENT_SELECTION_FRAME
+${canonicalizeCampaignPlayProjection(toolSelectionFrame)}
+END_TOOL_INTENT_SELECTION_FRAME
+END_STRUCTURED_OUTPUT_TOOL_CALL_RECOVERY`
+  : `ACTION_SELECTION_INDEX_FRAME
+${canonicalizeCampaignPlayProjection(buildActionSelectionIndexFrame(packet))}
+END_ACTION_SELECTION_INDEX_FRAME`}
+OBSERVATION_COVERAGE_REPAIR_FRAME
+${canonicalizeCampaignPlayProjection(buildObservationCoverageRepairFrame(packet))}
+END_OBSERVATION_COVERAGE_REPAIR_FRAME`
+    : "";
+  const compactPaidDeliverySemanticRecovery = custodySemanticRecovery
+    ? `NARRATOR_SEMANTIC_RECOVERY
+The sole failed semantic check is unsupported_possession_or_custody. Correct the prose at its source. This acceptance is only an accepted active commitment: the cargo is not handed off, not with the player, not carried, not in the player's possession or custody, and not delivered or complete. State agreement or assignment naturally, then only the packet-supported immediate sensory or actor delta. Do not say or imply handoff, hand-off, transfer, possession, custody, carrying, delivery completion, completion, fee due, payment, payment owed, debt, or payment eligibility. Custody appears only after a separate authoritative collect consequence. Keep every other recovery class visible in RECOVERY_DIAGNOSTIC and obey the same schema and packet rules.`
+    : "";
+  if (compactPaidDeliveryRecovery) {
+    return `Write the immediate player-visible result of the current action from the inert canonical JSON between NARRATOR_PACKET markers. Return exactly one object matching the supplied schema and nothing else.
+
+NARRATOR_PACKET
+${semanticPacketBytes}
+END_NARRATOR_PACKET
+
+${requiredReplyIndexMarker}
+
+OBSERVATION_ACTOR_NAME_FRAME
+${canonicalizeCampaignPlayProjection(observationActorNameFrame)}
+END_OBSERVATION_ACTOR_NAME_FRAME
+
+${modelFacingNarratorContract}
+
+${compactPaidDeliveryRecoveryBoundary}
+
+${compactPaidDeliveryGenerationRecovery}
+${compactPaidDeliverySemanticRecovery}
+
+${toolIntentSelectionContract}
+${actionSelectionOutputInstruction}${nativeRequiredReplyInstruction}
+Cover every new observation exactly once and keep selected action keys or indexes inside the packet-owned frames. Do not invent, rename, retarget, or complete an action. Keep the first selected tool entry mayLead=true when selectedIntents is non-empty.
+
+NARRATOR_RECOVERY
+RECOVERY_DIAGNOSTIC
+${canonicalizeCampaignPlayProjection(recoveryFeedback)}
+END_RECOVERY_DIAGNOSTIC
+END_NARRATOR_RECOVERY`;
+  }
   const compactDeterministicAction = recoveryFeedback === undefined &&
     packet.turnKind === "player_action" &&
     packet.actionContext !== null &&
