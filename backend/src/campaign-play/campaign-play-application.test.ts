@@ -1651,6 +1651,216 @@ describe("CampaignPlayApplication", () => {
     }));
   });
 
+  it("recovers a rejected deterministic driver after lease expiry without duplicate mechanics", async () => {
+    createAcceptedCampaign();
+    let now = 1_300;
+    const timers: Array<{ callback: () => void; delayMilliseconds: number }> = [];
+    const plannedDriver = vi.fn();
+    const recoverActiveTurn = vi.fn();
+    let failureInjected = false;
+    let recoveryFailureInjected = false;
+    const createTurn = (handle: CampaignPlayDatabaseHandle) => {
+      const repository = createCampaignPlayTurnRepository(handle);
+      const runtime = fakeStageLocalRecoveryRuntime(handle, {});
+      const runNextStage = runtime.runNextStage.bind(runtime);
+      runtime.runNextStage = async (turnId) => {
+        const turn = repository.loadTurn(turnId)!;
+        if (turn.stage === "planned" && !failureInjected) {
+          failureInjected = true;
+          plannedDriver(turnId);
+          const claimedAt = turn.updatedAt + 1;
+          repository.claimStage({
+            turnId,
+            expectedStage: "planned",
+            observedEpoch: turn.workerEpoch,
+            owner: "application-driver",
+            claimedAt,
+            leaseExpiresAt: claimedAt + 100,
+            mutationId: `planned-failure-claim:${turn.workerEpoch + 1}`,
+          });
+          throw new Error("deterministic driver rejected after claim");
+        }
+        return runNextStage(turnId);
+      };
+      const recover = runtime.recoverActiveTurn.bind(runtime);
+      runtime.recoverActiveTurn = async () => {
+        recoverActiveTurn();
+        const turn = repository.loadActiveTurn();
+        if (
+          turn && turn.stage === "planned" &&
+          (turn.workerLeaseOwner === "application-driver" ||
+            turn.workerLeaseOwner === "application-recovery") &&
+          turn.workerLeaseExpiresAt !== null && now >= turn.workerLeaseExpiresAt
+        ) {
+          const claimed = repository.claimStage({
+            turnId: turn.turnId,
+            expectedStage: "planned",
+            observedEpoch: turn.workerEpoch,
+            owner: "application-recovery",
+            claimedAt: now,
+            leaseExpiresAt: now + 100,
+            mutationId: `recovery-claim:${turn.workerEpoch + 1}`,
+          });
+          if (!recoveryFailureInjected) {
+            recoveryFailureInjected = true;
+            throw new Error("deterministic recovery handler rejected after claim");
+          }
+          const committed = repository.commitDeterministic({
+            token: claimed,
+            transition: "primary_settled",
+            worldVersionAdvance: 0,
+            committedAt: now + 1,
+            mutationId: `recovery-settle:${claimed.epoch}`,
+          });
+          return {
+            turn: committed,
+            recovery: repository.loadRecoveryState(turn.turnId, now),
+            telemetry: null,
+          };
+        }
+        return recover();
+      };
+      return runtime;
+    };
+    const setTimer = vi.fn((callback: () => void, delayMilliseconds: number) => {
+      timers.push({ callback, delayMilliseconds });
+      return `timer:${timers.length}` as unknown as ReturnType<typeof setTimeout>;
+    });
+    const application = createCampaignPlayApplication({
+      now: () => now,
+      setTimer,
+      clearTimer: vi.fn(),
+      runtimeFactory: {
+        createOpening: (handle) => fakeOpeningRuntime(handle, { runNextStage: vi.fn() }),
+        createTurn,
+      },
+    });
+    application.loadState(CAMPAIGN_ID);
+    bootstrapPlayer(application);
+    markPlayerPhaseReady();
+    const state = application.loadState(CAMPAIGN_ID);
+    const admission = application.admitTurn(CAMPAIGN_ID, {
+      source: "freeform",
+      idempotencyKey: "driver-rejection-recovery",
+      text: "Ask about the current signal.",
+      expectedWorldVersion: state.worldVersion,
+      expectedRuntimeRevision: state.runtimeRevision,
+    });
+
+    let idleSettled = false;
+    const idle = application.waitForIdle(CAMPAIGN_ID).then(() => { idleSettled = true; });
+    await vi.waitFor(() => expect(
+      timers.filter((timer) => timer.delayMilliseconds === 0),
+    ).toHaveLength(1));
+    expect(idleSettled).toBe(false);
+    expect(plannedDriver).toHaveBeenCalledWith(admission.turnId);
+
+    const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
+    let claimedAtExpiry: number;
+    let beforeRecovery: { commands: number; receipts: number; worldEvents: number; worldVersion: number };
+    try {
+      const repository = createCampaignPlayTurnRepository(handle);
+      const turn = repository.loadTurn(admission.turnId)!;
+      expect(turn).toMatchObject({
+        turnId: admission.turnId,
+        stage: "planned",
+        workerLeaseOwner: "application-driver",
+      });
+      claimedAtExpiry = turn.workerLeaseExpiresAt!;
+      beforeRecovery = handle.sqlite.prepare(`SELECT
+          (SELECT COUNT(*) FROM campaign_play_commands WHERE campaign_id = ? AND turn_id = ?) AS commands,
+          (SELECT COUNT(*) FROM campaign_play_receipts WHERE campaign_id = ? AND turn_id = ?) AS receipts,
+          (SELECT COUNT(*) FROM campaign_play_events WHERE campaign_id = ? AND turn_id = ?) AS worldEvents,
+          (SELECT world_version FROM campaign_play_states WHERE campaign_id = ?) AS worldVersion`).get(
+        CAMPAIGN_ID, admission.turnId,
+        CAMPAIGN_ID, admission.turnId,
+        CAMPAIGN_ID, admission.turnId,
+        CAMPAIGN_ID,
+      ) as typeof beforeRecovery;
+    } finally {
+      handle.close();
+    }
+
+    timers.find((timer) => timer.delayMilliseconds === 0)!.callback();
+    await vi.waitFor(() => expect(
+      timers.filter((timer) => timer.delayMilliseconds > 0),
+    ).toHaveLength(1));
+    expect(idleSettled).toBe(false);
+    const expiryWakeup = timers.find((timer) => timer.delayMilliseconds > 0)!;
+    expect(expiryWakeup.delayMilliseconds).toBe(claimedAtExpiry - now);
+
+    expiryWakeup.callback();
+    await vi.waitFor(() => expect(
+      timers.filter((timer) => timer.delayMilliseconds > 0),
+    ).toHaveLength(2));
+    expect(idleSettled).toBe(false);
+    const retriedExpiryWakeup = timers.filter((timer) => timer.delayMilliseconds > 0)[1]!;
+    expect(retriedExpiryWakeup.delayMilliseconds).toBe(claimedAtExpiry - now);
+
+    now = claimedAtExpiry + 1;
+    retriedExpiryWakeup.callback();
+    await vi.waitFor(() => expect(
+      timers.filter((timer) => timer.delayMilliseconds > 0),
+    ).toHaveLength(3));
+    expect(idleSettled).toBe(false);
+    const firstRecoveryHandle = openCampaignPlayDatabase(CAMPAIGN_ID);
+    let recoveryClaimExpiry: number;
+    try {
+      const repository = createCampaignPlayTurnRepository(firstRecoveryHandle);
+      const turn = repository.loadTurn(admission.turnId)!;
+      expect(turn).toMatchObject({
+        turnId: admission.turnId,
+        stage: "planned",
+        workerLeaseOwner: "application-recovery",
+      });
+      recoveryClaimExpiry = turn.workerLeaseExpiresAt!;
+      const afterRejectedRecovery = firstRecoveryHandle.sqlite.prepare(`SELECT
+          (SELECT COUNT(*) FROM campaign_play_commands WHERE campaign_id = ? AND turn_id = ?) AS commands,
+          (SELECT COUNT(*) FROM campaign_play_receipts WHERE campaign_id = ? AND turn_id = ?) AS receipts,
+          (SELECT COUNT(*) FROM campaign_play_events WHERE campaign_id = ? AND turn_id = ?) AS worldEvents,
+          (SELECT world_version FROM campaign_play_states WHERE campaign_id = ?) AS worldVersion`).get(
+        CAMPAIGN_ID, admission.turnId,
+        CAMPAIGN_ID, admission.turnId,
+        CAMPAIGN_ID, admission.turnId,
+        CAMPAIGN_ID,
+      );
+      expect(afterRejectedRecovery).toEqual(beforeRecovery);
+    } finally {
+      firstRecoveryHandle.close();
+    }
+    const secondExpiryWakeup = timers.filter((timer) => timer.delayMilliseconds > 0)[2]!;
+    expect(secondExpiryWakeup.delayMilliseconds).toBe(recoveryClaimExpiry - now);
+
+    now = recoveryClaimExpiry + 1;
+    secondExpiryWakeup.callback();
+    await idle;
+    expect(recoverActiveTurn).toHaveBeenCalledTimes(5);
+
+    const recoveredHandle = openCampaignPlayDatabase(CAMPAIGN_ID);
+    try {
+      expect(createCampaignPlayTurnRepository(recoveredHandle).loadTurn(admission.turnId))
+        .toMatchObject({
+          turnId: admission.turnId,
+          stage: "primary_settled",
+          workerLeaseOwner: null,
+          workerLeaseExpiresAt: null,
+        });
+      const afterRecovery = recoveredHandle.sqlite.prepare(`SELECT
+          (SELECT COUNT(*) FROM campaign_play_commands WHERE campaign_id = ? AND turn_id = ?) AS commands,
+          (SELECT COUNT(*) FROM campaign_play_receipts WHERE campaign_id = ? AND turn_id = ?) AS receipts,
+          (SELECT COUNT(*) FROM campaign_play_events WHERE campaign_id = ? AND turn_id = ?) AS worldEvents,
+          (SELECT world_version FROM campaign_play_states WHERE campaign_id = ?) AS worldVersion`).get(
+        CAMPAIGN_ID, admission.turnId,
+        CAMPAIGN_ID, admission.turnId,
+        CAMPAIGN_ID, admission.turnId,
+        CAMPAIGN_ID,
+      );
+      expect(afterRecovery).toEqual(beforeRecovery);
+    } finally {
+      recoveredHandle.close();
+    }
+  });
+
   it("automatically resumes one opening planner contract interruption and preserves turn identity", async () => {
     createAcceptedCampaign();
     const runNextStage = vi.fn();

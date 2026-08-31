@@ -19,7 +19,7 @@ import {
   createCampaignWorldBuildService,
   createCampaignWorldSourceService,
   openCampaignWorldDatabase,
-  type WorldFrameAndCastSkeletonToolPacket,
+  type WorldFrameToolPacket,
 } from "../campaign-world/index.js";
 import type {
   WorldCastDetailBatchPacket,
@@ -33,7 +33,10 @@ import type {
 } from "../campaign-world/contracts.js";
 import { createCampaignWorldRoutes } from "./campaign-world.js";
 import campaignRoutes from "./campaigns.js";
-import { worldFrameAndCastSkeletonToolPacketSchema } from "../campaign-world/world-builder.js";
+import {
+  worldFrameAndCastSkeletonToolPacketSchema,
+  worldFrameToolPacketSchema,
+} from "../campaign-world/world-builder.js";
 
 const CAMPAIGN_ID = "33333333-3333-4333-8333-333333333333";
 
@@ -158,7 +161,7 @@ function framePacket(): WorldFramePacket {
   };
 }
 
-function toolFrameAndSkeletonPacket(): WorldFrameAndCastSkeletonToolPacket {
+function toolFramePacket(): WorldFrameToolPacket {
   const frame = framePacket();
   const macroLocations = frame.locations.filter((location) => location.kind === "macro");
   const persistentLocations = frame.locations.filter((location) =>
@@ -189,7 +192,6 @@ function toolFrameAndSkeletonPacket(): WorldFrameAndCastSkeletonToolPacket {
       toPersistentIndex: persistentIndexByRef.get(route.toLocationRef)!,
       travelCost: route.travelCost,
     })),
-    ...toolSkeletonTransportPacket(),
   };
 }
 
@@ -446,6 +448,18 @@ function detailBatchPacket(globalActorIndices: readonly number[]): WorldCastDeta
   };
 }
 
+function detailActorIndicesFromPrompt(prompt: string): number[] {
+  const startMarker = "ASSIGNED_ACTORS\n";
+  const endMarker = "\nEND_ASSIGNED_ACTORS";
+  const start = prompt.indexOf(startMarker);
+  const end = prompt.indexOf(endMarker, start + startMarker.length);
+  if (start < 0 || end < 0) throw new Error("Detail prompt is missing its assigned actor block.");
+  const assigned = JSON.parse(
+    prompt.slice(start + startMarker.length, end),
+  ) as Array<{ actorIndex: number }>;
+  return assigned.map((actor) => actor.actorIndex);
+}
+
 function toolDetailBatchPacket(globalActorIndices: readonly number[]): WorldCastDetailBatchPacket {
   const actors = detailPacket().actors;
   return {
@@ -642,14 +656,6 @@ function controlledSuccessfulProvider(toolMode = false): {
   const generateObject = vi.fn(async ({ prompt, schema }: GenerateOptions) => {
     prompts.push(prompt ?? "");
     schemas.push(schema);
-    if (toolMode && prompt?.includes("WORLD_CAST_SKELETON_IN_SAME_PACKET")) {
-      if (!frameEntered) {
-        frameEntered = true;
-        enter();
-        await released;
-      }
-      return { object: toolFrameAndSkeletonPacket(), trace: successfulToolTrace() };
-    }
     if (prompt?.startsWith("You design the Campaign World frame.")) {
       if (!frameEntered) {
         frameEntered = true;
@@ -657,21 +663,17 @@ function controlledSuccessfulProvider(toolMode = false): {
         await released;
       }
       return toolMode
-        ? { object: toolFrameAndSkeletonPacket(), trace: successfulToolTrace() }
+        ? { object: toolFramePacket(), trace: successfulToolTrace() }
         : { object: framePacket(), trace: successfulTrace() };
     }
     if (prompt?.startsWith("You design the compact starting Campaign World cast skeleton.")) {
       return { object: skeletonTransportPacket(), trace: successfulTrace() };
     }
     if (prompt?.startsWith("You complete one assigned detail batch")) {
-      const globalActorIndices = prompt.includes('"actorIndex":0')
-        ? [0, 2, 4, 6]
-        : [1, 3, 5, 7];
+      const globalActorIndices = detailActorIndicesFromPrompt(prompt);
       return {
         object: toolMode
-          ? toolDetailBatchPacket(prompt.includes('"actorIndex":0')
-            ? [0, 2, 4, 6]
-            : [1, 3, 5, 7])
+          ? toolDetailBatchPacket(globalActorIndices)
           : detailBatchPacket(globalActorIndices),
         trace: successfulTrace(),
       };
@@ -906,7 +908,7 @@ describe("Campaign World routes", () => {
     );
   });
 
-  it("runs the tool-mode world seed as one frame call before detail and connections", async () => {
+  it("builds the world frame and cast skeleton before parallel detail and connections", async () => {
     const provider = controlledSuccessfulProvider(true);
     const { app, buildService } = createHarness(provider.generateObject, true);
     const source = await loadSource(app);
@@ -916,20 +918,33 @@ describe("Campaign World routes", () => {
 
     await provider.gate.entered;
     expect(provider.prompts).toHaveLength(1);
-    expect(provider.prompts[0]).toContain("WORLD_CAST_SKELETON_IN_SAME_PACKET");
-    expect(provider.schemas[0]).toBe(worldFrameAndCastSkeletonToolPacketSchema);
+    expect(provider.prompts[0]).toMatch(/^You design the Campaign World frame\./);
+    expect(provider.prompts[0]).not.toContain("WORLD_CAST_SKELETON_IN_SAME_PACKET");
+    expect(provider.schemas[0]).toBe(worldFrameToolPacketSchema);
 
     const completion = buildService.waitForBuild(CAMPAIGN_ID, started.buildId);
     provider.gate.release();
     await completion;
 
-    expect(provider.prompts).toHaveLength(4);
-    expect(provider.prompts.filter((prompt) =>
-      prompt.startsWith("You design the compact starting Campaign World cast skeleton."),
-    )).toHaveLength(0);
-    expect(provider.prompts.slice(1).some((prompt) =>
+    expect(provider.prompts).toHaveLength(7);
+    expect(provider.schemas).toHaveLength(7);
+    expect(provider.prompts[1]).toMatch(
+      /^You design the compact starting Campaign World cast skeleton\./,
+    );
+    expect(provider.schemas[1]).not.toBe(worldFrameAndCastSkeletonToolPacketSchema);
+    expect(provider.prompts.slice(2).some((prompt) =>
       prompt.includes("WORLD_CAST_SKELETON_IN_SAME_PACKET"),
     )).toBe(false);
+    const detailPrompts = provider.prompts.filter((prompt) =>
+      prompt.startsWith("You complete one assigned detail batch"),
+    );
+    expect(detailPrompts).toHaveLength(4);
+    expect(detailPrompts.map(detailActorIndicesFromPrompt).sort((left, right) =>
+      left[0]! - right[0]!
+    )).toEqual([[0, 2], [1, 3], [4, 6], [5, 7]]);
+    expect(provider.prompts.filter((prompt) =>
+      prompt.startsWith("You design Campaign World relations and starting pressures from an accepted cast skeleton."),
+    )).toHaveLength(1);
 
     const events = parseSse(await (await app.request(
       `/api/campaigns/${CAMPAIGN_ID}/world/builds/${started.buildId}/events`,

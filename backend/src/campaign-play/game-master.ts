@@ -4,6 +4,7 @@ import {
   CAMPAIGN_PLAY_LIMITS,
   CAMPAIGN_PLAY_ROUTE_STATE_VALUES,
   type CampaignPlayCommitmentBinding,
+  type CampaignPlayDecisionAcceptEffect,
 } from "@worldforge/shared";
 import {
   getSafeGenerateObjectErrorCode,
@@ -97,6 +98,8 @@ const CONTACT_LIFECYCLE_ASSERTION_VALUES = [
 ] as const;
 const contactLifecycleAssertionSchema = z.enum(CONTACT_LIFECYCLE_ASSERTION_VALUES);
 type ContactLifecycleAssertion = z.infer<typeof contactLifecycleAssertionSchema>;
+const OPEN_CONTACT_DECISION_CLARIFICATION_INSTRUCTION =
+  "When OPEN_CONTACT_DECISION_CONTEXT is non-null and PLAYER_INTENT merely asks or clarifies the existing decision's fee, destination, subject, or terms, return decisionProposal.kind=none with summary, acceptLabel, declineLabel, and acceptEffect all null. Report only the supplied typed terms; a missing fee or destination remains unknown and must not be invented. Do not create, resolve, replace, or duplicate the pending decision. The existing Accept/Decline controls remain application-owned and authoritative. A genuinely revised actionable offer still requires the exact typed effect and remains subject to the Rulebook duplicate-open guard.";
 
 function createExposureProposalSchema(handleSchema: z.ZodType<string>) {
   return z.discriminatedUnion("mode", [
@@ -1658,6 +1661,22 @@ interface CertifiedContactContext {
   contactDetail: string;
   lifecycleContext: CompletedPaidDeliveryLifecycleContext | null;
   paidDeliveryDestinationContext: PaidDeliveryDestinationContext;
+  openContactDecisionContext: OpenContactDecisionContext | null;
+}
+
+interface OpenContactDecisionContext {
+  decisionKey: string;
+  decisionKind: NonNullable<CampaignPlayRulebookFrame["pendingDecisions"]>[number]["kind"];
+  effectKind: CampaignPlayDecisionAcceptEffect["kind"] | null;
+  summary: string;
+  acceptLabel: string;
+  declineLabel: string;
+  subjectName: string | null;
+  destinationHandle: string | null;
+  dueInMinutes: number | null;
+  feeUnit: "copper" | null;
+  feeAmount: number | null;
+  paymentTiming: "on_completion" | null;
 }
 
 interface CompletedPaidDeliveryLifecycleContext {
@@ -1768,6 +1787,55 @@ function locationIdForDestinationHandle(
         reference.id,
       ) === destinationHandle,
   )?.id ?? null;
+}
+
+function openContactDecisionContext(
+  frame: CampaignPlayGameMasterFrame,
+  map: ReadonlyMap<string, CampaignPlayEntityRef>,
+  targetActorId: string,
+): OpenContactDecisionContext | null {
+  const decision = (frame.rulebookFrame.pendingDecisions ?? [])
+    .filter((candidate) => candidate.status === "open" && candidate.actorId === targetActorId)
+    .sort((left, right) => left.decisionKey.localeCompare(right.decisionKey))[0];
+  if (decision === undefined) return null;
+  const effect = decision.acceptEffect;
+  const baseContext = {
+    decisionKey: decision.decisionKey,
+    decisionKind: decision.kind,
+    effectKind: effect?.kind ?? null,
+    summary: decision.summary,
+    acceptLabel: decision.acceptLabel,
+    declineLabel: decision.declineLabel,
+    subjectName: null,
+    destinationHandle: null,
+    dueInMinutes: null,
+    feeUnit: null,
+    feeAmount: null,
+    paymentTiming: null,
+  } satisfies OpenContactDecisionContext;
+  if (effect === null || effect.kind === "grant_player_possession") return baseContext;
+  const destinationId = locationIdForDestinationHandle(frame, map, effect.destinationHandle);
+  const destinationHandle = destinationId === null
+    ? null
+    : [...map.entries()]
+      .filter(([, reference]) => reference.kind === "location" && reference.id === destinationId)
+      .map(([handle]) => handle)
+      .sort()[0] ?? null;
+  const destinationAuthorized = destinationId !== null
+    && destinationHandle !== null
+    && frame.authority.authorizedRefs.some((reference) =>
+      reference.kind === "location" && reference.id === destinationId,
+    );
+  if (!destinationAuthorized) return baseContext;
+  return {
+    ...baseContext,
+    subjectName: effect.subjectName,
+    destinationHandle,
+    dueInMinutes: effect.dueInMinutes ?? null,
+    feeUnit: effect.kind === "paid_delivery" ? effect.feeUnit : null,
+    feeAmount: effect.kind === "paid_delivery" ? effect.feeAmount : null,
+    paymentTiming: effect.kind === "paid_delivery" ? effect.paymentTiming : null,
+  };
 }
 
 function paidDeliveryDestinationContext(
@@ -1904,6 +1972,11 @@ function requireCertifiedContactContext(
       playerActorId,
       targetReference.id,
     ),
+    openContactDecisionContext: openContactDecisionContext(
+      frame,
+      map,
+      targetReference.id,
+    ),
   };
 }
 
@@ -1970,6 +2043,11 @@ function genericContactContext(
       frame,
       map,
       playerActorId,
+      targetReference.id,
+    ),
+    openContactDecisionContext: openContactDecisionContext(
+      frame,
+      map,
       targetReference.id,
     ),
   };
@@ -4030,6 +4108,7 @@ function certifiedContactPrompt(
     "Produce the grounded response to the admitted player delivery; do not invent a second action or a new durable state change.",
     "Return exactly one strict object with elapsedMinutes=1 and one record_world_event item. The item must be dialogue or interaction, must use the exact target actor handle as performingActorHandle, and must include the player and target handles exactly once in affectedHandles.",
     CAMPAIGN_PLAY_CONTACT_DECISION_BOUNDARY,
+    OPEN_CONTACT_DECISION_CLARIFICATION_INSTRUCTION,
     "For kind=offer, provide exact summary, acceptLabel, and declineLabel describing only that pure status-only choice. For kind=paid_delivery, provide the existing actionable contract with a concrete subject, visible destination handle, positive copper fee, on_completion timing, and meaningful accept/decline controls. For kind=unpaid_delivery, provide a concrete subject and visible destination handle with no fee or payment terms, plus meaningful accept/decline controls.",
     "When completedDestinationHandle is non-null, a new paid_delivery from this target is actionable only when it uses a different destination from the visible outbound routes in PAID_DELIVERY_DESTINATION_CONTEXT. Choose one exact visible outbound destination handle that differs from completedDestinationHandle. When no different visible outbound destination exists, return kind=none with summary, acceptLabel, declineLabel, and acceptEffect all null. A first paid_delivery remains eligible.",
     "An offer or delivery proposal is pending only: it is not acceptance, agreement, payment, possession, delivery, reward, access, debt, obligation, or world change before acceptance. Do not invent hidden actors, cargo facts, or extra terms.",
@@ -4051,6 +4130,7 @@ function certifiedContactPrompt(
       currentLocationHandle: context.currentLocationHandle,
     })}`,
     `CONTACT_DETAIL=${JSON.stringify(context.contactDetail)}`,
+    `OPEN_CONTACT_DECISION_CONTEXT=${JSON.stringify(context.openContactDecisionContext)}`,
     `EVENT_RULE=${JSON.stringify({
       eventClasses: ["dialogue", "interaction"],
       performingActorHandle: context.targetActorHandle,
@@ -4062,6 +4142,7 @@ function certifiedContactPrompt(
     instructions.push([
       "GAME_MASTER_RECOVERY",
       "Generate a new response from the unchanged source moment, profile, intent, ruling, resolution, directives, and continuity. Correct every listed safe check while preserving the exact contact transport.",
+      OPEN_CONTACT_DECISION_CLARIFICATION_INSTRUCTION,
       ...(recoveryFeedback.failedChecks.some((check) => check.check === "completed_paid_delivery_destination_reused")
         ? ["For completed_paid_delivery_destination_reused, choose a different exact visible outbound destination handle from PAID_DELIVERY_DESTINATION_CONTEXT, or return kind=none with all decision fields null when no different destination is visible."]
         : []),
@@ -4206,6 +4287,7 @@ function prompt(
       ? []
       : [
         "This one-actor contact requires decisionProposal. Copy CONTACT_DETAIL exactly. Apply the contact decision boundary exactly. For kind=offer, provide non-null summary, acceptLabel, and declineLabel only for the pure status-only choice. For kind=paid_delivery, use only the existing typed paid-delivery effect. For kind=unpaid_delivery, use only the exact typed unpaid-delivery effect with no fee or payment fields. For kind=none, all decision fields must be null. The proposal is pending: do not grant reward, access, ownership, debt, obligation, or any other world change before explicit acceptance.",
+        OPEN_CONTACT_DECISION_CLARIFICATION_INSTRUCTION,
         "For kind=paid_delivery or kind=unpaid_delivery, every summary, acceptLabel, declineLabel, and event may state only the exact delivery subject, destination, timing, and (for paid_delivery) Copper fee. Do not promise a later relationship, access, permission, endorsement, vouch, service, reward, payment, or other consequential return; no typed post-completion promise mechanic exists for those claims.",
         "When this contact asks for concrete future work, a load, delivery, service, or payment terms, use kind=paid_delivery only for a complete pending offer whose subjectName names the whole consignment or lot and whose feeAmount is the total copper for that lot. A per-unit rate without a complete lot size and total copper is incomplete. Use kind=none with all decision fields null to clarify missing terms, and leave the event explicitly unresolved; do not describe incomplete terms as assigned, accepted, ready to act, paid, or another future control.",
         "For acceptedDeal, emit it only when the targeted NPC explicitly accepts this turn's concrete player-proposed paid-delivery deal. Include the exact target counterpartyActorHandle, typed paid_delivery with feeUnit=copper, an authorized visible destination, paymentTiming=on_completion, and completionCondition=deliver_subject_to_destination, plus summary and accept/decline labels. Set decisionProposal.kind=none. If the denomination is silver, gold, or another unsupported unit, or the subject, destination, payment timing, or completion condition is incomplete, do not emit acceptedDeal; clarify or counter in copper, or leave the negotiation unresolved. Prose never creates a commitment.",
@@ -4216,6 +4298,7 @@ function prompt(
            targetActorHandle: contactContext.targetActorHandle,
            currentLocationHandle: contactContext.currentLocationHandle,
          })}`,
+        `OPEN_CONTACT_DECISION_CONTEXT=${JSON.stringify(contactContext.openContactDecisionContext)}`,
          ...(contactContext.lifecycleContext === null
            ? []
            : [
@@ -4232,7 +4315,7 @@ function prompt(
     "A route claim with state open and accessRequirement none establishes no crossing payment for any traveler, role, cargo, profession, or circumstance. When the player asks about cost, toll, tithe, fee, stamp, or permit, answer from that typed absence: do not infer a conditional charge from the route's name, an actor's title or duties, nearby scales or ledgers, prior dialogue, or the question itself. Those details may characterize the actor's work, but they establish no charge, debt, tithe, collection rule, liable category, or conditional obligation for the player or anyone else. In that route-contact event, omit every separate financial duty, collection practice, liable category, and conditional payment from the summary unless a supplied typed obligation establishes its exact parties and amount and PLAYER_INTENT separately seeks that transaction. Do not explain a collector's route answer by inventing who owes what nearby.",
     "When earlier dialogue in SOURCE_MOMENT or VISIBLE_FACTS conflicts with the current typed route authority, treat that dialogue as a continuity error rather than protected character belief. In a current contact about that route, have the actor plainly correct the mistaken claim. Do not repeat, qualify, defend, or preserve the conflicting toll, bridge, checkpoint, detour, payment, permission, stamp, or credential as experience, hearsay, uncertainty, or memory.",
     "For observation and discovery effects, report concrete sensory properties and only cautious conclusions that those properties support. Keep conclusions within comparisons an ordinary observer can make from supplied facts: wear or corrosion may suggest age, but cannot establish an absolute chronology, provenance, or comparison with every structure without supplied expertise and reference evidence. Preserve unknown authorship, motive, provenance, prior contents, and hidden causes. A clean, empty, missing, or disturbed surface establishes only its current observable state; it does not prove that something existed, was found, removed, stolen, concealed, or carried away. Unknowns are constraints, not a checklist for the public summary: lead with concrete sensory evidence, express at most one useful uncertainty, and do not enumerate every interpretation the evidence fails to prove. Do not expose protected truth by guessing the most convenient explanation or echo Judge diagnostic language into the scene.",
-    "When the resolved action reveals, records, communicates, or verifies concrete information whose value was previously unspecified—such as a name, marking, code, number, date, quantity, direction, or instruction—materialize each usable player-visible value in the committed summary. Never say that a value was read, written down, repeated, counted, or confirmed while omitting the value itself. If the current action relies on earlier concrete values present in SOURCE_MOMENT or VISIBLE_FACTS, preserve and repeat them exactly. Do not substitute opaque handles or internal IDs for in-world values.",
+    "When the resolved action reveals, records, communicates, or verifies concrete information whose value was previously unspecified, such as a name, marking, code, number, date, quantity, direction, or instruction, materialize each usable player-visible value in the committed summary. Never say that a value was read, written down, repeated, counted, or confirmed while omitting the value itself. If the current action relies on earlier concrete values present in SOURCE_MOMENT or VISIBLE_FACTS, preserve and repeat them exactly. Do not substitute opaque handles or internal IDs for in-world values.",
     "ACTOR_CONTINUITY is protected causal truth about visible actors' own completed actions and outranks conflicting earlier dialogue in VISIBLE_FACTS. Maintain identity and causality: an actor must not deny, misattribute, or forget an action listed under its handle. Reconcile a prior denial instead of repeating it. Use this truth only when the exact PLAYER_INTENT and RULING make it relevant; do not volunteer unrelated protected history. An absent action means unknown, not that the actor did nothing.",
     "A dialogue or interaction must answer the exact current PLAYER_INTENT. Never copy a summary from that actor's ACTOR_CONTINUITY.recentOwnActions. If the actor must restate an earlier point, give a concise paraphrase that adds the current question-specific detail.",
     "ACTOR_DIRECTIVES is protected roleplay authority for each agent actor targeted by PLAYER_INTENT. Use the person's profile, present conditions, active goals, and relations to choose what they actually say or do. These directives establish characterization and decision pressure, not player knowledge or permission to disclose protected facts. Never quote a hidden goal or motive merely because it appears there.",
@@ -4381,6 +4464,7 @@ function prompt(
     );
     const recoveryInstruction = [
       "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. For mechanical_authority_rejected, make every mechanically durable claim in each event summary agree with the typed resource effects and ROUTE_AUTHORITY. If no typed authority changes a possession, obligation, or route, keep the event summary non-mechanical. For a contact decision mismatch, use kind=none with all decision fields null unless the exact typed paid_delivery or unpaid_delivery contract is present; never recover a work, service, delivery, payment, compensation, debt, duty, custody, access, permission, or relationship transition as a null-effect kind=offer.",
+      OPEN_CONTACT_DECISION_CLARIFICATION_INSTRUCTION,
       ...(contractDiagnostic === undefined
         ? []
         : [
@@ -4443,6 +4527,7 @@ function prompt(
         ? []
         : [
            "Include the required decisionProposal object alongside the effect arrays, using the exact contactDetail and pending-choice boundary above.",
+           OPEN_CONTACT_DECISION_CLARIFICATION_INSTRUCTION,
            "When the NPC explicitly accepts the player's concrete copper paid-delivery proposal this turn, include acceptedDeal and set decisionProposal.kind=none; otherwise omit acceptedDeal.",
            ...(contactContext.lifecycleContext === null
              ? []

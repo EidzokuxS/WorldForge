@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { CAMPAIGN_PLAY_LIMITS } from "@worldforge/shared";
 import { closeDb } from "../db/index.js";
 import {
   openCampaignWorldDatabase,
@@ -53,6 +54,7 @@ import {
   availableIntents,
   createCampaignPlayVisibilityService,
   currentTurnDecisionPublicObservations,
+  CampaignPlayVisibilityError,
   renderCampaignPlayVisibleActorEvent,
   resolveCampaignPlayOpeningObservableTrace,
 } from "./visibility-service.js";
@@ -62,6 +64,7 @@ const HASH_A = "a".repeat(64);
 const TEST_MODEL_PRICING = { known: true, currency: "USD", tokenUnit: 1_000_000,
   inputCostMicros: 1_000, outputCostMicros: 2_000, rounding: "ceil" } as const;
 const HASH_B = "b".repeat(64);
+const HASH_C = "c".repeat(64);
 let root = "";
 let previousCampaignsRoot: string | undefined;
 let handles: Array<CampaignWorldDatabaseHandle | CampaignPlayDatabaseHandle> = [];
@@ -86,7 +89,7 @@ function track<T extends CampaignWorldDatabaseHandle | CampaignPlayDatabaseHandl
   return handle;
 }
 
-function acceptPlayableWorld(): void {
+function acceptPlayableWorld(withCompetingOpeningPressures = false): void {
   createMigratedCampaign(root, CAMPAIGN_ID);
   const handle = openCampaignWorldDatabase(CAMPAIGN_ID);
   try {
@@ -108,6 +111,41 @@ function acceptPlayableWorld(): void {
         placement.id === "placement-b"
           ? { ...placement, locationId: "location-a-office" }
             : placement),
+      pressures: withCompetingOpeningPressures
+        ? [
+            ...candidate.draft.pressures.map((pressure) =>
+              pressure.id === "pressure-a"
+                ? { ...pressure, locationIds: [...pressure.locationIds, "location-c"] }
+                : pressure),
+            {
+              id: "pressure-local-a",
+              name: "Ash Tide",
+              description: "Ash gathers against the tower doors.",
+              trajectory: "The island signal house becomes inaccessible.",
+              urgency: 5 as const,
+              actorIds: ["actor-c"],
+              locationIds: ["location-c"],
+            },
+            {
+              id: "pressure-local-b",
+              name: "Broken Lanterns",
+              description: "Three signal lanterns have gone dark.",
+              trajectory: "Night traffic loses its safe approach.",
+              urgency: 4 as const,
+              actorIds: ["actor-c"],
+              locationIds: ["location-c"],
+            },
+            {
+              id: "pressure-local-c",
+              name: "Cold Ropes",
+              description: "Frost stiffens every bell rope on the island.",
+              trajectory: "The warning system falls silent.",
+              urgency: 4 as const,
+              actorIds: ["actor-c"],
+              locationIds: ["location-c"],
+            },
+          ]
+        : candidate.draft.pressures,
     };
     const review = repository.completeBuild({
       buildId: "build-visibility",
@@ -254,8 +292,10 @@ function createVisibilityFixture(
   obligationDirection: "none" | "payable" | "receivable" = "none",
   decision: NonNullable<CampaignPlayOpeningProposal["decision"]> | null = null,
   actorCArrivesAtCurrentScene = false,
+  openingOnly = false,
+  withCompetingOpeningPressures = false,
 ) {
-  acceptPlayableWorld();
+  acceptPlayableWorld(withCompetingOpeningPressures);
   const handle = track(openCampaignPlayDatabase(CAMPAIGN_ID));
   const openingScheduler = actorBAcquiresPossession
     ? createCampaignPlayActorScheduler(handle)
@@ -430,6 +470,41 @@ function createVisibilityFixture(
       }
     },
   });
+
+  if (openingOnly) {
+    const actorsToken = turns.claimStage({
+      turnId: "turn-opening",
+      expectedStage: "primary_settled",
+      observedEpoch: 2,
+      owner: "visibility-worker",
+      claimedAt: 1_610,
+      leaseExpiresAt: 3_000,
+      mutationId: "actors-claimed",
+    });
+    turns.commitDeterministic({
+      token: actorsToken,
+      transition: "actors_settled",
+      worldVersionAdvance: 0,
+      committedAt: 1_620,
+      mutationId: "actors-settled",
+    });
+    const visibilityToken = turns.claimStage({
+      turnId: "turn-opening",
+      expectedStage: "actors_settled",
+      observedEpoch: 3,
+      owner: "visibility-worker",
+      claimedAt: 1_630,
+      leaseExpiresAt: 3_000,
+      mutationId: "visibility-claimed",
+    });
+    return {
+      handle,
+      states,
+      turns,
+      visibilityToken,
+      actorAcquisition: null,
+    };
+  }
 
   const frame = rulebookFrame(handle);
   const batchId = "visibility-evidence";
@@ -1113,6 +1188,504 @@ describe("Campaign Play visibility service", () => {
       .toThrow("A directly perceived autonomous actor event requires its persisted observable trace.");
   });
 
+  it("projects the selected opening pressure only to the human player", () => {
+    const fixture = createVisibilityFixture([], false, "none", null, false, true);
+    const before = fixture.states.loadState()!;
+    const result = createCampaignPlayVisibilityService(fixture.handle).projectTurn({
+      token: fixture.visibilityToken,
+      actionContext: null,
+      sourceMoment: null,
+      committedAt: 1_650,
+      mutationId: "opening-pressure-visibility",
+    });
+
+    expect(result.packet.currentLocation.name).toBe("Bell Island Tower");
+    expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
+      "Bell Island signals storms that never arrive.",
+    );
+    expect(result.packet.visiblePressures).toEqual([{
+      handle: deriveCampaignPlayPublicHandle("pressure", CAMPAIGN_ID, "pressure-b"),
+      label: "False Bells",
+      summary: "Bell Island signals storms that never arrive.",
+    }]);
+    expect(result.packet.visiblePressures.map((pressure) => pressure.handle)).not.toContain(
+      deriveCampaignPlayPublicHandle("pressure", CAMPAIGN_ID, "pressure-a"),
+    );
+    const openingPressure = fixture.handle.sqlite.prepare(`SELECT event.event_id AS eventId
+      FROM campaign_play_events event
+      JOIN campaign_play_commands command ON command.command_id = event.command_id
+        AND command.campaign_id = event.campaign_id
+      WHERE event.campaign_id = ?
+        AND command.command_kind = 'record_world_event'
+        AND json_extract(command.source_json, '$.system') = 'opening_bootstrap'
+        AND json_extract(command.protected_payload_json, '$.eventClass') = 'discovery'
+        AND json_extract(command.protected_payload_json, '$.performingActorId') IS NULL`).get(
+          CAMPAIGN_ID,
+        ) as { eventId: string } | undefined;
+    expect(openingPressure).toBeDefined();
+    expect(fixture.handle.sqlite.prepare(`SELECT actor_id AS actorId
+      FROM campaign_play_actor_knowledge WHERE campaign_id = ? AND event_id = ?
+      ORDER BY actor_id`).all(CAMPAIGN_ID, openingPressure!.eventId)).toEqual([
+      { actorId: "actor-player" },
+    ]);
+    expect(fixture.handle.sqlite.prepare(`SELECT human_actor_id AS actorId
+      FROM campaign_play_observations WHERE campaign_id = ? AND event_id = ?
+      ORDER BY human_actor_id`).all(CAMPAIGN_ID, openingPressure!.eventId)).toEqual([
+      { actorId: "actor-player" },
+    ]);
+    const after = fixture.states.loadState()!;
+    expect(after.authority.worldVersion).toBe(before.authority.worldVersion);
+    expect(after.authority.worldTimeMinutes).toBe(before.authority.worldTimeMinutes);
+    expect(after.publicState.projection).toMatchObject({
+      visiblePressures: result.packet.visiblePressures,
+    });
+    expect(fixture.handle.sqlite.prepare(`SELECT pressure_id AS pressureId, progress, status
+      FROM campaign_play_pressure_states WHERE campaign_id = ? ORDER BY pressure_id`).all(
+        CAMPAIGN_ID,
+      )).toEqual([
+      { pressureId: "pressure-a", progress: 0, status: "active" },
+      { pressureId: "pressure-b", progress: 0, status: "active" },
+    ]);
+  });
+
+  it("keeps a resolved opening pressure as historical evidence without showing it as current", () => {
+    const fixture = createVisibilityFixture([], false, "none", null, false, true);
+    const frame = rulebookFrame(fixture.handle);
+    const batchId = "batch-resolve-opening-pressure";
+    const commands = Array.from({ length: 4 }, (_, order) => {
+      const commandId = deriveCampaignPlayCommandId(
+        CAMPAIGN_ID,
+        "turn-opening",
+        batchId,
+        order,
+      );
+      return {
+        commandId,
+        batchId,
+        order,
+        causalParent: order === 0
+          ? { kind: "turn" as const, turnId: "turn-opening" }
+          : {
+              kind: "command" as const,
+              commandId: deriveCampaignPlayCommandId(
+                CAMPAIGN_ID,
+                "turn-opening",
+                batchId,
+                order - 1,
+              ),
+            },
+        source: { kind: "actor" as const, actorId: "actor-player" },
+        expectedWorldVersion: frame.worldVersion + order,
+        readScope: [{ kind: "pressure" as const, id: "pressure-b" }],
+        writeScope: [{ kind: "pressure" as const, id: "pressure-b" }],
+        exposure: { mode: "protected" as const },
+        kind: "advance_pressure" as const,
+        pressureId: "pressure-b",
+        amount: CAMPAIGN_PLAY_LIMITS.pressureAdvance,
+        resultStatus: order === 3 ? "resolved" as const : "active" as const,
+      };
+    });
+    const accepted = preflightCampaignPlayRulebook({
+      frame,
+      authority: {
+        purpose: "player_action",
+        turnId: "turn-opening",
+        actorId: "actor-player",
+        rootParent: { kind: "turn", turnId: "turn-opening" },
+        authorizedRefs: [
+          { kind: "actor", id: "actor-player" },
+          { kind: "pressure", id: "pressure-b" },
+        ],
+        witnessActorIds: [],
+        knownWorldEventIds: [],
+      },
+      batch: {
+        batchId,
+        baseWorldVersion: frame.worldVersion,
+        commands,
+      },
+    });
+    if (!accepted.accepted) {
+      throw new Error(`Opening pressure resolution denied: ${accepted.denial.code}`);
+    }
+    fixture.states.commitMechanical({
+      updatedAt: 1_640,
+      worldVersionAdvance: commands.length,
+      mutate(context) {
+        executeCampaignPlayRulebookBatch({
+          frame,
+          accepted,
+          context,
+          turnId: "turn-opening",
+          createdAt: 1_640,
+        });
+      },
+    });
+
+    expect(fixture.handle.sqlite.prepare(`SELECT progress, status
+      FROM campaign_play_pressure_states
+      WHERE campaign_id = ? AND pressure_id = 'pressure-b'`).get(CAMPAIGN_ID)).toEqual({
+        progress: 100,
+        status: "resolved",
+      });
+
+    const result = createCampaignPlayVisibilityService(fixture.handle).projectTurn({
+      token: fixture.visibilityToken,
+      actionContext: null,
+      sourceMoment: null,
+      committedAt: 1_650,
+      mutationId: "resolved-opening-pressure-visibility",
+    });
+
+    expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
+      "Bell Island signals storms that never arrive.",
+    );
+    expect(result.packet.visiblePressures.map((pressure) => pressure.handle)).not.toContain(
+      deriveCampaignPlayPublicHandle("pressure", CAMPAIGN_ID, "pressure-b"),
+    );
+  });
+
+  it("keeps the selected opening pressure visible ahead of higher-urgency local pressures", () => {
+    const fixture = createVisibilityFixture([], false, "none", null, false, true, true);
+    const openingEvent = fixture.handle.sqlite.prepare(`SELECT
+        event.command_id AS commandId, event.receipt_id AS receiptId,
+        exposure.exposure_id AS exposureId
+      FROM campaign_play_events event
+      JOIN campaign_play_commands command ON command.command_id = event.command_id
+        AND command.campaign_id = event.campaign_id
+      JOIN campaign_play_event_exposures exposure ON exposure.event_id = event.event_id
+        AND exposure.campaign_id = event.campaign_id
+      WHERE event.campaign_id = ?
+        AND command.command_kind = 'record_world_event'
+        AND json_extract(command.source_json, '$.system') = 'opening_bootstrap'
+        AND json_extract(command.protected_payload_json, '$.eventClass') = 'discovery'`).get(
+          CAMPAIGN_ID,
+        ) as { commandId: string; receiptId: string; exposureId: string } | undefined;
+    expect(openingEvent).toBeDefined();
+    const extraPressures = [
+      { id: "pressure-local-a", name: "Ash Tide", description: "Ash gathers against the tower doors.", urgency: 5 },
+      { id: "pressure-local-b", name: "Broken Lanterns", description: "Three signal lanterns have gone dark.", urgency: 4 },
+      { id: "pressure-local-c", name: "Cold Ropes", description: "Frost stiffens every bell rope on the island.", urgency: 4 },
+    ];
+    const observedPressures = [
+      { id: "pressure-a", description: "Safe sea lanes close earlier after every eclipse." },
+      ...extraPressures,
+    ];
+    const currentWorldVersion = fixture.states.loadState()!.authority.worldVersion;
+    fixture.handle.sqlite.exec(`DROP TRIGGER campaign_play_events_insert_guard;
+      DROP TRIGGER campaign_play_observations_insert_guard;`);
+    fixture.states.commitRuntime({
+      event: {
+        eventId: "runtime-local-pressure-observations",
+        turnId: null,
+        kind: "character_created",
+        workerEpoch: null,
+        protectedPayloadHash: HASH_C,
+        createdAt: 1_640,
+      },
+      mutate(context) {
+        for (const [index, pressure] of observedPressures.entries()) {
+          const eventId = `local-pressure-event-${index}`;
+          context.sqlite.prepare(`INSERT INTO campaign_play_events
+            (event_id, campaign_id, turn_id, command_id, receipt_id, parent_event_id,
+              event_kind, source_json, world_time_minutes, world_version, affected_refs_json,
+              before_payload_json, after_payload_json, payload_hash, created_at)
+            VALUES (?, ?, 'turn-opening', ?, ?, NULL, 'scene_recorded',
+              '{"kind":"system","system":"game_master"}', 0, ?, ?, NULL, '{}', ?, 1640)`).run(
+                eventId,
+                CAMPAIGN_ID,
+                openingEvent!.commandId,
+                openingEvent!.receiptId,
+                currentWorldVersion,
+                JSON.stringify([{ kind: "pressure", id: pressure.id }]),
+                HASH_C,
+              );
+          const entry = {
+            observationHandle: `observation_local_pressure_${index}`,
+            title: "Pressure nearby",
+            text: pressure.description,
+            whereOrRoute: "Bell Island Tower",
+            worldTimeLabel: "Day 1, 00:00",
+            consequence: null,
+          };
+          context.sqlite.prepare(`INSERT INTO campaign_play_observations
+            (observation_id, campaign_id, human_actor_id, event_id, exposure_id,
+              channel, source_location_id, source_route_id, source_trigger,
+              source_witness_actor_id, perceived_actor_id, source_json, source_hash,
+              public_entry_json, public_entry_hash, world_time_minutes, created_at)
+            VALUES (?, ?, 'actor-player', ?, ?, 'direct_perception', 'location-c', NULL, NULL,
+              NULL, NULL, '{"channel":"direct_perception","locationId":"location-c"}', ?,
+              ?, ?, 0, 1640)`).run(
+                `local-pressure-observation-${index}`,
+                CAMPAIGN_ID,
+                eventId,
+                openingEvent!.exposureId,
+                HASH_A,
+                JSON.stringify(entry),
+                HASH_B,
+              );
+        }
+      },
+    });
+
+    const result = createCampaignPlayVisibilityService(fixture.handle).projectTurn({
+      token: fixture.visibilityToken,
+      actionContext: null,
+      sourceMoment: null,
+      committedAt: 1_650,
+      mutationId: "opening-pressure-priority",
+    });
+
+    expect(result.packet.visiblePressures).toHaveLength(CAMPAIGN_PLAY_LIMITS.visiblePressures);
+    expect(result.packet.visiblePressures[0]).toEqual({
+      handle: deriveCampaignPlayPublicHandle("pressure", CAMPAIGN_ID, "pressure-b"),
+      label: "False Bells",
+      summary: "Bell Island signals storms that never arrive.",
+    });
+    expect(result.packet.visiblePressures.map((pressure) => pressure.handle)).toContain(
+      deriveCampaignPlayPublicHandle("pressure", CAMPAIGN_ID, "pressure-b"),
+    );
+    expect(result.packet.visiblePressures.map((pressure) => pressure.handle)).not.toContain(
+      deriveCampaignPlayPublicHandle("pressure", CAMPAIGN_ID, "pressure-local-c"),
+    );
+  });
+
+  it.each([
+    {
+      label: "an extra actor",
+      mutateRefs: (refs: Array<{ kind: string; id: string }>) => [
+        ...refs,
+        { kind: "actor", id: "actor-c" },
+      ],
+    },
+    {
+      label: "an extra pressure",
+      mutateRefs: (refs: Array<{ kind: string; id: string }>) => [
+        ...refs,
+        { kind: "pressure", id: "pressure-a" },
+      ],
+    },
+    {
+      label: "a non-human actor",
+      mutateRefs: (refs: Array<{ kind: string; id: string }>) => refs.map((ref) =>
+        ref.kind === "actor" ? { ...ref, id: "actor-c" } : ref),
+    },
+    {
+      label: "the wrong location",
+      mutateRefs: (refs: Array<{ kind: string; id: string }>) => refs.map((ref) =>
+        ref.kind === "location" ? { ...ref, id: "location-a" } : ref),
+    },
+  ])("rejects opening pressure discovery with $label", ({ label, mutateRefs }) => {
+    const fixture = createVisibilityFixture([], false, "none", null, false, true);
+    const openingPressure = fixture.handle.sqlite.prepare(`SELECT event.event_id AS eventId,
+        event.affected_refs_json AS affectedRefsJson
+      FROM campaign_play_events event
+      JOIN campaign_play_commands command ON command.command_id = event.command_id
+        AND command.campaign_id = event.campaign_id
+      WHERE event.campaign_id = ?
+        AND command.command_kind = 'record_world_event'
+        AND json_extract(command.source_json, '$.system') = 'opening_bootstrap'
+        AND json_extract(command.protected_payload_json, '$.eventClass') = 'discovery'
+        AND json_extract(command.protected_payload_json, '$.performingActorId') IS NULL`).get(
+          CAMPAIGN_ID,
+        ) as { eventId: string; affectedRefsJson: string } | undefined;
+    expect(openingPressure).toBeDefined();
+    const refs = JSON.parse(openingPressure!.affectedRefsJson) as Array<{ kind: string; id: string }>;
+    fixture.handle.sqlite.exec("DROP TRIGGER campaign_play_events_update_immutable");
+    fixture.handle.sqlite.prepare(`UPDATE campaign_play_events
+      SET affected_refs_json = ? WHERE campaign_id = ? AND event_id = ?`).run(
+        JSON.stringify(mutateRefs(refs)),
+        CAMPAIGN_ID,
+        openingPressure!.eventId,
+      );
+
+    expect(() => createCampaignPlayVisibilityService(fixture.handle).projectTurn({
+      token: fixture.visibilityToken,
+      actionContext: null,
+      sourceMoment: null,
+      committedAt: 1_650,
+      mutationId: `malformed-opening-pressure-${label}`,
+    })).toThrowError(expect.objectContaining({ code: "visibility_state_invalid" }));
+    expect(fixture.handle.sqlite.prepare(`SELECT count(*) AS count
+      FROM campaign_play_observations WHERE campaign_id = ?`).get(CAMPAIGN_ID)).toEqual({ count: 0 });
+  });
+
+  it("rejects an opening pressure discovery whose command scope exceeds its accepted artifact", () => {
+    const fixture = createVisibilityFixture([], false, "none", null, false, true);
+    const openingPressure = fixture.handle.sqlite.prepare(`SELECT command.command_id AS commandId,
+        command.read_scope_json AS readScopeJson
+      FROM campaign_play_commands command
+      WHERE command.campaign_id = ? AND command.command_kind = 'record_world_event'
+        AND json_extract(command.source_json, '$.system') = 'opening_bootstrap'
+        AND json_extract(command.protected_payload_json, '$.eventClass') = 'discovery'`).get(
+          CAMPAIGN_ID,
+        ) as { commandId: string; readScopeJson: string } | undefined;
+    expect(openingPressure).toBeDefined();
+    const readScope = JSON.parse(openingPressure!.readScopeJson) as Array<{ kind: string; id: string }>;
+    fixture.handle.sqlite.exec("DROP TRIGGER campaign_play_commands_update_immutable");
+    fixture.handle.sqlite.prepare(`UPDATE campaign_play_commands SET read_scope_json = ?
+      WHERE campaign_id = ? AND command_id = ?`).run(
+        JSON.stringify([...readScope, { kind: "pressure", id: "pressure-a" }]),
+        CAMPAIGN_ID,
+        openingPressure!.commandId,
+      );
+
+    expect(() => createCampaignPlayVisibilityService(fixture.handle).projectTurn({
+      token: fixture.visibilityToken,
+      actionContext: null,
+      sourceMoment: null,
+      committedAt: 1_650,
+      mutationId: "opening-pressure-command-scope",
+    })).toThrowError(expect.objectContaining({ code: "visibility_state_invalid" }));
+  });
+
+  it("fails closed when the accepted opening pressure discovery exposure is missing", () => {
+    const fixture = createVisibilityFixture([], false, "none", null, false, true);
+    const openingExposure = fixture.handle.sqlite.prepare(`SELECT exposure.exposure_id AS exposureId
+      FROM campaign_play_event_exposures exposure
+      JOIN campaign_play_events event ON event.event_id = exposure.event_id
+        AND event.campaign_id = exposure.campaign_id
+      JOIN campaign_play_commands command ON command.command_id = event.command_id
+        AND command.campaign_id = event.campaign_id
+      WHERE exposure.campaign_id = ? AND command.command_kind = 'record_world_event'
+        AND json_extract(command.source_json, '$.system') = 'opening_bootstrap'
+        AND json_extract(command.protected_payload_json, '$.eventClass') = 'discovery'`).get(
+          CAMPAIGN_ID,
+        ) as { exposureId: string } | undefined;
+    expect(openingExposure).toBeDefined();
+    fixture.handle.sqlite.exec("DROP TRIGGER campaign_play_event_exposures_delete_immutable");
+    fixture.handle.sqlite.prepare(`DELETE FROM campaign_play_event_exposures
+      WHERE campaign_id = ? AND exposure_id = ?`).run(
+        CAMPAIGN_ID,
+        openingExposure!.exposureId,
+      );
+
+    expect(() => createCampaignPlayVisibilityService(fixture.handle).projectTurn({
+      token: fixture.visibilityToken,
+      actionContext: null,
+      sourceMoment: null,
+      committedAt: 1_650,
+      mutationId: "opening-pressure-exposure-missing",
+    })).toThrowError(expect.objectContaining({ code: "visibility_state_invalid" }));
+    expect(fixture.handle.sqlite.prepare(`SELECT count(*) AS count
+      FROM campaign_play_observations WHERE campaign_id = ?`).get(CAMPAIGN_ID)).toEqual({ count: 0 });
+  });
+
+  it("fails closed when an opening pressure discovery has an extra non-direct exposure", () => {
+    const fixture = createVisibilityFixture([], false, "none", null, false, true);
+    const openingExposure = fixture.handle.sqlite.prepare(`SELECT
+        event.event_id AS eventId, exposure.location_id AS locationId
+      FROM campaign_play_event_exposures exposure
+      JOIN campaign_play_events event ON event.event_id = exposure.event_id
+        AND event.campaign_id = exposure.campaign_id
+      JOIN campaign_play_commands command ON command.command_id = event.command_id
+        AND command.campaign_id = event.campaign_id
+      WHERE exposure.campaign_id = ? AND command.command_kind = 'record_world_event'
+        AND json_extract(command.source_json, '$.system') = 'opening_bootstrap'
+        AND json_extract(command.protected_payload_json, '$.eventClass') = 'discovery'`).get(
+          CAMPAIGN_ID,
+        ) as { eventId: string; locationId: string } | undefined;
+    expect(openingExposure).toBeDefined();
+    fixture.handle.sqlite.exec("DROP TRIGGER campaign_play_event_exposures_insert_guard");
+    fixture.handle.sqlite.prepare(`INSERT INTO campaign_play_event_exposures
+      (exposure_id, campaign_id, event_id, channel, location_id, route_id,
+        witness_actor_id, valid_until_world_time_minutes, route_triggers_json, created_at)
+      VALUES ('opening-pressure-extra-aftermath', ?, ?, 'local_aftermath', ?, NULL,
+        NULL, 20, NULL, 1641)`).run(
+          CAMPAIGN_ID,
+          openingExposure!.eventId,
+          openingExposure!.locationId,
+        );
+
+    expect(() => createCampaignPlayVisibilityService(fixture.handle).projectTurn({
+      token: fixture.visibilityToken,
+      actionContext: null,
+      sourceMoment: null,
+      committedAt: 1_650,
+      mutationId: "opening-pressure-extra-non-direct-exposure",
+    })).toThrowError(expect.objectContaining({ code: "visibility_state_invalid" }));
+    expect(fixture.handle.sqlite.prepare(`SELECT count(*) AS count
+      FROM campaign_play_observations WHERE campaign_id = ?`).get(CAMPAIGN_ID)).toEqual({ count: 0 });
+  });
+
+  it("rejects a consistently rewritten opening discovery that disagrees with the accepted scene", () => {
+    const fixture = createVisibilityFixture([], false, "none", null, false, true);
+    const openingPressure = fixture.handle.sqlite.prepare(`SELECT
+        command.command_id AS commandId, event.event_id AS eventId,
+        exposure.exposure_id AS exposureId, event.after_payload_json AS afterPayloadJson
+      FROM campaign_play_events event
+      JOIN campaign_play_commands command ON command.command_id = event.command_id
+        AND command.campaign_id = event.campaign_id
+      JOIN campaign_play_event_exposures exposure ON exposure.event_id = event.event_id
+        AND exposure.campaign_id = event.campaign_id
+      WHERE event.campaign_id = ? AND command.command_kind = 'record_world_event'
+        AND json_extract(command.source_json, '$.system') = 'opening_bootstrap'
+        AND json_extract(command.protected_payload_json, '$.eventClass') = 'discovery'`).get(
+          CAMPAIGN_ID,
+        ) as {
+          commandId: string;
+          eventId: string;
+          exposureId: string;
+          afterPayloadJson: string;
+        } | undefined;
+    expect(openingPressure).toBeDefined();
+    const wrongRefs = [
+      { kind: "actor", id: "actor-player" },
+      { kind: "location", id: "location-a-office" },
+      { kind: "pressure", id: "pressure-a" },
+    ];
+    const afterPayload = JSON.parse(openingPressure!.afterPayloadJson) as {
+      placements: Array<{ actorId: string; locationId: string; placementKind: string }>;
+    };
+    afterPayload.placements = afterPayload.placements.map((placement) =>
+      placement.actorId === "actor-player" && placement.placementKind === "present"
+        ? { ...placement, locationId: "location-a-office" }
+        : placement);
+    fixture.handle.sqlite.exec(`DROP TRIGGER campaign_play_commands_update_immutable;
+      DROP TRIGGER campaign_play_events_update_immutable;
+      DROP TRIGGER campaign_play_event_exposures_update_immutable;`);
+    fixture.handle.sqlite.prepare(`UPDATE campaign_play_commands
+      SET read_scope_json = ?, exposure_policy_json = ?, protected_payload_json = ?
+      WHERE campaign_id = ? AND command_id = ?`).run(
+        JSON.stringify(wrongRefs),
+        JSON.stringify({
+          mode: "projectable",
+          predicates: [{ channel: "direct_perception", locationId: "location-a-office" }],
+        }),
+        JSON.stringify({
+          eventClass: "discovery",
+          performingActorId: null,
+          summary: "Safe sea lanes close earlier after every eclipse.",
+          observableTrace: null,
+          affectedRefs: wrongRefs,
+        }),
+        CAMPAIGN_ID,
+        openingPressure!.commandId,
+      );
+    fixture.handle.sqlite.prepare(`UPDATE campaign_play_events
+      SET affected_refs_json = ?, after_payload_json = ?
+      WHERE campaign_id = ? AND event_id = ?`).run(
+        JSON.stringify(wrongRefs),
+        JSON.stringify(afterPayload),
+        CAMPAIGN_ID,
+        openingPressure!.eventId,
+      );
+    fixture.handle.sqlite.prepare(`UPDATE campaign_play_event_exposures SET location_id = ?
+      WHERE campaign_id = ? AND exposure_id = ?`).run(
+        "location-a-office",
+        CAMPAIGN_ID,
+        openingPressure!.exposureId,
+      );
+
+    expect(() => createCampaignPlayVisibilityService(fixture.handle).projectTurn({
+      token: fixture.visibilityToken,
+      actionContext: null,
+      sourceMoment: null,
+      committedAt: 1_650,
+      mutationId: "opening-pressure-accepted-artifact",
+    })).toThrowError(expect.objectContaining({ code: "visibility_state_invalid" }));
+  });
+
   it("reloads a visible actor event from its persisted summary", () => {
     const fixture = createVisibilityFixture();
     const stored = fixture.handle.sqlite.prepare(`SELECT command.protected_payload_json AS payloadJson,
@@ -1178,7 +1751,6 @@ describe("Campaign Play visibility service", () => {
       committedAt: 1_650,
       mutationId: "visibility-projected",
     });
-
     expect(result.turn.stage).toBe("visibility_projected");
     expect(result.turn.finalWorldVersion).toBeNull();
     expect(result.packet.sourceMoment).toBeNull();
@@ -1196,7 +1768,7 @@ describe("Campaign Play visibility service", () => {
     expect(result.packet.newObservations).toHaveLength(8);
     expect(result.packet.consequences).toHaveLength(8);
     expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
-      "The signal keeper asks Mara what she has learned about the impossible signal.",
+      "Bell Island signals storms that never arrive.",
     );
     expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
       "Mara Venn says the signal lantern has failed while Ilya Venn listens nearby.",
@@ -1262,31 +1834,43 @@ describe("Campaign Play visibility service", () => {
           name: "Ilya Venn",
         }],
       });
-    const premise = result.packet.consequences.find((entry) =>
-      entry.whatChanged === "The signal keeper asks Mara what she has learned about the impossible signal.");
-    expect(premise).toMatchObject({
-      performingActorHandle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-c"),
-    });
+    expect(result.packet.newObservations.map((entry) => entry.text)).not.toContain(
+      "The signal keeper asks Mara what she has learned about the impossible signal.",
+    );
     expect(result.packet.consequences.filter((entry) =>
-      entry !== performed && entry !== premise).every((entry) =>
+      entry !== performed).every((entry) =>
       entry.performingActorHandle === null && entry.performingActorName === null)).toBe(true);
     expect(result.knowledgeInserted).toBeGreaterThanOrEqual(8);
     expect(result.observationsInserted).toBe(8);
 
-    const premiseKnowledge = fixture.handle.sqlite.prepare(`SELECT knowledge.actor_id AS actorId
+    const premiseKnowledgeRows = fixture.handle.sqlite.prepare(`SELECT knowledge.actor_id AS actorId
       FROM campaign_play_actor_knowledge knowledge
-      JOIN campaign_play_commands command ON command.command_id = (
-        SELECT event.command_id FROM campaign_play_events event
-        WHERE event.event_id = knowledge.event_id AND event.campaign_id = knowledge.campaign_id
-      )
+      JOIN campaign_play_events event ON event.event_id = knowledge.event_id
+        AND event.campaign_id = knowledge.campaign_id
+      JOIN campaign_play_commands command ON command.command_id = event.command_id
+        AND command.campaign_id = event.campaign_id
       WHERE knowledge.campaign_id = ?
         AND command.command_kind = 'record_world_event'
         AND json_extract(command.source_json, '$.system') = 'opening_bootstrap'
+        AND json_extract(command.protected_payload_json, '$.eventClass') IN ('dialogue', 'interaction')
       ORDER BY knowledge.actor_id`).all(CAMPAIGN_ID);
-    expect(premiseKnowledge).toEqual([
+    expect(premiseKnowledgeRows).toEqual([
       { actorId: "actor-c" },
       { actorId: "actor-player" },
     ]);
+    const pressureKnowledgeRows = fixture.handle.sqlite.prepare(`SELECT knowledge.actor_id AS actorId
+      FROM campaign_play_actor_knowledge knowledge
+      JOIN campaign_play_events event ON event.event_id = knowledge.event_id
+        AND event.campaign_id = knowledge.campaign_id
+      JOIN campaign_play_commands command ON command.command_id = event.command_id
+        AND command.campaign_id = event.campaign_id
+      WHERE knowledge.campaign_id = ?
+        AND command.command_kind = 'record_world_event'
+        AND json_extract(command.source_json, '$.system') = 'opening_bootstrap'
+        AND json_extract(command.protected_payload_json, '$.eventClass') = 'discovery'
+        AND json_extract(command.protected_payload_json, '$.performingActorId') IS NULL
+      ORDER BY knowledge.actor_id`).all(CAMPAIGN_ID);
+    expect(pressureKnowledgeRows).toEqual([{ actorId: "actor-player" }]);
 
     const after = fixture.states.loadState()!;
     expect(after.authority.worldVersion).toBe(before.authority.worldVersion);
@@ -1368,6 +1952,25 @@ describe("Campaign Play visibility service", () => {
     expect(texts).toContain("Sel Bell arrived at North Harbor Docks.");
     expect(texts).not.toContain("Sel Bell left for North Harbor Docks.");
     expect(texts).toContain("Mara Venn left for Glass Reef Quay.");
+  });
+
+  it("keeps newer obligation and arrival observations ahead of the opening cap", () => {
+    const fixture = createVisibilityFixture(["inspect"], false, "payable", null, true);
+    const result = createCampaignPlayVisibilityService(fixture.handle).projectTurn({
+      token: fixture.visibilityToken,
+      actionContext: null,
+      sourceMoment: null,
+      committedAt: 1_650,
+      mutationId: "visibility-cap-regression",
+    });
+    const texts = result.packet.newObservations.map((entry) => entry.text);
+
+    expect(result.packet.newObservations).toHaveLength(8);
+    expect(texts).toContain("Bell Island signals storms that never arrive.");
+    expect(texts).toContain("Player owes Mara Venn four copper for the signal work.");
+    expect(texts).toContain("Sel Bell arrived at North Harbor Docks.");
+    expect(texts).toContain("Mara Venn left for Glass Reef Quay.");
+    expect(texts).not.toContain("Something changed here before you arrived.");
   });
 
   it("projects and reloads a visible actor's debt as a player receivable", () => {
@@ -1530,8 +2133,8 @@ describe("Campaign Play visibility service", () => {
     const decisionIntents = intents.filter((intent) => intent.decisionBinding !== undefined);
     expect(decisionIntents).toHaveLength(2);
     expect(decisionIntents.map((intent) => intent.label)).toEqual([
-      "Accept — Carry the sealed ledger",
-      "Decline — Leave the sealed ledger",
+      "Accept: Carry the sealed ledger",
+      "Decline: Leave the sealed ledger",
     ]);
     expect(decisionIntents.map((intent) => intent.decisionBinding)).toEqual([
       {
@@ -2268,7 +2871,7 @@ describe("Campaign Play visibility service", () => {
     expect(result.packet.newObservations.map((entry) => entry.title))
       .not.toContain("Along the route");
     expect(result.packet.newObservations.map((entry) => entry.title)).toContain("At the start");
-    expect(result.packet.newObservations).toHaveLength(6);
+    expect(result.packet.newObservations).toHaveLength(7);
     expect(result.packet.visibleRoutes[0]?.state).toBe("open");
     expect(fixture.states.loadState()!.protectedAudit.canonicalBytes)
       .toContain('"routeTriggersJson":"[\\"attempt\\"]"');

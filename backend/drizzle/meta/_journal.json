@@ -484,6 +484,13 @@
       "when": 1787702000000,
       "tag": "0068_campaign_play_explicit_resume",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "6",
+      "when": 1787702100000,
+      "tag": "0069_campaign_play_commitment_nullable_due_guard",
+      "breakpoints": true
     }
   ]
 }

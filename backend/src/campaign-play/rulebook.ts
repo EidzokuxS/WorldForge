@@ -1597,6 +1597,49 @@ function isOpeningPremiseCommand(
     && refsEqual(command.affectedRefs, expectedRefs);
 }
 
+function isOpeningPressureObservationCommand(
+  frame: CampaignPlayRulebookFrame,
+  state: CampaignPlayRulebookSimulation,
+  command: RulebookBatchCommand,
+): boolean {
+  if (
+    command.kind !== "record_world_event"
+    || command.source.kind !== "system"
+    || command.source.system !== "opening_bootstrap"
+    || command.eventClass !== "discovery"
+    || command.performingActorId !== null
+    || command.observableTrace !== null
+    || command.exposure.mode !== "projectable"
+    || command.exposure.predicates.length !== 1
+    || command.exposure.predicates[0]?.channel !== "direct_perception"
+    || command.writeScope.length !== 0
+    || state.human === null
+  ) return false;
+  const playerLocations = operativeActorLocations(frame, state, state.human.actorId);
+  if (playerLocations.length !== 1) return false;
+  const locationId = playerLocations[0]!;
+  const pressureRefs = command.affectedRefs.filter((reference) => reference.kind === "pressure");
+  const expectedRefs: CampaignPlayEntityRef[] = [
+    ref("actor", state.human.actorId),
+    ref("location", locationId),
+    ...(pressureRefs.length === 1 ? [pressureRefs[0]!] : []),
+  ];
+  if (
+    pressureRefs.length !== 1
+    || command.affectedRefs.length !== 3
+    || !refsEqual(command.affectedRefs, expectedRefs)
+    || !refsEqual(command.readScope, expectedRefs)
+    || command.exposure.predicates[0].locationId !== locationId
+  ) return false;
+  const pressure = frame.acceptedWorld.pressures.find((candidate) =>
+    candidate.id === pressureRefs[0]!.id);
+  return pressure !== undefined
+    && pressure.locationIds.includes(locationId)
+    && command.summary === pressure.description
+    && state.pressureStates.some((row) =>
+      row.pressureId === pressure.id && row.status === "active");
+}
+
 function isOpeningRouteRestrictionCommand(
   frame: CampaignPlayRulebookFrame,
   state: CampaignPlayRulebookSimulation,
@@ -1841,10 +1884,26 @@ function validateRefsAndScopes(
   ) {
     deny("invalid_reference", "Commitment affected references must match the exact party, source, and commitment identity.", command, index);
   }
+  if (
+    authority.purpose === "opening"
+    && command.kind === "record_world_event"
+    && command.eventClass === "discovery"
+    && command.performingActorId === null
+    && !isOpeningPressureObservationCommand(frame, state, command)
+  ) {
+    deny(
+      "invalid_exposure",
+      "Opening pressure discovery must match the accepted local pressure and direct perception contract.",
+      command,
+      index,
+    );
+  }
   if (authority.purpose === "character_bootstrap" || authority.purpose === "opening") {
     if (
       command.exposure.mode !== "protected"
-      && !(authority.purpose === "opening" && isOpeningPremiseCommand(frame, state, command))
+      && !(authority.purpose === "opening"
+        && (isOpeningPremiseCommand(frame, state, command)
+          || isOpeningPressureObservationCommand(frame, state, command)))
     ) {
       deny("invalid_exposure", "Bootstrap commands require protected exposure.", command, index);
     }
@@ -1985,6 +2044,7 @@ function validateAvailability(
     : authority.purpose === "opening"
       ? (!modelVisible && command.kind !== "decision_resolve")
         || isOpeningPremiseCommand(frame, state, command)
+        || isOpeningPressureObservationCommand(frame, state, command)
         || isOpeningRouteRestrictionCommand(frame, state, command)
       : authority.purpose === "player_action"
         ? command.kind === "decision_open"
@@ -2915,26 +2975,37 @@ function validateBootstrapCoverage(
   const clocks = commands.filter((command) => command.kind === "initialize_world_time");
   const pressures = commands.filter((command) => command.kind === "initialize_pressure_state");
   const routeRestrictions = commands.filter((command) => command.kind === "set_route_state");
-  const premises = commands.filter((command) => command.kind === "record_world_event");
+  const recordEvents = commands.filter((command) => command.kind === "record_world_event");
+  const premises = recordEvents.filter((command) =>
+    command.eventClass === "dialogue" || command.eventClass === "interaction");
+  const pressureObservations = recordEvents.filter((command) =>
+    command.eventClass === "discovery" && command.performingActorId === null);
   const decisionOpens = commands.filter((command) => command.kind === "decision_open");
   const expectedPressureIds = [...frame.acceptedWorld.pressures].map((pressure) => pressure.id).sort(compareText);
   const actualPressureIds = pressures.map((command) => command.pressureId).sort(compareText);
+  const finalRecordIndex = commands.length - decisionOpens.length - 1;
+  const premiseIndex = finalRecordIndex - pressureObservations.length;
+  const routeRestrictionIndex = premiseIndex - premises.length;
   if (
     placements.length !== 1
     || clocks.length !== 1
     || routeRestrictions.length > 1
     || premises.length > 1
+    || pressureObservations.length !== 1
+    || recordEvents.length !== premises.length + pressureObservations.length
     || decisionOpens.length > 1
     || (routeRestrictions.length === 1 && premises.length !== 1)
     || (decisionOpens.length === 1 && commands.at(-1) !== decisionOpens[0])
-    || (premises.length === 1 && commands.at(-(decisionOpens.length + 1)) !== premises[0])
+    || (pressureObservations.length === 1
+      && commands[finalRecordIndex] !== pressureObservations[0])
+    || (premises.length === 1 && commands[premiseIndex] !== premises[0])
     || (routeRestrictions.length === 1
-      && commands.at(-(decisionOpens.length + premises.length + 1)) !== routeRestrictions[0])
+      && commands[routeRestrictionIndex] !== routeRestrictions[0])
     || commands.length !== 2 + expectedPressureIds.length
-      + routeRestrictions.length + premises.length + decisionOpens.length
+      + routeRestrictions.length + recordEvents.length + decisionOpens.length
     || JSON.stringify(actualPressureIds) !== JSON.stringify(expectedPressureIds)
   ) {
-    deny("invalid_bootstrap_coverage", "Opening must initialize placement, clock, and every pressure exactly once, followed by optional route restriction, player-premise, and one structured decision.");
+    deny("invalid_bootstrap_coverage", "Opening must initialize placement, clock, and every pressure exactly once, then add any optional route restriction and player-premise, exactly one local pressure observation, and an optional structured decision.");
   }
 }
 

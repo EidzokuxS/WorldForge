@@ -42,7 +42,6 @@ import {
   buildWorldCastDetailBatchPrompt,
   buildWorldCastSkeletonPrompt,
   buildWorldConnectionsTransportPrompt,
-  buildWorldFrameAndCastSkeletonPrompt,
   buildWorldFramePrompt,
 } from "./world-prompts.js";
 import { calculateCampaignWorldContentHash } from "./world-snapshot.js";
@@ -1552,15 +1551,27 @@ export function decodeWorldConnectionsTransportPacket(
 
 export function splitWorldCastDetailActorIndices(
   actorCount: number,
-): readonly [readonly number[], readonly number[]] {
+): readonly (readonly number[])[] {
   if (!Number.isInteger(actorCount) || actorCount < 6 || actorCount > 16) {
     throw new RangeError("Cast detail batching requires 6 through 16 skeleton actors.");
   }
   const actorIndices = Array.from({ length: actorCount }, (_, actorIndex) => actorIndex);
-  return [
-    actorIndices.filter((actorIndex) => actorIndex % 2 === 0),
-    actorIndices.filter((actorIndex) => actorIndex % 2 === 1),
-  ];
+  const groups: number[][] = [];
+  for (let blockStart = 0; blockStart < actorIndices.length; blockStart += 4) {
+    const block = actorIndices.slice(blockStart, blockStart + 4);
+    if (block.length === 4) {
+      // Keep each pair mixed across adjacent role/context lanes while
+      // bounding provider payloads to two actors.
+      groups.push([block[0]!, block[2]!], [block[1]!, block[3]!]);
+    } else if (block.length === 3) {
+      groups.push([block[0]!, block[2]!], [block[1]!]);
+    } else if (block.length === 2) {
+      groups.push([block[0]!, block[1]!]);
+    } else if (block.length === 1) {
+      groups.push([block[0]!]);
+    }
+  }
+  return groups;
 }
 
 const MAX_STAGE_ATTEMPTS = 3;
@@ -2142,29 +2153,23 @@ export function createCampaignWorldBuilder(
         await request.observer?.onStageStarted("world_frame");
         throwIfAborted(request.abortSignal);
         try {
-          const combinedSeed = capability.primaryStrategy === "tool_mode";
           const frameDeadlineAt = Math.min(
-            buildDeadlineAt - (CAMPAIGN_WORLD_STAGE_BUDGET_MS * (combinedSeed ? 1 : 2)),
-            Date.now() + (CAMPAIGN_WORLD_STAGE_BUDGET_MS * (combinedSeed ? 2 : 1)),
+            buildDeadlineAt - (CAMPAIGN_WORLD_STAGE_BUDGET_MS * 2),
+            Date.now() + CAMPAIGN_WORLD_STAGE_BUDGET_MS,
           );
           let frame: WorldFramePacket;
-          let skeleton: WorldCastSkeletonPacket | null = null;
           let traces: readonly StageTrace[];
           if (capability.primaryStrategy === "tool_mode") {
             const result = await runStageCall(
               "world_frame",
-              worldFrameAndCastSkeletonToolPacketSchema,
-              buildWorldFrameAndCastSkeletonPrompt(request.source),
-              (value) => decodeWorldFrameAndCastSkeletonToolPacket(
-                value,
-                request.source.playerIdentity,
-              ),
+              worldFrameToolPacketSchema,
+              buildWorldFramePrompt(request.source, true),
+              (value) => decodeWorldFrameToolPacket(value),
               frameDeadlineAt,
               request.abortSignal,
-              "seed",
+              "frame",
             );
-            frame = result.accepted.frame;
-            skeleton = result.accepted.skeleton;
+            frame = result.accepted;
             traces = result.traces;
           } else {
             const result = await runStageCall(
@@ -2190,7 +2195,7 @@ export function createCampaignWorldBuilder(
           evidence.push(stageEvidence);
           await request.observer?.onStageCompleted(stageEvidence);
           throwIfAborted(request.abortSignal);
-          return { frame, skeleton, traces };
+          return { frame, skeleton: null, traces };
         } catch (error) {
           if (error instanceof CampaignWorldBuilderError) throw error;
           if (error instanceof CampaignWorldStageFailure) {
@@ -2213,39 +2218,32 @@ export function createCampaignWorldBuilder(
       await request.observer?.onStageStarted("world_cast");
       throwIfAborted(request.abortSignal);
       let skeletonResult: { accepted: WorldCastSkeletonPacket; traces: readonly StageTrace[] };
-      if (observedFrame.skeleton !== null) {
-        // Tool mode coalesces frame and skeleton into one provider call. Keep
-        // an empty trace list here so world_cast evidence counts only detail
-        // batches below, never an invented skeleton call.
-        skeletonResult = { accepted: observedFrame.skeleton, traces: [] };
-      } else {
-        try {
-          skeletonResult = await runStageCall(
-            "world_cast",
-            createWorldCastSkeletonTransportPacketSchema(frame),
-            buildWorldCastSkeletonPrompt(request.source, frame),
-            (value) => decodeWorldCastSkeletonTransportPacket(
-              frame,
-              value,
-              request.source.playerIdentity,
-            ),
-            Math.min(
-              buildDeadlineAt - CAMPAIGN_WORLD_STAGE_BUDGET_MS,
-              Date.now() + CAMPAIGN_WORLD_STAGE_BUDGET_MS,
-            ),
+      try {
+        skeletonResult = await runStageCall(
+          "world_cast",
+          createWorldCastSkeletonTransportPacketSchema(frame),
+          buildWorldCastSkeletonPrompt(request.source, frame),
+          (value) => decodeWorldCastSkeletonTransportPacket(
+            frame,
+            value,
+            request.source.playerIdentity,
+          ),
+          Math.min(
+            buildDeadlineAt - CAMPAIGN_WORLD_STAGE_BUDGET_MS,
+            Date.now() + CAMPAIGN_WORLD_STAGE_BUDGET_MS,
+          ),
+        );
+      } catch (error) {
+        if (error instanceof CampaignWorldStageFailure) {
+          throw new CampaignWorldBuilderError(
+            "model_contract_failed",
+            error.stage,
+            [...evidence, ...error.stageEvidence],
+            error.message,
+            { cause: error.cause },
           );
-        } catch (error) {
-          if (error instanceof CampaignWorldStageFailure) {
-            throw new CampaignWorldBuilderError(
-              "model_contract_failed",
-              error.stage,
-              [...evidence, ...error.stageEvidence],
-              error.message,
-              { cause: error.cause },
-            );
-          }
-          throw error;
         }
+        throw error;
       }
       throwIfAborted(request.abortSignal);
 
@@ -2306,9 +2304,7 @@ export function createCampaignWorldBuilder(
           });
           const stageEvidence = createAggregatedCampaignWorldStageEvidence(
             "world_cast",
-            capability.primaryStrategy === "tool_mode"
-              ? batchResults.map((result) => result.traces)
-              : [skeletonResult.traces, ...batchResults.map((result) => result.traces)],
+            [skeletonResult.traces, ...batchResults.map((result) => result.traces)],
             null,
             false,
             capability.primaryStrategy,
@@ -2316,11 +2312,7 @@ export function createCampaignWorldBuilder(
           assertSuccessfulEvidence(
             stageEvidence,
             stageEvidence.retryUsed,
-            MAX_STAGE_ATTEMPTS * (
-              capability.primaryStrategy === "tool_mode"
-                ? detailActorIndexGroups.length
-                : 1 + detailActorIndexGroups.length
-            ),
+            MAX_STAGE_ATTEMPTS * (1 + detailActorIndexGroups.length),
           );
           const completionOrdinal = ++branchCompletionOrdinal;
           return {
@@ -2334,9 +2326,7 @@ export function createCampaignWorldBuilder(
               "world_cast",
               [createAggregatedCampaignWorldStageEvidence(
                 "world_cast",
-                capability.primaryStrategy === "tool_mode"
-                  ? [error.traces]
-                  : [skeletonResult.traces, error.traces],
+                [skeletonResult.traces, error.traces],
                 error.stageEvidence[0]?.errorCode ?? "model_contract_failed",
                 true,
                 capability.primaryStrategy,

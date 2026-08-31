@@ -789,8 +789,12 @@ describe("Campaign Play mounted route", () => {
     const journalResponse = await app.request(`/${CAMPAIGN_ID}/play/journal?cursor=0&limit=20`);
     expect(journalResponse.status).toBe(200);
     const journal = campaignPlayJournalPageSchema.parse(await journalResponse.json());
-    expect(journal.entries).toHaveLength(3);
+    expect(journal.entries).toHaveLength(4);
     expect(journal.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        text: "Bell Island signals storms that never arrive.",
+        whereOrRoute: "Bell Island Tower",
+      }),
       expect.objectContaining({
         title: "Your action",
         text: "Mara tests the signal keepers' account against the ringing tower.",

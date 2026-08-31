@@ -2050,6 +2050,95 @@ describe("Campaign Play player-action turn runtime", () => {
     ).get(CAMPAIGN_ID)).toEqual({ count: 1 });
   });
 
+  it("commits a certified paid delivery with a nullable due time and replays idempotently", async () => {
+    const decision = {
+      ...decisionFixture,
+      acceptEffect: {
+        kind: "paid_delivery" as const,
+        title: "Carry the sealed route map",
+        subjectName: "Sealed route map",
+        destinationHandle: deriveCampaignPlayPublicHandle(
+          "location",
+          CAMPAIGN_ID,
+          "location-a",
+        ),
+        feeUnit: "copper" as const,
+        feeAmount: 7,
+        paymentTiming: "on_completion" as const,
+      },
+    };
+    const { handle, state } = await createReadyCampaignWithOpening(10_000, { decision });
+    const time = fixedClock(1_925);
+    const judge = judgeFixture("deterministic");
+    const gameMaster = gameMasterFixture();
+    const runtime = turnRuntime(
+      handle,
+      time,
+      judge,
+      gameMaster,
+      { narrator: playerNarratorFixture() },
+    );
+    const accept = renderedDecisionSuggestion(handle, "accept");
+    const request = {
+      idempotencyKey: "certified-rendered-decision-paid-delivery-null-due",
+      expectedWorldVersion: state.authority.worldVersion,
+      expectedRuntimeRevision: state.authority.runtimeRevision,
+      source: "suggested" as const,
+      choiceHandle: accept.choiceHandle,
+      decisionBinding: accept.decisionBinding,
+    };
+    const admission = runtime.admitAction({ request, submittedAt: 1_925 });
+    const frame = loadCampaignPlayPlayerActionAdmissionFrame(runtime.loadTurn(admission.turnId)!);
+    expect(frame.executionRoute).toMatchObject({ kind: "certified_decision" });
+
+    await advanceUntilStage(runtime, time, admission.turnId, "completed");
+    await runtime.runNarration(admission.turnId);
+
+    expect(judge.judge).not.toHaveBeenCalled();
+    expect(gameMaster.plan).not.toHaveBeenCalled();
+    expect(handle.sqlite.prepare(`SELECT command_kind AS commandKind, COUNT(*) AS count
+      FROM campaign_play_commands WHERE campaign_id = ? AND turn_id = ?
+      GROUP BY command_kind ORDER BY command_kind`).all(CAMPAIGN_ID, admission.turnId)).toEqual([
+      { commandKind: "advance_world_time", count: 1 },
+      { commandKind: "create_player_commitment", count: 1 },
+      { commandKind: "decision_resolve", count: 1 },
+    ]);
+    const command = handle.sqlite.prepare(`SELECT protected_payload_json AS protectedPayloadJson
+      FROM campaign_play_commands
+      WHERE campaign_id = ? AND turn_id = ? AND command_kind = 'create_player_commitment'`).get(
+      CAMPAIGN_ID,
+      admission.turnId,
+    ) as { protectedPayloadJson: string };
+    const protectedPayload = JSON.parse(command.protectedPayloadJson) as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(protectedPayload, "dueWorldTimeMinutes")).toBe(true);
+    expect(protectedPayload).toMatchObject({
+      commitmentKind: "paid_delivery",
+      dueWorldTimeMinutes: null,
+    });
+    expect(handle.sqlite.prepare(`SELECT due_world_time_minutes AS dueWorldTimeMinutes,
+        status, source_receipt_id AS sourceReceiptId
+      FROM campaign_play_commitments WHERE campaign_id = ?`).get(CAMPAIGN_ID)).toMatchObject({
+      dueWorldTimeMinutes: null,
+      status: "active",
+      sourceReceiptId: expect.any(String),
+    });
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_receipts WHERE campaign_id = ? AND turn_id = ?
+        AND command_kind = 'create_player_commitment' AND outcome = 'applied'
+        AND applied_world_mutation = 1`).get(CAMPAIGN_ID, admission.turnId)).toEqual({ count: 1 });
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_commitments WHERE campaign_id = ?`).get(CAMPAIGN_ID)).toEqual({ count: 1 });
+
+    const replay = runtime.admitAction({ request, submittedAt: 1_926 });
+    expect(replay.turnId).toBe(admission.turnId);
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_receipts WHERE campaign_id = ? AND turn_id = ?
+        AND command_kind = 'create_player_commitment'`).get(CAMPAIGN_ID, admission.turnId))
+      .toEqual({ count: 1 });
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_commitments WHERE campaign_id = ?`).get(CAMPAIGN_ID)).toEqual({ count: 1 });
+  });
+
   it("persists an unpaid delivery, collects its cargo, and completes without payment or obligation", async () => {
     const decision = {
       ...decisionFixture,

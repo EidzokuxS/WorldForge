@@ -569,10 +569,92 @@ export function createCampaignPlayApplication(
   };
   const drivers = new Map<string, { turnId: string; promise: Promise<void> }>();
   const narrationDrivers = new Map<string, { turnId: string; promise: Promise<void> }>();
+  type RecoveryWakeup = {
+    expiresAt: number;
+    timer: ReturnType<typeof setTimeout>;
+    promise: Promise<void>;
+    resolve: () => void;
+  };
   const recoveryWakeups = new Map<
     string,
-    { expiresAt: number; timer: ReturnType<typeof setTimeout> }
+    RecoveryWakeup
   >();
+  const immediateRecoveryWakeups = new Map<string, Promise<void>>();
+
+  function scheduleRecoveryWakeup(
+    campaignId: string,
+    expiresAt: number,
+    replaceExisting = false,
+  ): void {
+    const existing = recoveryWakeups.get(campaignId);
+    if (existing && !replaceExisting && existing.expiresAt === expiresAt) return;
+    if (existing) {
+      dependencies.clearTimer(existing.timer);
+      recoveryWakeups.delete(campaignId);
+      existing.resolve();
+    }
+    let resolveWakeup!: () => void;
+    const wakeup = new Promise<void>((resolve) => {
+      resolveWakeup = resolve;
+    });
+    const entry: RecoveryWakeup = {
+      expiresAt,
+      timer: undefined as unknown as ReturnType<typeof setTimeout>,
+      promise: wakeup,
+      resolve: resolveWakeup,
+    };
+    entry.timer = dependencies.setTimer(() => {
+      const current = recoveryWakeups.get(campaignId);
+      if (current !== entry) {
+        entry.resolve();
+        return;
+      }
+      void recoverCampaign(campaignId, entry)
+        .catch(() => {
+          console.error(`Campaign Play recovery wake-up failed for ${campaignId}.`);
+          rearmRecoveryAfterRejection(campaignId, entry);
+        })
+        .finally(() => {
+          if (recoveryWakeups.get(campaignId) === entry) {
+            recoveryWakeups.delete(campaignId);
+          }
+          entry.resolve();
+        });
+    }, Math.max(0, expiresAt - dependencies.now()));
+    recoveryWakeups.set(campaignId, entry);
+  }
+
+  function rearmRecoveryAfterRejection(
+    campaignId: string,
+    expectedWakeup?: RecoveryWakeup,
+  ): void {
+    if (expectedWakeup !== undefined && recoveryWakeups.get(campaignId) !== expectedWakeup) {
+      return;
+    }
+    let handle: CampaignPlayDatabaseHandle | undefined;
+    try {
+      handle = dependencies.openDatabase(campaignId);
+      const active = createCampaignPlayTurnRepository(handle).loadActiveTurn();
+      const leaseExpiresAt = active?.workerLeaseExpiresAt;
+      if (
+        active?.workerLeaseOwner !== null &&
+        active?.workerLeaseOwner !== undefined &&
+        leaseExpiresAt !== null &&
+        leaseExpiresAt !== undefined &&
+        leaseExpiresAt > dependencies.now()
+      ) {
+        scheduleRecoveryWakeup(
+          campaignId,
+          leaseExpiresAt,
+          expectedWakeup !== undefined,
+        );
+      }
+    } catch {
+      console.error(`Campaign Play recovery reinspection failed for ${campaignId}.`);
+    } finally {
+      handle?.close();
+    }
+  }
 
   const createDefaultOpeningRuntime = (
     handle: CampaignPlayDatabaseHandle,
@@ -1023,6 +1105,28 @@ export function createCampaignPlayApplication(
     });
   }
 
+  function scheduleImmediateRecoveryWakeup(campaignId: string): void {
+    if (immediateRecoveryWakeups.has(campaignId)) return;
+    let resolveWakeup!: () => void;
+    const wakeup = new Promise<void>((resolve) => {
+      resolveWakeup = resolve;
+    });
+    immediateRecoveryWakeups.set(campaignId, wakeup);
+    dependencies.setTimer(() => {
+      void recoverCampaign(campaignId)
+        .catch(() => {
+          console.error(`Campaign Play immediate recovery wake-up failed for ${campaignId}.`);
+          rearmRecoveryAfterRejection(campaignId);
+        })
+        .finally(() => {
+          if (immediateRecoveryWakeups.get(campaignId) === wakeup) {
+            immediateRecoveryWakeups.delete(campaignId);
+          }
+          resolveWakeup();
+        });
+    }, 0);
+  }
+
   const schedule = (
     campaignId: string,
     turnId: string,
@@ -1034,35 +1138,33 @@ export function createCampaignPlayApplication(
   ): void => {
     const current = drivers.get(campaignId);
     if (current?.turnId === turnId && resume === null) return;
+    let driverRejected = false;
     const running = (current?.promise ?? Promise.resolve())
       .catch(() => undefined)
       .then(() => drive(campaignId, turnId, resume))
-      .catch(() => undefined);
+      .catch(() => {
+        driverRejected = true;
+      });
     const entry = { turnId, promise: running };
     drivers.set(campaignId, entry);
     void running
       .finally(() => {
-        if (drivers.get(campaignId) === entry) drivers.delete(campaignId);
+        if (drivers.get(campaignId) !== entry) return;
+        drivers.delete(campaignId);
+        if (driverRejected) scheduleImmediateRecoveryWakeup(campaignId);
       });
   };
 
-  const recoverCampaign = async (campaignId: string): Promise<void> => {
+  const recoverCampaign = async (
+    campaignId: string,
+    triggeredWakeup?: RecoveryWakeup,
+  ): Promise<void> => {
     const pendingWakeup = recoveryWakeups.get(campaignId);
-    if (pendingWakeup) {
+    if (pendingWakeup && pendingWakeup !== triggeredWakeup) {
       dependencies.clearTimer(pendingWakeup.timer);
       recoveryWakeups.delete(campaignId);
+      pendingWakeup.resolve();
     }
-    const scheduleRecoveryWakeup = (expiresAt: number): void => {
-      const timer = dependencies.setTimer(() => {
-        const current = recoveryWakeups.get(campaignId);
-        if (!current || current.expiresAt !== expiresAt) return;
-        recoveryWakeups.delete(campaignId);
-        void recoverCampaign(campaignId).catch(() => {
-          console.error(`Campaign Play recovery wake-up failed for ${campaignId}.`);
-        });
-      }, Math.max(0, expiresAt - dependencies.now()));
-      recoveryWakeups.set(campaignId, { expiresAt, timer });
-    };
     while (true) {
       const handle = dependencies.openDatabase(campaignId);
       try {
@@ -1078,7 +1180,11 @@ export function createCampaignPlayApplication(
               campaignId,
             ) as { leaseExpiresAt: number } | undefined;
           if (runningNarration) {
-            scheduleRecoveryWakeup(runningNarration.leaseExpiresAt);
+            scheduleRecoveryWakeup(
+              campaignId,
+              runningNarration.leaseExpiresAt,
+              triggeredWakeup !== undefined,
+            );
             return;
           }
           const pendingNarration = handle.sqlite.prepare(`SELECT turn_id AS turnId
@@ -1095,7 +1201,11 @@ export function createCampaignPlayApplication(
         if (!result) return;
         if (result.recovery.kind === "external_in_flight") {
           if (result.recovery.token.expiresAt > dependencies.now()) {
-            scheduleRecoveryWakeup(result.recovery.token.expiresAt);
+            scheduleRecoveryWakeup(
+              campaignId,
+              result.recovery.token.expiresAt,
+              triggeredWakeup !== undefined,
+            );
           }
           return;
         }
@@ -1116,7 +1226,11 @@ export function createCampaignPlayApplication(
             result.recovery.kind === "deterministic_in_flight" &&
             result.recovery.token.expiresAt > dependencies.now()
           ) {
-            scheduleRecoveryWakeup(result.recovery.token.expiresAt);
+            scheduleRecoveryWakeup(
+              campaignId,
+              result.recovery.token.expiresAt,
+              triggeredWakeup !== undefined,
+            );
           }
           return;
         }
@@ -1381,10 +1495,14 @@ export function createCampaignPlayApplication(
       while (true) {
         const mechanics = drivers.get(campaignId);
         const narration = narrationDrivers.get(campaignId);
-        if (!mechanics && !narration) return;
+        const recovery = recoveryWakeups.get(campaignId);
+        const immediateRecovery = immediateRecoveryWakeups.get(campaignId);
+        if (!mechanics && !narration && !recovery && !immediateRecovery) return;
         await Promise.all([
           mechanics?.promise ?? Promise.resolve(),
           narration?.promise ?? Promise.resolve(),
+          recovery?.promise ?? Promise.resolve(),
+          immediateRecovery ?? Promise.resolve(),
         ]);
       }
     },

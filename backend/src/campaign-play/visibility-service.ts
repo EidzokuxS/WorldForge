@@ -93,7 +93,19 @@ interface ExposureRow {
   eventOrder: number;
   commandKind: string;
   commandPayloadJson: string;
+  commandReadScopeJson: string;
+  commandWriteScopeJson: string;
+  commandExposurePolicyJson: string;
 }
+
+interface OpeningPressureContract {
+  actorId: string;
+  pressureId: string;
+  locationId: string;
+  summary: string;
+}
+
+type OpeningPressureObservation = OpeningPressureContract;
 
 interface EpistemicCandidate {
   actorId: string;
@@ -232,16 +244,152 @@ function parseDecisionAcceptEffect(
   }
 }
 
-function openingPremiseParticipants(exposure: ExposureRow): Set<string> | null {
+function openingPressureObservation(
+  handle: CampaignPlayDatabaseHandle,
+  exposure: ExposureRow,
+  contract: OpeningPressureContract,
+): OpeningPressureObservation | null {
+  if (exposure.commandKind !== "record_world_event") {
+    return null;
+  }
+  const source = parseRecord(exposure.eventSourceJson, "Event source");
+  if (source.kind !== "system" || source.system !== "opening_bootstrap") return null;
+  const payload = parseRecord(exposure.commandPayloadJson, "Command payload");
+  if (
+    payload.eventClass !== "discovery" ||
+    payload.performingActorId !== null ||
+    payload.observableTrace !== null
+  ) return null;
+  if (exposure.channel !== "direct_perception") {
+    throw new CampaignPlayVisibilityError(
+      "visibility_state_invalid",
+      "Opening pressure exposure must use direct perception.",
+    );
+  }
+  const affectedRefs = parseRecordArray(
+    exposure.eventAffectedRefsJson,
+    "Event affected references",
+  );
+  const commandReadScope = parseRecordArray(
+    exposure.commandReadScopeJson,
+    "Opening pressure command read scope",
+  );
+  const commandWriteScope = parseRecordArray(
+    exposure.commandWriteScopeJson,
+    "Opening pressure command write scope",
+  );
+  const commandExposure = parseRecord(
+    exposure.commandExposurePolicyJson,
+    "Opening pressure command exposure policy",
+  );
+  const actorIds = affectedRefs.flatMap((reference) =>
+    reference.kind === "actor" && typeof reference.id === "string" ? [reference.id] : []);
+  const locationIds = affectedRefs.flatMap((reference) =>
+    reference.kind === "location" && typeof reference.id === "string" ? [reference.id] : []);
+  const pressureIds = affectedRefs.flatMap((reference) =>
+    reference.kind === "pressure" && typeof reference.id === "string" ? [reference.id] : []);
+  if (
+    typeof payload.summary !== "string"
+    || exposure.locationId === null
+    || affectedRefs.length !== 3
+    || actorIds.length !== 1
+    || new Set(actorIds).size !== 1
+    || locationIds.length !== 1
+    || new Set(locationIds).size !== 1
+    || locationIds[0] !== exposure.locationId
+    || pressureIds.length !== 1
+    || new Set(pressureIds).size !== 1
+  ) {
+    throw new CampaignPlayVisibilityError(
+      "visibility_state_invalid",
+      "Opening pressure exposure does not match its participant contract.",
+    );
+  }
+  if (
+    actorIds[0] !== contract.actorId
+    || locationIds[0] !== contract.locationId
+    || pressureIds[0] !== contract.pressureId
+    || exposure.locationId !== contract.locationId
+    || payload.summary !== contract.summary
+    || actorLocationFromSnapshot(exposure.eventAfterPayloadJson, contract.actorId)
+      !== contract.locationId
+  ) {
+    throw new CampaignPlayVisibilityError(
+      "visibility_state_invalid",
+      "Opening pressure exposure must match the accepted opening actor, scene, and selected pressure.",
+    );
+  }
+  const expectedRefs = [
+    { kind: "actor", id: contract.actorId },
+    { kind: "location", id: contract.locationId },
+    { kind: "pressure", id: contract.pressureId },
+  ];
+  const expectedExposure = {
+    mode: "projectable",
+    predicates: [{
+      channel: "direct_perception",
+      locationId: contract.locationId,
+    }],
+  };
+  if (
+    canonicalizeCampaignPlayProjection(affectedRefs)
+      !== canonicalizeCampaignPlayProjection(expectedRefs)
+    || canonicalizeCampaignPlayProjection(commandReadScope)
+      !== canonicalizeCampaignPlayProjection(expectedRefs)
+    || commandWriteScope.length !== 0
+    || canonicalizeCampaignPlayProjection(commandExposure)
+      !== canonicalizeCampaignPlayProjection(expectedExposure)
+  ) {
+    throw new CampaignPlayVisibilityError(
+      "visibility_state_invalid",
+      "Opening pressure exposure does not match its durable command authority.",
+    );
+  }
+  const pressure = handle.sqlite.prepare(`SELECT pressure.id, pressure.description
+    FROM world_pressure_locations anchor
+    JOIN world_pressures pressure ON pressure.id = anchor.pressure_id
+      AND pressure.campaign_id = anchor.campaign_id
+    JOIN campaign_play_pressure_states state ON state.pressure_id = pressure.id
+      AND state.campaign_id = anchor.campaign_id
+    WHERE anchor.campaign_id = ? AND anchor.location_id = ?
+      AND pressure.id = ?`).get(
+        handle.campaignId,
+        exposure.locationId,
+        pressureIds[0],
+      ) as { id: string; description: string } | undefined;
+  if (!pressure || pressure.id !== contract.pressureId || pressure.description !== contract.summary) {
+    throw new CampaignPlayVisibilityError(
+      "visibility_state_invalid",
+      "Opening pressure exposure does not name one canonical local pressure with its description.",
+    );
+  }
+  return { ...contract };
+}
+
+function openingPremiseParticipants(
+  handle: CampaignPlayDatabaseHandle,
+  exposure: ExposureRow,
+  openingPressureContract: OpeningPressureContract,
+): Set<string> | null {
   if (exposure.channel !== "direct_perception" || exposure.commandKind !== "record_world_event") {
     return null;
   }
+  const pressureObservation = openingPressureObservation(
+    handle,
+    exposure,
+    openingPressureContract,
+  );
+  if (pressureObservation !== null) return new Set([pressureObservation.actorId]);
   const source = parseRecord(exposure.eventSourceJson, "Event source");
   const payload = parseRecord(exposure.commandPayloadJson, "Command payload");
   const affectedRefs = parseRecordArray(
     exposure.eventAffectedRefsJson,
     "Event affected references",
   );
+  const actorIds = affectedRefs.flatMap((reference) =>
+    reference.kind === "actor" && typeof reference.id === "string" ? [reference.id] : []);
+  const locationIds = affectedRefs.flatMap((reference) =>
+    reference.kind === "location" && typeof reference.id === "string" ? [reference.id] : []);
   if (source.kind !== "system" || source.system !== "opening_bootstrap") return null;
   if (
     (payload.eventClass !== "dialogue" && payload.eventClass !== "interaction")
@@ -253,10 +401,6 @@ function openingPremiseParticipants(exposure: ExposureRow): Set<string> | null {
       "Opening premise exposure does not match its participant contract.",
     );
   }
-  const actorIds = affectedRefs.flatMap((reference) =>
-    reference.kind === "actor" && typeof reference.id === "string" ? [reference.id] : []);
-  const locationIds = affectedRefs.flatMap((reference) =>
-    reference.kind === "location" && typeof reference.id === "string" ? [reference.id] : []);
   if (!(actorIds.length === 2
       && new Set(actorIds).size === 2
       && actorIds.includes(payload.performingActorId)
@@ -471,6 +615,7 @@ function knowledgeKey(candidate: EpistemicCandidate): string {
 function deriveBaseKnowledge(
   handle: CampaignPlayDatabaseHandle,
   actors: readonly ActorRow[],
+  openingPressureContract: OpeningPressureContract,
   exposures: readonly ExposureRow[],
   locations: ReadonlyMap<string, string>,
   routeEvidence: ReadonlyMap<string, Map<RouteTrigger, number[]>>,
@@ -480,7 +625,11 @@ function deriveBaseKnowledge(
   const candidates = new Map<string, EpistemicCandidate>();
   for (const exposure of exposures) {
     if (exposure.channel === "witness_report") continue;
-    const premiseParticipants = openingPremiseParticipants(exposure);
+    const premiseParticipants = openingPremiseParticipants(
+      handle,
+      exposure,
+      openingPressureContract,
+    );
     for (const actor of actors) {
       let trigger: RouteTrigger | undefined;
       let earnedEventOrder = exposure.eventOrder;
@@ -1111,6 +1260,8 @@ function directlyPerceivedObservationSubjects(
 function visibleScene(
   handle: CampaignPlayDatabaseHandle,
   humanActorId: string,
+  openingPressureContract: OpeningPressureContract,
+  pendingOpeningPressureObservations: readonly OpeningPressureObservation[] = [],
 ): {
   currentLocation: CampaignPlayVisibleLocation;
   visibleActors: CampaignPlayVisibleActor[];
@@ -1161,7 +1312,7 @@ function visibleScene(
       travelCost: number;
       state: "open" | "restricted" | "blocked";
     }>;
-  const pressures = handle.sqlite.prepare(`WITH observed_pressure AS (
+  const persistedPressures = handle.sqlite.prepare(`WITH observed_pressure AS (
       SELECT pressure.id, pressure.name, pressure.urgency,
         json_extract(observation.public_entry_json, '$.text') AS summary,
         ROW_NUMBER() OVER (
@@ -1184,13 +1335,67 @@ function visibleScene(
         AND observation.human_actor_id = ?
       WHERE anchor.campaign_id = ? AND anchor.location_id = ? AND state.status = 'active'
     )
-    SELECT id, name, summary FROM observed_pressure
+    SELECT id, name, urgency, summary FROM observed_pressure
     WHERE recency = 1 AND typeof(summary) = 'text' AND length(summary) > 0
-    ORDER BY urgency DESC, name, id LIMIT 4`).all(
+    ORDER BY urgency DESC, name, id`).all(
       humanActorId,
       handle.campaignId,
       location.id,
-    ) as Array<{ id: string; name: string; summary: string }>;
+    ) as Array<{ id: string; name: string; urgency: number; summary: string }>;
+  const pressureById = new Map(persistedPressures.map((pressure) => [pressure.id, pressure]));
+  const pendingPressureIds = [...new Set(pendingOpeningPressureObservations
+    .filter((observation) => observation.locationId === location.id)
+    .map((observation) => observation.pressureId))];
+  if (pendingPressureIds.length > 0) {
+    const pendingPressures = handle.sqlite.prepare(`SELECT pressure.id,
+        pressure.name, pressure.description, pressure.urgency, state.status
+      FROM world_pressure_locations anchor
+      JOIN world_pressures pressure ON pressure.id = anchor.pressure_id
+        AND pressure.campaign_id = anchor.campaign_id
+      JOIN campaign_play_pressure_states state ON state.pressure_id = pressure.id
+        AND state.campaign_id = anchor.campaign_id
+      WHERE anchor.campaign_id = ? AND anchor.location_id = ?
+        AND pressure.id IN (${pendingPressureIds.map(() => "?").join(",")})`).all(
+          handle.campaignId,
+          location.id,
+          ...pendingPressureIds,
+        ) as Array<{
+          id: string;
+          name: string;
+          description: string;
+          urgency: number;
+          status: "active" | "resolved";
+        }>;
+    const pendingPressureById = new Map(pendingPressures.map((pressure) => [pressure.id, pressure]));
+    for (const pending of pendingOpeningPressureObservations) {
+      if (pending.locationId !== location.id) continue;
+      const pressure = pendingPressureById.get(pending.pressureId);
+      if (!pressure || pressure.description !== pending.summary) {
+        throw new CampaignPlayVisibilityError(
+          "visibility_state_invalid",
+          "Pending opening pressure observation does not match its canonical local pressure.",
+        );
+      }
+      if (pressure.status !== "active") continue;
+      pressureById.set(pending.pressureId, {
+        id: pressure.id,
+        name: pressure.name,
+        urgency: pressure.urgency,
+        summary: pending.summary,
+      });
+    }
+  }
+  const selectedOpeningPressure = location.id === openingPressureContract.locationId
+    ? pressureById.get(openingPressureContract.pressureId)
+    : undefined;
+  const otherPressures = [...pressureById.values()]
+    .filter((pressure) => pressure.id !== selectedOpeningPressure?.id)
+    .sort((left, right) => right.urgency - left.urgency ||
+      compareText(left.name, right.name) || compareText(left.id, right.id));
+  const pressures = [
+    ...(selectedOpeningPressure ? [selectedOpeningPressure] : []),
+    ...otherPressures,
+  ].slice(0, CAMPAIGN_PLAY_LIMITS.visiblePressures);
   const possessions = handle.sqlite.prepare(`SELECT possession_id AS possessionId,
       name, quantity FROM campaign_play_actor_possessions
     WHERE campaign_id = ? AND actor_id = ? AND quantity > 0
@@ -1635,7 +1840,7 @@ function decisionIntentLabel(
   branchLabel: string,
 ): string {
   const prefix = disposition === "accept" ? "Accept" : "Decline";
-  const label = `${prefix} — ${branchLabel}`;
+  const label = `${prefix}: ${branchLabel}`;
   if (label.length > CAMPAIGN_PLAY_LIMITS.label) {
     throw new CampaignPlayVisibilityError(
       "visibility_state_invalid",
@@ -2069,6 +2274,12 @@ export function createCampaignPlayVisibilityService(
       const openingArtifactDocument = campaignPlayOpeningArtifactSchema.parse(
         openingArtifact.artifact,
       );
+      const openingPressureContract: OpeningPressureContract = {
+        actorId: human.id,
+        locationId: openingArtifactDocument.narratorFacts.location.id,
+        pressureId: openingArtifactDocument.narratorFacts.pressure.id,
+        summary: openingArtifactDocument.narratorFacts.pressure.description,
+      };
       const openingExposureSeed = openingArtifactDocument.exposureSeed;
       const openingDecision = turn.turnKind === "opening" &&
         openingArtifactDocument.narratorFacts.decision !== null &&
@@ -2088,7 +2299,10 @@ export function createCampaignPlayVisibilityService(
           event.world_version AS eventWorldVersion,
           event.after_payload_json AS eventAfterPayloadJson,
           command.command_kind AS commandKind,
-          command.protected_payload_json AS commandPayloadJson
+          command.protected_payload_json AS commandPayloadJson,
+          command.read_scope_json AS commandReadScopeJson,
+          command.write_scope_json AS commandWriteScopeJson,
+          command.exposure_policy_json AS commandExposurePolicyJson
           , event.rowid AS eventOrder
         FROM campaign_play_event_exposures exposure
         JOIN campaign_play_events event ON event.event_id = exposure.event_id
@@ -2097,10 +2311,19 @@ export function createCampaignPlayVisibilityService(
         WHERE exposure.campaign_id = ? ORDER BY exposure.exposure_id`).all(
           handle.campaignId,
         ) as ExposureRow[];
+      const openingPressureExposures = exposures.filter((exposure) =>
+        openingPressureObservation(handle, exposure, openingPressureContract) !== null);
+      if (openingPressureExposures.length !== 1) {
+        throw new CampaignPlayVisibilityError(
+          "visibility_state_invalid",
+          "Visibility state requires exactly one opening pressure exposure.",
+        );
+      }
       const placements = currentActorLocations(handle);
       const baseKnowledge = deriveBaseKnowledge(
         handle,
         actors,
+        openingPressureContract,
         exposures,
         placements,
         interactionEvidence(handle, turn.turnId),
@@ -2118,6 +2341,18 @@ export function createCampaignPlayVisibilityService(
         left.learnedAtWorldTimeMinutes - right.learnedAtWorldTimeMinutes ||
         left.earnedEventOrder - right.earnedEventOrder ||
         compareText(knowledgeKey(left), knowledgeKey(right)));
+      const openingPressureKnowledge = candidates.filter((candidate) =>
+        candidate.actorId === human.id && openingPressureObservation(
+          handle,
+          candidate.exposure,
+          openingPressureContract,
+        ) !== null);
+      if (openingPressureKnowledge.length !== 1) {
+        throw new CampaignPlayVisibilityError(
+          "visibility_state_invalid",
+          "Visibility projection requires exactly one valid opening pressure observation.",
+        );
+      }
       const actionContext = actionContextForTurn(turn, turnRepository);
       const humanMoveCandidate = actionContext?.intentKind === "move" &&
         actionContext.result === "success"
@@ -2140,14 +2375,39 @@ export function createCampaignPlayVisibilityService(
         .filter((candidate) => !existingObservations.has(
           `${candidate.exposure.eventId}\u0000${candidate.exposure.channel}\u0000${candidate.sourceHash}`,
         ));
-      const prioritizedObservationCandidates = humanMoveCandidate === undefined
-        ? observationCandidates
-        : [
-            humanMoveCandidate,
-            ...observationCandidates.filter((candidate) => candidate !== humanMoveCandidate),
-          ];
-      const observationPlans = prioritizedObservationCandidates
-        .slice(0, 8)
+      const openingPressureCandidates = observationCandidates.filter((candidate) =>
+        openingPressureObservation(
+          handle,
+          candidate.exposure,
+          openingPressureContract,
+        ) !== null);
+      if (openingPressureCandidates.length > 1) {
+        throw new CampaignPlayVisibilityError(
+          "visibility_state_invalid",
+          "Visibility projection found more than one unobserved opening pressure observation.",
+        );
+      }
+      const openingPressureCandidate = openingPressureCandidates[0];
+      const pinnedCandidates = [humanMoveCandidate, openingPressureCandidate]
+        .filter((candidate): candidate is EpistemicCandidate => candidate !== undefined);
+      const pinnedCandidateSet = new Set(pinnedCandidates);
+      const candidateBudget = Math.max(
+        0,
+        CAMPAIGN_PLAY_LIMITS.newObservations - pinnedCandidates.length,
+      );
+      const newestObservationCandidates = observationCandidates
+        .filter((candidate) => !pinnedCandidateSet.has(candidate))
+        .sort((left, right) =>
+          right.learnedAtWorldTimeMinutes - left.learnedAtWorldTimeMinutes ||
+          right.earnedEventOrder - left.earnedEventOrder ||
+          compareText(knowledgeKey(right), knowledgeKey(left)))
+        .slice(0, candidateBudget);
+      const selectedObservationCandidates = [...newestObservationCandidates, ...pinnedCandidates];
+      const observationPlans = selectedObservationCandidates
+        .sort((left, right) =>
+          left.learnedAtWorldTimeMinutes - right.learnedAtWorldTimeMinutes ||
+          left.earnedEventOrder - right.earnedEventOrder ||
+          compareText(knowledgeKey(left), knowledgeKey(right)))
         .map((candidate) => {
           const observationId = stableId("observation", {
             campaignId: handle.campaignId,
@@ -2169,7 +2429,26 @@ export function createCampaignPlayVisibilityService(
             ),
           };
         });
-      const scene = visibleScene(handle, human.id);
+      const pendingOpeningPressureObservations = observationPlans.flatMap((plan) => {
+        const observation = openingPressureObservation(
+          handle,
+          plan.candidate.exposure,
+          openingPressureContract,
+        );
+        return observation === null ? [] : [observation];
+      });
+      if (pendingOpeningPressureObservations.length > 1) {
+        throw new CampaignPlayVisibilityError(
+          "visibility_state_invalid",
+          "Visibility projection scheduled more than one opening pressure observation.",
+        );
+      }
+      const scene = visibleScene(
+        handle,
+        human.id,
+        openingPressureContract,
+        pendingOpeningPressureObservations,
+      );
       const openingDecisionObservation = openingDecision === null
         ? null
         : openingDecisionPublicObservation(

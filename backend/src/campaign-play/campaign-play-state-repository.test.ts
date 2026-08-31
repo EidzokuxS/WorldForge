@@ -288,8 +288,14 @@ function openingBootstrapFrame(state: LoadedCampaignPlayState): CampaignPlayRule
 
 function readyFrame(state: LoadedCampaignPlayState): CampaignPlayRulebookFrame {
   const startingMacroId = state.acceptedReview.locations.find((row) => row.isStarting)!.id;
-  const startLocationId = state.acceptedReview.locations.find((row) =>
-    row.kind === "persistent_sublocation" && row.parentLocationId === startingMacroId)!.id;
+  const startingLocationIds = new Set(state.acceptedReview.locations
+    .filter((row) => row.kind === "persistent_sublocation" && row.parentLocationId === startingMacroId)
+    .map((row) => row.id));
+  const openingPressure = state.acceptedReview.pressures.find((pressure) =>
+    pressure.locationIds.some((locationId) => startingLocationIds.has(locationId)));
+  if (!openingPressure) throw new Error("Ready fixture requires one local opening pressure.");
+  const startLocationId = openingPressure.locationIds.find((locationId) =>
+    startingLocationIds.has(locationId))!;
   return {
     ...openingBootstrapFrame(state),
     setupPhase: "ready",
@@ -642,8 +648,14 @@ describe("Campaign Play atomic Rulebook execution", () => {
     const batchId = "batch-opening-bootstrap";
     const rootParent = { kind: "turn" as const, turnId: "turn-opening" };
     const startingMacroId = frame.acceptedWorld.locations.find((row) => row.isStarting)!.id;
-    const startLocationId = frame.acceptedWorld.locations.find((row) =>
-      row.kind === "persistent_sublocation" && row.parentLocationId === startingMacroId)!.id;
+    const startingLocationIds = new Set(frame.acceptedWorld.locations
+      .filter((row) => row.kind === "persistent_sublocation" && row.parentLocationId === startingMacroId)
+      .map((row) => row.id));
+    const openingPressure = frame.acceptedWorld.pressures.find((pressure) =>
+      pressure.locationIds.some((locationId) => startingLocationIds.has(locationId)));
+    if (!openingPressure) throw new Error("Opening fixture requires one local pressure.");
+    const startLocationId = openingPressure.locationIds.find((locationId) =>
+      startingLocationIds.has(locationId))!;
     const commandInputs = [
       {
         kind: "initialize_player_placement" as const,
@@ -666,6 +678,24 @@ describe("Campaign Play atomic Rulebook execution", () => {
         readScope: [{ kind: "pressure" as const, id: pressure.id }],
         writeScope: [{ kind: "pressure" as const, id: pressure.id }],
       })),
+      {
+        kind: "record_world_event" as const,
+        eventClass: "discovery" as const,
+        performingActorId: null,
+        summary: openingPressure.description,
+        observableTrace: null,
+        affectedRefs: [
+          { kind: "actor" as const, id: "actor-player" },
+          { kind: "location" as const, id: startLocationId },
+          { kind: "pressure" as const, id: openingPressure.id },
+        ],
+        readScope: [
+          { kind: "actor" as const, id: "actor-player" },
+          { kind: "location" as const, id: startLocationId },
+          { kind: "pressure" as const, id: openingPressure.id },
+        ],
+        writeScope: [],
+      },
     ];
     commandInputs[0]!.readScope = [
       { kind: "actor", id: "actor-player" },
@@ -686,7 +716,15 @@ describe("Campaign Play atomic Rulebook execution", () => {
         causalParent,
         source: { kind: "system" as const, system: "opening_bootstrap" as const },
         expectedWorldVersion: frame.worldVersion + order,
-        exposure: { mode: "protected" as const },
+        exposure: commandInput.kind === "record_world_event"
+          ? {
+              mode: "projectable" as const,
+              predicates: [{
+                channel: "direct_perception" as const,
+                locationId: startLocationId,
+              }],
+            }
+          : { mode: "protected" as const },
       };
     });
     const preflight = preflightCampaignPlayRulebook({
@@ -719,7 +757,8 @@ describe("Campaign Play atomic Rulebook execution", () => {
       expect(() => turns.commitDeterministic({
         token: settlementToken,
         transition: "primary_settled",
-        worldVersionAdvance: commands.length,
+        worldVersionAdvance: commands.filter((command) =>
+          command.kind !== "record_world_event").length,
         committedAt: 1_550 + faultIndex,
         mutationId: `runtime-opening-fault-${faultIndex}`,
         mutate(context) {
@@ -745,7 +784,8 @@ describe("Campaign Play atomic Rulebook execution", () => {
     const settled = turns.commitDeterministic({
       token: settlementToken,
       transition: "primary_settled",
-      worldVersionAdvance: commands.length,
+      worldVersionAdvance: commands.filter((command) =>
+        command.kind !== "record_world_event").length,
       committedAt: 1_600,
       mutationId: "runtime-opening-primary-settled",
       mutate(context) {
@@ -764,7 +804,8 @@ describe("Campaign Play atomic Rulebook execution", () => {
       setupPhase: "opening_required",
       openedAt: null,
       worldTimeMinutes: 0,
-      worldVersion: characterState.authority.worldVersion + commands.length,
+      worldVersion: characterState.authority.worldVersion + commands.filter((command) =>
+        command.kind !== "record_world_event").length,
     });
     expect(handle.sqlite.prepare(`SELECT
       (SELECT count(*) FROM actor_placements WHERE campaign_id = ? AND actor_id = 'actor-player' AND placement_kind = 'present') AS placements,
@@ -988,7 +1029,7 @@ describe("Campaign Play atomic Rulebook execution", () => {
       routeStates: 1,
       conditions: 1,
       possessions: 1,
-      exposures: 2,
+      exposures: 3,
     });
     expect(handle.sqlite.prepare(`SELECT name, quantity FROM campaign_play_actor_possessions
       WHERE campaign_id = ? AND actor_id = ?`).get(CAMPAIGN_A, "actor-player"))
@@ -1467,8 +1508,14 @@ describe("Campaign Play atomic Rulebook execution", () => {
 
     const openingFrame = openingBootstrapFrame(characterState);
     const startingMacroId = openingFrame.acceptedWorld.locations.find((row) => row.isStarting)!.id;
-    const destination = openingFrame.acceptedWorld.locations.find((row) =>
-      row.kind === "persistent_sublocation" && row.parentLocationId === startingMacroId)!;
+    const startingLocations = openingFrame.acceptedWorld.locations.filter((row) =>
+      row.kind === "persistent_sublocation" && row.parentLocationId === startingMacroId);
+    const startingLocationIds = new Set(startingLocations.map((row) => row.id));
+    const openingPressure = openingFrame.acceptedWorld.pressures.find((pressure) =>
+      pressure.locationIds.some((locationId) => startingLocationIds.has(locationId)));
+    if (!openingPressure) throw new Error("Commitment fixture requires one local pressure.");
+    const destination = startingLocations.find((location) =>
+      openingPressure.locationIds.includes(location.id))!;
     const agent = openingFrame.acceptedWorld.actors.find((candidate) =>
       candidate.kind === "person"
       && candidate.controller === "agent"
@@ -1527,6 +1574,24 @@ describe("Campaign Play atomic Rulebook execution", () => {
         writeScope: [{ kind: "pressure" as const, id: pressure.id }],
       })),
       {
+        kind: "record_world_event" as const,
+        eventClass: "discovery" as const,
+        performingActorId: null,
+        summary: openingPressure.description,
+        observableTrace: null,
+        affectedRefs: [
+          { kind: "actor" as const, id: "actor-player" },
+          { kind: "location" as const, id: destination.id },
+          { kind: "pressure" as const, id: openingPressure.id },
+        ],
+        readScope: [
+          { kind: "actor" as const, id: "actor-player" },
+          { kind: "location" as const, id: destination.id },
+          { kind: "pressure" as const, id: openingPressure.id },
+        ],
+        writeScope: [],
+      },
+      {
         kind: "decision_open" as const,
         decisionKey,
         actorId: agent.id,
@@ -1566,9 +1631,17 @@ describe("Campaign Play atomic Rulebook execution", () => {
           },
         source: { kind: "system" as const, system: "opening_bootstrap" as const },
         expectedWorldVersion: openingExpectedWorldVersion,
-        exposure: { mode: "protected" as const },
+        exposure: input.kind === "record_world_event"
+          ? {
+              mode: "projectable" as const,
+              predicates: [{
+                channel: "direct_perception" as const,
+                locationId: destination.id,
+              }],
+            }
+          : { mode: "protected" as const },
       };
-      openingExpectedWorldVersion += 1;
+      if (input.kind !== "record_world_event") openingExpectedWorldVersion += 1;
       return command;
     });
     const openingPreflight = preflightCampaignPlayRulebook({
@@ -1597,7 +1670,8 @@ describe("Campaign Play atomic Rulebook execution", () => {
       throw new Error(`Commitment opening preflight failed: ${openingPreflight.denial.code}`);
     }
     repository.commitMechanicalAndRuntime({
-      worldVersionAdvance: openingCommands.length,
+      worldVersionAdvance: openingCommands.filter((command) =>
+        command.kind !== "record_world_event").length,
       event: {
         eventId: "runtime-commitment-opening-settled",
         turnId: "turn-opening",

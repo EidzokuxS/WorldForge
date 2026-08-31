@@ -454,12 +454,37 @@ function openingBatch(): RulebookCommandBatch {
         progress: 0,
         status: "active",
       },
+      {
+        ...commandBase(3, READY_VERSION, root),
+        source: { kind: "system", system: "opening_bootstrap" },
+        kind: "record_world_event",
+        readScope: [
+          { kind: "actor", id: PLAYER_ID },
+          { kind: "location", id: "location-a" },
+          { kind: "pressure", id: "pressure-passage" },
+        ],
+        writeScope: [],
+        exposure: {
+          mode: "projectable",
+          predicates: [{ channel: "direct_perception", locationId: "location-a" }],
+        },
+        eventClass: "discovery",
+        performingActorId: null,
+        summary: "The signal route loses coherence.",
+        observableTrace: null,
+        affectedRefs: [
+          { kind: "actor", id: PLAYER_ID },
+          { kind: "location", id: "location-a" },
+          { kind: "pressure", id: "pressure-passage" },
+        ],
+      },
     ],
   };
 }
 
 function openingBatchWithPremise(): RulebookCommandBatch {
   const batch = openingBatch();
+  const observation = batch.commands.pop()!;
   batch.commands.push({
     ...commandBase(3, READY_VERSION, { kind: "turn", turnId: TURN_ID }),
     source: { kind: "system", system: "opening_bootstrap" },
@@ -484,6 +509,21 @@ function openingBatchWithPremise(): RulebookCommandBatch {
       { kind: "location", id: "location-a" },
     ],
   });
+  batch.commands.push({
+    ...observation,
+    commandId: "command-4",
+    order: 4,
+    causalParent: { kind: "command", commandId: "command-3" },
+  });
+  return batch;
+}
+
+function openingBatchWithPressureObservation(
+  overrides: Record<string, unknown> = {},
+): RulebookCommandBatch {
+  const batch = openingBatch();
+  const observation = batch.commands.pop()!;
+  batch.commands.push({ ...observation, ...overrides } as typeof observation);
   return batch;
 }
 
@@ -2612,14 +2652,104 @@ describe("Campaign Play Rulebook preflight", () => {
     expect(result.checkpoints.at(-1)?.worldVersion).toBe(READY_VERSION);
 
     const extra = structuredClone(batch.commands.at(-1)!);
-    extra.commandId = "command-4";
-    extra.order = 4;
-    extra.causalParent = { kind: "command", commandId: "command-3" };
+    extra.commandId = "command-5";
+    extra.order = 5;
+    extra.causalParent = { kind: "command", commandId: "command-4" };
     batch.commands.push(extra);
     expect(preflightCampaignPlayRulebook({ frame, authority, batch })).toMatchObject({
       accepted: false,
       denial: { code: "invalid_bootstrap_coverage" },
     });
+  });
+
+  it("admits one exact actorless opening pressure observation without changing pressure progress or clock", () => {
+    const frame = frameFixture("opening_required");
+    const authority: CampaignPlayRulebookAuthority = {
+      purpose: "opening",
+      turnId: TURN_ID,
+      actorId: PLAYER_ID,
+      rootParent: { kind: "turn", turnId: TURN_ID },
+      authorizedRefs: allRefs(),
+      witnessActorIds: [],
+      knownWorldEventIds: [],
+    };
+    const batch = openingBatchWithPressureObservation();
+    const result = preflightCampaignPlayRulebook({ frame, authority, batch });
+    expect(result).toMatchObject({ accepted: true });
+    if (!result.accepted) return;
+    expect(result.simulation.worldVersion).toBe(READY_VERSION);
+    expect(result.simulation.worldTimeMinutes).toBe(0);
+    expect(result.simulation.pressureStates).toEqual([{
+      pressureId: "pressure-passage",
+      progress: 0,
+      status: "active",
+      lastAdvancedWorldTimeMinutes: 0,
+    }]);
+
+    const malformed = [
+      openingBatchWithPressureObservation({
+        readScope: [
+          { kind: "actor", id: PLAYER_ID },
+          { kind: "location", id: "location-a" },
+          { kind: "pressure", id: "pressure-passage" },
+          { kind: "pressure", id: "pressure-other" },
+        ],
+        affectedRefs: [
+          { kind: "actor", id: PLAYER_ID },
+          { kind: "location", id: "location-a" },
+          { kind: "pressure", id: "pressure-passage" },
+          { kind: "pressure", id: "pressure-other" },
+        ],
+      }),
+      openingBatchWithPressureObservation({
+        readScope: [
+          { kind: "actor", id: PLAYER_ID },
+          { kind: "location", id: "location-a" },
+          { kind: "pressure", id: "pressure-passage" },
+          { kind: "pressure", id: "pressure-passage" },
+        ],
+        affectedRefs: [
+          { kind: "actor", id: PLAYER_ID },
+          { kind: "location", id: "location-a" },
+          { kind: "pressure", id: "pressure-passage" },
+          { kind: "pressure", id: "pressure-passage" },
+        ],
+      }),
+      openingBatchWithPressureObservation({
+        summary: "The signal route is stable.",
+      }),
+      openingBatchWithPressureObservation({
+        readScope: [
+          { kind: "actor", id: PLAYER_ID },
+          { kind: "location", id: "location-b" },
+          { kind: "pressure", id: "pressure-passage" },
+        ],
+        affectedRefs: [
+          { kind: "actor", id: PLAYER_ID },
+          { kind: "location", id: "location-b" },
+          { kind: "pressure", id: "pressure-passage" },
+        ],
+        exposure: {
+          mode: "projectable",
+          predicates: [{ channel: "direct_perception", locationId: "location-b" }],
+        },
+      }),
+      openingBatchWithPressureObservation({
+        performingActorId: PLAYER_ID,
+      }),
+      openingBatchWithPressureObservation({
+        exposure: { mode: "protected" },
+      }),
+    ];
+    for (const malformedBatch of malformed) {
+      expect(preflightCampaignPlayRulebook({
+        frame,
+        authority,
+        batch: malformedBatch,
+      })).toMatchObject({
+        accepted: false,
+      });
+    }
   });
 
   it("admits one typed outgoing-route restriction immediately before its opening premise", () => {
@@ -2634,6 +2764,7 @@ describe("Campaign Play Rulebook preflight", () => {
       knownWorldEventIds: [],
     };
     const batch = openingBatchWithPremise();
+    const observation = batch.commands.pop()!;
     const premise = batch.commands.pop()!;
     const restriction = {
       ...commandBase(3, READY_VERSION, { kind: "turn" as const, turnId: TURN_ID }),
@@ -2651,6 +2782,12 @@ describe("Campaign Play Rulebook preflight", () => {
       order: 4,
       expectedWorldVersion: READY_VERSION + 1,
       causalParent: { kind: "command", commandId: "command-3" },
+    }, {
+      ...observation,
+      commandId: "command-5",
+      order: 5,
+      expectedWorldVersion: READY_VERSION + 1,
+      causalParent: { kind: "command", commandId: "command-4" },
     });
     const result = preflightCampaignPlayRulebook({ frame, authority, batch });
     expect(result).toMatchObject({ accepted: true });
@@ -3560,7 +3697,7 @@ describe("Campaign Play Rulebook preflight", () => {
     })).toMatchObject({ accepted: false, denial: { code: "invalid_frame" } });
   });
 
-  it("requires exact opening pressure coverage", () => {
+  it("requires exact opening pressure and observation coverage", () => {
     const frame = frameFixture("opening_required");
     const authority: CampaignPlayRulebookAuthority = {
       purpose: "opening",

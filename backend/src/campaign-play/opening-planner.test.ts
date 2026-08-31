@@ -482,9 +482,10 @@ describe("Campaign Play opening planner", () => {
       "initialize_pressure_state",
       "initialize_pressure_state",
       "record_world_event",
+      "record_world_event",
     ]);
     expect(first.artifact.bootstrapCommands.map((command) =>
-      command.expectedWorldVersion)).toEqual([4, 5, 6, 7, 8]);
+      command.expectedWorldVersion)).toEqual([4, 5, 6, 7, 8, 8]);
     expect(first.artifact.playerPremise).toEqual({
       motivation: "Understand the impossible signal",
       commandId: first.artifact.bootstrapCommands[4]!.commandId,
@@ -502,6 +503,37 @@ describe("Campaign Play opening planner", () => {
         predicates: [{ channel: "direct_perception", locationId: "scene-harbor-docks" }],
       },
     });
+    const pressureObservation = first.artifact.bootstrapCommands.find((command) =>
+      command.kind === "record_world_event" && command.eventClass === "discovery");
+    expect(pressureObservation).toMatchObject({
+      kind: "record_world_event",
+      eventClass: "discovery",
+      performingActorId: null,
+      summary: "Signal keepers have stopped outbound traffic.",
+      observableTrace: null,
+      readScope: [
+        { kind: "actor", id: PLAYER_ID },
+        { kind: "location", id: "scene-harbor-docks" },
+        { kind: "pressure", id: "pressure-harbor-lock" },
+      ],
+      writeScope: [],
+      affectedRefs: [
+        { kind: "actor", id: PLAYER_ID },
+        { kind: "location", id: "scene-harbor-docks" },
+        { kind: "pressure", id: "pressure-harbor-lock" },
+      ],
+      exposure: {
+        mode: "projectable",
+        predicates: [{ channel: "direct_perception", locationId: "scene-harbor-docks" }],
+      },
+    });
+    expect(pressureObservation?.expectedWorldVersion).toBe(8);
+    expect(first.artifact.bootstrapCommands.filter((command) =>
+      command.kind === "record_world_event" && command.eventClass === "discovery")).toHaveLength(1);
+    expect(first.artifact.bootstrapCommands.flatMap((command) =>
+      command.kind === "record_world_event"
+        ? command.affectedRefs.filter((reference) => reference.kind === "pressure").map((reference) => reference.id)
+        : [])).toEqual(["pressure-harbor-lock"]);
     expect(Object.isFrozen(first.artifact)).toBe(true);
     expect(Object.isFrozen(first.artifact.actorSchedules)).toBe(true);
 
@@ -511,6 +543,29 @@ describe("Campaign Play opening planner", () => {
     expect(narratorJson).not.toContain("Sel Bell");
     expect(narratorJson).not.toContain("goal-bells-explain");
     expect(narratorJson).not.toContain("Lantern Council");
+    expect(narratorJson).not.toContain("Bell Island signals storms that never arrive.");
+  });
+
+  it("fails closed when the selected pressure is absent or not anchored at the scene", () => {
+    for (const mutateWorld of [
+      (world: CampaignWorldReview) => {
+        world.pressures = world.pressures.filter((pressure) =>
+          pressure.id !== "pressure-harbor-lock");
+      },
+      (world: CampaignWorldReview) => {
+        const pressure = world.pressures.find((candidate) =>
+          candidate.id === "pressure-harbor-lock");
+        pressure!.locationIds = [];
+      },
+    ]) {
+      const world = worldFixture();
+      mutateWorld(world);
+      expect(() => createCampaignPlayOpeningPlanner().compile(
+        frameFixture(world),
+        chosenConditions,
+        proposalFixture(),
+      )).toThrowError(expect.objectContaining({ code: "opening_frame_invalid" }));
+    }
   });
 
   it("keeps the provider contract compact and rejects removed actor material", () => {
@@ -567,7 +622,8 @@ describe("Campaign Play opening planner", () => {
     );
     expect(empty.artifact.playerPremise).toBeNull();
     expect(empty.artifact.bootstrapCommands.some((command) =>
-      command.kind === "record_world_event")).toBe(false);
+      command.kind === "record_world_event"
+      && (command.eventClass === "dialogue" || command.eventClass === "interaction"))).toBe(false);
 
     const missing = proposalFixture();
     missing.playerPremise = null;

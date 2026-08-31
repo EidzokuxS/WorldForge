@@ -537,6 +537,33 @@ function unpaidDeliveryFrame(action: "collect" | "deliver"): CampaignPlayGameMas
   return value;
 }
 
+function openMartaUnpaidDeliveryContactFrame(): CampaignPlayGameMasterFrame {
+  const value = martleContactFrame();
+  value.rulebookFrame.pendingDecisions = [{
+    decisionKey: "decision-marta-unpaid",
+    actorId: "actor-guard",
+    actorHandle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-guard"),
+    kind: "offer",
+    status: "open",
+    sourceTurnId: "turn-marta-offer",
+    summary: "Martle offers to carry the sealed parcel to South Harbor.",
+    acceptLabel: "Take the delivery",
+    declineLabel: "Decline the delivery",
+    acceptEffect: {
+      kind: "unpaid_delivery",
+      title: "Carry the sealed parcel",
+      subjectName: "Sealed parcel",
+      destinationHandle: "south",
+      dueInMinutes: 10,
+    },
+    resolutionEventId: null,
+    resolutionTurnId: null,
+    resolutionDisposition: null,
+    worldVersion: value.rulebookFrame.worldVersion,
+  }];
+  return value;
+}
+
 function scopeOverflowFrame(): CampaignPlayGameMasterFrame {
   const value = frame();
   for (let index = 0; index < 9; index += 1) {
@@ -2034,7 +2061,7 @@ describe("Campaign Play Game Master repeated-dialogue recovery", () => {
     const recoveryBlock = recoveryPrompt.slice(recoveryPrompt.indexOf("GAME_MASTER_RECOVERY"));
     expect(recoveryBlock).toBe([
       "GAME_MASTER_RECOVERY",
-      "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. For mechanical_authority_rejected, make every mechanically durable claim in each event summary agree with the typed resource effects and ROUTE_AUTHORITY. If no typed authority changes a possession, obligation, or route, keep the event summary non-mechanical. For a contact decision mismatch, use kind=none with all decision fields null unless the exact typed paid_delivery or unpaid_delivery contract is present; never recover a work, service, delivery, payment, compensation, debt, duty, custody, access, permission, or relationship transition as a null-effect kind=offer. All schema, authority, continuity, and Rulebook rules above still apply.",
+      "The previous proposal failed the safe checks below. Generate a new proposal from the unchanged frame, ruling, and resolution. Fix every listed check. For repeated_actor_dialogue, do not reuse the matching ACTOR_CONTINUITY.recentOwnActions summary. Answer the current PLAYER_INTENT in new words and include the current question-specific detail. For mechanical_authority_rejected, make every mechanically durable claim in each event summary agree with the typed resource effects and ROUTE_AUTHORITY. If no typed authority changes a possession, obligation, or route, keep the event summary non-mechanical. For a contact decision mismatch, use kind=none with all decision fields null unless the exact typed paid_delivery or unpaid_delivery contract is present; never recover a work, service, delivery, payment, compensation, debt, duty, custody, access, permission, or relationship transition as a null-effect kind=offer. When OPEN_CONTACT_DECISION_CONTEXT is non-null and PLAYER_INTENT merely asks or clarifies the existing decision's fee, destination, subject, or terms, return decisionProposal.kind=none with summary, acceptLabel, declineLabel, and acceptEffect all null. Report only the supplied typed terms; a missing fee or destination remains unknown and must not be invented. Do not create, resolve, replace, or duplicate the pending decision. The existing Accept/Decline controls remain application-owned and authoritative. A genuinely revised actionable offer still requires the exact typed effect and remains subject to the Rulebook duplicate-open guard. All schema, authority, continuity, and Rulebook rules above still apply.",
       "RECOVERY_DIAGNOSTIC",
       JSON.stringify(recoveryFeedback),
       "END_RECOVERY_DIAGNOSTIC",
@@ -6724,6 +6751,105 @@ describe("Campaign Play Game Master generic contact proposer", () => {
       kind: "record_world_event",
       eventClass: "dialogue",
       performingActorId: "actor-guard",
+    });
+  });
+
+  it("clarifies an open Marta unpaid-delivery decision without opening a duplicate", async () => {
+    const method = "Ask Martle Vess what fee she wants and where to take the sealed parcel.";
+    const genericRuling = genericActorContactRuling(
+      method,
+      "Clarify the fee and destination for Martle Vess's existing delivery offer",
+    );
+    const contactFrame = openMartaUnpaidDeliveryContactFrame();
+    const pendingBefore = structuredClone(contactFrame.rulebookFrame.pendingDecisions);
+    const event = {
+      ...proposal.effects[0],
+      summary: "Martle Vess confirms South Harbor as the destination; the fee remains unstated.",
+    };
+    const toolProposal = contactToolTransportForRuling(
+      toolTransport(1, [event]),
+      genericRuling,
+    );
+    const generateObject = vi.fn()
+      .mockResolvedValueOnce({
+        object: toolProposal,
+        trace: trace("tool_mode", undefined, "tool"),
+      })
+      .mockResolvedValueOnce({
+        object: {
+          verdict: "accepted",
+          reason: "The contact clarifies the existing typed destination without creating another decision.",
+          failedChecks: [],
+        },
+        trace: trace("tool_mode", undefined, "tool"),
+      });
+
+    const candidate = await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: contactFrame,
+      ruling: genericRuling,
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      structuredOutputMode: "tool",
+    });
+
+    const proposerPrompt = String(generateObject.mock.calls[0]![0].prompt);
+    expect(proposerPrompt).toContain("OPEN_CONTACT_DECISION_CONTEXT");
+    expect(proposerPrompt).toContain('"decisionKey":"decision-marta-unpaid"');
+    expect(proposerPrompt).toContain('"effectKind":"unpaid_delivery"');
+    expect(proposerPrompt).toContain('"destinationHandle":"south"');
+    expect(proposerPrompt).toContain("return decisionProposal.kind=none");
+    expect(candidate.batch.commands.map((command) => command.kind)).toEqual([
+      "advance_world_time",
+      "record_world_event",
+    ]);
+    expect(candidate.batch.commands).toHaveLength(2);
+    expect(candidate.batch.commands.some((command) => command.kind === "decision_open")).toBe(false);
+    expect(contactFrame.rulebookFrame.pendingDecisions).toEqual(pendingBefore);
+  });
+
+  it("keeps an actionable duplicate open decision behind the Rulebook guard", () => {
+    const method = "Ask Martle Vess what fee she wants and where to take the sealed parcel.";
+    const genericRuling = genericActorContactRuling(method);
+    const actionableDuplicate = {
+      kind: "unpaid_delivery" as const,
+      contactDetail: method,
+      summary: "Carry the sealed parcel to South Harbor.",
+      acceptLabel: "Take the delivery",
+      declineLabel: "Decline the delivery",
+      acceptEffect: {
+        kind: "unpaid_delivery" as const,
+        title: "Carry the sealed parcel",
+        subjectName: "Sealed parcel",
+        destinationHandle: "south",
+        dueInMinutes: 10,
+      },
+    };
+    const contactFrame = openMartaUnpaidDeliveryContactFrame();
+    let thrown: unknown;
+    try {
+      createCampaignPlayGameMaster().compile(
+        contactFrame,
+        genericRuling,
+        resolution,
+        null,
+        proposal,
+        actionableDuplicate,
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({
+      code: "model_contract_failed",
+      denial: {
+        code: "precondition_failed",
+        commandIndex: 2,
+        detail: "Offer decision must target one visible agent actor with a null effect or an authorized delivery destination.",
+      },
     });
   });
 

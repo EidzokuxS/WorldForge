@@ -827,7 +827,7 @@ function assertFrame(frame: CampaignPlayOpeningFrame): void {
     || world.locations.filter((location) => location.kind === "macro" && location.isStarting).length !== 1
     || eligibleActors(world).length < 1
     || eligibleActors(world).length > OPENING_MAX_ELIGIBLE_ACTORS
-    || world.pressures.length + 2 + (frame.player.motivations.length > 0 ? 1 : 0)
+    || world.pressures.length + 3 + (frame.player.motivations.length > 0 ? 1 : 0)
       > CAMPAIGN_PLAY_LIMITS.commandsPerBatch
   ) {
     fail("opening_frame_invalid");
@@ -962,6 +962,7 @@ function compileBootstrapCommands(
   frame: CampaignPlayOpeningFrame,
   startLocationId: string,
   premiseRouteId: string,
+  pressure: CampaignPlayOpeningNarratorFacts["pressure"],
   playerPremise: CampaignPlayOpeningProposal["playerPremise"],
   decision: NonNullable<CampaignPlayOpeningProposal["decision"]> | null,
   openingActorId: string,
@@ -1056,6 +1057,32 @@ function compileBootstrapCommands(
             { kind: "location" as const, id: startLocationId },
           ],
         }]),
+    {
+      kind: "record_world_event" as const,
+      source,
+      readScope: [
+        { kind: "actor" as const, id: frame.player.actorId },
+        { kind: "location" as const, id: startLocationId },
+        { kind: "pressure" as const, id: pressure.id },
+      ],
+      writeScope: [],
+      exposure: {
+        mode: "projectable" as const,
+        predicates: [{
+          channel: "direct_perception" as const,
+          locationId: startLocationId,
+        }],
+      },
+      eventClass: "discovery" as const,
+      performingActorId: null,
+      summary: pressure.description,
+      observableTrace: null,
+      affectedRefs: [
+        { kind: "actor" as const, id: frame.player.actorId },
+        { kind: "location" as const, id: startLocationId },
+        { kind: "pressure" as const, id: pressure.id },
+      ],
+    },
     ...(decision === null
       ? []
       : [{
@@ -1542,6 +1569,7 @@ export function createCampaignPlayOpeningPlanner(
       frame,
       start.sceneLocationId,
       narratorFacts.route.id,
+      narratorFacts.pressure,
       proposal.playerPremise,
       proposal.decision ?? null,
       openingActorId,

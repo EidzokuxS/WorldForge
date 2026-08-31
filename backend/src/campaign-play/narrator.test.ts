@@ -312,14 +312,14 @@ function decisionPacketWithManyIntents(): CampaignPlayNarratorPacket {
     availableIntents: [
       {
         handle: "choice_decision_accept",
-        label: "Accept — Carry the sealed ledger",
+        label: "Accept: Carry the sealed ledger",
         kind: "contact",
         targets: [{ handle: "actor_public_keeper", kind: "actor" }],
         decisionBinding: { ...decisionBinding, disposition: "accept" as const },
       },
       {
         handle: "choice_decision_decline",
-        label: "Decline — Leave the sealed ledger",
+        label: "Decline: Leave the sealed ledger",
         kind: "contact",
         targets: [{ handle: "actor_public_keeper", kind: "actor" }],
         decisionBinding: { ...decisionBinding, disposition: "decline" as const },
@@ -399,6 +399,22 @@ function decisionAndRequiredReplyPacket(): CampaignPlayNarratorPacket {
         kind: "contact" as const,
         targets: [{ handle: "actor_public_keeper", kind: "actor" as const }],
       },
+    ],
+  };
+}
+
+function requiredReplyProposal(detail: string): CampaignPlayNarratorProposal {
+  return {
+    beats: [{
+      purpose: "consequence",
+      observationIndexes: [0],
+      text: "Mara Venn waits for your answer.",
+    }],
+    actionSelections: [
+      { intentIndex: 0, detail: null, mode: null },
+      { intentIndex: 1, detail: null, mode: null },
+      { intentIndex: 7, detail, mode: null },
+      { intentIndex: 2, detail: null, mode: null },
     ],
   };
 }
@@ -1678,6 +1694,64 @@ describe("Campaign Play narrator mechanical truth reviewer", () => {
     expect(generateObject).toHaveBeenCalledTimes(2);
   });
 
+  it("rejects an untyped required reply that accepts future work and payment", async () => {
+    const packet = decisionAndRequiredReplyPacket();
+    const detail = "I accept the porter job and will deliver the crate tomorrow for two silver.";
+    const proposal = requiredReplyProposal(detail);
+    const generateObject = reviewerAwareGenerateObject(
+      async () => ({ object: proposal, trace: trace() }),
+      {
+        verdict: "reject",
+        failedChecks: ["unsupported_obligation_or_payment"],
+      },
+    );
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    await expect(narrator.narrate(
+      requestFor(packet, "narration-untyped-required-reply-acceptance"),
+    )).rejects.toMatchObject({
+      code: "narration_invalid",
+      recoveryFeedback: {
+        diagnostic: "narrator_packet_validation_mismatch",
+        failedChecks: [{ check: "unsupported_obligation_or_payment" }],
+      },
+    });
+    expect(generateObject).toHaveBeenCalledTimes(2);
+    const reviewerPrompt = String(
+      (generateObject.mock.calls[1]![0] as NarratorGenerateObjectOptions).prompt ?? "",
+    );
+    expect(reviewerPrompt).toContain(
+      "requiredReplyDetail on a plain contact intent accepts, promises, undertakes, or creates work, service, delivery, cargo, payment, debt, or another future obligation",
+    );
+    expect(reviewerPrompt).toContain("Spoken words do not count as typed authority");
+    expect(reviewerPrompt).toContain(
+      "an unrelated typed control cannot authorize the plain contact reply",
+    );
+  });
+
+  it("accepts an untyped required reply that negotiates and asks without creating an obligation", async () => {
+    const packet = decisionAndRequiredReplyPacket();
+    const detail = "Could we discuss the silver and clarify whether delivery is due tomorrow?";
+    const proposal = requiredReplyProposal(detail);
+    const generateObject = reviewerAwareGenerateObject(
+      async () => ({ object: proposal, trace: trace() }),
+    );
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const result = await narrator.narrate(
+      requestFor(packet, "narration-untyped-required-reply-negotiation"),
+    );
+    expect(result.narration.suggestedActions).toContainEqual({
+      choiceHandle: "choice_decision_reply",
+      label: `Talk to Mara Venn: “${detail}”`,
+    });
+    expect(generateObject).toHaveBeenCalledTimes(2);
+  });
+
   it("accepts a grounded cargo condition without changing delivery mechanics", async () => {
     const basePacket = activeCommitmentPacket();
     const packet: CampaignPlayNarratorPacket = {
@@ -2041,7 +2115,7 @@ describe("Campaign Play narrator mechanical truth reviewer", () => {
   it("rejects the exact pending-offer two-beat artifact before reviewer validation", async () => {
     const basePacket = decisionAndRequiredReplyPacket();
     const offerText = "Mara Venn offers a salted fish crate load for Crate Yard Nine, due in roughly four hours for 14 Copper.";
-    const exactLiveSecondBeat = "Nothing is marked against your name yet — the offer stands open pending your word, and the settled 14 Copper count from the fish crates stays untouched in his ledger while he waits, stylus resting on the fresh line.";
+    const exactLiveSecondBeat = "Nothing is marked against your name yet. The offer stands open pending your word, and the settled 14 Copper count from the fish crates stays untouched in his ledger while he waits, stylus resting on the fresh line.";
     const offerConsequence = {
       ...basePacket.consequences[0]!,
       whatChanged: offerText,
@@ -2749,7 +2823,7 @@ describe("Campaign Play narrator", () => {
     expect(generated.narration.suggestedActions).toEqual([
       {
         choiceHandle: "choice_decision_accept",
-        label: "Accept — Carry the sealed ledger",
+        label: "Accept: Carry the sealed ledger",
         decisionBinding: {
           decisionKey: "decision-harbor-share",
           actorHandle: "actor_public_keeper",
@@ -2759,7 +2833,7 @@ describe("Campaign Play narrator", () => {
       },
       {
         choiceHandle: "choice_decision_decline",
-        label: "Decline — Leave the sealed ledger",
+        label: "Decline: Leave the sealed ledger",
         decisionBinding: {
           decisionKey: "decision-harbor-share",
           actorHandle: "actor_public_keeper",
@@ -3446,6 +3520,12 @@ describe("Campaign Play narrator", () => {
     );
     expect(String(options.prompt)).toContain(
       "The application adds quotation marks and binds this utterance to the contact intent.",
+    );
+    expect(String(options.prompt)).toContain(
+      "A plain contact reply has no mechanical authority.",
+    );
+    expect(String(options.prompt)).toContain(
+      "those outcomes require an exact application-owned typed decision or commitment on the selected action.",
     );
     expect(String(options.prompt)).not.toContain("Start with one allowed reply verb");
   });
@@ -6356,7 +6436,7 @@ NARRATOR_RECOVERY
 The prior proposal failed the safe checks below. Regenerate a fresh proposal from NARRATOR_PACKET. Correct every listed check. Do not reuse the rejected observation-index or action-selection arrangement. Every schema, grounding, identity, visibility, and action rule above remains unchanged.
 If a failed check requires changing observation coverage or observationIndexes, recompute permittedActorNames, quotedReferenceActorNames, sourceReferenceActorNames, and forbiddenActorNames for every beat from OBSERVATION_ACTOR_NAME_FRAME using its final observationIndexes. Then rewrite each beat so every actor name follows the rules above.
 ACTOR_SCOPE_REPAIR
-Each entry identifies one failed beat field. Keep its final observationIndexes grounded; do not change them merely to authorize a name. If the matched actor is forbidden for every listed observation, remove its canonical name and matched alias from that field. If the matched actor is a quoted reference for any listed observation and is never permitted, keep it only inside balanced quoted dialogue and do not depict that actor speaking, moving, arriving, watching, or otherwise acting. Rewrite the listed field, then check every actor name against OBSERVATION_ACTOR_NAME_FRAME.
+Each entry identifies one failed beat field. Keep its final observationIndexes grounded; do not change them merely to authorize a name. If the matched actor is forbidden for every listed observation, remove its canonical name and matched alias from that field. For a movement or arrival packet, a forbidden actor can still be a visible destination actor: keep the travel or arrival beat actorless, and if orientation matters, mention that actor only in a separate beat with observationIndexes:[] using the exact visible actor name. Do not add the actor to an indexed beat merely to authorize the name. If the matched actor is a quoted reference for any listed observation and is never permitted, keep it only inside balanced quoted dialogue and do not depict that actor speaking, moving, arriving, watching, or otherwise acting. Rewrite the listed field, then check every actor name against OBSERVATION_ACTOR_NAME_FRAME.
 ACTOR_SCOPE_REPAIR_FRAME
 [{"allowedActorNames":["Dren Vask"],"beatIndex":0,"fieldPath":"beats[0].text","matchedActor":{"canonicalName":"Vedris Kast","matchedAlias":"Vedris"},"matchedActorScopeByObservation":[{"observationIndex":0,"scope":"forbidden"}],"observationIndexes":[0]}]
 END_ACTOR_SCOPE_REPAIR_FRAME
@@ -6371,6 +6451,182 @@ END_RECOVERY_DIAGNOSTIC`);
     expect(recoveryPrompt).not.toContain("sentinel-secret");
     expect(recoveryPrompt).not.toContain("provider response");
     expect(recoveryPrompt).not.toContain("Dren Vask says");
+  });
+
+  it("recovers a visible destination actor without attributing it to an arrival observation", async () => {
+    const arrivalConsequence = {
+      observationHandle: "observation-market-arrival",
+      performingActorHandle: null,
+      performingActorName: null,
+      whatChanged: "You arrive at Flood Market.",
+      whereOrRoute: "Flood Market",
+      worldTimeLabel: "Day 1, 00:20",
+      causalCue: "direct_perception" as const,
+    };
+    const packet: CampaignPlayNarratorPacket = {
+      ...packetFixture(),
+      campaignId: "campaign-movement-recovery",
+      turnId: "turn-movement-arrival",
+      turnKind: "player_action",
+      openingContext: null,
+      actionContext: {
+        submittedText: "Go to Flood Market.",
+        intentKind: "move",
+        disposition: "deterministic",
+        result: "success",
+        clarificationQuestion: null,
+      },
+      sourceMoment: null,
+      currentLocation: {
+        handle: "location_public_market",
+        name: "Flood Market",
+        description: "Patched awnings crowd the market road.",
+      },
+      visibleActors: [
+        {
+          handle: "actor_market_keeper",
+          name: "Harbor Keeper Nera",
+          monogram: "HN",
+          descriptor: "A harbor keeper sorting wet rope.",
+          accent: "amber-7",
+        },
+        {
+          handle: "actor_market_clerk",
+          name: "Ferry Clerk Oren",
+          monogram: "FO",
+          descriptor: "A ferry clerk checking tide boards.",
+          accent: "blue-7",
+        },
+      ],
+      visibleRoutes: [],
+      visiblePressures: [],
+      newObservations: [{
+        observationHandle: arrivalConsequence.observationHandle,
+        title: "Arrival",
+        text: arrivalConsequence.whatChanged,
+        whereOrRoute: arrivalConsequence.whereOrRoute,
+        worldTimeLabel: arrivalConsequence.worldTimeLabel,
+        consequence: arrivalConsequence,
+      }],
+      consequences: [arrivalConsequence],
+      observationSubjects: [],
+      availableIntents: [{
+        handle: "choice_contact_keeper",
+        label: "Talk to Harbor Keeper Nera",
+        kind: "contact",
+        targets: [{ handle: "actor_market_keeper", kind: "actor" }],
+      }],
+      elapsedMinutes: 20,
+    };
+    const invalidProposal: CampaignPlayNarratorProposal = {
+      beats: [{
+        purpose: "consequence",
+        observationIndexes: [0],
+        text: "You arrive at Flood Market. Harbor Keeper Nera raises a hand beside the stalls.",
+      }],
+      actionSelections: [{ intentIndex: 0, detail: null, mode: null }],
+    };
+    const validProposal: CampaignPlayNarratorProposal = {
+      beats: [
+        {
+          purpose: "consequence",
+          observationIndexes: [0],
+          text: "You arrive at Flood Market.",
+        },
+        {
+          purpose: "moment",
+          observationIndexes: [],
+          text: "Harbor Keeper Nera sorts wet rope while Ferry Clerk Oren checks the tide boards.",
+        },
+      ],
+      actionSelections: [{ intentIndex: 0, detail: null, mode: null }],
+    };
+    const model = structuredModel();
+    const generationOptions: NarratorGenerateObjectOptions[] = [];
+    let proposalCount = 0;
+    const generateObject = vi.fn(async (options: NarratorGenerateObjectOptions) => {
+      if (String(options.prompt ?? "").includes("NARRATOR_COMPILED_CANDIDATE")) {
+        return {
+          object: {
+            verdict: "approve" as const,
+            failedChecks: [],
+            dimensions: reviewerDimensions([]),
+          },
+          trace: trace(),
+        };
+      }
+      generationOptions.push(options);
+      const proposal = proposalCount++ === 0 ? invalidProposal : validProposal;
+      return { object: proposal, trace: trace() };
+    });
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    const request = {
+      narrationId: "narration-movement-arrival-recovery",
+      packetBytes: canonicalizeCampaignPlayProjection(packet),
+      createdAt: 1_000,
+      model,
+      temperature: 0.5,
+      budget,
+    };
+
+    const firstError = await narrator.narrate(request).then(
+      () => undefined,
+      (cause: unknown) => cause,
+    );
+    expect(firstError).toBeInstanceOf(CampaignPlayNarratorError);
+    if (!(firstError instanceof CampaignPlayNarratorError)) {
+      throw new Error("Expected the arrival actor attribution to be rejected.");
+    }
+    expect(firstError.recoveryFeedback).toMatchObject({
+      diagnostic: "narrator_packet_validation_mismatch",
+      failedChecks: [expect.objectContaining({
+        check: "visible_actor_observation_mismatch",
+        beatIndex: 0,
+        fieldPath: "beats[0].text",
+        observationIndexes: [0],
+        matchedActor: expect.objectContaining({
+          canonicalName: "Harbor Keeper Nera",
+        }),
+        allowedActors: [],
+      })],
+    });
+    const recoveryFeedback = firstError.recoveryFeedback;
+    if (recoveryFeedback === null || recoveryFeedback === undefined) {
+      throw new Error("Expected bounded recovery feedback for the arrival actor.");
+    }
+
+    const recovered = await narrator.narrate({ ...request, recoveryFeedback });
+    expect(recovered.narration.beats).toHaveLength(2);
+    expect(recovered.narration.displayText).toContain("Harbor Keeper Nera sorts wet rope");
+    expect(recovered.narration.suggestedActions).toEqual([{
+      choiceHandle: "choice_contact_keeper",
+      label: "Talk to Harbor Keeper Nera",
+    }]);
+    expect(recovered.modelEvidence).toMatchObject({
+      actualProviderId: "test-provider",
+      responseModel: "test-model",
+      repairUsed: false,
+      retryUsed: false,
+      textFallbackUsed: false,
+    });
+    expect(generationOptions).toHaveLength(2);
+    const recoveryPrompt = String(generationOptions[1]!.prompt ?? "");
+    expect(recoveryPrompt).toContain('"name":"Harbor Keeper Nera"');
+    expect(recoveryPrompt).toContain('"name":"Ferry Clerk Oren"');
+    expect(recoveryPrompt).toContain(
+      "For a movement or arrival packet, a forbidden actor can still be a visible destination actor: keep the travel or arrival beat actorless, and if orientation matters, mention that actor only in a separate beat with observationIndexes:[] using the exact visible actor name.",
+    );
+    expect(recoveryPrompt).toContain('"matchedActor":{"canonicalName":"Harbor Keeper Nera"');
+    expect(recoveryPrompt).not.toContain("private model output");
+    expect(generateObject).toHaveBeenCalledTimes(3);
+    for (const options of generateObject.mock.calls.map(([value]) => value as NarratorGenerateObjectOptions)) {
+      expect(options.model).toBe(model);
+      expect(options.allowRepair).toBe(false);
+      expect(options.allowTextFallback).toBe(false);
+      expect(options.retries).toBe(1);
+    }
   });
 
   it("localizes actor scope for each visible-actor mismatch in recovery", async () => {
