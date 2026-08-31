@@ -1879,6 +1879,107 @@ describe("Campaign Play narrator mechanical truth reviewer", () => {
     }
   });
 
+  it("keeps application-owned decision tool recovery compact and packet-exact", async () => {
+    const packet = r13AgreementPacket();
+    const generateText = vi.spyOn(raindropWorkshop, "generateText");
+    generateText
+      .mockResolvedValueOnce({
+        text: "",
+        finishReason: "tool-calls",
+        toolCalls: [{
+          type: "tool-call",
+          toolName: "structured_output",
+          invalid: true,
+          input: {
+            beats: [{
+              purpose: "consequence",
+              observationIndexes: [0],
+              text: "Mara Venn accepts the sealed packet.",
+            }],
+            selectedIntents: [{ key: "intent0", detail: null, mode: null }],
+          },
+        }],
+        usage: { inputTokens: 10, outputTokens: 4, totalTokens: 14 },
+        response: { modelId: "test-model" },
+      } as never)
+      .mockResolvedValueOnce({
+        text: "",
+        finishReason: "tool-calls",
+        toolCalls: [{
+          type: "tool-call",
+          toolName: "structured_output",
+          input: {
+            beats: [{
+              purpose: "consequence",
+              observationIndexes: [0],
+              text: "You tell Mara Venn that you accept her offer; Mara Venn acknowledges your answer.",
+            }],
+            selectedIntents: [],
+          },
+        }],
+        usage: { inputTokens: 12, outputTokens: 20, totalTokens: 32 },
+        response: { modelId: "test-model" },
+      } as never);
+
+    try {
+      const generateObject = vi.fn(async (options: NarratorGenerateObjectOptions) =>
+        safeGenerateObject(options));
+      const narrator = createCampaignPlayNarrator({
+        generateObject: reviewerAwareGenerateObject(
+          (options) => generateObject(options),
+        ) as unknown as typeof safeGenerateObject,
+      });
+      const request = {
+        ...requestFor(packet, "narration-r13-decision-tool-recovery"),
+        structuredOutputMode: "tool" as const,
+      };
+
+      let firstError: CampaignPlayNarratorError | undefined;
+      try {
+        await narrator.narrate(request);
+      } catch (cause) {
+        firstError = cause as CampaignPlayNarratorError;
+      }
+      expect(firstError).toMatchObject({
+        code: "model_contract_failed",
+        recoveryFeedback: {
+          diagnostic: "narrator_generation_schema_mismatch",
+          failedChecks: [{ check: "generation_schema_invalid" }],
+          recoveryInstruction: "structured_output_tool_call",
+          contractDiagnostic: {
+            phase: "provider_extraction",
+            coordinate: "selectedIntents",
+          },
+        },
+      });
+      await expect(narrator.narrate({
+        ...request,
+        recoveryFeedback: firstError?.recoveryFeedback ?? undefined,
+      })).resolves.toBeDefined();
+
+      const firstGenerationOptions = generateObject.mock.calls[0]![0];
+      const recoveryGenerationOptions = generateObject.mock.calls[1]![0];
+      const recoveryPrompt = String(recoveryGenerationOptions.prompt ?? "");
+      expect(recoveryPrompt).toContain("DECISION_OUTCOME_RECOVERY_BOUNDARY");
+      expect(recoveryPrompt).toContain("NARRATOR_GENERATION_RECOVERY");
+      expect(recoveryPrompt).toContain("STRUCTURED_OUTPUT_TOOL_CALL_RECOVERY");
+      expect(recoveryPrompt).toContain("TOOL_INTENT_SELECTION_FRAME");
+      expect(recoveryPrompt).toContain("selectedIntents as exactly []");
+      expect(recoveryPrompt).toContain("RECOVERY_DIAGNOSTIC");
+      expect(recoveryPrompt).not.toContain("MECHANICAL_TRUTH_DIMENSION_CHECKLIST");
+      expect(firstGenerationOptions.model).toBe(recoveryGenerationOptions.model);
+      expect(firstGenerationOptions.mode).toBe(recoveryGenerationOptions.mode);
+      expect(firstGenerationOptions.temperature).toBe(recoveryGenerationOptions.temperature);
+      expect(firstGenerationOptions.maxOutputTokens).toBe(recoveryGenerationOptions.maxOutputTokens);
+      expect(recoveryPrompt).toContain("campaign-harbor");
+      expect(recoveryPrompt).toContain("turn-r13-packet");
+      expect(generateObject).toHaveBeenCalledTimes(2);
+      expect(generateText).toHaveBeenCalledTimes(2);
+    } finally {
+      generateText.mockRestore();
+    }
+  });
+
   it("keeps the single paid-delivery custody recovery compact and preserves the call seam", async () => {
     const packet = acceptedPaidDeliveryPacket();
     const invalidProposal: CampaignPlayNarratorProposal = {
@@ -2424,6 +2525,120 @@ describe("Campaign Play narrator mechanical truth reviewer", () => {
     expect(reviewerOptions.allowTextFallback).toBe(false);
     expect(reviewerOptions.retries).toBe(1);
     expect(reviewerOptions.model).toBe(request.model);
+  });
+
+  it("keeps application-owned decision recovery compact and acknowledgement-only", async () => {
+    const packet = r13AgreementPacket();
+    const invalidProposal = r13Proposal(
+      "You accept Mara Venn's offer, creating a paid obligation and hidden debt that she will settle later.",
+    );
+    const groundedProposal = r13Proposal(
+      "You tell Mara Venn that you accept her offer; Mara Venn acknowledges your answer.",
+    );
+    const review: ReviewerReviewFixture = {
+      verdict: "reject",
+      failedChecks: [
+        "decision_outcome_exaggerated",
+        "unsupported_obligation_or_payment",
+        "hidden_or_unobserved_fact",
+      ],
+    };
+    let proposalCall = 0;
+    const generateObject = reviewerAwareGenerateObject(
+      async () => {
+        const firstProposal = proposalCall++ === 0;
+        if (!firstProposal) {
+          review.verdict = "approve";
+          review.failedChecks = [];
+        }
+        return {
+          object: firstProposal ? invalidProposal : groundedProposal,
+          trace: trace(),
+        };
+      },
+      review,
+    );
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    const request = requestFor(packet, "narration-r13-decision-recovery");
+
+    let firstError: CampaignPlayNarratorError | undefined;
+    try {
+      await narrator.narrate(request);
+    } catch (cause) {
+      firstError = cause as CampaignPlayNarratorError;
+    }
+    expect(firstError).toMatchObject({
+      code: "narration_invalid",
+      recoveryFeedback: {
+        diagnostic: "narrator_packet_validation_mismatch",
+        failedChecks: [
+          { check: "unsupported_obligation_or_payment" },
+          { check: "hidden_or_unobserved_fact" },
+          { check: "decision_outcome_exaggerated" },
+        ],
+      },
+    });
+    const recoveryFeedback = firstError?.recoveryFeedback ?? undefined;
+    expect(recoveryFeedback).toBeDefined();
+    const recoveryResult = await narrator.narrate({ ...request, recoveryFeedback });
+    expect(recoveryResult.narration.displayText).toContain("Mara Venn acknowledges your answer");
+
+    const firstGenerationOptions = generateObject.mock.calls[0]![0] as NarratorGenerateObjectOptions;
+    const recoveryGenerationOptions = generateObject.mock.calls[2]![0] as NarratorGenerateObjectOptions;
+    const recoveryPrompt = String(recoveryGenerationOptions.prompt ?? "");
+    expect(recoveryPrompt).toContain("DECISION_OUTCOME_RECOVERY_BOUNDARY");
+    expect(recoveryPrompt).toContain("NARRATOR_SEMANTIC_RECOVERY");
+    expect(recoveryPrompt).toContain("public acknowledgement only");
+    expect(recoveryPrompt).toContain("no task, contract, obligation, payment, possession");
+    expect(recoveryPrompt).toContain("hidden or unobserved fact");
+    expect(recoveryPrompt).toContain("future performance");
+    expect(recoveryPrompt).toContain("campaign-harbor");
+    expect(recoveryPrompt).toContain("turn-r13-packet");
+    expect(recoveryPrompt).not.toContain("MECHANICAL_TRUTH_DIMENSION_CHECKLIST");
+    expect(firstGenerationOptions.model).toBe(recoveryGenerationOptions.model);
+    expect(firstGenerationOptions.mode).toBe(recoveryGenerationOptions.mode);
+    expect(firstGenerationOptions.temperature).toBe(recoveryGenerationOptions.temperature);
+    expect(firstGenerationOptions.maxOutputTokens).toBe(recoveryGenerationOptions.maxOutputTokens);
+    expect(generateObject).toHaveBeenCalledTimes(4);
+  });
+
+  it("keeps mixed decision recovery on the full semantic route", async () => {
+    const packet = r13AgreementPacket();
+    const proposal = r13Proposal(
+      "You accept Mara Venn's offer, and the hidden payment obligation is now settled.",
+    );
+    const generateObject = reviewerAwareGenerateObject(
+      async () => ({ object: proposal, trace: trace() }),
+      {
+        verdict: "reject",
+        failedChecks: ["decision_outcome_exaggerated", "unsupported_action_target"],
+      },
+    );
+    const narrator = createCampaignPlayNarrator({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+    const request = requestFor(packet, "narration-r13-decision-mixed-recovery");
+
+    let firstError: CampaignPlayNarratorError | undefined;
+    try {
+      await narrator.narrate(request);
+    } catch (cause) {
+      firstError = cause as CampaignPlayNarratorError;
+    }
+    expect(firstError?.recoveryFeedback).toBeDefined();
+    await expect(narrator.narrate({
+      ...request,
+      recoveryFeedback: firstError?.recoveryFeedback ?? undefined,
+    })).rejects.toMatchObject({ code: "narration_invalid" });
+
+    const recoveryOptions = generateObject.mock.calls[2]![0] as NarratorGenerateObjectOptions;
+    const recoveryPrompt = String(recoveryOptions.prompt ?? "");
+    expect(recoveryPrompt).toContain("Write the next player-visible scene");
+    expect(recoveryPrompt).toContain("The prior proposal failed the safe checks below.");
+    expect(recoveryPrompt).not.toContain("DECISION_OUTCOME_RECOVERY_BOUNDARY");
+    expect(recoveryPrompt).not.toContain("NARRATOR_SEMANTIC_RECOVERY");
   });
 
   it("rejects the exact pending-offer two-beat artifact before reviewer validation", async () => {

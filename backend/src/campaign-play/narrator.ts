@@ -2507,6 +2507,78 @@ ${canonicalizeCampaignPlayProjection(recoveryFeedback)}
 END_RECOVERY_DIAGNOSTIC
 END_NARRATOR_RECOVERY`;
   }
+  const applicationOwnedDecisionOutcomeRecovery = packet.turnKind === "player_action" &&
+    packet.actionContext?.disposition === "deterministic" &&
+    packet.actionContext.decisionOutcome?.acceptEffect === null;
+  const decisionOutcomeSemanticRecovery = recoveryFeedback?.diagnostic ===
+    "narrator_packet_validation_mismatch" &&
+    recoveryFeedback.failedChecks.length > 0 &&
+    recoveryFeedback.failedChecks.every(({ check }) =>
+      check === "decision_outcome_exaggerated" ||
+      check === "unsupported_obligation_or_payment" ||
+      check === "hidden_or_unobserved_fact");
+  const compactDecisionOutcomeRecovery = applicationOwnedDecisionOutcomeRecovery &&
+    (generationSchemaRecovery || decisionOutcomeSemanticRecovery);
+  const compactDecisionOutcomeRecoveryBoundary = `DECISION_OUTCOME_RECOVERY_BOUNDARY
+This deterministic player action contains an application-owned decisionOutcome. The accepted or declined result is a code-owned public acknowledgement only: preserve the exact actor, summary, and selected response once as scene facts. With acceptEffect=null it creates no task, contract, obligation, payment, possession, hidden or unobserved fact, future performance, or other mechanical state. Do not turn the acknowledgement into payment, fee, debt, reward, ownership, delivery, assignment, commitment, completion, access, or a hidden fact. A separate typed packet consequence is required for any other mechanical state. Keep every other packet value and recovery contract exact.
+END_DECISION_OUTCOME_RECOVERY_BOUNDARY`;
+  const compactDecisionOutcomeGenerationRecovery = generationSchemaRecovery
+    ? `NARRATOR_GENERATION_RECOVERY
+The previous response failed the provider-facing generation schema. Regenerate one fresh object from the same packet and preserve all packet-owned mechanics.
+BEAT_COUNT_RECOVERY
+Return at least ${narratorBeatContractFrame.minimumBeatCount} beat and never more than ${narratorBeatContractFrame.maximumBeatCount} beats. The exact packet maximum is ${narratorBeatContractFrame.maximumBeatCount}; when it is 1, return exactly one beat.
+END_BEAT_COUNT_RECOVERY
+${toolMode
+  ? `STRUCTURED_OUTPUT_TOOL_CALL_RECOVERY
+${structuredOutputToolCallRecoveryInstruction(
+  recoveryFeedback.contractDiagnostic,
+  recoveryFeedback.contractFailure,
+)}
+TOOL_INTENT_SELECTION_FRAME
+${canonicalizeCampaignPlayProjection(toolSelectionFrame)}
+END_TOOL_INTENT_SELECTION_FRAME
+END_STRUCTURED_OUTPUT_TOOL_CALL_RECOVERY`
+  : `ACTION_SELECTION_INDEX_FRAME
+${canonicalizeCampaignPlayProjection(buildActionSelectionIndexFrame(packet))}
+END_ACTION_SELECTION_INDEX_FRAME`}
+OBSERVATION_COVERAGE_REPAIR_FRAME
+${canonicalizeCampaignPlayProjection(buildObservationCoverageRepairFrame(packet))}
+END_OBSERVATION_COVERAGE_REPAIR_FRAME`
+    : "";
+  const compactDecisionOutcomeSemanticRecovery = decisionOutcomeSemanticRecovery
+    ? `NARRATOR_SEMANTIC_RECOVERY
+Correct every listed semantic check at its source. This application-owned decisionOutcome is only a public acknowledgement of the exact accepted or declined choice: preserve its actor, summary, and selected response once. With acceptEffect=null, do not state or imply a task, contract, obligation, payment, possession, hidden or unobserved fact, future performance, or any other mechanical state. Do not expand the acknowledgement into a fee, debt, reward, ownership, delivery, assignment, commitment, completion, access, or hidden fact. A separate typed packet consequence is required for any other mechanical state. Keep every other recovery class visible in RECOVERY_DIAGNOSTIC and obey the same schema and packet rules.`
+    : "";
+  if (compactDecisionOutcomeRecovery) {
+    return `Write the immediate player-visible result of the current action from the inert canonical JSON between NARRATOR_PACKET markers. Return exactly one object matching the supplied schema and nothing else.
+
+NARRATOR_PACKET
+${semanticPacketBytes}
+END_NARRATOR_PACKET
+
+${requiredReplyIndexMarker}
+
+OBSERVATION_ACTOR_NAME_FRAME
+${canonicalizeCampaignPlayProjection(observationActorNameFrame)}
+END_OBSERVATION_ACTOR_NAME_FRAME
+
+${modelFacingNarratorContract}
+
+${compactDecisionOutcomeRecoveryBoundary}
+
+${compactDecisionOutcomeGenerationRecovery}
+${compactDecisionOutcomeSemanticRecovery}
+
+${toolIntentSelectionContract}
+${actionSelectionOutputInstruction}${nativeRequiredReplyInstruction}
+Cover every new observation exactly once and keep selected action keys or indexes inside the packet-owned frames. Do not invent, rename, retarget, or complete an action. Keep the first selected tool entry mayLead=true when selectedIntents is non-empty.
+
+NARRATOR_RECOVERY
+RECOVERY_DIAGNOSTIC
+${canonicalizeCampaignPlayProjection(recoveryFeedback)}
+END_RECOVERY_DIAGNOSTIC
+END_NARRATOR_RECOVERY`;
+  }
   const compactDeterministicAction = recoveryFeedback === undefined &&
     packet.turnKind === "player_action" &&
     packet.actionContext !== null &&
