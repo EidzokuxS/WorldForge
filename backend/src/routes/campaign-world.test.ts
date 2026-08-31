@@ -397,19 +397,12 @@ function skeletonTransportPacket(): WorldCastSkeletonTransportPacket {
     homeLocationIndex: actor.homeLocationIndex ?? -1,
     objective: actor.objective,
   });
-  const anchor = (actor: WorldCastSkeletonPacket["actors"][number]) => ({
-    name: actor.name,
-    role: actor.role,
-    summary: actor.summary,
-    homeLocationIndex: actor.homeLocationIndex ?? -1,
-    objective: actor.objective,
-  });
   return {
     keyActorOne: { ...ordinary(actors[0]!), role: "key" },
     keyActorTwo: { ...ordinary(actors[5]!), role: "key" },
-    startingSupport: { ...anchor(actors[1]!), role: "support" },
+    startingSupport: { ...ordinary(actors[1]!), role: "support" },
     supportActor: { ...ordinary(actors[2]!), role: "support" },
-    remoteBackground: { ...anchor(actors[3]!), role: "background" },
+    remoteBackground: { ...ordinary(actors[3]!), role: "background" },
     backgroundActor: { ...ordinary(actors[4]!), role: "background" },
     otherActorOne: { ...ordinary(actors[6]!), role: actors[6]!.role },
     otherActorTwo: { ...ordinary(actors[7]!), role: actors[7]!.role },

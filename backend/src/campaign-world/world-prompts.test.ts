@@ -87,14 +87,9 @@ describe("Campaign World prompts", () => {
     expect(skeletonPrompt).toContain(
       "Return exactly these eight top-level actor slots, in this order: keyActorOne, keyActorTwo, startingSupport, supportActor, remoteBackground, backgroundActor, otherActorOne, otherActorTwo, with no extra keys.",
     );
-    expect(skeletonPrompt).toContain("Every slot is one object. keyActorOne and keyActorTwo use role key; startingSupport and supportActor use role support; remoteBackground and backgroundActor use role background; otherActorOne and otherActorTwo use role key, support, or background.");
-    expect(skeletonPrompt).toContain("The startingSupport and remoteBackground anchor objects contain exactly these five keys in this order: name, role, summary, homeLocationIndex, objective.");
-    expect(skeletonPrompt).toContain("The other six actor objects contain exactly these six keys in this order: name, role, summary, presentLocationIndex, homeLocationIndex, objective.");
-    expect(skeletonPrompt).toContain("Code assigns startingSupport's present scene to the first persistent scene under the accepted starting macro and remoteBackground's present scene to the first persistent scene outside that macro.");
-    expect(skeletonPrompt).toContain("Do not emit, copy, infer, calculate, or mention a presentLocationIndex for either anchor.");
-    expect(skeletonPrompt).not.toContain("startingSupport.presentLocationIndex must equal STARTING_SUPPORT_SLOT.index");
-    expect(skeletonPrompt).not.toContain("remoteBackground.presentLocationIndex must equal REMOTE_BACKGROUND_SLOT.index");
-    expect(skeletonPrompt).not.toContain("omit presentLocationIndex");
+    expect(skeletonPrompt).toContain("keyActorOne and keyActorTwo use role key; startingSupport and supportActor use role support; remoteBackground and backgroundActor use role background; otherActorOne and otherActorTwo use role key, support, or background.");
+    expect(skeletonPrompt).toContain("Every slot is one object containing exactly these six keys in this order: name, role, summary, presentLocationIndex, homeLocationIndex, objective.");
+    expect(skeletonPrompt).toContain("Copy startingSupport.presentLocationIndex exactly from STARTING_SUPPORT_SLOT.index and remoteBackground.presentLocationIndex exactly from REMOTE_BACKGROUND_SLOT.index.");
     expect(skeletonPrompt).toContain("Use homeLocationIndex -1 when no home scene is needed");
     expect(skeletonPrompt).toContain("STARTING_SUPPORT_SLOT");
     expect(skeletonPrompt).toContain("REMOTE_BACKGROUND_SLOT");
@@ -322,24 +317,11 @@ describe("Campaign World prompts", () => {
       "Names must identify distinct people, not repeated aliases.",
     );
     expect(prompt).toContain(
-      "Return exactly one object in each slot. keyActorOne and keyActorTwo use role key; startingSupport and supportActor use role support; remoteBackground and backgroundActor use role background; otherActorOne and otherActorTwo use role key, support, or background.",
+      "Every actor object contains exactly these six keys in this order: name, role, summary, presentLocationIndex, homeLocationIndex, objective.",
     );
     expect(prompt).toContain(
-      "The startingSupport and remoteBackground anchor objects contain exactly these five keys in this order: name, role, summary, homeLocationIndex, objective.",
+      "Set startingSupport.presentLocationIndex to the first persistent scene under the starting macro and remoteBackground.presentLocationIndex to the first persistent scene outside it.",
     );
-    expect(prompt).toContain(
-      "The other six actor objects contain exactly these six keys in this order: name, role, summary, presentLocationIndex, homeLocationIndex, objective.",
-    );
-    expect(prompt).toContain(
-      "Code assigns the present scene for startingSupport to the first persistent scene under the accepted starting macro and assigns the present scene for remoteBackground to the first persistent scene outside that macro.",
-    );
-    expect(prompt).toContain(
-      "Do not emit, copy, infer, calculate, or mention a presentLocationIndex for either anchor.",
-    );
-    expect(prompt).not.toContain("Use this exact anchor table");
-    expect(prompt).not.toContain("Copy these exact integers directly");
-    expect(prompt).not.toContain("startingSupport.presentLocationIndex =");
-    expect(prompt).not.toContain("remoteBackground.presentLocationIndex =");
     expect(prompt).toContain("never return locationKey or any other free-form reference");
     for (const forbidden of ["keyActors", "supportActors", "backgroundActors", "otherActors"]) {
       expect(prompt).not.toContain(forbidden);
@@ -349,16 +331,11 @@ describe("Campaign World prompts", () => {
       prompt.indexOf("END_WORLD_CAST_SKELETON_IN_SAME_PACKET"),
     );
     expect(skeletonParagraph).toContain(
-      "The startingSupport and remoteBackground anchor objects contain exactly these five keys in this order: name, role, summary, homeLocationIndex, objective.",
+      "Every actor object contains exactly these six keys in this order: name, role, summary, presentLocationIndex, homeLocationIndex, objective.",
     );
     expect(skeletonParagraph).toContain(
-      "The other six actor objects contain exactly these six keys in this order: name, role, summary, presentLocationIndex, homeLocationIndex, objective.",
+      "Set startingSupport.presentLocationIndex to the first persistent scene under the starting macro and remoteBackground.presentLocationIndex to the first persistent scene outside it.",
     );
-    expect(skeletonParagraph).toContain(
-      "Do not emit, copy, infer, calculate, or mention a presentLocationIndex for either anchor.",
-    );
-    expect(skeletonParagraph).not.toContain("Use this exact anchor table");
-    expect(skeletonParagraph).not.toContain("Copy these exact integers directly");
   });
 
   it("allows cast placements only at exact concrete scenes", () => {

@@ -394,14 +394,6 @@ const worldCastSkeletonTransportActorFieldsSchema = z.object({
   objective: providerObjectiveSchema,
 }).strict();
 
-const worldCastSkeletonTransportAnchorFieldsSchema = z.object({
-  name: providerNameSchema,
-  role: z.enum(actorRoleValues),
-  summary: providerSummarySchema,
-  homeLocationIndex: z.number().int(),
-  objective: providerObjectiveSchema,
-}).strict();
-
 const worldCastSkeletonTransportSlotNames = [
   "keyActorOne",
   "keyActorTwo",
@@ -462,13 +454,13 @@ function addTransportActorNameCheck<
 const transportKeyActorSchema = worldCastSkeletonTransportActorFieldsSchema.extend({
   role: z.literal("key"),
 }).strict();
-const transportStartingSupportSchema = worldCastSkeletonTransportAnchorFieldsSchema.extend({
+const transportStartingSupportSchema = worldCastSkeletonTransportActorFieldsSchema.extend({
   role: z.literal("support"),
 }).strict();
 const transportSupportActorSchema = worldCastSkeletonTransportActorFieldsSchema.extend({
   role: z.literal("support"),
 }).strict();
-const transportRemoteBackgroundSchema = worldCastSkeletonTransportAnchorFieldsSchema.extend({
+const transportRemoteBackgroundSchema = worldCastSkeletonTransportActorFieldsSchema.extend({
   role: z.literal("background"),
 }).strict();
 const transportBackgroundActorSchema = worldCastSkeletonTransportActorFieldsSchema.extend({
@@ -522,11 +514,6 @@ export function createWorldCastSkeletonTransportPacketSchema(
       presentLocationIndex: presentLocationIndexSchema,
       homeLocationIndex: homeLocationIndexSchema,
     }).strict();
-  const anchorSchema = <TRole extends z.ZodTypeAny>(roleSchema: TRole) =>
-    worldCastSkeletonTransportAnchorFieldsSchema.extend({
-      role: roleSchema,
-      homeLocationIndex: homeLocationIndexSchema,
-    }).strict();
   const startingMacro = frame.locations.find((location) =>
     location.kind === "macro" && location.isStarting
   );
@@ -541,9 +528,15 @@ export function createWorldCastSkeletonTransportPacketSchema(
   }
 
   const keyActorSchema = actorSchema(z.literal("key"), presentLocationIndexSchema);
-  const startingSupportSchema = anchorSchema(z.literal("support"));
+  const startingSupportSchema = actorSchema(
+    z.literal("support"),
+    z.literal(startingSupportLocationIndex),
+  );
   const supportActorSchema = actorSchema(z.literal("support"), presentLocationIndexSchema);
-  const remoteBackgroundSchema = anchorSchema(z.literal("background"));
+  const remoteBackgroundSchema = actorSchema(
+    z.literal("background"),
+    z.literal(remoteBackgroundLocationIndex),
+  );
   const backgroundActorSchema = actorSchema(z.literal("background"), presentLocationIndexSchema);
   const otherActorSchema = actorSchema(z.enum(actorRoleValues), presentLocationIndexSchema);
 
@@ -593,30 +586,6 @@ function transportActorWithRole(
   };
 }
 
-function transportAnchorActorWithRole(
-  actor: {
-    name: string;
-    role: (typeof actorRoleValues)[number];
-    summary: string;
-    homeLocationIndex: number;
-    objective: string;
-  },
-  role: (typeof actorRoleValues)[number],
-  presentLocationIndex: number,
-): WorldCastSkeletonPacket["actors"][number] {
-  if (actor.role !== role) {
-    throw new Error(`Transport actor role must be ${role}.`);
-  }
-  return {
-    name: actor.name,
-    role,
-    summary: actor.summary,
-    presentLocationIndex,
-    homeLocationIndex: transportHomeLocationIndex(actor.homeLocationIndex),
-    objective: actor.objective,
-  };
-}
-
 export function decodeWorldCastSkeletonTransportPacket(
   frame: Pick<WorldFramePacket, "locations">,
   transport: WorldCastSkeletonTransportPacket,
@@ -641,9 +610,9 @@ export function decodeWorldCastSkeletonTransportPacket(
   const actors: WorldCastSkeletonPacket["actors"] = [
     transportActorWithRole(transport.keyActorOne, "key", transport.keyActorOne.presentLocationIndex),
     transportActorWithRole(transport.keyActorTwo, "key", transport.keyActorTwo.presentLocationIndex),
-    transportAnchorActorWithRole(transport.startingSupport, "support", startingSupportLocationIndex),
+    transportActorWithRole(transport.startingSupport, "support", startingSupportLocationIndex),
     transportActorWithRole(transport.supportActor, "support", transport.supportActor.presentLocationIndex),
-    transportAnchorActorWithRole(transport.remoteBackground, "background", remoteBackgroundLocationIndex),
+    transportActorWithRole(transport.remoteBackground, "background", remoteBackgroundLocationIndex),
     transportActorWithRole(transport.backgroundActor, "background", transport.backgroundActor.presentLocationIndex),
     transportActorWithRole(transport.otherActorOne, transport.otherActorOne.role, transport.otherActorOne.presentLocationIndex),
     transportActorWithRole(transport.otherActorTwo, transport.otherActorTwo.role, transport.otherActorTwo.presentLocationIndex),

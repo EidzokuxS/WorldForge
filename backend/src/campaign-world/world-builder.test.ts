@@ -351,19 +351,20 @@ function skeletonTransportPacket(): WorldCastSkeletonTransportPacket {
     homeLocationIndex: actor.homeLocationIndex ?? -1,
     objective: actor.objective,
   });
-  const anchor = (actor: WorldCastSkeletonPacket["actors"][number]) => ({
-    name: actor.name,
-    role: actor.role,
-    summary: actor.summary,
-    homeLocationIndex: actor.homeLocationIndex ?? -1,
-    objective: actor.objective,
-  });
   return {
     keyActorOne: { ...ordinary(actors[0]!), role: "key" },
     keyActorTwo: { ...ordinary(actors[5]!), role: "key" },
-    startingSupport: { ...anchor(actors[1]!), role: "support" },
+    startingSupport: {
+      ...ordinary(actors[1]!),
+      role: "support",
+      presentLocationIndex: 0,
+    },
     supportActor: { ...ordinary(actors[2]!), role: "support" },
-    remoteBackground: { ...anchor(actors[3]!), role: "background" },
+    remoteBackground: {
+      ...ordinary(actors[3]!),
+      role: "background",
+      presentLocationIndex: 2,
+    },
     backgroundActor: { ...ordinary(actors[4]!), role: "background" },
     otherActorOne: ordinary(actors[6]!),
     otherActorTwo: ordinary(actors[7]!),
@@ -800,6 +801,14 @@ function combinedToolPacketForStartingMacro(
 ): WorldFrameAndCastSkeletonToolPacket {
   const packet = JSON.parse(JSON.stringify(combinedToolPacket())) as WorldFrameAndCastSkeletonToolPacket;
   packet.startingMacroIndex = startingMacroIndex;
+  const anchorPlacements = [
+    { startingSupport: 0, remoteBackground: 2 },
+    { startingSupport: 2, remoteBackground: 0 },
+    { startingSupport: 4, remoteBackground: 0 },
+  ] as const;
+  const placements = anchorPlacements[startingMacroIndex];
+  packet.startingSupport.presentLocationIndex = placements.startingSupport;
+  packet.remoteBackground.presentLocationIndex = placements.remoteBackground;
   return packet;
 }
 
@@ -2053,11 +2062,19 @@ describe("Campaign World staged builder", () => {
     expect(worldFrameAndCastSkeletonToolPacketSchema.safeParse({
       ...base,
       startingSupport: { ...base.startingSupport, presentLocationIndex: 1 },
-    }).success).toBe(false);
+    }).success).toBe(true);
+    expect(() => decodeWorldFrameAndCastSkeletonToolPacket({
+      ...base,
+      startingSupport: { ...base.startingSupport, presentLocationIndex: 1 },
+    })).toThrow(/expected 0|present location must match/);
     expect(worldFrameAndCastSkeletonToolPacketSchema.safeParse({
       ...base,
       remoteBackground: { ...base.remoteBackground, presentLocationIndex: 0 },
-    }).success).toBe(false);
+    }).success).toBe(true);
+    expect(() => decodeWorldFrameAndCastSkeletonToolPacket({
+      ...base,
+      remoteBackground: { ...base.remoteBackground, presentLocationIndex: 0 },
+    })).toThrow(/expected 2|present location must match/);
     expect(worldFrameAndCastSkeletonToolPacketSchema.safeParse({
       ...base,
       otherActorTwo: { ...base.otherActorTwo, name: "  MARA   VENN " },
@@ -2080,7 +2097,7 @@ describe("Campaign World staged builder", () => {
     }).success).toBe(false);
   });
 
-  it("decodes the fixed combined anchor map for every starting macro and rejects anchor placement fields", () => {
+  it("decodes the fixed combined anchor map for every starting macro and rejects wrong anchor placements", () => {
     const anchorMap = [
       { startingMacroIndex: 0 as const, startingSupport: 0, remoteBackground: 2 },
       { startingMacroIndex: 1 as const, startingSupport: 2, remoteBackground: 0 },
@@ -2094,14 +2111,14 @@ describe("Campaign World staged builder", () => {
       expect(decoded.skeleton.actors[2]!.presentLocationIndex).toBe(expected.startingSupport);
       expect(decoded.skeleton.actors[4]!.presentLocationIndex).toBe(expected.remoteBackground);
 
-      const legacyAnchorPacket = {
+      const wrongAnchorPacket = {
         ...JSON.parse(JSON.stringify(packet)),
         remoteBackground: {
           ...packet.remoteBackground,
-          presentLocationIndex: expected.remoteBackground,
+          presentLocationIndex: expected.startingSupport,
         },
       };
-      expect(() => decodeWorldFrameAndCastSkeletonToolPacket(legacyAnchorPacket)).toThrow();
+      expect(() => decodeWorldFrameAndCastSkeletonToolPacket(wrongAnchorPacket)).toThrow();
     }
   });
 
@@ -2357,11 +2374,11 @@ describe("Campaign World staged builder", () => {
         }
         expect(prompt).toContain("WORLD_CAST_RECOVERY:");
         expect(prompt).toContain(
-          "The startingSupport and remoteBackground anchor objects contain exactly name, role, summary, homeLocationIndex, and objective; the other six actor objects contain exactly name, role, summary, presentLocationIndex, homeLocationIndex, and objective.",
+          "Every actor object contains exactly name, role, summary, presentLocationIndex, homeLocationIndex, and objective.",
         );
         expect(prompt).toContain("keyActorOne and keyActorTwo use role key; startingSupport and supportActor use role support; remoteBackground and backgroundActor use role background; otherActorOne and otherActorTwo use role key, support, or background.");
         expect(prompt).toContain(
-          "Code assigns both anchor present scenes from the accepted frame; do not emit, copy, infer, calculate, or mention a presentLocationIndex for either anchor.",
+          "Copy startingSupport.presentLocationIndex exactly from STARTING_SUPPORT_SLOT.index and remoteBackground.presentLocationIndex exactly from REMOTE_BACKGROUND_SLOT.index.",
         );
         expect(prompt).not.toContain("Fixed groups omit role");
         expect(prompt).not.toContain("omit presentLocationIndex");

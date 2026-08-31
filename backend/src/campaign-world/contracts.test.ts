@@ -191,19 +191,20 @@ function skeletonTransportFixture(): WorldCastSkeletonTransportPacket {
     homeLocationIndex: actor.homeLocationIndex ?? -1,
     objective: actor.objective,
   });
-  const anchor = (actor: WorldCastSkeletonPacket["actors"][number]) => ({
-    name: actor.name,
-    role: actor.role,
-    summary: actor.summary,
-    homeLocationIndex: actor.homeLocationIndex ?? -1,
-    objective: actor.objective,
-  });
   return {
     keyActorOne: { ...ordinary(actors[0]!), role: "key" },
     keyActorTwo: { ...ordinary(actors[5]!), role: "key" },
-    startingSupport: { ...anchor(actors[1]!), role: "support" },
+    startingSupport: {
+      ...ordinary(actors[1]!),
+      role: "support",
+      presentLocationIndex: 0,
+    },
     supportActor: { ...ordinary(actors[2]!), role: "support" },
-    remoteBackground: { ...anchor(actors[3]!), role: "background" },
+    remoteBackground: {
+      ...ordinary(actors[3]!),
+      role: "background",
+      presentLocationIndex: 2,
+    },
     backgroundActor: { ...ordinary(actors[4]!), role: "background" },
     otherActorOne: ordinary(actors[6]!),
     otherActorTwo: ordinary(actors[7]!),
@@ -572,21 +573,12 @@ describe("Campaign World model contracts", () => {
       "homeLocationIndex",
       "objective",
     ];
-    const anchorRowRequired = [
-      "name",
-      "role",
-      "summary",
-      "homeLocationIndex",
-      "objective",
-    ];
-    const anchorSlots = ["startingSupport", "remoteBackground"];
     expect(schemaJson.required).toEqual(slots);
     expect(Object.keys(schemaJson.properties ?? {})).toEqual(slots);
     for (const slot of slots) {
       const row = schemaJson.properties?.[slot];
-      const rowRequired = anchorSlots.includes(slot) ? anchorRowRequired : ordinaryRowRequired;
-      expect(row?.required).toEqual(rowRequired);
-      expect(Object.keys(row?.properties ?? {})).toEqual(rowRequired);
+      expect(row?.required).toEqual(ordinaryRowRequired);
+      expect(Object.keys(row?.properties ?? {})).toEqual(ordinaryRowRequired);
       expect(row?.properties?.homeLocationIndex).toMatchObject({ minimum: -1, maximum: 5 });
     }
     expect(schemaJson.properties?.keyActorOne?.properties?.role).toMatchObject({ const: "key" });
@@ -597,8 +589,8 @@ describe("Campaign World model contracts", () => {
     expect(schemaJson.properties?.backgroundActor?.properties?.role).toMatchObject({ const: "background" });
     expect(schemaJson.properties?.otherActorOne?.properties?.role).toMatchObject({ enum: ["key", "support", "background"] });
     expect(schemaJson.properties?.otherActorTwo?.properties?.role).toMatchObject({ enum: ["key", "support", "background"] });
-    expect(schemaJson.properties?.startingSupport?.properties?.presentLocationIndex).toBeUndefined();
-    expect(schemaJson.properties?.remoteBackground?.properties?.presentLocationIndex).toBeUndefined();
+    expect(schemaJson.properties?.startingSupport?.properties?.presentLocationIndex).toMatchObject({ const: 0 });
+    expect(schemaJson.properties?.remoteBackground?.properties?.presentLocationIndex).toMatchObject({ const: 2 });
     const serialized = JSON.stringify(schemaJson);
     for (const forbidden of ["anyOf", "oneOf", "prefixItems"]) {
       expect(serialized).not.toContain(forbidden);
